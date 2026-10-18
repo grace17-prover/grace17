@@ -1,0 +1,299 @@
+-- Nash's theorem: a game is given by a block map assigning each pure
+-- strategy to its player and, for each pure strategy i, a continuous function
+-- V(i) on the cube giving the payoff to the owner of i when they switch to i
+-- against the profile. At a fixed point of Nash's map no pure strategy pays
+-- more than the owner's expected payoff, so the fixed point is an equilibrium
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GameTheory.NashEquilibrium
+import NashMap
+import FixedPoint.BrouwerSimplex
+
+-- The deviation terms x(j)·(V(j)(x) − U) of a profile against a level U.
+defgraph deviationTerms (n V x : Set) (U : Real) (j ∈ n) : ℝ := (x(j):R) * ((V(j)(x):R) + -U)
+requires nNat : Nat(n)
+requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+requires hx : x ∈ unitCube(n)
+proof
+  have xj := unitCube.coordinate_real with hx, member
+  have vj := CubeFunction.value with (CubeFunctionContinuous.function with (family with member)), hx
+  have negative := realNegValue.real at U
+  have difference := realAddValue.real at V(j)(x), -U
+  exact realMulValue.real at x(j), (V(j)(x):R) + -U
+
+-- Summed over a block, the deviation terms are the block's payoff sum minus
+-- U times the block's probability mass.
+theorem deviationTerms.sum (n : Nat) (S V x : Set) (U : Real)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows realPartialSum(maskedPoint(n, S, deviationTerms(n, V, x, U)), n) = (realPartialSum(maskedPoint(n, S, assembledPoint(n, payoffFamily(n, V), x)), n):R) - U * (realPartialSum(maskedPoint(n, S, x), n):R)
+proof
+  have xFunction := unitCube.point with hx
+  have functions := payoffFamily.functions with family
+  have dFunction := deviationTerms.function at n, V, x, U with *
+  have pFunction := assembledPoint.function with functions, hx
+  have maskedD := maskedPoint.sequence at n, S, deviationTerms(n, V, x, U) with dFunction
+  have maskedP := maskedPoint.sequence at n, S, assembledPoint(n, payoffFamily(n, V), x) with pFunction
+  have maskedX := maskedPoint.sequence at n, S, x with xFunction
+  have constantU := constantSequence.sequence at U
+  have scaledX := mulSequence.sequence with constantU, maskedX
+  have difference := subSequence.sequence with maskedP, scaledX
+  have agree : ∀ k ∈ ℕ, k < n → maskedPoint(n, S, deviationTerms(n, V, x, U))(k) = subSequence(maskedPoint(n, S, assembledPoint(n, payoffFamily(n, V), x)), mulSequence(constantSequence(U), maskedPoint(n, S, x)))(k)
+    intros k hk hkn
+    have kNat : Nat(k) by typecheck
+    have hkIn : k ∈ n by exact membership.of_Less with hkn
+    have pReal := RealSequence.value at maskedPoint(n, S, assembledPoint(n, payoffFamily(n, V), x)), k with maskedP
+    have xReal := RealSequence.value at maskedPoint(n, S, x), k with maskedX
+    have uReal := RealSequence.value at constantSequence(U), k with constantU
+    have uValue := constantSequence.value at U, k
+    have scaledValue := mulSequence.value with constantU, maskedX, uReal, xReal
+    have scaledReal := RealSequence.value at mulSequence(constantSequence(U), maskedPoint(n, S, x)), k with scaledX
+    have differenceValue := subSequence.value with maskedP, scaledX, pReal, scaledReal
+    rw [differenceValue, scaledValue, uValue]
+    have alternatives : k ∈ S ∨ ¬k ∈ S by tauto
+    cases alternatives with inBlock | outside
+    . have dSame := maskedPoint.on_block with dFunction, hkIn, inBlock
+      have pSame := maskedPoint.on_block with pFunction, hkIn, inBlock
+      have xSame := maskedPoint.on_block with xFunction, hkIn, inBlock
+      have dValue := deviationTerms.value at n, V, x, U, k with *
+      have pValue := assembledPoint.value with functions, hx, hkIn
+      have term := payoffFamily.term with family, hx, hkIn
+      have xk := unitCube.coordinate_real with hx, hkIn
+      have vk := CubeFunction.value with (CubeFunctionContinuous.function with (family with hkIn)), hx
+      rw [dSame, pSame, xSame, dValue, pValue, term]
+      ring
+    . have dSame := maskedPoint.off_block with dFunction, hkIn, outside
+      have pSame := maskedPoint.off_block with pFunction, hkIn, outside
+      have xSame := maskedPoint.off_block with xFunction, hkIn, outside
+      rw [dSame, pSame, xSame]
+      ring
+  have equal := realPartialSum.eq_prefix with maskedD, difference, agree
+  have sub := realPartialSum.sub with maskedP, scaledX
+  have scale := realPartialSum.scale with maskedX
+  rw [equal, sub, scale]
+  rfl
+
+-- Against the owner's own expected payoff, the deviation terms of a block sum
+-- to zero on the product of simplices.
+theorem deviationTerms.sum_zero (n : Nat) (m blk V x p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  requires hp : p ∈ m
+  shows realPartialSum(maskedPoint(n, blockSet(n, blk, p), deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x))), n) = (0:R)
+proof
+  have xCube := simplexProduct.cube with hx
+  have xFunction := unitCube.point with xCube
+  have functions := payoffFamily.functions with family
+  have pFunction := assembledPoint.function with functions, xCube
+  have maskedP := maskedPoint.sequence at n, blockSet(n, blk, p), assembledPoint(n, payoffFamily(n, V), x) with pFunction
+  have sumReal := realPartialSum.real with maskedP
+  have payoffReal := expectedPayoff.real at n, blk, V, p, x with family, xCube
+  have identity := deviationTerms.sum at n, blockSet(n, blk, p), V, x, expectedPayoff(n, blk, V, p)(x) with family, xCube
+  have payoffValue := expectedPayoff.value at n, blk, V, p, x with family, xCube
+  have sumOne := simplexProduct.block_sum with hx, hp
+  have blockValue := blockSum.definition at n, blk, p
+  have cubeValue := sumCube.value at n, blockSet(n, blk, p), x with xCube
+  rw blockValue at cubeValue
+  rw cubeValue at sumOne
+  have one := realMulValue.one_right at expectedPayoff(n, blk, V, p)(x)
+  rw [identity, sumOne, one, payoffValue]
+  linarith
+
+-- At a fixed point of Nash's map, every gain is the coordinate times the
+-- block's total gain.
+theorem nashMap.fixed_gain (n : Nat) (blk V x i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  requires fixed : nashMap(n, blk, V)(x) = x
+  requires hi : i ∈ n
+  shows gain(n, blk, V, i)(x) = (x(i):R) * (totalGain(n, blk, V, blk(i))(x):R)
+proof
+  have coordinate := nashMap.coordinate at n, blk, V, x, i with family, hx, hi
+  rw fixed at coordinate
+  have xi := unitCube.coordinate_real with hx, hi
+  have gainReal := gain.real at n, blk, V, i, x with family, hi, hx
+  have scaleReal := denominator.real at n, blk, V, blk(i), x with family, hx
+  have totalReal := totalGain.real at n, blk, V, blk(i), x with family, hx
+  have scaleValue := denominator.value at n, blk, V, blk(i), x with family, hx
+  have scaleAtLeastOne := denominator.at_least_one at n, blk, V, blk(i), x with family, hx
+  have scaleNonzero : (denominator(n, blk, V, blk(i))(x):R) ≠ (0:R)
+    intro zero
+    rw zero at scaleAtLeastOne
+    linarith
+  have cancel := realInvValue.mul_right with scaleNonzero
+  have key : ((x(i):R) + (gain(n, blk, V, i)(x):R)) * realInvValue((denominator(n, blk, V, blk(i))(x):R)) * (denominator(n, blk, V, blk(i))(x):R) = (x(i):R) + (gain(n, blk, V, i)(x):R)
+    have rearrange : ((x(i):R) + (gain(n, blk, V, i)(x):R)) * realInvValue((denominator(n, blk, V, blk(i))(x):R)) * (denominator(n, blk, V, blk(i))(x):R) = ((x(i):R) + (gain(n, blk, V, i)(x):R)) * (realInvValue((denominator(n, blk, V, blk(i))(x):R)) * (denominator(n, blk, V, blk(i))(x):R))
+      ring
+    have commute := realMulValue.commutative at realInvValue(denominator(n, blk, V, blk(i))(x)), denominator(n, blk, V, blk(i))(x)
+    have one := realMulValue.one_right at (x(i):R) + (gain(n, blk, V, i)(x):R)
+    rwa [rearrange, commute, cancel]
+  symm at coordinate
+  rw [coordinate, scaleValue] at key
+  have expand : (x(i):R) * ((1:R) + (totalGain(n, blk, V, blk(i))(x):R)) = (x(i):R) + (x(i):R) * (totalGain(n, blk, V, blk(i))(x):R)
+    ring
+  rw expand at key
+  linarith
+
+-- Every block of a point of the product has a coordinate of positive mass.
+theorem simplexProduct.positive_coordinate (n : Nat) (m blk x p : Set)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  requires hp : p ∈ m
+  shows ∃ j ∈ n, j ∈ blockSet(n, blk, p) ∧ (0:R) < (x(j):R)
+proof
+  have xCube := simplexProduct.cube with hx
+  have xFunction := unitCube.point with xCube
+  have sumOne := simplexProduct.block_sum with hx, hp
+  have blockValue := blockSum.definition at n, blk, p
+  have cubeValue := sumCube.value at n, blockSet(n, blk, p), x with xCube
+  rw blockValue at cubeValue
+  rw cubeValue at sumOne
+  have sequence := maskedPoint.sequence at n, blockSet(n, blk, p), x with xFunction
+  by_contra none
+  have terms : ∀ k ∈ n, maskedPoint(n, blockSet(n, blk, p), x)(k) = (0:R)
+    intros k hk
+    have alternatives : k ∈ blockSet(n, blk, p) ∨ ¬k ∈ blockSet(n, blk, p) by tauto
+    cases alternatives with inBlock | outside
+    . have same := maskedPoint.on_block with xFunction, hk, inBlock
+      have interval := unitCube.coordinate with xCube, hk
+      obtain ⟨kReal, lower, upper⟩ := closedInterval.membership.forward with interval
+      have notPos : ¬(0:R) < (x(k):R)
+        intro pos
+        apply none
+        witness k
+        exact ⟨hk, ⟨inBlock, pos⟩⟩
+      have le := realLe.of_not_less with notPos
+      have zero : x(k) = (0:R) by exact realLe.antisymmetric with le, lower
+      rwa same
+    . exact maskedPoint.off_block with xFunction, hk, outside
+  have vanish := realPartialSum.zero_terms with sequence
+  have zeroSum := vanish with terms
+  rw zeroSum at sumOne
+  apply realZero.ne_one
+  exact sumOne
+
+-- At a fixed point no block has positive total gain: a positive total gain
+-- would make every deviation term nonnegative and the one at a coordinate of
+-- positive mass strictly positive, yet the deviation terms sum to zero.
+theorem nash.total_gain_zero (n : Nat) (m blk V x p : Set)
+  requires blkFunction : blk : n → m
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  requires fixed : nashMap(n, blk, V)(x) = x
+  requires hp : p ∈ m
+  shows totalGain(n, blk, V, p)(x) = (0:R)
+proof
+  have xCube := simplexProduct.cube with hx
+  have totalReal := totalGain.real at n, blk, V, p, x with family, xCube
+  have totalNonneg := totalGain.nonnegative at n, blk, V, p, x with family, xCube
+  have alternatives : (0:R) < (totalGain(n, blk, V, p)(x):R) ∨ ¬(0:R) < (totalGain(n, blk, V, p)(x):R) by tauto
+  cases alternatives with positive | notPositive
+  . exfalso
+    have payoffReal := expectedPayoff.real at n, blk, V, p, x with family, xCube
+    have dFunction := deviationTerms.function at n, V, x, expectedPayoff(n, blk, V, p)(x) with *
+    have sequence := maskedPoint.sequence at n, blockSet(n, blk, p), deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x)) with dFunction
+    have sumZero := deviationTerms.sum_zero with family, hx, hp
+    have termSign : ∀ j ∈ n, j ∈ blockSet(n, blk, p) → (0:R) ≤ (deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x))(j):R) ∧ ((0:R) < (x(j):R) → (0:R) < (deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x))(j):R))
+      intros j hj inBlock
+      have parts := blockSet.membership.forward with inBlock
+      have block := parts.right
+      have gainEq := nashMap.fixed_gain with family, xCube, fixed, hj
+      rw block at gainEq
+      have gainValue := gain.value at n, blk, V, j, x with family, hj, xCube
+      rw block at gainValue
+      have dValue := deviationTerms.value at n, V, x, expectedPayoff(n, blk, V, p)(x), j with *
+      have dReal := FunctionBetween.apply_closed with dFunction, hj
+      have xInterval := unitCube.coordinate with xCube, hj
+      obtain ⟨xReal, xLower, xUpper⟩ := closedInterval.membership.forward with xInterval
+      have vReal := CubeFunction.value with (CubeFunctionContinuous.function with (family with hj)), xCube
+      have positiveCase : (0:R) < (x(j):R) → (0:R) < (deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x))(j):R)
+        intro xPos
+        have gainPos : (0:R) < (gain(n, blk, V, j)(x):R)
+          rw gainEq
+          exact realMulValue.positive with xPos, positive
+        rw gainValue at gainPos
+        have differencePos : (0:R) < (V(j)(x):R) + -(expectedPayoff(n, blk, V, p)(x):R)
+          have dAlternatives : (0:R) < (V(j)(x):R) + -(expectedPayoff(n, blk, V, p)(x):R) ∨ ¬(0:R) < (V(j)(x):R) + -(expectedPayoff(n, blk, V, p)(x):R) by tauto
+          cases dAlternatives with dPos | dNotPos
+          . exact dPos
+          . have le := realLe.of_not_less with dNotPos
+            have zero := realMax.of_le with le
+            rw zero at gainPos
+            exfalso
+            linarith
+        rw dValue
+        exact realMulValue.positive with xPos, differencePos
+      constructor
+      . have xAlternatives : (0:R) < (x(j):R) ∨ ¬(0:R) < (x(j):R) by tauto
+        cases xAlternatives with xPos | xNotPos
+        . exact realLess.implies_le with (positiveCase with xPos)
+        . have xLe := realLe.of_not_less with xNotPos
+          have xZero : x(j) = (0:R) by exact realLe.antisymmetric with xLe, xLower
+          have zero := realMulValue.zero_left at (V(j)(x):R) + -(expectedPayoff(n, blk, V, p)(x):R)
+          rw [dValue, xZero, zero]
+          exact realLe.reflexive
+      . exact positiveCase
+    obtain ⟨j, hj, inBlock, xPos⟩ := simplexProduct.positive_coordinate with hx, hp
+    have signs := termSign with hj, inBlock
+    have termPos := signs.right with xPos
+    have nonnegative : ∀ k ∈ n, (0:R) ≤ (maskedPoint(n, blockSet(n, blk, p), deviationTerms(n, V, x, expectedPayoff(n, blk, V, p)(x)))(k):R)
+      intros k hk
+      have kAlternatives : k ∈ blockSet(n, blk, p) ∨ ¬k ∈ blockSet(n, blk, p) by tauto
+      cases kAlternatives with kIn | kOut
+      . have same := maskedPoint.on_block with dFunction, hk, kIn
+        have kSigns := termSign with hk, kIn
+        rw same
+        exact kSigns.left
+      . have same := maskedPoint.off_block with dFunction, hk, kOut
+        rw same
+        exact realLe.reflexive
+    have bounds := realPartialSum.term_le_prefix with sequence
+    have forAll := bounds with nonnegative
+    have bound := forAll with hj
+    have same := maskedPoint.on_block with dFunction, hj, inBlock
+    rw [same, sumZero] at bound
+    have termReal := FunctionBetween.apply_closed with dFunction, hj
+    linarith
+  . have le := realLe.of_not_less with notPositive
+    exact realLe.antisymmetric with le, totalNonneg
+
+-- At a fixed point no pure strategy beats its owner's expected payoff.
+theorem nash.no_gain (n : Nat) (m blk V x i : Set)
+  requires blkFunction : blk : n → m
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  requires fixed : nashMap(n, blk, V)(x) = x
+  requires hi : i ∈ n
+  shows (V(i)(x):R) ≤ (expectedPayoff(n, blk, V, blk(i))(x):R)
+proof
+  have xCube := simplexProduct.cube with hx
+  have block := FunctionBetween.apply_closed with blkFunction, hi
+  have total := nash.total_gain_zero with blkFunction, family, hx, fixed, block
+  have gainEq := nashMap.fixed_gain with family, xCube, fixed, hi
+  rw total at gainEq
+  have xi := unitCube.coordinate_real with xCube, hi
+  have zero := realMulValue.zero_right at x(i)
+  rw zero at gainEq
+  have bound := gain.ge_difference at n, blk, V, i, x with family, hi, xCube
+  rw gainEq at bound
+  have vReal := CubeFunction.value with (CubeFunctionContinuous.function with (family with hi)), xCube
+  have payoffReal := expectedPayoff.real at n, blk, V, blk(i), x with family, xCube
+  linarith
+
+-- Nash's theorem.
+theorem nash.equilibrium (n : Nat) (m blk V a : Set)
+  requires blkFunction : blk : n → m
+  requires ha : a ∈ simplexProduct(n, m, blk)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∃ x ∈ simplexProduct(n, m, blk), ∀ i ∈ n, (V(i)(x):R) ≤ (expectedPayoff(n, blk, V, blk(i))(x):R)
+proof
+  have continuous := nashMap.continuous at n, blk, V with family
+  have preserves := nashMap.preserves with blkFunction, family
+  obtain ⟨x, hx, fixed⟩ := brouwer.simplexProduct_of_cube with blkFunction, ha, continuous, preserves
+  witness x
+  constructor
+  . exact hx
+  . intros i hi
+    exact nash.no_gain with blkFunction, family, hx, fixed, hi

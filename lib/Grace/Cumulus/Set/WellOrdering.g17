@@ -1,0 +1,236 @@
+-- The well-ordering theorem: every set carries a well-order. A choice
+-- function enumerates the set along the Hartogs bound, picking at each stage
+-- an element not yet chosen; Hartogs' theorem forces the enumeration to
+-- exhaust the set at some stage, and the least such stage is an ordinal in
+-- bijection with the set, whose membership order transports back.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Set.WellOrdering
+import Cardinal.Hartogs
+import ChoiceFunctions
+import OrderTransport
+
+theorem enumerationStep.well_founded (A H c : Set)
+  shows wellFoundedOn(membershipOn(H), H)
+proof
+  simp [membershipOn.wellFounded]
+
+-- At stage x choose an element of A not chosen at any earlier stage.
+noncomputable well-founded def enumerationStep (A H c x : Set) : Set
+  over H ordered by membershipOn(H)
+  certified by enumerationStep.well_founded
+  | x using history => c[A ∖ Relation.range(history)]
+
+def enumerated (A H c x : Set) : Set :=
+  Relation.range(enumerationStep.history(A, H, c, x))
+
+theorem enumerated.membership (z A H c x : Set)
+  shows z ∈ enumerated(A, H, c, x) ↔
+    ∃ y ∈ H, relates(membershipOn(H), y, x) ∧ z = enumerationStep(A, H, c, y)
+proof
+  constructor
+  . intro member
+    unfold enumerated at member
+    obtain ⟨bounded, source, pair⟩ := Relation.range.membership.forward with member
+    obtain ⟨y, hy, earlier, equal⟩ := enumerationStep.history.membership.forward with pair
+    obtain ⟨sameSource, sameValue⟩ := orderedPair.injective with equal
+    refine ⟨y, hy, earlier, sameValue⟩
+  . intro represented
+    obtain ⟨y, hy, earlier, value⟩ := represented
+    have pair : (y, enumerationStep(A, H, c, y)) ∈ enumerationStep.history(A, H, c, x)
+      exact enumerationStep.history.membership.backward with ⟨y, hy, earlier, rfl⟩
+    have rangeMember := Relation.range.contains with pair
+    unfold enumerated
+    rwa value
+
+theorem enumerationStep.selects (A H c x : Set)
+  requires hx : x ∈ H
+  shows enumerationStep(A, H, c, x) = c[A ∖ enumerated(A, H, c, x)]
+proof
+  have equation := enumerationStep.equation.direct at A, H, c, x with hx
+  simpa [enumerated] using equation
+
+-- A stage is exhausted when every element of A was chosen before it.
+predicate Exhausted (A H c x : Set) := A ⊆ enumerated(A, H, c, x)
+
+theorem enumerationStep.fresh (A H c x : Set)
+  requires choice : SubsetChoice(c, A)
+  requires hx : x ∈ H
+  requires remaining : ¬Exhausted(A, H, c, x)
+  shows enumerationStep(A, H, c, x) ∈ A ∧
+    ¬enumerationStep(A, H, c, x) ∈ enumerated(A, H, c, x)
+proof
+  have inhabited : Nonempty(A ∖ enumerated(A, H, c, x))
+    by_contra absent
+    apply remaining
+    unfold Exhausted
+    intros a ha
+    by_contra outside
+    apply absent
+    witness a
+    exact difference.membership.backward with ⟨ha, outside⟩
+  have subset := difference.subset_left at A, enumerated(A, H, c, x)
+  have selected := SubsetChoice.member with choice, subset, inhabited
+  have equation := enumerationStep.selects at A, H, c, x with hx
+  rw ← equation at selected
+  exact difference.membership.forward with selected
+
+theorem enumerationStep.distinct (A H c x y : Set)
+  requires choice : SubsetChoice(c, A)
+  requires hx : x ∈ H
+  requires hy : y ∈ H
+  requires earlier : x ∈ y
+  requires remaining : ¬Exhausted(A, H, c, y)
+  shows enumerationStep(A, H, c, x) ≠ enumerationStep(A, H, c, y)
+proof
+  obtain ⟨closed, outside⟩ := enumerationStep.fresh with choice, hy, remaining
+  have rule := membershipOn.relates with hx, hy
+  have related := rule.backward with earlier
+  have prior : enumerationStep(A, H, c, x) ∈ enumerated(A, H, c, y)
+    exact enumerated.membership.backward with ⟨x, hx, related, rfl⟩
+  intro equal
+  rw equal at prior
+  exact outside with prior
+
+-- The enumeration as a function on a set of unexhausted stages.
+defgraph enumeration (A H c D : Set) (x ∈ D) : A := enumerationStep(A, H, c, x)
+requires choice : SubsetChoice(c, A)
+requires stages : D ⊆ H
+requires remaining : ∀ x ∈ D, ¬Exhausted(A, H, c, x)
+proof
+  have hxH := stages with x, assumption
+  have unexhausted := remaining with x, assumption
+  obtain ⟨closed, outside⟩ := enumerationStep.fresh with choice, hxH, unexhausted
+  exact closed
+
+theorem enumeration.injective (A H c D : Set)
+  requires ordinal : H ∈ Ordinal
+  requires choice : SubsetChoice(c, A)
+  requires stages : D ⊆ H
+  requires remaining : ∀ x ∈ D, ¬Exhausted(A, H, c, x)
+  shows InjectiveBetween(enumeration(A, H, c, D), D, A)
+proof
+  have function := enumeration.function at A, H, c, D with *
+  constructor
+  . exact function
+  . intros x hx y hy z hz mappedX mappedY
+    have valueX := FunctionBetween.apply_value with function, hx, mappedX
+    have valueY := FunctionBetween.apply_value with function, hy, mappedY
+    have stepX := enumeration.value at A, H, c, D, x with *
+    have stepY := enumeration.value at A, H, c, D, y with *
+    have equalValues : enumerationStep(A, H, c, x) = enumerationStep(A, H, c, y) by cc
+    have hxH := stages with x, hx
+    have hyH := stages with y, hy
+    have xOrdinal := Ordinal.member with ordinal, hxH
+    have yOrdinal := Ordinal.member with ordinal, hyH
+    have alternatives := Ordinal.trichotomy with xOrdinal, y, yOrdinal
+    cases alternatives with xy | rest
+    . exfalso
+      have distinct := enumerationStep.distinct with choice, hxH, hyH, xy, (remaining with y, hy)
+      exact distinct with equalValues
+    . cases rest with equal | yx
+      . exact equal
+      . exfalso
+        have distinct := enumerationStep.distinct with choice, hyH, hxH, yx, (remaining with x, hx)
+        apply distinct
+        symm
+        exact equalValues
+
+-- Hartogs' theorem: some stage below the Hartogs bound exhausts A.
+theorem enumeration.exhausts (A c : Set)
+  requires choice : SubsetChoice(c, A)
+  shows ∃ x ∈ hartogsBound(A), Exhausted(A, hartogsBound(A), c, x)
+proof
+  by_contra none
+  have remaining : ∀ x ∈ hartogsBound(A), ¬Exhausted(A, hartogsBound(A), c, x)
+    intros x hx exhausted
+    apply none
+    refine ⟨x, hx, exhausted⟩
+  have ordinal := hartogsBound.ordinal at A
+  have stages := Subset.reflexive at hartogsBound(A)
+  have injection := enumeration.injective with *
+  exact hartogsBound.no_injection with injection
+
+def exhaustedStages (A H c : Set) : Set := {x ∈ H | Exhausted(A, H, c, x)}
+
+theorem exhaustedStages.membership (x A H c : Set)
+  shows x ∈ exhaustedStages(A, H, c) ↔ x ∈ H ∧ Exhausted(A, H, c, x)
+proof
+  simp [exhaustedStages]
+
+theorem enumeration.least_exhausted (A c : Set)
+  requires choice : SubsetChoice(c, A)
+  shows ∃ m ∈ hartogsBound(A), Exhausted(A, hartogsBound(A), c, m) ∧
+    (∀ x ∈ m, ¬Exhausted(A, hartogsBound(A), c, x))
+proof
+  have ordinal := hartogsBound.ordinal at A
+  obtain ⟨x, hx, exhausted⟩ := enumeration.exhausts with choice
+  have ordinals : ∀ α ∈ exhaustedStages(A, hartogsBound(A), c), α ∈ Ordinal
+    intros α hα
+    have parts := exhaustedStages.membership.forward with hα
+    exact Ordinal.member with ordinal, parts.left
+  have member : x ∈ exhaustedStages(A, hartogsBound(A), c)
+    exact exhaustedStages.membership.backward with ⟨hx, exhausted⟩
+  have nonempty := Nonempty.ne_empty at exhaustedStages(A, hartogsBound(A), c) with ⟨x, member⟩
+  obtain ⟨m, hm, least⟩ := Ordinal.least with ordinals, nonempty
+  have parts := exhaustedStages.membership.forward with hm
+  refine ⟨m, parts.left, parts.right, ?_⟩
+  intros y hy exhaustedY
+  have below := Ordinal.member_subset with ordinal, parts.left
+  have memberY : y ∈ exhaustedStages(A, hartogsBound(A), c)
+    exact exhaustedStages.membership.backward with ⟨(below with y, hy), exhaustedY⟩
+  have bound := least with y, memberY
+  have loop := bound with y, hy
+  have irreflexive := Ordinal.not_member_self at y
+  exact irreflexive with loop
+
+theorem enumeration.surjective (A H c D : Set)
+  requires ordinal : H ∈ Ordinal
+  requires choice : SubsetChoice(c, A)
+  requires stage : D ∈ H
+  requires exhausted : Exhausted(A, H, c, D)
+  requires remaining : ∀ x ∈ D, ¬Exhausted(A, H, c, x)
+  shows SurjectiveBetween(enumeration(A, H, c, D), D, A)
+proof
+  have stages := Ordinal.member_subset with ordinal, stage
+  have function := enumeration.function at A, H, c, D with *
+  constructor
+  . exact function
+  . intros a ha
+    unfold Exhausted at exhausted
+    have covered := exhausted with a, ha
+    obtain ⟨y, hy, related, value⟩ := enumerated.membership.forward with covered
+    have rule := membershipOn.relates with hy, stage
+    have hyD := rule.forward with related
+    refine ⟨y, hyD, ?_⟩
+    have step := enumeration.value at A, H, c, D, y with *
+    have graph := FunctionBetween.relates_apply with function, hyD
+    rwa [step, ← value] at graph
+
+theorem WellOrder.exists (A : Set)
+  shows ∃ r, WellOrder(A, r)
+proof
+  obtain ⟨c, choice⟩ := SubsetChoice.exists at A
+  have ordinal := hartogsBound.ordinal at A
+  obtain ⟨m, hm, exhausted, remaining⟩ := enumeration.least_exhausted with choice
+  have stages := Ordinal.member_subset with ordinal, hm
+  have mOrdinal := Ordinal.member with ordinal, hm
+  have injective := enumeration.injective with *
+  have surjective := enumeration.surjective with *
+  have order := Ordinal.well_order with mOrdinal
+  have transported := transportedOrder.well_order with injective, order
+  have covering : functionImage(enumeration(A, hartogsBound(A), c, m), m, A) = A
+    apply Subset.antisymmetric
+    . exact functionImage.subset at enumeration(A, hartogsBound(A), c, m), m, A
+    . intros a ha
+      obtain ⟨y, hy, related⟩ := surjective.right with a, ha
+      have value := FunctionBetween.apply_value with surjective.left, hy, related
+      have closed := FunctionBetween.apply_closed with surjective.left, hy
+      rw ← value
+      simp [functionImage.membership]
+  rw covering at transported
+  witness transportedOrder(enumeration(A, hartogsBound(A), c, m), m, A, membershipOn(m))
+  exact transported

@@ -1,0 +1,233 @@
+-- Binomial coefficients at a prime power: p does not divide
+-- (p^k·m choose p^k) when p does not divide m
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.PrimeBinomial
+import Combinatorics.Vandermonde
+import NumberTheory.Factorization
+import NumberTheory.Modular
+
+-- The inner entries of row p of Pascal's triangle are divisible by p.
+theorem choose.prime_middle (p j : Nat)
+  requires prime : Prime(p)
+  requires positive : 0 < j
+  requires below : j < p
+  shows p ∣ p choose j
+proof
+  obtain ⟨i, iNat, jShape⟩ := Less.exists_add_one with positive
+  obtain ⟨n, nNat, pShape⟩ := Less.exists_add_one with below
+  have zeroAdd : 0 + i + 1 = i + 1 by ring
+  rw zeroAdd at jShape
+  have absorbed := choose.absorption_at at j + n, i
+  have rowShape : j + n + 1 = p
+    rw pShape
+    ring
+  have row : (i + 1) * (p choose (i + 1)) = p * ((j + n) choose i)
+    rw ← rowShape
+    exact absorbed
+  rw ← jShape at row
+  have cNat := choose.natural at j + n, i
+  have product : p ∣ j * (p choose j)
+    witness (j + n) choose i
+    rw row
+    rfl
+  have split := Prime.divides_mul with prime, product
+  cases split with dividesJ | dividesEntry
+  . exfalso
+    have jNonzero : j ≠ 0
+      intro zero
+      rw zero at positive
+      exact Less.irreflexive at 0 with positive
+    have bound := divides.le with dividesJ, jNonzero
+    have strict := LessEqual.transitive_Less with bound, below
+    exact Less.irreflexive with strict
+  . exact dividesEntry
+
+-- Modulo p, the first t ≤ p terms of the convolution with row p reduce to
+-- the term i = 0.
+theorem chooseConvolution.mod_prime (p n r t : Nat)
+  requires prime : Prime(p)
+  requires below : t < p
+  shows chooseConvolution(p, n, r, t + 1) % p = (n choose r) % p
+proof
+  induction t
+  | zero =>
+    intro below
+    have one : 0 + 1 = 1 by compute
+    rw [one, chooseConvolution.one]
+    rfl
+  | k + 1 using ih =>
+    intro below
+    have pNonzero := Prime.nonzero with prime
+    have earlier : k < p by arith
+    have reduced := ih with earlier
+    have positive : 0 < k + 1 by arith
+    obtain ⟨s, sNat, entry⟩ :=
+      choose.prime_middle with prime, positive, below
+    have cNat := choose.natural at n, r - (k + 1)
+    have split := chooseConvolution.succ at p, n, r, k + 1
+    have multiple : (p choose (k + 1)) * (n choose (r - (k + 1))) =
+        p * (s * (n choose (r - (k + 1))))
+      rw ← entry
+      ring
+    rw [split, multiple, mod.add_multiple]
+    exact reduced
+
+-- Beyond the row, the convolution with row p gains nothing.
+theorem chooseConvolution.beyond_row (p n r d : Nat)
+  shows chooseConvolution(p, n, r, p + 1 + d) =
+    chooseConvolution(p, n, r, p + 1)
+proof
+  induction d
+  | zero =>
+    have shape : p + 1 + 0 = p + 1 by ring
+    rw shape
+    rfl
+  | k + 1 using ih =>
+    have shape : p + 1 + (k + 1) = p + 1 + k + 1 by ring
+    have below : p < p + 1 + k by arith
+    have vanishes := choose.above_diagonal with below
+    have cNat := choose.natural at n, r - (p + 1 + k)
+    rw [shape, chooseConvolution.succ, vanishes, ih]
+    ring
+
+-- One step of Lucas' theorem: modulo p, (p + n) choose r is the sum of two
+-- entries of row n, p apart.
+theorem choose.prime_add_mod (p n r : Nat)
+  requires prime : Prime(p)
+  requires le : p ≤ r
+  shows ((p + n) choose r) % p = ((n choose r) + (n choose (r - p))) % p
+proof
+  have pNonzero := Prime.nonzero with prime
+  obtain ⟨d, dNat, rShape⟩ := le
+  have positive := Less.positive_of_ne_zero with pNonzero
+  obtain ⟨q, qNat, pShape⟩ := Less.exists_add_one with positive
+  have zeroAdd : 0 + q + 1 = q + 1 by ring
+  rw zeroAdd at pShape
+  have rowShape : r + 1 = p + 1 + d
+    rw ← rShape
+    ring
+  have full := choose.vandermonde_at at p, n, r
+  have beyond := chooseConvolution.beyond_row at p, n, r, d
+  have top := chooseConvolution.succ at p, n, r, p
+  have last := choose.diagonal at p
+  have inner : chooseConvolution(p, n, r, q + 1) % p = (n choose r) % p
+    have below : q < p by arith
+    exact chooseConvolution.mod_prime with prime, below
+  rw ← pShape at inner
+  have cNat := choose.natural at n, r - p
+  have convNat := chooseConvolution.natural at p, n, r, p
+  have entryNat := choose.natural at n, r
+  have topValue : chooseConvolution(p, n, r, p + 1) =
+      chooseConvolution(p, n, r, p) + (n choose (r - p))
+    rw [top, last]
+    ring
+  have back := mod.add at p, n choose r, n choose (r - p) with pNonzero
+  calc
+    ((p + n) choose r) % p = chooseConvolution(p, n, r, r + 1) % p := by rw full
+    _ = chooseConvolution(p, n, r, p + 1) % p := by rw [rowShape, beyond]
+    _ = (chooseConvolution(p, n, r, p) + (n choose (r - p))) % p :=
+      by rw topValue
+    _ = (chooseConvolution(p, n, r, p) % p + (n choose (r - p)) % p) % p :=
+      mod.add with pNonzero
+    _ = ((n choose r) % p + (n choose (r - p)) % p) % p := by rw inner
+    _ = ((n choose r) + (n choose (r - p))) % p := by rw ← back
+
+-- Lucas' theorem in one digit: (p·a choose p·b) ≡ (a choose b) modulo p.
+theorem choose.mul_prime_mod (p a : Nat)
+  requires prime : Prime(p)
+  shows ∀ b, Nat(b) → ((p * a) choose (p * b)) % p = (a choose b) % p
+proof
+  induction a
+  | zero =>
+    intros b bNat
+    have pPositive := Less.positive_of_ne_zero with (Prime.nonzero with prime)
+    have zero : p * 0 = 0 by ring
+    rw zero
+    have split := natural.zero_or_successor at b
+    cases split with isZero | isSucc
+    . rw [isZero, zero]
+      rfl
+    . obtain ⟨j, jNat, shape⟩ := isSucc
+      have jBelow : 0 < succ(j) by arith
+      have below := Less.mul_positive with pPositive, jBelow
+      rw [shape, choose.above_diagonal, choose.above_diagonal]
+      rfl
+  | k + 1 using ih =>
+    intros b bNat
+    have pNonzero := Prime.nonzero with prime
+    have split := natural.zero_or_successor at b
+    cases split with isZero | isSucc
+    . have zero : p * 0 = 0 by ring
+      rw [isZero, zero, choose.zero_right, choose.zero_right]
+      rfl
+    . obtain ⟨j, jNat, shape⟩ := isSucc
+      have hj : j + 1 = succ(j) := add.right_one at j
+      rw [shape, ← hj]
+      have rowShape : p * (k + 1) = p + p * k by ring
+      have columnShape : p * (j + 1) = p * j + p by ring
+      have multipleNat : Nat(p * j) by typecheck
+      have le : p ≤ p * j + p by arith
+      have step := choose.prime_add_mod at p, p * k, p * j + p with prime, le
+      have cancel := sub.add_right at p * j, p
+      have first := ih with j + 1, assumption
+      have second := ih with j, jNat
+      rw columnShape at first
+      have pascal := choose.pascal at k, j
+      have leftNat := choose.natural at p * k, p * j + p
+      have rightNat := choose.natural at p * k, p * j
+      have aNat := choose.natural at k, j
+      have bNat2 := choose.natural at k, j + 1
+      have back := mod.add at p, k choose (j + 1), k choose j with pNonzero
+      have swapped : (k + 1) choose (j + 1) = (k choose (j + 1)) + (k choose j)
+        rw pascal
+        ring
+      rw cancel at step
+      have reshaped : ((p * (k + 1)) choose (p * (j + 1))) % p =
+          ((p + p * k) choose (p * j + p)) % p
+        rw [rowShape, columnShape]
+        rfl
+      have expanded := mod.add at p, (p * k) choose (p * j + p),
+        (p * k) choose (p * j) with pNonzero
+      rw [reshaped, step, expanded, first, second, ← back, swapped]
+      rfl
+
+-- Iterating down the powers of p: (p^k·m choose p^k) ≡ m modulo p.
+theorem choose.prime_power_mod (p m k : Nat)
+  requires prime : Prime(p)
+  shows ((p ^ k * m) choose (p ^ k)) % p = m % p
+proof
+  induction k
+  | zero =>
+    have one : p ^ 0 * m = m
+      rw pow.zero
+      ring
+    rw [one, pow.zero, choose.one_right]
+    rfl
+  | j + 1 using ih =>
+    have powNat := pow.closed at p, j
+    have row : p ^ (j + 1) * m = p * (p ^ j * m)
+      rw pow.add_one
+      ring
+    have column : p ^ (j + 1) = p * p ^ j := pow.add_one at p, j
+    have step := choose.mul_prime_mod at p, p ^ j * m with prime
+    have reduced := step with p ^ j, powNat
+    rw [row, column, reduced]
+    exact ih
+
+-- The binomial coefficient of Wielandt's argument is not divisible by p.
+theorem choose.prime_power_not_divides (p k m : Nat)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ m)
+  shows ¬(p ∣ (p ^ k * m) choose (p ^ k))
+proof
+  intro divides
+  have pNonzero := Prime.nonzero with prime
+  have reduced := choose.prime_power_mod at p, m, k with prime
+  have vanishes := mod.zero_iff.backward with pNonzero, divides
+  rw reduced at vanishes
+  have dividesM := mod.zero_iff.forward with pNonzero, vanishes
+  exact notDivides with dividesM

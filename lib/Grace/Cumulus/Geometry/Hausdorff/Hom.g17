@@ -1,0 +1,263 @@
+-- The rotation of a word is an injective homomorphism of the free group
+-- into SO3, by the freeness theorem
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Geometry.Hausdorff.Hom
+import Rotation.Freeness
+import Algebra.Group.FreeGroup
+import Algebra.Group.Homomorphism
+
+-- The product in SO3 is the matrix product.
+theorem SO3.mul_apply (M N : Set)
+  requires hM : M ∈ so3Matrices
+  requires hN : N ∈ so3Matrices
+  shows Group.mul(SO3)(M, N) = Ring.mul(matrixRing(realRing, 3))(M, N)
+proof
+  have ring := matrixRing.real_ring
+  have multiplicative := IsRing.multiplicative with (Ring.parts with ring)
+  have semigroup := IsMonoid.semigroup with multiplicative
+  have magma := IsSemigroup.magma with semigroup
+  have closed : ClosedBinary(so3Matrices, Ring.mul(matrixRing(realRing, 3)))
+    intros A hA B hB
+    have matrixA := so3Matrices.matrix with hA
+    have matrixB := so3Matrices.matrix with hB
+    exact so3Matrices.mul_mem with *
+  rw SO3.mulOf
+  exact restrictBinary.value with magma, so3Matrices.subset, closed, hM, hN
+
+-- A letter and its inverse letter multiply to the identity.
+theorem letterMatrix.cancel (ℓ : Set)
+  requires letter : ℓ ∈ 4
+  shows letterMatrix(ℓ) * letterMatrix(inverseLetter(ℓ)) =
+    Ring.one(matrixRing(realRing, 3))
+proof
+  have alternatives := letter.cases with letter
+  rcases alternatives with at0 | at1 | at2 | at3
+  . rw [at0, inverseLetter.zero, letterMatrix.zero, letterMatrix.one]
+    exact rotA.mul_transpose
+  . rw [at1, inverseLetter.one, letterMatrix.one, letterMatrix.zero]
+    exact rotA.transpose_mul
+  . rw [at2, inverseLetter.two, letterMatrix.two, letterMatrix.three]
+    exact rotB.mul_transpose
+  . rw [at3, inverseLetter.three, letterMatrix.three, letterMatrix.two]
+    exact rotB.transpose_mul
+
+-- The rotation of a concatenation is the product of the rotations.
+theorem wordRotation.concat (u v : List(4))
+  shows wordRotation(concat(u, v)) = wordRotation(u) * wordRotation(v)
+proof
+  induction u
+  | List.nil =>
+    have matrix := wordRotation.matrix at v with *
+    rw [concat.nil_left, wordRotation.nil]
+    symm
+    exact matrixRing.one_mul with matrix
+  | List.cons(x, xs) using ih =>
+    have hx : x ∈ 4 by assumption
+    have head := letterMatrix.matrix with hx
+    have rest := wordRotation.matrix at xs with *
+    have tail := wordRotation.matrix at v with *
+    have joined := concat.cons at x, xs, v with hx
+    have left := wordRotation.cons at x, concat(xs, v) with hx
+    have right := wordRotation.cons at x, xs with hx
+    rw [joined, left, ih, right]
+    symm
+    exact matrixRing.mul_assoc with head, rest, tail
+
+-- Pushing a letter onto a word multiplies the rotation by the letter.
+theorem wordRotation.pushLetter (x : Set) (r : List(4))
+  requires hx : x ∈ 4
+  shows wordRotation(pushLetter(x, r)) = letterMatrix(x) * wordRotation(r)
+proof
+  have shape := List.cases at 4, r with *
+  cases shape with nil | cons
+  . have single := wordRotation.cons at x, [] with hx
+    rw [nil, pushLetter.nil, single]
+    rfl
+  . obtain ⟨y, hy, ys, tailList, equal⟩ := cons
+    have boolean := cancels.boolean at x, y
+    have split : cancels(x, y) = Bool.false ∨ cancels(x, y) = Bool.true :=
+      boolean.cases with boolean
+    have headY := wordRotation.cons at y, ys with hy
+    cases split with keep | cancel
+    . have kept := pushLetter.keep at x, y, ys with hx, hy, keep
+      have headX := wordRotation.cons at x, y :: ys with hx
+      rw [equal, kept, headX]
+      rfl
+    . have cancelled := pushLetter.cancel at x, y, ys with hx, hy, cancel
+      have inverse := cancels.true_iff.forward with cancel
+      have matrixX := letterMatrix.matrix with hx
+      have matrixY := letterMatrix.matrix with hy
+      have rest := wordRotation.matrix at ys with *
+      have assoc := matrixRing.mul_assoc with matrixX, matrixY, rest
+      have unit := matrixRing.one_mul with rest
+      have pair : letterMatrix(x) * letterMatrix(y) =
+          Ring.one(matrixRing(realRing, 3))
+        rw inverse
+        exact letterMatrix.cancel with hx
+      rw [equal, cancelled, headY, ← assoc, pair, unit]
+      rfl
+
+-- Reduction does not change the rotation.
+theorem wordRotation.reduce (w : List(4))
+  shows wordRotation(reduce(w)) = wordRotation(w)
+proof
+  induction w
+  | List.nil =>
+    rw reduce.nil
+    rfl
+  | List.cons(x, xs) using ih =>
+    have hx : x ∈ 4 by assumption
+    have closed := reduce.closed at xs with *
+    have pushed := wordRotation.pushLetter at x, reduce(xs) with hx
+    have step := reduce.cons at x, xs with hx
+    have head := wordRotation.cons at x, xs with hx
+    rw [step, pushed, ih, head]
+    rfl
+
+-- The rotation of the inverse word is a left inverse of the rotation.
+theorem wordRotation.inverseWord (w : List(4))
+  shows wordRotation(inverseWord(w)) * wordRotation(w) =
+    Ring.one(matrixRing(realRing, 3))
+proof
+  induction w
+  | List.nil =>
+    have one := Matrix.one_matrix
+    rw [inverseWord.nil, wordRotation.nil]
+    exact matrixRing.one_mul with one
+  | List.cons(x, xs) using ih =>
+    have hx : x ∈ 4 by assumption
+    have letter := inverseLetter.letter with hx
+    have single : List(4, inverseLetter(x) :: []) by typecheck
+    have inverseList := inverseWord.closed at xs with *
+    have matrixX := letterMatrix.matrix with hx
+    have matrixI := letterMatrix.matrix with letter
+    have rest := wordRotation.matrix at xs with *
+    have front := wordRotation.matrix at inverseWord(xs) with *
+    have one := Matrix.one_matrix
+    have split := wordRotation.concat at inverseWord(xs),
+      inverseLetter(x) :: [] with *
+    have head := wordRotation.cons at inverseLetter(x), [] with letter
+    have headX := wordRotation.cons at x, xs with hx
+    have involutive := inverseLetter.involutive with hx
+    have pair : letterMatrix(inverseLetter(x)) * letterMatrix(x) =
+        Ring.one(matrixRing(realRing, 3))
+      have cancel := letterMatrix.cancel with letter
+      rw involutive at cancel
+      exact cancel
+    have unitR := matrixRing.mul_one with matrixI
+    have unitF := matrixRing.mul_one with front
+    have assoc1 := matrixRing.mul_assoc with front, matrixI, matrixX
+    have product := Matrix.mul_matrix with front, matrixI
+    have assoc2 := matrixRing.mul_assoc with product, matrixX, rest
+    rw [inverseWord.cons, split, head, wordRotation.nil, unitR, headX]
+    calc
+      wordRotation(inverseWord(xs)) * letterMatrix(inverseLetter(x)) *
+          (letterMatrix(x) * wordRotation(xs)) =
+          wordRotation(inverseWord(xs)) * letterMatrix(inverseLetter(x)) *
+          letterMatrix(x) * wordRotation(xs) := by rw assoc2
+      _ = wordRotation(inverseWord(xs)) *
+          (letterMatrix(inverseLetter(x)) * letterMatrix(x)) *
+          wordRotation(xs) := by rw assoc1
+      _ = wordRotation(inverseWord(xs)) *
+          wordRotation(xs) := by rw [pair, unitF]
+      _ = Ring.one(matrixRing(realRing, 3)) := ih
+
+-- The homomorphism: a reduced word goes to its rotation.
+defgraph wordHom (w ∈ reducedWords) : so3Matrices := wordRotation(w)
+proof
+  have list := reducedWords.list with member
+  exact wordRotation.so3 with list
+
+theorem wordHom.apply (w : Set)
+  requires hw : w ∈ reducedWords
+  shows wordHom(w) = wordRotation(w)
+proof
+  exact wordHom.value with hw
+
+theorem wordHom.carrier_function
+  shows wordHom : Group.carrier(freeGroup) → Group.carrier(SO3)
+proof
+  have function := wordHom.function
+  rw [freeGroup.carrierOf, SO3.carrierOf]
+  exact function
+
+theorem wordHom.hom
+  shows wordHom : freeGroup →* SO3
+proof
+  have group := freeGroup.group
+  have target := SO3.group
+  have function := wordHom.carrier_function
+  apply GroupHom.mk with group, target, function
+  intros u hu v hv
+  have uIn := hu
+  have vIn := hv
+  rw freeGroup.carrierOf at uIn
+  rw freeGroup.carrierOf at vIn
+  have productIn : u * v ∈ reducedWords
+    rw freeGroup.operation
+    exact freeMul.mem with uIn, vIn
+  have productValue : u * v = reduce(concat(u, v))
+    rw freeGroup.operation
+    exact freeMul.apply with uIn, vIn
+  have listU := reducedWords.list with uIn
+  have listV := reducedWords.list with vIn
+  have joined := concat.closed at u, v with *
+  have reduced := wordRotation.reduce at concat(u, v) with joined
+  have split := wordRotation.concat with listU, listV
+  have so3U := wordRotation.so3 with listU
+  have so3V := wordRotation.so3 with listV
+  have operation := SO3.mul_apply with so3U, so3V
+  have first := wordHom.apply with uIn
+  have second := wordHom.apply with vIn
+  have third := wordHom.apply with productIn
+  rw [third, first, second, productValue, reduced, split, operation]
+  rfl
+
+-- Injectivity: equal rotations give a reduced word u⁻¹v with rotation
+-- the identity, which is the empty word by the freeness theorem.
+theorem wordHom.injective
+  shows InjectiveBetween(wordHom, reducedWords, Group.carrier(SO3))
+proof
+  have group := freeGroup.group
+  have function := wordHom.function
+  rw SO3.carrierOf
+  apply Injective.of_pointwise with function
+  intros u hu v hv same
+  have first := wordHom.apply with hu
+  have second := wordHom.apply with hv
+  rw [first, second] at same
+  have listU := reducedWords.list with hu
+  have listV := reducedWords.list with hv
+  have inverseList := inverseWord.closed at u with *
+  have joined := concat.closed at inverseWord(u), v with *
+  have reducedK := reduce.reduced at concat(inverseWord(u), v) with joined
+  have listK := reduce.closed at concat(inverseWord(u), v) with joined
+  have rotation : wordRotation(reduce(concat(inverseWord(u), v))) =
+      Ring.one(matrixRing(realRing, 3))
+    have split := wordRotation.concat with inverseList, listV
+    have cancel := wordRotation.inverseWord with listU
+    rw [wordRotation.reduce, split, ← same]
+    exact cancel
+  have empty : reduce(concat(inverseWord(u), v)) = []
+    by_contra
+    have nonzero := wordRotation.ne_one with listK, reducedK, this
+    exact nonzero with rotation
+  have fixedV := reducedWords.fixed with hv
+  have shift := reduce.concat with inverseList, listV
+  rw [fixedV, empty] at shift
+  have uIn := hu
+  have vIn := hv
+  rw ← freeGroup.carrierOf at uIn
+  rw ← freeGroup.carrierOf at vIn
+  have criterion := inv_mul_eq_one at freeGroup, u, v with group
+  rw [freeGroup.operation, freeGroup.inverse, freeGroup.unit] at criterion
+  have inverseIn := freeInv.mem with hu
+  have inverseValue := freeInv.apply with hu
+  have productValue := freeMul.apply with inverseIn, hv
+  rw [productValue, inverseValue] at criterion
+  symm at shift
+  exact criterion.forward with shift

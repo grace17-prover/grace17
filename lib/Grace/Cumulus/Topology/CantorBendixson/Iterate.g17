@@ -1,0 +1,250 @@
+-- The transfinite iteration of the derived set: stages indexed by the
+-- ordinals, intersecting at limits, with the three recursion laws, the
+-- membership form at limits, and the stages closed and decreasing
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.CantorBendixson.Iterate
+import Derived
+
+-- The stages of a set A: the set itself, then the derived set of the
+-- previous stage, and at a limit the intersection of the earlier stages.
+noncomputable transfinite def derived (X T A : Set, α : Ordinal) : Set
+  | 0 => A
+  | succ β => derivedSet(X, T, derived(X, T, A, β))
+  | limit λ => ⋂(Relation.range(history))
+
+theorem derived.zero (X T A : Set)
+  shows derived(X, T, A, 0) = A
+proof
+  simp [derived, nat.zero]
+
+theorem derived.next (X T A : Set, α : Ordinal)
+  shows derived(X, T, A, next(α)) = derivedSet(X, T, derived(X, T, A, α))
+proof
+  simp [derived.equation.successor]
+
+theorem derived.limit (X T A λ : Set)
+  requires limit : Limit(λ)
+  shows derived(X, T, A, λ) = ⋂(Relation.range(derived.history(X, T, A, λ)))
+proof
+  simp [derived.equation.limit]
+
+theorem derived.history_membership (p X T A λ : Set)
+  shows p ∈ derived.history(X, T, A, λ) ↔
+    ∃ β ∈ λ, p = (β ↦ derived(X, T, A, β))
+proof
+  simp [derived.history.membership]
+
+theorem derived.history_range (y X T A λ : Set)
+  shows y ∈ Relation.range(derived.history(X, T, A, λ)) ↔
+    ∃ β ∈ λ, y = derived(X, T, A, β)
+proof
+  constructor
+  . intro hy
+    obtain ⟨β, hPair⟩ := range.membership_iff.forward with hy
+    have member : (β, y) ∈ derived.history(X, T, A, λ) := hPair
+    obtain ⟨γ, hγ, shape⟩ := derived.history_membership.forward with
+      member
+    have coordinates := orderedPair.injective with shape
+    witness γ
+    constructor
+    . exact hγ
+    . exact coordinates.right
+  . intro h
+    obtain ⟨β, hβ, shape⟩ := h
+    have member : (β ↦ derived(X, T, A, β)) ∈ derived.history(X, T, A, λ)
+      exact derived.history_membership.backward with ⟨β, hβ, rfl⟩
+    rw shape
+    exact range.contains with member
+
+theorem derived.stage_in_range (X T A β λ : Set)
+  requires hβ : β ∈ λ
+  shows derived(X, T, A, β) ∈ Relation.range(derived.history(X, T, A, λ))
+proof
+  exact derived.history_range.backward with ⟨β, hβ, rfl⟩
+
+-- At a limit, a point lies in the stage exactly when it lies in every
+-- earlier stage.
+theorem derived.limit_membership (X T A x λ : Set)
+  requires limit : Limit(λ)
+  shows x ∈ derived(X, T, A, λ) ↔ ∀ β ∈ λ, x ∈ derived(X, T, A, β)
+proof
+  have equation := derived.limit at X, T, A, λ with limit
+  rw equation
+  constructor
+  . intros hx β hβ
+    have parts := familyIntersection.membership.forward with hx
+    have stage := derived.stage_in_range at X, T, A with hβ
+    exact parts.right with derived(X, T, A, β), stage
+  . intro below
+    obtain ⟨ordinal, nonzero, successors⟩ := limit
+    obtain ⟨β, hβ⟩ := Nonempty.of_ne_empty with nonzero
+    have stage := derived.stage_in_range at X, T, A with hβ
+    have inhabited : Nonempty(Relation.range(derived.history(X, T, A, λ)))
+      exact ⟨derived(X, T, A, β), stage⟩
+    apply familyIntersection.membership_of_nonempty.backward with inhabited
+    intros S hS
+    obtain ⟨γ, hγ, shape⟩ := derived.history_range.forward with hS
+    rw shape
+    exact below with γ, hγ
+
+-- Every stage of a closed set is closed: the derived set of a closed set
+-- is closed, and so is an intersection of closed sets. The induction runs
+-- over the ordinals up to a bound, ordered by membership.
+theorem derived.closed_below (X T A β : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hBeta : β ∈ Ordinal
+  shows ∀ α ∈ next(β), IsClosed(X, T, derived(X, T, A, α))
+proof
+  have hNext := Ordinal.next with hBeta
+  have transitive := Ordinal.transitive with hNext
+  induction α over next(β) ordered by membershipOn(next(β)) certified by membershipOn.wellFounded at next(β)
+  intros current hCurrentIn ih
+  have hCurrent := Ordinal.member with hNext, hCurrentIn
+  have split := Ordinal.cases with hCurrent
+  cases split with zero | rest
+  . rw [zero, ← nat.zero, derived.zero]
+    exact closed
+  . cases rest with successor | limit
+    . obtain ⟨γ, hγ, equal⟩ := successor
+      have hGamma := Ordinal.member with hCurrent, hγ
+      have hGammaIn := transitive with current, hCurrentIn, γ, hγ
+      have rule := membershipOn.relates with hGammaIn, hCurrentIn
+      have predecessor : γ ∈ next(β) ∧
+          relates(membershipOn(next(β)), γ, current)
+        exact ⟨hGammaIn, (rule.backward with hγ)⟩
+      have closedGamma := ih with γ, predecessor
+      rw [← equal, derived.next]
+      exact derivedSet.closed with topology, closedGamma
+    . have equation := derived.limit at X, T, A, current with limit
+      rw equation
+      obtain ⟨ordinal, nonzero, successors⟩ := limit
+      obtain ⟨γ, hγ⟩ := Nonempty.of_ne_empty with nonzero
+      have stage := derived.stage_in_range at X, T, A with hγ
+      have inhabited : Nonempty(Relation.range(derived.history(X, T, A, current)))
+        exact ⟨derived(X, T, A, γ), stage⟩
+      apply IsClosed.family_intersection with topology, inhabited
+      intros S hS
+      obtain ⟨ε, hε, shape⟩ := derived.history_range.forward with hS
+      rw shape
+      have hEpsilonIn := transitive with current, hCurrentIn, ε, hε
+      have rule := membershipOn.relates with hEpsilonIn, hCurrentIn
+      have predecessor : ε ∈ next(β) ∧
+          relates(membershipOn(next(β)), ε, current)
+        exact ⟨hEpsilonIn, (rule.backward with hε)⟩
+      exact ih with ε, predecessor
+
+theorem derived.closed (X T A α : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  shows IsClosed(X, T, derived(X, T, A, α))
+proof
+  have below := derived.closed_below at X, T, A, α with
+    topology, closed, hAlpha
+  exact below with α, (next.contains at α)
+
+theorem derived.subset_whole (X T A α : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  shows derived(X, T, A, α) ⊆ X
+proof
+  have closedStage := derived.closed with topology, closed, hAlpha
+  exact closedStage.left
+
+-- The stages decrease along the ordinals: a successor stage is the
+-- derived set of a closed stage, which lies inside it, and a limit stage
+-- is the intersection of the earlier ones.
+theorem derived.decreasing_below (X T A δ : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hDelta : δ ∈ Ordinal
+  shows ∀ β ∈ next(δ), ∀ α, α ∈ Ordinal → α ∈ next(β) →
+    (derived(X, T, A, β) ⊆ derived(X, T, A, α))
+proof
+  have hNext := Ordinal.next with hDelta
+  have transitive := Ordinal.transitive with hNext
+  induction β over next(δ) ordered by membershipOn(next(δ)) certified by membershipOn.wellFounded at next(δ)
+  intros current hCurrentIn ih α hAlpha hBound
+  have hCurrent := Ordinal.member with hNext, hCurrentIn
+  have bound := next.membership.forward with hBound
+  cases bound with earlier | equal
+  . have split := Ordinal.cases with hCurrent
+    cases split with zero | rest
+    . exfalso
+      rw zero at earlier
+      exact set.empty with earlier
+    . cases rest with successor | limit
+      . obtain ⟨γ, hγ, equal⟩ := successor
+        have hGamma := Ordinal.member with hCurrent, hγ
+        have hGammaIn := transitive with current, hCurrentIn, γ, hγ
+        have rule := membershipOn.relates with hGammaIn, hCurrentIn
+        have predecessor : γ ∈ next(δ) ∧
+            relates(membershipOn(next(δ)), γ, current)
+          exact ⟨hGammaIn, (rule.backward with hγ)⟩
+        have closedGamma := derived.closed with topology, closed, hGamma
+        rw ← equal at earlier
+        have toAlpha := ih with γ, predecessor, α, hAlpha, earlier
+        have drop := derivedSet.subset with topology, closedGamma
+        rw [← equal, derived.next]
+        exact Subset.transitive with drop, toAlpha
+      . have equation := derived.limit at X, T, A, current with limit
+        rw equation
+        have stage := derived.stage_in_range at X, T, A with earlier
+        exact familyIntersection.subset_of_member with stage
+  . rw equal
+    exact Subset.reflexive
+
+theorem derived.decreasing (X T A α β : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  requires hBeta : β ∈ Ordinal
+  requires hBound : α ∈ next(β)
+  shows derived(X, T, A, β) ⊆ derived(X, T, A, α)
+proof
+  have below := derived.decreasing_below at X, T, A, β with
+    topology, closed, hBeta
+  exact below with β, (next.contains at β), α, hAlpha, hBound
+
+theorem derived.antitone (X T A α β : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  requires hBeta : β ∈ Ordinal
+  requires hLess : α ∈ β
+  shows derived(X, T, A, β) ⊆ derived(X, T, A, α)
+proof
+  have bound : α ∈ next(β)
+    apply next.membership.backward
+    left
+    exact hLess
+  exact derived.decreasing with topology, closed, hAlpha, hBeta, bound
+
+theorem derived.next_subset (X T A α : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  shows derived(X, T, A, next(α)) ⊆ derived(X, T, A, α)
+proof
+  have closedStage := derived.closed with topology, closed, hAlpha
+  rw derived.next
+  exact derivedSet.subset with topology, closedStage
+
+theorem derived.subset (X T A α : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, A)
+  requires hAlpha : α ∈ Ordinal
+  shows derived(X, T, A, α) ⊆ A
+proof
+  have bound := Ordinal.subset_bound at ∅, α with
+    Ordinal.empty, hAlpha, (empty.subset at α)
+  have below := derived.decreasing at X, T, A, ∅, α with
+    topology, closed, Ordinal.empty, hAlpha, bound
+  rw [← nat.zero, derived.zero] at below
+  exact below

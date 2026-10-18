@@ -1,0 +1,313 @@
+-- Correctness of the complete executable priority scan.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DijkstraMinimum
+import DijkstraProofs
+
+namespace Dijkstra
+
+predicate CandidateOption (result : Set) :=
+  result = Option.none ∨ ∃ i ∈ ℕ, ∃ d ∈ ℕ,
+    result = Option.some(Dijkstra.Candidate.value(i, d))
+
+predicate CandidateOrder (first second : Set) :=
+  ∀ i ∈ ℕ, ∀ d ∈ ℕ, second = Option.some(Dijkstra.Candidate.value(i, d)) →
+    ∃ j ∈ ℕ, ∃ c ∈ ℕ, first = Option.some(Dijkstra.Candidate.value(j, c)) ∧ c ≤ d
+
+theorem CandidateOrder.none (result : Set)
+  shows CandidateOrder(result, Option.none)
+proof
+  intros i hi d hd equality
+  have impossible := Option.inductive.disjoint.none.some at Dijkstra.Candidate.value(i, d)
+  exfalso
+  exact impossible with equality
+
+theorem CandidateOrder.reflexive (result : Set)
+  shows CandidateOrder(result, result)
+proof
+  intros i hi d hd equality
+  have dNat := nat.omega.backward with hd
+  have same := LessEqual.reflexive with dNat
+  refine ⟨i, hi, d, hd, equality, same⟩
+
+theorem CandidateOrder.transitive (a b c : Set)
+  requires first : CandidateOrder(a, b)
+  requires second : CandidateOrder(b, c)
+  shows CandidateOrder(a, c)
+proof
+  intros i hi d hd equality
+  obtain ⟨j, hj, e, he, bValue, ed⟩ := second with i, hi, d, hd, equality
+  obtain ⟨k, hk, f, hf, aValue, fe⟩ := first with j, hj, e, he, bValue
+  have dNat := nat.omega.backward with hd
+  have eNat := nat.omega.backward with he
+  have fNat := nat.omega.backward with hf
+  have bound := LessEqual.transitive with fNat, eNat, dNat, fe, ed
+  refine ⟨k, hk, f, hf, aValue, bound⟩
+
+theorem CandidateOrder.finite (i d j e : Nat)
+  requires order : d ≤ e
+  shows CandidateOrder(Option.some(Dijkstra.Candidate.value(i, d)), Option.some(Dijkstra.Candidate.value(j, e)))
+proof
+  intros k hk c hc equality
+  have pair := Option.inductive.injective.some with equality
+  have coordinates := Dijkstra.Candidate.inductive.injective.value with pair
+  rcases coordinates with ⟨jk, ec⟩
+  have iIn := nat.omega.forward at i with assumption
+  have dIn := nat.omega.forward at d with assumption
+  refine ⟨i, iIn, d, dIn, rfl, _⟩
+  rw ← ec
+  exact order
+
+theorem prefer.correct (left right : Set)
+  requires leftValid : CandidateOption(left)
+  requires rightValid : CandidateOption(right)
+  shows CandidateOption(Dijkstra.prefer(left, right)) ∧
+    (Dijkstra.prefer(left, right) = left ∨ Dijkstra.prefer(left, right) = right) ∧
+    CandidateOrder(Dijkstra.prefer(left, right), left) ∧
+    CandidateOrder(Dijkstra.prefer(left, right), right)
+proof
+  cases leftValid with noLeft | someLeft
+  . have same := CandidateOrder.reflexive at right
+    have computed : Dijkstra.prefer(left, right) = right
+      rw noLeft
+      settle with Dijkstra.prefer
+    rw computed
+    have noBound := CandidateOrder.none at right
+    refine ⟨rightValid, _, _, same⟩
+    . right
+      rfl
+    . rw noLeft
+      exact noBound
+  . rcases someLeft with ⟨i, hi, d, hd, leftValue⟩
+    have rightCases := rightValid
+    cases rightCases with noRight | someRight
+    . have same := CandidateOrder.reflexive at left
+      have computed : Dijkstra.prefer(left, right) = left
+        rw leftValue
+        rw noRight
+        settle with Dijkstra.prefer, Dijkstra.preferSome
+      rw computed
+      have leftShape : CandidateOption(left)
+        right
+        refine ⟨i, hi, d, hd, leftValue⟩
+      refine ⟨leftShape, _, same, _⟩
+      . left
+        rfl
+      . rw noRight
+        exact CandidateOrder.none
+    . rcases someRight with ⟨j, hj, e, he, rightValue⟩
+      have iNat := nat.omega.backward with hi
+      have jNat := nat.omega.backward with hj
+      have dNat := nat.omega.backward with hd
+      have eNat := nat.omega.backward with he
+      have typed := Dijkstra.less.boolean with dNat, eNat
+      have choices := Dijkstra.boolean_cases with typed
+      cases choices with no | yes
+      . have order := Dijkstra.less.false_iff.forward at d, e with dNat, eNat, no
+        have computed : Dijkstra.prefer(left, right) = right
+          rw leftValue
+          rw rightValue
+          settle with Dijkstra.prefer, Dijkstra.preferSome, Dijkstra.candidateDistance, Dijkstra.choose, no
+        rw computed
+        have rightShape : CandidateOption(right)
+          right
+          refine ⟨j, hj, e, he, rightValue⟩
+        have same := CandidateOrder.reflexive at right
+        refine ⟨rightShape, _, _, same⟩
+        . right
+          rfl
+        . rw rightValue
+          rw leftValue
+          exact CandidateOrder.finite with jNat, eNat, iNat, dNat, order
+      . have strict := Dijkstra.less.true_iff.forward at d, e with dNat, eNat, yes
+        have order := Less.implies_LessEqual with dNat, eNat, strict
+        have computed : Dijkstra.prefer(left, right) = left
+          rw leftValue
+          rw rightValue
+          settle with Dijkstra.prefer, Dijkstra.preferSome, Dijkstra.candidateDistance, Dijkstra.choose, yes
+        rw computed
+        have leftShape : CandidateOption(left)
+          right
+          refine ⟨i, hi, d, hd, leftValue⟩
+        have same := CandidateOrder.reflexive at left
+        refine ⟨leftShape, _, same, _⟩
+        . left
+          rfl
+        . rw leftValue
+          rw rightValue
+          exact CandidateOrder.finite with iNat, dNat, jNat, eNat, order
+
+predicate MinimumOf (result offers : Set) :=
+  CandidateOption(result) ∧ result ∈ offers ∧
+  (∀ other ∈ offers, CandidateOrder(result, other))
+
+theorem MinimumOf.singleton (result : Set)
+  requires valid : CandidateOption(result)
+  shows MinimumOf(result, {result})
+proof
+  have member := singleton.self at result
+  unfold MinimumOf
+  refine ⟨valid, member, _⟩
+  intros other inSet
+  have equality := singleton.membership.forward with inSet
+  rw equality
+  exact CandidateOrder.reflexive
+
+theorem MinimumOf.union (left right A B : Set)
+  requires first : MinimumOf(left, A)
+  requires second : MinimumOf(right, B)
+  shows MinimumOf(Dijkstra.prefer(left, right), A ∪ B)
+proof
+  rcases first with ⟨leftValid, leftIn, leftLeast⟩
+  rcases second with ⟨rightValid, rightIn, rightLeast⟩
+  obtain ⟨valid, selected, leLeft, leRight⟩ := prefer.correct with leftValid, rightValid
+  unfold MinimumOf
+  refine ⟨valid, _, _⟩
+  . cases selected with chooseLeft | chooseRight
+    . rw chooseLeft
+      exact union2.left with leftIn
+    . rw chooseRight
+      exact union2.right with rightIn
+  . intros other inUnion
+    have alternatives := union2.membership.forward with inUnion
+    cases alternatives with inA | inB
+    . have bound := leftLeast with other, inA
+      exact CandidateOrder.transitive with leLeft, bound
+    . have bound := rightLeast with other, inB
+      exact CandidateOrder.transitive with leRight, bound
+
+
+theorem equalNat.boolean (a b : Nat)
+  shows Bool(equalNat(a, b))
+proof
+  exact Grace.Cumulus.Nat.Mod.equalNat.boolean at a, b with *
+
+theorem boolHead.natural (flags : List(ℕ))
+  shows Nat(Dijkstra.boolHead(flags))
+proof
+  induction flags
+  | List.nil =>
+    have computed : Dijkstra.boolHead(List.nil) = 1 by simp [Dijkstra.boolHead]
+    rw computed
+    typecheck
+  | List.cons(flag, rest) using ih =>
+    have computed : Dijkstra.boolHead(List.cons(flag, rest)) = flag by simp [Dijkstra.boolHead]
+    rw computed
+    typecheck
+
+theorem boolTail.closed (flags : List(ℕ))
+  shows List(ℕ, Dijkstra.boolTail(flags))
+proof
+  induction flags
+  | List.nil =>
+    have computed : Dijkstra.boolTail(List.nil) = List.nil by simp [Dijkstra.boolTail]
+    rw computed
+    exact List.inductive.constructor.nil
+  | List.cons(flag, rest) using ih =>
+    have computed : Dijkstra.boolTail(List.cons(flag, rest)) = rest by simp [Dijkstra.boolTail]
+    rwa computed
+
+theorem available.valid (distance : Option(ℕ), index : Nat, flag : Bool)
+  shows CandidateOption(Dijkstra.available(flag, distance, index))
+proof
+  induction flag
+  | Bool.true =>
+    left
+    settle with Dijkstra.available
+  | Bool.false =>
+    have shape := Dijkstra.option_cases at distance with assumption
+    cases shape with absent | present
+      left
+      rw absent
+      settle with Dijkstra.available, Dijkstra.availableOpen
+    . rcases present with ⟨d, hd, equality⟩
+      have indexIn := nat.omega.forward at index with assumption
+      right
+      refine ⟨index, indexIn, d, hd, _⟩
+      rw equality
+      settle with Dijkstra.available, Dijkstra.availableOpen
+
+-- A is a set of cells. The theorem below requires each of its
+-- members to be an optional natural, without treating a class as a set.
+def scanOffers {A : Set} (distances : List(A), flags : List(ℕ), index : Nat) → Set
+  | List.nil, flags, index => {Option.none}
+  | List.cons(d, rest), flags, index =>
+    {Dijkstra.available(equalNat(Dijkstra.boolHead(flags), 1), d, index)} ∪
+      scanOffers(rest, Dijkstra.boolTail(flags), succ(index))
+  descends distances
+
+theorem minimum.correct (A : Set, distances : List(A), flags : List(ℕ), index : Nat)
+  requires cells : ∀ d ∈ A, Option(ℕ, d)
+  shows MinimumOf(Dijkstra.minimum(distances, flags, index), scanOffers{A := A}(distances, flags, index))
+proof
+  induction distances generalizing flags index
+  | List.nil =>
+    intros flags index flagsType indexNat
+    have valid : CandidateOption(Option.none)
+      left
+      rfl
+    have initial := MinimumOf.singleton with valid
+    simp [Dijkstra.minimum, scanOffers]
+  | List.cons(d, rest) using ih =>
+    intros flags index flagsType indexNat
+    have dType := cells with d, assumption
+    have headNat := boolHead.natural with flagsType
+    have tailType := boolTail.closed with flagsType
+    have condition := equalNat.boolean at Dijkstra.boolHead(flags), 1 with headNat, assumption
+    have nextNat := Naturals.constructor.succ with indexNat
+    have valid := available.valid with dType, indexNat
+    have first := MinimumOf.singleton with valid
+    have second := ih with Dijkstra.boolTail(flags), succ(index), tailType, nextNat
+    have merged := MinimumOf.union with first, second
+    simp [Dijkstra.minimum, scanOffers]
+
+
+theorem MinimumOf.none_iff (result offers : Set)
+  requires minimum : MinimumOf(result, offers)
+  shows result = Option.none ↔
+    (∀ i ∈ ℕ, ∀ d ∈ ℕ, ¬(Option.some(Dijkstra.Candidate.value(i, d)) ∈ offers))
+proof
+  rcases minimum with ⟨valid, member, least⟩
+  constructor
+  . intros absent i hi d hd offered
+    have order := least with Option.some(Dijkstra.Candidate.value(i, d)), offered
+    have itself : Option.some(Dijkstra.Candidate.value(i, d)) = Option.some(Dijkstra.Candidate.value(i, d)) by rfl
+    obtain ⟨j, hj, c, hc, equality, bound⟩ := order with i, hi, d, hd, itself
+    rw absent at equality
+    have impossible := Option.inductive.disjoint.none.some at Dijkstra.Candidate.value(j, c)
+    exact impossible with equality
+  . intro noFinite
+    cases valid with absent | finite
+    . exact absent
+    . rcases finite with ⟨fi, hfi, fd, hfd, finiteEquality⟩
+      have notOffered := noFinite with fi, hfi, fd, hfd
+      rw finiteEquality at member
+      exfalso
+      exact notOffered with member
+
+theorem minimum.none_iff (A : Set, distances : List(A), flags : List(ℕ), index : Nat)
+  requires cells : ∀ d ∈ A, Option(ℕ, d)
+  shows Dijkstra.minimum(distances, flags, index) = Option.none ↔
+    (∀ i ∈ ℕ, ∀ d ∈ ℕ, ¬(Option.some(Dijkstra.Candidate.value(i, d)) ∈ scanOffers{A := A}(distances, flags, index)))
+proof
+  have correct := minimum.correct with *
+  exact MinimumOf.none_iff with correct
+
+theorem minimum.le_every_offer (A : Set, distances : List(A), flags : List(ℕ), index i d : Nat)
+  requires cells : ∀ value ∈ A, Option(ℕ, value)
+  requires offered : Option.some(Dijkstra.Candidate.value(i, d)) ∈ scanOffers{A := A}(distances, flags, index)
+  shows ∃ j ∈ ℕ, ∃ c ∈ ℕ,
+    Dijkstra.minimum(distances, flags, index) = Option.some(Dijkstra.Candidate.value(j, c)) ∧ c ≤ d
+proof
+  have correct := minimum.correct at A, distances, flags, index with *
+  rcases correct with ⟨valid, member, least⟩
+  have bound := least with Option.some(Dijkstra.Candidate.value(i, d)), offered
+  have iIn := nat.omega.forward at i with assumption
+  have dIn := nat.omega.forward at d with assumption
+  have same : Option.some(Dijkstra.Candidate.value(i, d)) = Option.some(Dijkstra.Candidate.value(i, d)) by rfl
+  exact bound with i, iIn, d, dIn, same
+
+end Dijkstra

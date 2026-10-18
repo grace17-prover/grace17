@@ -1,0 +1,325 @@
+-- Finite real polynomials
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Real.Polynomial
+import FiniteSum
+import Power
+
+-- A polynomial is represented by a real coefficient sequence and a finite
+-- cutoff. Only the first n coefficients affect the value.
+def polynomialEval (coeff : Set, n : Nat, X : Real) → Set
+  | coeff, zero, X => realZero
+  | coeff, succ(k), X =>
+      realAddValue(polynomialEval(coeff, k, X), realMulValue(coeff[k], realPow(X, k)))
+
+-- A polynomial's weighted terms form a real sequence, permitting general
+-- finite-sum laws to be applied to polynomial evaluations.
+defgraph polynomialTerms (coeff : Set, X : Real) (k ∈ ℕ) : ℝ :=
+  realMulValue(coeff[k], realPow(X, k))
+requires coefficients : RealSequence(coeff)
+proof
+  have typedK := nat.omega.backward at k with member
+  have coefficient := RealSequence.value at coeff, k with coefficients
+  have power := realPow.real at X, k with assumption, typedK
+  have product := realMulValue.real at coeff[k], realPow(X, k) with
+    coefficient, power
+  unfold Real at product
+  unfold realMulValue
+  unfold call2 at product
+  exact product
+
+theorem polynomialTerms.sequence (coeff : Set, X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows RealSequence(polynomialTerms(coeff, X))
+proof
+  unfold RealSequence
+  exact polynomialTerms.function with coefficients
+
+theorem polynomialEval.zero (coeff : Set) (X : Real)
+  shows polynomialEval(coeff, 0, X) = (0:R)
+proof
+  rw polynomialEval
+  rfl
+
+theorem polynomialEval.succ (coeff : Set) (k : Nat, X : Real)
+  shows polynomialEval(coeff, succ(k), X) =
+    realAddValue(polynomialEval(coeff, k, X),
+      realMulValue(coeff[k], realPow(X, k)))
+proof
+  rw polynomialEval
+  rfl
+
+theorem polynomialEval.real (coeff : Set, n : Nat, X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows Real(polynomialEval(coeff, n, X))
+proof
+  induction n
+  | zero =>
+    rw polynomialEval.zero
+    exact realZero.real
+  | succ(k) using ih =>
+    rw polynomialEval.succ
+    have coefficient := RealSequence.value with coefficients
+    have power := realPow.real at X, k with *
+    have term := realMulValue.real with coefficient, power
+    have typedTerm : Real(realMulValue(coeff[k], realPow(X, k)))
+      unfold realMulValue
+      unfold call2 at term
+      exact term
+    have sum := realAddValue.real at
+      polynomialEval(coeff, k, X), realMulValue(coeff[k], realPow(X, k)) with ih, typedTerm
+    unfold realAddValue
+    unfold call2 at sum
+    exact sum
+
+theorem polynomialEval.as_sum (coeff : Set, n : Nat, X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, n, X) = realPartialSum(polynomialTerms(coeff, X), n)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, realPartialSum.zero]
+    rfl
+  | succ(k) using ih =>
+    have value := polynomialTerms.value with coefficients
+    rw [polynomialEval.succ, realPartialSum.succ, ih, value]
+    rfl
+
+-- Increasing a cutoff adds precisely the weighted terms in its new suffix.
+theorem polynomialEval.split_at (coeff : Set, n m : Nat, X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, add(n, m), X) =
+    (polynomialEval(coeff, n, X):R) +
+      realPartialSum(shiftedRealSequence(polynomialTerms(coeff, X), n), m)
+proof
+  have terms := polynomialTerms.sequence with coefficients
+  rw [polynomialEval.as_sum, polynomialEval.as_sum]
+  exact realPartialSum.split_at with terms
+
+-- Constant coefficients form a scalar multiple of the geometric polynomial.
+theorem polynomialEval.geometric_coefficients (C X : Real, n : Nat)
+  shows polynomialEval(constantSequence(C), n, X) =
+    C * (realPartialSum(geometricTerms(X), n):R)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, realPartialSum.zero]
+    ring
+  | succ(k) using ih =>
+    have constants := constantSequence.sequence at C
+    have coefficient := constantSequence.value at C, k with *
+    have geometric := geometricTerms.value at X, k with *
+    rw [polynomialEval.succ, realPartialSum.succ, coefficient, geometric, ih]
+    ring
+
+theorem polynomialEval.geometric_identity (X : Real, n : Nat)
+  shows ((1:R) - X) * (polynomialEval(constantSequence(realOne), n, X):R) =
+    (1:R) - X ^ n
+proof
+  have eval := polynomialEval.geometric_coefficients at realOne, X, n
+  have sum := realPartialSum.geometric with *
+  have sequence := geometricTerms.sequence at X
+  have sumReal := realPartialSum.real with sequence
+  have one := realMulValue.one_left with sumReal
+  rwa [eval, one]
+
+theorem polynomialEval.add (u v : Set, n : Nat, X : Real)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows polynomialEval(addSequence(u, v), n, X) =
+    (polynomialEval(u, n, X):R) + (polynomialEval(v, n, X):R)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, polynomialEval.zero, polynomialEval.zero]
+    ring
+  | succ(k) using ih =>
+    have valueU := RealSequence.value with sequenceU
+    have valueV := RealSequence.value with sequenceV
+    have combined := addSequence.sequence with sequenceU, sequenceV
+    have value := addSequence.value with sequenceU, sequenceV, valueU, valueV
+    rw [polynomialEval.succ, polynomialEval.succ, polynomialEval.succ, ih, value]
+    ring
+
+-- Evaluation depends only on coefficients below the cutoff.
+theorem polynomialEval.eq_prefix_aux (X : Real, n : Nat)
+  shows ∀ u, ∀ v, RealSequence(u) → RealSequence(v) →
+    (∀ k ∈ ℕ, k < n → u[k] = v[k]) →
+      polynomialEval(u, n, X) = polynomialEval(v, n, X)
+proof
+  induction n
+  | zero =>
+    intros u v sequenceU sequenceV equal
+    rw [polynomialEval.zero, polynomialEval.zero]
+    rfl
+  | succ(k) using ih =>
+    intros u v sequenceU sequenceV equal
+    have naturalK := nat.omega.forward at k with assumption
+    have before : k < succ(k)
+      unfold Less
+      exact LessEqual.reflexive at succ(k) with
+        Naturals.constructor.succ at k with assumption
+    have termEqual := equal with k, naturalK, before
+    have prefix : ∀ j ∈ ℕ, j < k → u[j] = v[j]
+      intros j naturalJ smaller
+      have typedJ := nat.omega.backward with naturalJ
+      have below := Less.transitive_LessEqual at j, k, succ(k) with
+        typedJ, assumption, Naturals.constructor.succ at k with assumption,
+        smaller, LessEqual.successor at k with assumption
+      exact equal with j, naturalJ, below
+    have sumEqual := ih with u, v, sequenceU, sequenceV, prefix
+    rw [polynomialEval.succ, polynomialEval.succ, sumEqual, termEqual]
+    rfl
+
+theorem polynomialEval.eq_prefix (u v : Set, n : Nat, X : Real)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires equal : ∀ k ∈ ℕ, k < n → u[k] = v[k]
+  shows polynomialEval(u, n, X) = polynomialEval(v, n, X)
+proof
+  exact polynomialEval.eq_prefix_aux at X, n with
+    u, v, sequenceU, sequenceV, equal
+
+-- Multiplying every coefficient by a real scalar multiplies the value.
+theorem polynomialEval.scale (coeff : Set, n : Nat, X C : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(mulSequence(constantSequence(C), coeff), n, X) =
+    C * (polynomialEval(coeff, n, X):R)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, polynomialEval.zero]
+    ring
+  | succ(k) using ih =>
+    have constants := constantSequence.sequence at C
+    have scaled := mulSequence.sequence with constants, coefficients
+    have constantValue := RealSequence.value with constants
+    have coeffValue := RealSequence.value with coefficients
+    have value := mulSequence.value with constants, coefficients, constantValue, coeffValue
+    have constant := constantSequence.value at C, k with *
+    rw [polynomialEval.succ, polynomialEval.succ, ih, value, constant]
+    ring
+
+theorem polynomialEval.neg (coeff : Set, n : Nat, X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(negSequence(coeff), n, X) =
+    -(polynomialEval(coeff, n, X):R)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, polynomialEval.zero]
+    ring
+  | succ(k) using ih =>
+    have coefficient := RealSequence.value with coefficients
+    have negated := negSequence.sequence with coefficients
+    have value := negSequence.value with coefficients, coefficient
+    rw [polynomialEval.succ, polynomialEval.succ, ih, value]
+    ring
+
+theorem polynomialEval.sub (u v : Set, n : Nat, X : Real)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows polynomialEval(subSequence(u, v), n, X) =
+    (polynomialEval(u, n, X):R) - (polynomialEval(v, n, X):R)
+proof
+  have negated := negSequence.sequence with sequenceV
+  unfold subSequence
+  rw [polynomialEval.add, polynomialEval.neg]
+  unfold realSubValue
+  rfl
+
+-- At one, evaluation is exactly the finite sum of the coefficients.
+theorem polynomialEval.at_one (coeff : Set, n : Nat)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, n, realOne) = realPartialSum(coeff, n)
+proof
+  induction n
+  | zero =>
+    rw [polynomialEval.zero, realPartialSum.zero]
+    rfl
+  | succ(k) using ih =>
+    rw [polynomialEval.succ, realPartialSum.succ, ih, realPow.one]
+    have coefficient := RealSequence.value with coefficients
+    have product : realMulValue(coeff[k], realOne) = coeff[k]
+      have value := realMulValue.one_right with coefficient
+      unfold realMulValue
+      unfold call2 at value
+      exact value
+    rw product
+    rfl
+
+theorem polynomialEval.constant (coeff : Set) (X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, succ(0), X) = coeff[0]
+proof
+  rw [polynomialEval.succ, polynomialEval.zero, realPow.zero]
+  have coefficient := RealSequence.value at coeff, 0 with coefficients
+  have product : realMulValue(coeff[0], realOne) = coeff[0]
+    have value := realMulValue.one_right with coefficient
+    unfold realMulValue
+    unfold call2 at value
+    exact value
+  rw product
+  have zero : realAddValue(realZero, coeff[0]) = coeff[0]
+    have value := realAddValue.zero_left with coefficient
+    unfold realAddValue
+    unfold call2 at value
+    exact value
+  exact zero
+
+-- A nonempty coefficient prefix evaluated at zero is its constant term.
+theorem polynomialEval.at_zero_succ (coeff : Set, n : Nat)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, succ(n), realZero) = coeff[0]
+proof
+  induction n
+  | zero =>
+    exact polynomialEval.constant at coeff, realZero with coefficients
+  | succ(k) using ih =>
+    rw [polynomialEval.succ, ih, realPow.zero_succ]
+    have coefficient := RealSequence.value at coeff, succ(k) with coefficients
+    have constant := RealSequence.value at coeff, 0 with coefficients
+    have product : realMulValue(coeff[succ(k)], realZero) = realZero
+      have value := realMulValue.zero_right with coefficient
+      unfold realMulValue
+      unfold call2 at value
+      exact value
+    rw product
+    have sum : realAddValue(coeff[0], realZero) = coeff[0]
+      have value := realAddValue.zero_right with constant
+      unfold realAddValue
+      unfold call2 at value
+      exact value
+    exact sum
+
+theorem polynomialEval.linear (coeff : Set) (X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, succ(succ(0)), X) =
+    (coeff[0]:R) + (coeff[succ(0)]:R) * X
+proof
+  rw [polynomialEval.succ, polynomialEval.constant]
+  have first := RealSequence.value at coeff, 0 with coefficients
+  have second := RealSequence.value at coeff, succ(0) with coefficients
+  have powerOne : X ^ succ(0) = X
+    rw [realPow.succ, realPow.zero]
+    exact realMulValue.one_right with assumption
+  rw powerOne
+  unfold realAddValue
+  unfold realMulValue
+  unfold call2
+  rfl
+
+theorem polynomialEval.quadratic (coeff : Set) (X : Real)
+  requires coefficients : RealSequence(coeff)
+  shows polynomialEval(coeff, succ(succ(succ(0))), X) =
+    ((coeff[0]:R) + (coeff[succ(0)]:R) * X) +
+      (coeff[succ(succ(0))]:R) * (X * X)
+proof
+  rw [polynomialEval.succ, polynomialEval.linear, realPow.two]
+  have first := RealSequence.value at coeff, 0 with coefficients
+  have second := RealSequence.value at coeff, succ(0) with coefficients
+  have third := RealSequence.value at coeff, succ(succ(0)) with coefficients
+  ring

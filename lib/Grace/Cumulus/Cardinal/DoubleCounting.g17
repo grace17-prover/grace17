@@ -1,0 +1,198 @@
+-- Double counting: the size of a finite relation is the sum, over the
+-- first coordinates, of the sizes of its fibres
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.DoubleCounting
+import NaturalSum
+
+def fiber (I D r : Set) : Set := { d ∈ D | (r, d) ∈ I }
+
+theorem fiber.membership (d I D r : Set)
+  shows d ∈ fiber(I, D, r) ↔ d ∈ D ∧ (r, d) ∈ I
+proof
+  simp [fiber]
+
+theorem fiber.finite (I D r : Set)
+  requires finite : Finite(D)
+  shows Finite(fiber(I, D, r))
+proof
+  have inside : fiber(I, D, r) ⊆ D
+    intros d hd
+    have parts := fiber.membership.forward with hd
+    exact parts.left
+  exact Finite.subset with finite, inside
+
+defgraph fiberSize (I R D : Set) (r ∈ R) : ℕ := cardinality(fiber(I, D, r))
+requires finiteD : Finite(D)
+proof
+  have finite := fiber.finite at I, D, r with finiteD
+  have correct := cardinality.correct with finite
+  exact nat.omega.forward with correct.left
+
+-- The row of the relation over a point is a copy of its fibre.
+theorem fiber.row (I D a : Set)
+  shows I ∩ ({a} × D) = {a} × fiber(I, D, a)
+proof
+  have self : a ∈ {a} by simp [singleton.membership]
+  ext p
+  constructor
+  . intro hp
+    have both := intersection.membership.forward with hp
+    obtain ⟨bound, x, hx, d, hd, shape⟩ := product.membership.forward with both.right
+    have same := singleton.membership.forward with hx
+    rw same at shape
+    have inI := both.left
+    rw shape at inI
+    have member : d ∈ fiber(I, D, a) := fiber.membership.backward with ⟨hd, inI⟩
+    rw shape
+    exact product.pair with self, member
+  . intro hp
+    obtain ⟨bound, x, hx, d, hd, shape⟩ := product.membership.forward with hp
+    have same := singleton.membership.forward with hx
+    rw same at shape
+    have parts := fiber.membership.forward with hd
+    apply intersection.membership.backward
+    rw shape
+    exact ⟨parts.right, (product.pair with self, parts.left)⟩
+
+theorem fiber.restrict (I D R r : Set)
+  requires hr : r ∈ R
+  shows fiber(I ∩ (R × D), D, r) = fiber(I, D, r)
+proof
+  ext d
+  constructor
+  . intro hd
+    have parts := fiber.membership.forward with hd
+    have both := intersection.membership.forward with parts.right
+    exact fiber.membership.backward with ⟨parts.left, both.left⟩
+  . intro hd
+    have parts := fiber.membership.forward with hd
+    apply fiber.membership.backward
+    refine ⟨parts.left, ?_⟩
+    apply intersection.membership.backward
+    exact ⟨parts.right, (product.pair with hr, parts.left)⟩
+
+-- Splitting a relation at a point of its domain.
+theorem relation.split (I R D a : Set)
+  requires inside : I ⊆ R × D
+  requires ha : a ∈ R
+  shows I = (I ∩ ((R ∖ {a}) × D)) ∪ ({a} × fiber(I, D, a))
+proof
+  rw ← fiber.row
+  ext p
+  constructor
+  . intro hp
+    obtain ⟨bound, r, hr, d, hd, shape⟩ := product.membership.forward with (inside with p, hp)
+    have split : r = a ∨ r ≠ a by tauto
+    cases split with same | different
+    . apply union2.right
+      apply intersection.membership.backward
+      refine ⟨hp, ?_⟩
+      rw [shape, same]
+      have self : a ∈ {a} by simp [singleton.membership]
+      exact product.pair with self, hd
+    . apply union2.left
+      apply intersection.membership.backward
+      refine ⟨hp, ?_⟩
+      rw shape
+      have kept : r ∈ R ∖ {a} := difference.singleton_membership.backward with ⟨hr, different⟩
+      exact product.pair with kept, hd
+  . intro hp
+    have split := union2.membership.forward with hp
+    cases split with left | right
+    . have both := intersection.membership.forward with left
+      exact both.left
+    . have both := intersection.membership.forward with right
+      exact both.left
+
+theorem relation.split_disjoint (I R D a : Set)
+  shows Disjoint(I ∩ ((R ∖ {a}) × D), {a} × fiber(I, D, a))
+proof
+  apply Disjoint.iff.backward
+  intros p hp hp2
+  have both := intersection.membership.forward with hp
+  obtain ⟨bound, r, hr, d, hd, shape⟩ := product.membership.forward with both.right
+  rw shape at hp2
+  have coordinates := product.pair_membership.forward with hp2
+  have same := singleton.membership.forward with coordinates.left
+  have parts := difference.singleton_membership.forward with hr
+  exact parts.right with same
+
+-- The count.
+theorem relation.count (I R D : Set, n : Nat)
+  requires finiteR : Finite(R)
+  requires finiteD : Finite(D)
+  requires size : cardinality(R) = n
+  requires inside : I ⊆ R × D
+  shows cardinality(I) = natSum(R, fiberSize(I, R, D))
+proof
+  induction n generalizing R I
+  | zero =>
+    intros I R finiteR size inside
+    have has := cardinality.correct with finiteR
+    rw size at has
+    have empty := HasCardinality.empty_of_zero at R with has
+    have emptyI : I = ∅
+      apply Subset.antisymmetric
+      . intros p hp
+        have bound := inside with p, hp
+        rw [empty, product.left_empty] at bound
+        exact bound
+      . exact empty.subset at I
+    rw [emptyI, empty, natSum.empty]
+    rw ← nat.zero
+    exact cardinality.natural at 0
+  | succ(k) using ih =>
+    intros I R finiteR size inside
+    have has := cardinality.correct with finiteR
+    rw size at has
+    obtain ⟨a, ha⟩ := HasCardinality.exists_member with has
+    have removed := cardinality.remove with finiteR, ha
+    rw size at removed
+    have smaller := Naturals.injective.succ with removed
+    have restSize : cardinality(R ∖ {a}) = k
+      symm
+      exact smaller
+    have restFinite := Finite.subset with finiteR, (difference.subset_left at R, {a})
+    have restInside : I ∩ ((R ∖ {a}) × D) ⊆ (R ∖ {a}) × D := intersection.subset_right at I, (R ∖ {a}) × D
+    have restCount := ih with I ∩ ((R ∖ {a}) × D), R ∖ {a}, restFinite, restSize, restInside
+    have graph := fiberSize.function at I, R, D with finiteD
+    have restGraph := fiberSize.function at I ∩ ((R ∖ {a}) × D), R ∖ {a}, D with finiteD
+    have agree : ∀ r ∈ R ∖ {a}, fiberSize(I ∩ ((R ∖ {a}) × D), R ∖ {a}, D)(r) = fiberSize(I, R, D)(r)
+      intros r hr
+      have hrR := difference.subset_left at R, {a} with r, hr
+      have valueRest := fiberSize.value at I ∩ ((R ∖ {a}) × D), R ∖ {a}, D, r with finiteD
+      have value := fiberSize.value at I, R, D, r with finiteD
+      have restricted := fiber.restrict at I, D, R ∖ {a}, r with hr
+      rw [valueRest, value, restricted]
+      rfl
+    have sameSum := natSum.congr with agree
+    have weights : ∀ r ∈ R ∖ {a}, fiberSize(I, R, D)(r) ∈ ℕ
+      intros r hr
+      have hrR := difference.subset_left at R, {a} with r, hr
+      exact FunctionBetween.apply_closed with graph, hrR
+    have weightA := FunctionBetween.apply_closed with graph, ha
+    have fresh : ¬a ∈ R ∖ {a}
+      intro inside2
+      have parts := difference.singleton_membership.forward with inside2
+      apply parts.right
+      rfl
+    have inserted := natSum.insert with restFinite, weights, weightA, fresh
+    have restore := insert.restore with ha
+    rw restore at inserted
+    have split := relation.split with inside, ha
+    have disjoint := relation.split_disjoint at I, R, D, a
+    have finiteI := Finite.subset with (Finite.product with finiteR, finiteD), inside
+    have finiteRest := Finite.subset with finiteI, (intersection.subset_left at I, (R ∖ {a}) × D)
+    have finiteRow := Finite.product with (Finite.singleton at a), (fiber.finite at I, D, a with finiteD)
+    have added := cardinality.union_disjoint with finiteRest, finiteRow, disjoint
+    have rowCount := cardinality.singleton_product at a, fiber(I, D, a) with (fiber.finite at I, D, a with finiteD)
+    have valueA := fiberSize.value at I, R, D, a with finiteD
+    have leftCount : cardinality(I) = cardinality((I ∩ ((R ∖ {a}) × D)) ∪ ({a} × fiber(I, D, a)))
+      rw ← split
+      rfl
+    rw [leftCount, added, rowCount, restCount, sameSum, inserted, valueA]
+    rfl

@@ -1,0 +1,483 @@
+-- Filtering a list by membership in a set: the entries kept, their
+-- support, and how filtering passes through concatenation and reversal
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.List.Filter
+import TakeDrop
+import Set.Indicator
+
+-- Membership in S as a Boolean, through the natural-valued indicator.
+def memberTest (S x : Set) : Bool := BoolOps.not(isZero(indicator(S, x)))
+
+theorem memberTest.true (S x : Set)
+  requires member : x ∈ S
+  shows memberTest(S, x) = Bool.true
+proof
+  have one := indicator.member with member
+  simp [memberTest, one, isZero, BoolOps.not]
+
+theorem memberTest.false (S x : Set)
+  requires absent : ¬(x ∈ S)
+  shows memberTest(S, x) = Bool.false
+proof
+  have zero := indicator.absent with absent
+  simp [memberTest, zero, isZero, BoolOps.not]
+
+theorem memberTest.congr (S T x y : Set)
+  requires equivalent : x ∈ S ↔ y ∈ T
+  shows memberTest(S, x) = memberTest(T, y)
+proof
+  have same := indicator.congr with equivalent
+  simp [memberTest, same]
+
+def listFilter {A : Set} (S : Set) (xs : List(A)) → Set
+  | S, List.nil => []
+  | S, List.cons(a, tail) =>
+    boolChoice(memberTest(S, a), a :: listFilter(S, tail), listFilter(S, tail))
+  descends xs
+
+theorem listFilter.nil (A S : Set)
+  shows listFilter{A}(S, []) = []
+proof
+  simp [listFilter]
+
+theorem listFilter.cons_member (A S a : Set) (xs : List(A))
+  requires element : a ∈ A
+  requires member : a ∈ S
+  shows listFilter{A}(S, a :: xs) = a :: listFilter{A}(S, xs)
+proof
+  have test := memberTest.true with member
+  simp [listFilter, test, boolChoice]
+
+theorem listFilter.cons_other (A S a : Set) (xs : List(A))
+  requires element : a ∈ A
+  requires absent : ¬(a ∈ S)
+  shows listFilter{A}(S, a :: xs) = listFilter{A}(S, xs)
+proof
+  have test := memberTest.false with absent
+  simp [listFilter, test, boolChoice]
+
+theorem listFilter.closed (A S : Set) (xs : List(A))
+  shows List(A, listFilter{A}(S, xs))
+proof
+  induction xs
+  | List.nil =>
+    rw listFilter.nil
+    typecheck
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternatives with member | absent
+    . rw listFilter.cons_member
+      typecheck
+    . rw listFilter.cons_other
+      exact ih
+
+theorem listFilter.length_le (A S : Set) (xs : List(A))
+  shows length{A}(listFilter{A}(S, xs)) ≤ length{A}(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw [listFilter.nil, length.nil]
+    arith
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have filtered := listFilter.closed at A, S, tail with *
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    rw length.cons
+    cases alternatives with member | absent
+    . rw [listFilter.cons_member, length.cons]
+      arith
+    . rw listFilter.cons_other
+      arith
+
+theorem listFilter.append (A S : Set) (xs ys : List(A))
+  shows listFilter{A}(S, append(ys, xs)) =
+    append(listFilter{A}(S, ys), listFilter{A}(S, xs))
+proof
+  induction xs
+  | List.nil =>
+    have filtered := listFilter.closed at A, S, ys with *
+    rw [append.nil, listFilter.nil, append.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have appended := append.closed at A, tail, ys with *
+    have filteredTail := listFilter.closed at A, S, tail with *
+    have filteredYs := listFilter.closed at A, S, ys with *
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    rw append.cons
+    cases alternatives with member | absent
+    . rw [listFilter.cons_member, listFilter.cons_member, ih, append.cons]
+      rfl
+    . rw [listFilter.cons_other, listFilter.cons_other, ih]
+      rfl
+
+theorem listFilter.mem_support (A S y : Set) (xs : List(A))
+  requires member : y ∈ listSupport{A}(listFilter{A}(S, xs))
+  shows y ∈ listSupport{A}(xs) ∧ y ∈ S
+proof
+  induction xs
+  | List.nil =>
+    intro member
+    rw [listFilter.nil, listSupport.nil] at member
+    exfalso
+    exact set.empty with member
+  | List.cons(a, tail) using ih =>
+    intro member
+    have element : a ∈ A by assumption
+    have filtered := listFilter.closed at A, S, tail with *
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternatives with inS | absent
+    . rw listFilter.cons_member at member
+      have split := listSupport.mem_cons_iff.forward with element, member
+      cases split with head | rest
+      . rw head
+        have headIn := listSupport.mem_cons_self at A, a, tail with element
+        exact ⟨headIn, inS⟩
+      . obtain ⟨inner, yS⟩ := ih with rest
+        have outer := listSupport.mem_cons_of_mem with element, inner
+        exact ⟨outer, yS⟩
+    . rw listFilter.cons_other at member
+      obtain ⟨inner, yS⟩ := ih with member
+      have outer := listSupport.mem_cons_of_mem with element, inner
+      exact ⟨outer, yS⟩
+
+theorem listFilter.support_subset (A S : Set) (xs : List(A))
+  shows listSupport{A}(listFilter{A}(S, xs)) ⊆ listSupport{A}(xs)
+proof
+  intros y hy
+  have both := listFilter.mem_support with hy
+  exact both.left
+
+theorem listFilter.support_in (A S : Set) (xs : List(A))
+  shows listSupport{A}(listFilter{A}(S, xs)) ⊆ S
+proof
+  intros y hy
+  have both := listFilter.mem_support with hy
+  exact both.right
+
+theorem listFilter.mem_support_of (A S y : Set) (xs : List(A))
+  requires member : y ∈ listSupport{A}(xs)
+  requires inS : y ∈ S
+  shows y ∈ listSupport{A}(listFilter{A}(S, xs))
+proof
+  induction xs
+  | List.nil =>
+    intro member
+    rw listSupport.nil at member
+    exfalso
+    exact set.empty with member
+  | List.cons(a, tail) using ih =>
+    intro member
+    have element : a ∈ A by assumption
+    have filtered := listFilter.closed at A, S, tail with *
+    have split := listSupport.mem_cons_iff.forward with element, member
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternatives with aS | absent
+    . rw listFilter.cons_member
+      cases split with head | rest
+      . rw head
+        exact listSupport.mem_cons_self with element
+      . have inner := ih with rest
+        exact listSupport.mem_cons_of_mem with element, inner
+    . rw listFilter.cons_other
+      cases split with head | rest
+      . rw head at inS
+        exfalso
+        exact absent with inS
+      . exact ih with rest
+
+theorem listFilter.mem_support_iff (A S y : Set) (xs : List(A))
+  shows y ∈ listSupport{A}(listFilter{A}(S, xs)) ↔ y ∈ listSupport{A}(xs) ∧ y ∈ S
+proof
+  constructor
+  . intro member
+    exact listFilter.mem_support with member
+  . intro both
+    obtain ⟨member, inS⟩ := both
+    exact listFilter.mem_support_of with member, inS
+
+theorem listFilter.support (A S : Set) (xs : List(A))
+  shows listSupport{A}(listFilter{A}(S, xs)) = listSupport{A}(xs) ∩ S
+proof
+  ext y
+  have kept := listFilter.mem_support_iff at A, S, y, xs with *
+  have meet := intersection.membership at y, listSupport{A}(xs), S
+  tauto
+
+theorem listFilter.all (A S : Set) (xs : List(A))
+  requires covered : listSupport{A}(xs) ⊆ S
+  shows listFilter{A}(S, xs) = xs
+proof
+  induction xs
+  | List.nil =>
+    intro covered
+    exact listFilter.nil at A, S
+  | List.cons(a, tail) using ih =>
+    intro covered
+    have element : a ∈ A by assumption
+    have headIn := listSupport.mem_cons_self at A, a, tail with element
+    have member := covered with a, headIn
+    have rest : listSupport{A}(tail) ⊆ S
+      intros y hy
+      have outer := listSupport.mem_cons_of_mem with element, hy
+      exact covered with y, outer
+    have inner := ih with rest
+    rw [listFilter.cons_member, inner]
+    rfl
+
+theorem listFilter.carrier (A : Set) (xs : List(A))
+  shows listFilter{A}(A, xs) = xs
+proof
+  have covered := listSupport.subset at A, xs with *
+  exact listFilter.all with covered
+
+theorem listFilter.none (A S : Set) (xs : List(A))
+  requires disjoint : ∀ y ∈ listSupport{A}(xs), ¬(y ∈ S)
+  shows listFilter{A}(S, xs) = []
+proof
+  induction xs
+  | List.nil =>
+    intro disjoint
+    exact listFilter.nil at A, S
+  | List.cons(a, tail) using ih =>
+    intro disjoint
+    have element : a ∈ A by assumption
+    have headIn := listSupport.mem_cons_self at A, a, tail with element
+    have absent := disjoint with a, headIn
+    have rest : ∀ y ∈ listSupport{A}(tail), ¬(y ∈ S)
+      intros y hy
+      have outer := listSupport.mem_cons_of_mem with element, hy
+      exact disjoint with y, outer
+    have inner := ih with rest
+    rw [listFilter.cons_other, inner]
+    rfl
+
+theorem listFilter.empty (A : Set) (xs : List(A))
+  shows listFilter{A}(∅, xs) = []
+proof
+  have disjoint : ∀ y ∈ listSupport{A}(xs), ¬(y ∈ ∅)
+    intros y hy
+    exact set.empty at y
+  exact listFilter.none with disjoint
+
+theorem listFilter.eq_nil (A S : Set) (xs : List(A))
+  requires empty : listFilter{A}(S, xs) = []
+  shows ∀ y ∈ listSupport{A}(xs), ¬(y ∈ S)
+proof
+  intros y hy inS
+  have member := listFilter.mem_support_of with hy, inS
+  rw [empty, listSupport.nil] at member
+  exact set.empty with member
+
+theorem listFilter.nil_iff (A S : Set) (xs : List(A))
+  shows listFilter{A}(S, xs) = [] ↔ ∀ y ∈ listSupport{A}(xs), ¬(y ∈ S)
+proof
+  constructor
+  . intro empty
+    exact listFilter.eq_nil with empty
+  . intro disjoint
+    exact listFilter.none with disjoint
+
+theorem listFilter.congr (A S T : Set) (xs : List(A))
+  requires agreement : ∀ y ∈ listSupport{A}(xs), (y ∈ S ↔ y ∈ T)
+  shows listFilter{A}(S, xs) = listFilter{A}(T, xs)
+proof
+  induction xs
+  | List.nil =>
+    intro agreement
+    rw [listFilter.nil, listFilter.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    intro agreement
+    have element : a ∈ A by assumption
+    have headIn := listSupport.mem_cons_self at A, a, tail with element
+    have head := agreement with a, headIn
+    have rest : ∀ y ∈ listSupport{A}(tail), (y ∈ S ↔ y ∈ T)
+      intros y hy
+      have outer := listSupport.mem_cons_of_mem with element, hy
+      exact agreement with y, outer
+    have inner := ih with rest
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternatives with inS | absent
+    . have inT : a ∈ T := head.forward with inS
+      rw [listFilter.cons_member, listFilter.cons_member, inner]
+      rfl
+    . have notT : ¬(a ∈ T)
+        intro inT
+        have inS := head.backward with inT
+        exact absent with inS
+      rw [listFilter.cons_other, listFilter.cons_other, inner]
+      rfl
+
+theorem listFilter.filter (A S T : Set) (xs : List(A))
+  shows listFilter{A}(S, listFilter{A}(T, xs)) = listFilter{A}(S ∩ T, xs)
+proof
+  induction xs
+  | List.nil =>
+    rw [listFilter.nil, listFilter.nil, listFilter.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have filtered := listFilter.closed at A, T, tail with *
+    have alternativesT : a ∈ T ∨ ¬(a ∈ T) by tauto
+    have alternativesS : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternativesT with inT | notT
+    . rw listFilter.cons_member
+      cases alternativesS with inS | notS
+      . have both : a ∈ S ∩ T by simp
+        rw [listFilter.cons_member, listFilter.cons_member, ih]
+        rfl
+      . have notBoth : ¬(a ∈ S ∩ T) by simp
+        rw [listFilter.cons_other, listFilter.cons_other, ih]
+        rfl
+    . have notBoth : ¬(a ∈ S ∩ T) by simp
+      rw [listFilter.cons_other, listFilter.cons_other, ih]
+      rfl
+
+theorem listFilter.idempotent (A S : Set) (xs : List(A))
+  shows listFilter{A}(S, listFilter{A}(S, xs)) = listFilter{A}(S, xs)
+proof
+  have covered := listFilter.support_in at A, S, xs with *
+  exact listFilter.all with covered
+
+theorem listFilter.commutative (A S T : Set) (xs : List(A))
+  shows listFilter{A}(S, listFilter{A}(T, xs)) = listFilter{A}(T, listFilter{A}(S, xs))
+proof
+  rw [listFilter.filter, listFilter.filter, intersection.commutative]
+  rfl
+
+theorem listFilter.singleton_member (A S a : Set)
+  requires element : a ∈ A
+  requires member : a ∈ S
+  shows listFilter{A}(S, a :: []) = a :: []
+proof
+  have test := memberTest.true with member
+  simp [listFilter, test, boolChoice]
+
+theorem listFilter.singleton_other (A S a : Set)
+  requires element : a ∈ A
+  requires absent : ¬(a ∈ S)
+  shows listFilter{A}(S, a :: []) = []
+proof
+  have test := memberTest.false with absent
+  simp [listFilter, test, boolChoice]
+
+theorem listFilter.reverse (A S : Set) (xs : List(A))
+  shows listFilter{A}(S, reverse(xs)) = reverse(listFilter{A}(S, xs))
+proof
+  induction xs
+  | List.nil =>
+    rw [reverse.nil, listFilter.nil, reverse.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have single : List(A, a :: []) by typecheck
+    have reversed : List(A, reverse(tail)) by typecheck
+    have filtered := listFilter.closed at A, S, tail with *
+    have filteredReversed := listFilter.closed at A, S, reverse(tail) with *
+    have reversedFiltered : List(A, reverse(listFilter{A}(S, tail))) by typecheck
+    rw [reverse.cons, listFilter.append, ih]
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    cases alternatives with member | absent
+    . rw [listFilter.singleton_member, listFilter.cons_member, reverse.cons]
+      rfl
+    . rw [listFilter.singleton_other, listFilter.cons_other, append.right_unit]
+      rfl
+
+theorem listFilter.replicate_member (A S x : Set) (n : Nat)
+  requires element : x ∈ A
+  requires member : x ∈ S
+  shows listFilter{A}(S, listReplicate(n, x)) = listReplicate(n, x)
+proof
+  have list := listReplicate.closed at A, x, n with element
+  have covered := listReplicate.support_subset at A, x, n with element
+  have inside : listSupport{A}(listReplicate(n, x)) ⊆ S
+    intros y hy
+    have single := covered with y, hy
+    have equal := singleton.membership.forward with single
+    rw equal
+    exact member
+  exact listFilter.all with inside
+
+theorem listFilter.replicate_other (A S x : Set) (n : Nat)
+  requires element : x ∈ A
+  requires absent : ¬(x ∈ S)
+  shows listFilter{A}(S, listReplicate(n, x)) = []
+proof
+  have list := listReplicate.closed at A, x, n with element
+  have covered := listReplicate.support_subset at A, x, n with element
+  have disjoint : ∀ y ∈ listSupport{A}(listReplicate(n, x)), ¬(y ∈ S)
+    intros y hy
+    have single := covered with y, hy
+    have equal := singleton.membership.forward with single
+    rw equal
+    exact absent
+  exact listFilter.none with disjoint
+
+-- The kept and the discarded entries together account for the length.
+theorem listFilter.length_add_complement (A S : Set) (xs : List(A))
+  shows length{A}(listFilter{A}(S, xs)) + length{A}(listFilter{A}(A ∖ S, xs)) =
+    length{A}(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw [listFilter.nil, listFilter.nil, length.nil, add.right_unit]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have kept := listFilter.closed at A, S, tail with *
+    have discarded := listFilter.closed at A, A ∖ S, tail with *
+    have alternatives : a ∈ S ∨ ¬(a ∈ S) by tauto
+    rw length.cons
+    cases alternatives with member | absent
+    . have notDifference : ¬(a ∈ A ∖ S) by simp
+      rw [listFilter.cons_member, listFilter.cons_other, length.cons]
+      have shift : succ(length{A}(listFilter{A}(S, tail))) + length{A}(listFilter{A}(A ∖ S, tail)) =
+        succ(length{A}(listFilter{A}(S, tail)) + length{A}(listFilter{A}(A ∖ S, tail)))
+        simp [add, add.succ_right]
+      rw [shift, ih]
+      rfl
+    . have inDifference : a ∈ A ∖ S by simp
+      rw [listFilter.cons_other, listFilter.cons_member, length.cons, add.succ_right, ih]
+      rfl
+
+theorem listFilter.complement_length_le (A S : Set) (xs : List(A))
+  shows length{A}(listFilter{A}(A ∖ S, xs)) ≤ length{A}(xs)
+proof
+  have total := listFilter.length_add_complement at A, S, xs with *
+  have kept := listFilter.closed at A, S, xs with *
+  have discarded := listFilter.closed at A, A ∖ S, xs with *
+  rw ← total
+  arith
+
+theorem listFilter.length_eq_of_all (A S : Set) (xs : List(A))
+  requires full : length{A}(listFilter{A}(S, xs)) = length{A}(xs)
+  shows listFilter{A}(S, xs) = xs
+proof
+  have total := listFilter.length_add_complement at A, S, xs with *
+  have kept := listFilter.closed at A, S, xs with *
+  have discarded := listFilter.closed at A, A ∖ S, xs with *
+  rw full at total
+  have padded : length{A}(xs) + length{A}(listFilter{A}(A ∖ S, xs)) = length{A}(xs) + 0
+    rw add.right_unit
+    exact total
+  have zero := add.left_cancel with padded
+  have emptyComplement := length.eq_zero with zero
+  have disjoint := listFilter.eq_nil with emptyComplement
+  have covered : listSupport{A}(xs) ⊆ S
+    intros y hy
+    have yA := listSupport.subset at A, xs with *
+    have inA := yA with y, hy
+    have notDifference := disjoint with y, hy
+    have alternatives : y ∈ S ∨ ¬(y ∈ S) by tauto
+    cases alternatives with inS | notS
+    . exact inS
+    . have inDifference : y ∈ A ∖ S by simp
+      exfalso
+      exact notDifference with inDifference
+  exact listFilter.all with covered

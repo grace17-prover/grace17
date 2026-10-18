@@ -1,0 +1,181 @@
+-- Real analysis: the derivative as a function
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Real.Analysis.Derivative
+import Set.Choice
+import Differentiation
+
+-- Section: Derivative
+-- The derivative of f at X is the number D with HasDerivativeAt(f, D, X)
+-- when f is differentiable there, and zero otherwise.
+defchoose derivativeValue (f : Set, X : Real) (D ∈ ℝ) :=
+  HasDerivativeAt(f, D, X) ∨ (¬DifferentiableAt(f, X) ∧ D = (0:R))
+proof
+  have split : DifferentiableAt(f, X) ∨ ¬DifferentiableAt(f, X) by tauto
+  cases split with differentiable | nowhere
+  . obtain ⟨D, realD, hasDerivative⟩ := differentiable
+    witness D
+    refine ⟨realD, _⟩
+    left
+    exact hasDerivative
+  . have realZeroMember : (0:R) ∈ ℝ by exact realZero.real
+    witness (0:R)
+    refine ⟨realZeroMember, _⟩
+    right
+    refine ⟨nowhere, _⟩
+    rfl
+
+defgraph derivative (f : Set) (X ∈ ℝ) : ℝ := derivativeValue(f, X)
+proof
+  obtain ⟨realD, property⟩ := derivativeValue.selected at f, X
+  exact realD
+
+-- The derivative is written with a prime, f′, and its value f′(X); a
+-- doubled prime is the second derivative, f″.
+notation postfix 95 "′" => derivative
+
+theorem derivative.of_has_derivative (f : Set) (D X : Real)
+  requires hasDerivative : HasDerivativeAt(f, D, X)
+  shows f′(X) = D
+proof
+  have value := derivative.value at f, X
+  obtain ⟨realD, property⟩ := derivativeValue.selected at f, X
+  rw value
+  cases property with chosen | nowhere
+  . exact HasDerivativeAt.unique with chosen, hasDerivative
+  . obtain ⟨notDifferentiable, zero⟩ := nowhere
+    exfalso
+    apply notDifferentiable
+    exact HasDerivativeAt.differentiable_at with hasDerivative
+
+theorem derivative.has_derivative_at (f : Set) (X : Real)
+  requires differentiable : DifferentiableAt(f, X)
+  shows HasDerivativeAt(f, f′(X), X)
+proof
+  have value := derivative.value at f, X
+  obtain ⟨realD, property⟩ := derivativeValue.selected at f, X
+  rw value
+  cases property with chosen | nowhere
+  . exact chosen
+  . obtain ⟨notDifferentiable, zero⟩ := nowhere
+    exfalso
+    exact notDifferentiable with differentiable
+
+theorem derivative.real (f : Set) (X : Real)
+  shows Real(f′(X))
+proof
+  have realX : X ∈ ℝ by simp [Real]
+  have function := derivative.function at f
+  exact FunctionBetween.apply_closed with function, realX
+
+-- Section: IteratedDerivative
+def iteratedDerivative (f : Set, k : Nat) → Set
+  | f, zero => f
+  | f, succ(k) => derivative(iteratedDerivative(f, k))
+
+-- The k-th derivative is written f⁽ᵏ⁾, with the index in superscript, so
+-- f⁽ⁿ⁺¹⁾(C) is iteratedDerivative(f, n + 1)(C).
+notation postfix 95 "⁽_⁾" => iteratedDerivative
+
+theorem iteratedDerivative.zero (f : Set)
+  shows f⁽⁰⁾ = f
+proof
+  simp [iteratedDerivative]
+
+theorem iteratedDerivative.succ (f : Set, k : Nat)
+  shows f⁽ᵏ⁺¹⁾ = f⁽ᵏ⁾′
+proof
+  have one : k + 1 = succ(k) := add.right_one with *
+  rw one
+  simp [iteratedDerivative]
+
+theorem iteratedDerivative.shift (f : Set, k : Nat)
+  shows f⁽ᵏ⁺¹⁾ = (f′)⁽ᵏ⁾
+proof
+  induction k
+  | zero =>
+    rw [iteratedDerivative.succ, iteratedDerivative.zero,
+      iteratedDerivative.zero]
+    rfl
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    rw [iteratedDerivative.succ, ih, iteratedDerivative.succ]
+    rfl
+
+theorem iteratedDerivative.function (f : Set, k : Nat)
+  requires function : f : ℝ → ℝ
+  shows f⁽ᵏ⁾ : ℝ → ℝ
+proof
+  induction k
+  | zero =>
+    rw iteratedDerivative.zero
+    exact function
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    rw iteratedDerivative.succ
+    exact derivative.function at iteratedDerivative(f, j)
+
+-- Section: DerivativeLaws
+-- Multiplying by a constant scales the derivative.
+theorem HasDerivativeAt.scale (g : Set) (K E C : Real)
+  requires derivativeG : HasDerivativeAt(g, E, C)
+  shows HasDerivativeAt(pointwiseMul(constantRealFunction(K), g), K * E, C)
+proof
+  have gFunction := HasDerivativeAt.function with derivativeG
+  have constantDerivative := constantRealFunction.has_derivative_at at K, C
+  have raw := HasDerivativeAt.mul with
+    realZero.real, constantDerivative, derivativeG
+  have realC : C ∈ ℝ by simp [Real]
+  have gC := FunctionBetween.apply_closed with gFunction, realC
+  have typedGC : Real(g(C)) by exact gC
+  have constantValue := constantRealFunction.value at K, C
+  have result : realZero * g(C) + constantRealFunction(K)(C) * E = K * E
+    rw constantValue
+    ring
+  have view : realAddValue(realMulValue(realZero, g(C)),
+      realMulValue(constantRealFunction(K)(C), E)) =
+      realZero * g(C) + constantRealFunction(K)(C) * E
+    unfold realAddValue
+    unfold realMulValue
+    unfold call2
+    rfl
+  rwa [view, result] at raw
+
+theorem derivative.scale (g : Set) (K C : Real)
+  requires differentiable : DifferentiableAt(g, C)
+  shows pointwiseMul(constantRealFunction(K), g)′(C) = K * g′(C)
+proof
+  have derivativeG := derivative.has_derivative_at with differentiable
+  have typedValue := derivative.real at g, C
+  have scaled := HasDerivativeAt.scale at g, K, derivative(g)(C), C with
+    typedValue, derivativeG
+  exact derivative.of_has_derivative with scaled
+
+theorem HasDerivativeAt.congr_value (f : Set) (D E A : Real)
+  requires hasDerivative : HasDerivativeAt(f, D, A)
+  requires equal : D = E
+  shows HasDerivativeAt(f, E, A)
+proof
+  rwa equal at hasDerivative
+
+-- The product rule with its value written in the usual notation.
+theorem HasDerivativeAt.mul_value (f g : Set) (D E A : Real)
+  requires derivativeF : HasDerivativeAt(f, D, A)
+  requires derivativeG : HasDerivativeAt(g, E, A)
+  requires typedFA : Real(f(A))
+  requires typedGA : Real(g(A))
+  shows HasDerivativeAt(pointwiseMul(f, g), D * g(A) + f(A) * E, A)
+proof
+  have raw := HasDerivativeAt.mul with derivativeF, derivativeG
+  have view : realAddValue(realMulValue(D, g(A)), realMulValue(f(A), E)) =
+      D * g(A) + f(A) * E
+    unfold realAddValue
+    unfold realMulValue
+    unfold call2
+    rfl
+  rwa view at raw

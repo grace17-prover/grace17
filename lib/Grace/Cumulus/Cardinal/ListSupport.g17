@@ -1,0 +1,223 @@
+-- Finite list supports and finiteness of their subsets (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.ListSupport
+import Sum
+import Core.List
+
+def listSupport {C : Set} (xs : List(C)) → Set
+  | List.nil => ∅
+  | List.cons(x, tail) => insert(x, listSupport(tail))
+
+theorem listSupport.nil (C : Set)
+  shows listSupport{C}([]) = ∅
+proof
+  simp [listSupport]
+
+theorem listSupport.cons (C x : Set) (xs : List(C))
+  requires hx : x ∈ C
+  shows listSupport{C}(x :: xs) = insert(x, listSupport{C}(xs))
+proof
+  simp [listSupport]
+
+theorem Finite.insert (A x : Set)
+  requires finite : Finite(A)
+  shows Finite(insert(x, A))
+proof
+  have casesX : x ∈ A ∨ ¬(x ∈ A) by tauto
+  cases casesX with member | fresh
+  . have same : insert(x, A) = A
+      ext y
+      simp
+    rwa same
+  . obtain ⟨n, natural, equinumerous⟩ := finite
+    obtain ⟨f, bijective⟩ := equinumerous
+    have nFresh := membership.irreflexive at n
+    have extended := adjoinMap.bijective with bijective, fresh, nFresh
+    have successor := natural.successor_as_insert with natural
+    have nextNat := Naturals.constructor.succ with natural
+    have cardinality : HasCardinality(insert(x, A), succ(n))
+      unfold HasCardinality
+      refine ⟨nextNat, ?_⟩
+      witness adjoinMap(f, x, n)
+      rwa successor
+    exact Finite.from_cardinality with cardinality
+
+theorem listSupport.subset (C : Set) (xs : List(C))
+  shows listSupport{C}(xs) ⊆ C
+proof
+  induction xs
+  | List.nil =>
+    rw listSupport
+    exact empty.subset
+  | List.cons(x, tail) using ih =>
+    rw listSupport
+    have member : x ∈ C by assumption
+    simp
+
+theorem listSupport.append (C : Set) (ys xs : List(C))
+  shows listSupport{C}(ListOps.append{C}(ys, xs)) = listSupport{C}(xs) ∪ listSupport{C}(ys)
+proof
+  induction xs
+  | List.nil =>
+    simp [ListOps.append, listSupport]
+    ext x
+    simp
+  | List.cons(x, tail) using ih =>
+    simp [ListOps.append, listSupport, ih]
+    ext y
+    simp
+
+-- Remove the head if it is present; recurse on a subset of the tail support.
+theorem listSupport.finite_subsets (C : Set) (xs : List(C))
+  shows ∀ S, S ⊆ listSupport{C}(xs) → Finite(S)
+proof
+  induction xs
+  | List.nil =>
+    intros S subset
+    rw listSupport at subset
+    have equal : S = ∅
+      apply Subset.antisymmetric with subset
+      exact empty.subset
+    rw equal
+    exact Finite.empty
+  | List.cons(x, tail) using ih =>
+    intros S subset
+    rw listSupport at subset
+    have casesX : x ∈ S ∨ ¬(x ∈ S) by tauto
+    cases casesX with member | absent
+    . have restSubset : S ∖ {x} ⊆ listSupport{C}(tail) by simp
+      have restFinite := ih with S ∖ {x}, restSubset
+      have restored : insert(x, S ∖ {x}) = S
+        ext y
+        have equalityCases : y = x ∨ y ≠ x by tauto
+        cases equalityCases with equal | distinct
+        . rw equal
+          have left := insert.self at x, S ∖ {x}
+          tauto
+        . settle with insert.membership, difference.membership, singleton.membership
+      have finite := Finite.insert at S ∖ {x}, x with restFinite
+      rwa restored at finite
+    . have restSubset : S ⊆ listSupport{C}(tail) by simp
+      exact ih with S, restSubset
+
+theorem listSupport.finite (C : Set) (xs : List(C))
+  shows Finite(listSupport{C}(xs))
+proof
+  have subsets := listSupport.finite_subsets at C, xs
+  have reflexive : listSupport{C}(xs) ⊆ listSupport{C}(xs) by simp [Subset]
+  exact subsets with listSupport{C}(xs), reflexive
+
+-- List every value on a natural prefix, without choosing from any family.
+theorem FunctionBetween.list_cover_prefix (n : Nat)
+  shows ∀ f, ∀ D, ∀ C, FunctionBetween(f, D, C) → n ⊆ D →
+    ∃ xs, List(C, xs) ∧ (∀ i ∈ n, f(i) ∈ listSupport{C}(xs))
+proof
+  induction n
+  | zero =>
+    intros f D C function subset
+    have nil : List(C, []) by typecheck
+    refine ⟨[], nil, ?_⟩
+    intros i hi
+    have emptyMember : i ∈ ∅ by rwa ← nat.zero
+    simp
+  | succ(k) using ih =>
+    intros f D C function subset
+    have successor := natural.successor_as_insert at k with assumption
+    have kIn : k ∈ succ(k) by simp
+    have prefixSubset : k ⊆ D by simp
+    have kInD : k ∈ D by simp
+    have valueIn := FunctionBetween.apply_closed with function, kInD
+    obtain ⟨xs, listX, covers⟩ := ih with f, D, C, function, prefixSubset
+    have listNext : List(C, f(k) :: xs) by typecheck
+    refine ⟨f(k) :: xs, listNext, ?_⟩
+    intros i hi
+    rw successor at hi
+    have alternatives := insert.membership.forward with hi
+    rw listSupport
+    cases alternatives with equal | previous
+    . rw equal
+      exact insert.self
+    . have old := covers with i, previous
+      exact insert.contains with old
+
+theorem Finite.list_cover (S : Set)
+  requires finite : Finite(S)
+  shows ∃ xs, List(S, xs) ∧ S ⊆ listSupport{S}(xs)
+proof
+  obtain ⟨n, natural, equinumerous⟩ := finite
+  obtain ⟨f, bijective⟩ := equinumerous
+  have inverse := converse.function_of_bijective with bijective
+  have injective := Bijective.injective with bijective
+  have function := Injective.function with injective
+  have reflexive : n ⊆ n by simp [Subset]
+  have enumeration := FunctionBetween.list_cover_prefix with natural
+  obtain ⟨xs, listX, covers⟩ := enumeration with converse(f, S, n), n, S, inverse, reflexive
+  refine ⟨xs, listX, ?_⟩
+  intros x hx
+  have indexIn := FunctionBetween.apply_closed with function, hx
+  have recovered := Bijective.inverse_apply with bijective, hx
+  have member := covers with f(x), indexIn
+  rwa recovered at member
+
+theorem Finite.subset (S T : Set)
+  requires finite : Finite(T)
+  requires subset : S ⊆ T
+  shows Finite(S)
+proof
+  obtain ⟨xs, listX, covers⟩ := Finite.list_cover with finite
+  have included := Subset.transitive with subset, covers
+  have subsets := listSupport.finite_subsets with listX
+  exact subsets with S, included
+
+theorem List.weaken (C D : Set) (xs : List(C))
+  requires subset : C ⊆ D
+  shows List(D, xs)
+proof
+  induction xs
+  | List.nil => typecheck
+  | List.cons(x, tail) using ih =>
+    have member := subset with x, assumption
+    typecheck
+
+theorem listSupport.change_carrier (C D : Set) (xs : List(C))
+  requires subset : C ⊆ D
+  shows listSupport{C}(xs) = listSupport(D, xs)
+proof
+  induction xs
+  | List.nil => simp [listSupport]
+  | List.cons(x, tail) using ih =>
+    have listD := List.weaken with *
+    have member := subset with x
+    simp [listSupport, ih]
+
+theorem Finite.cover_in (S C : Set)
+  requires finite : Finite(S)
+  requires subset : S ⊆ C
+  shows ∃ xs, List(C, xs) ∧ S ⊆ listSupport{C}(xs)
+proof
+  obtain ⟨xs, listX, covers⟩ := Finite.list_cover with finite
+  have listC := List.weaken at S, C, xs with *
+  have same := listSupport.change_carrier at S, C, xs with *
+  rw same at covers
+  refine ⟨xs, listC, covers⟩
+
+theorem Finite.union (S T : Set)
+  requires left : Finite(S)
+  requires right : Finite(T)
+  shows Finite(S ∪ T)
+proof
+  have subsetS := union2.subset_left at S, T
+  have subsetT := union2.subset_right at S, T
+  obtain ⟨xs, listX, coverX⟩ := Finite.cover_in with left, subsetS
+  obtain ⟨ys, listY, coverY⟩ := Finite.cover_in with right, subsetT
+  have combined : List(S ∪ T, ListOps.append{S ∪ T}(ys, xs)) by typecheck
+  have equation := listSupport.append at S ∪ T, ys, xs with *
+  have covered : S ∪ T ⊆ listSupport{S ∪ T}(ListOps.append{S ∪ T}(ys, xs))
+    rw equation
+    simp [Subset, union2.membership]
+  have subsets := listSupport.finite_subsets with combined
+  exact subsets with S ∪ T, covered

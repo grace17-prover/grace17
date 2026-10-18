@@ -1,0 +1,266 @@
+-- The first-unsettled-vertex argument for Dijkstra's greedy step.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DijkstraCut
+import WeightedPaths
+import Connectivity
+
+-- S is the settled region. Its labels bound every source path.
+predicate SettledLowerBounds (V E weights source S labels : Set) :=
+  FunctionBetween(labels, S, ℕ) ∧
+  (∀ u ∈ S, ∀ c ∈ ℕ, HasPathCost(V, E, weights, source, u, c) → labels(u) ≤ c)
+
+-- Before the source is settled, the next finite minimum must be zero.
+-- Afterwards every route to an unsettled vertex must cross this boundary.
+predicate FrontierCutBound (V E weights source S labels bound : Set) :=
+  Nat(bound) ∧ (source ∈ S ∨ bound = 0) ∧
+  (∀ u ∈ S, ∀ v ∈ V, ∀ k ∈ ℕ,
+    ¬(v ∈ S) → WeightedEdge(E, weights, u, v, k) → bound ≤ add(labels(u), k))
+
+theorem FrontierCutBound.lower_bound (V E weights source S labels bound : Set, n : Nat)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires frontier : FrontierCutBound(V, E, weights, source, S, labels, bound)
+  shows ∀ v ∈ V, ∀ c ∈ ℕ, ¬(v ∈ S) →
+    (v, c) ∈ pathsOfLength(V, E, weights, source, n) → bound ≤ c
+proof
+  induction n
+  | zero =>
+    intros v hv c hc outside path
+    rw pathsOfLength.zero at path
+    have pair := singleton.membership.forward with path
+    have coordinates := orderedPair.injective with pair
+    rcases coordinates with ⟨vs, c0⟩
+    rcases frontier with ⟨boundNat, initial, edges⟩
+    cases initial with sourceInside | boundZero
+    . exfalso
+      apply outside
+      rw vs
+      exact sourceInside
+    . rw boundZero
+      rw c0
+      exact LessEqual.reflexive with Naturals.constructor.zero
+  | succ(m) using ih =>
+    intros v hv c hc outside path
+    rw pathsOfLength.successor at path
+    have parts := costStep.membership.forward at V, E, weights,
+      pathsOfLength(V, E, weights, source, m), (v, c) with path
+    rcases parts with ⟨bounded, u, hu, y, hy, prior, hprior, k, hk, earlier, edge, pair⟩
+    have coordinates := orderedPair.injective with pair
+    rcases coordinates with ⟨vy, cSum⟩
+    have yOutside : ¬(y ∈ S)
+      intro inside
+      apply outside
+      rw vy
+      exact inside
+    have priorNat := nat.omega.backward with hprior
+    have kNat := nat.omega.backward with hk
+    have sumNat := add.closed at k, prior with kNat
+    rcases frontier with ⟨boundNat, initial, edges⟩
+    have alternatives : u ∈ S ∨ ¬(u ∈ S) by tauto
+    cases alternatives with uInside | uOutside
+    . rcases settled with ⟨function, shortest⟩
+      have mNat : Nat(m) by typecheck
+      have mIn := nat.omega.forward with mNat
+      have prefix : HasPathCost(V, E, weights, source, u, prior)
+        unfold HasPathCost
+        refine ⟨m, mIn, earlier⟩
+      have priorBound := shortest with u, uInside, prior, hprior, prefix
+      have crossing := edges with u, uInside, y, hy, k, hk, yOutside, edge
+      have labelIn := FunctionBetween.apply_closed with function, uInside
+      have labelNat := nat.omega.backward with labelIn
+      have same := LessEqual.reflexive with kNat
+      have sumBound := LessEqual.add with labelNat, priorNat, kNat, kNat, priorBound, same
+      have labelSumNat := add.closed at k, labels(u) with kNat
+      have result := LessEqual.transitive with boundNat, labelSumNat, sumNat, crossing, sumBound
+      rw cSum
+      exact result
+    . have prefixBound := ih with u, hu, prior, hprior, uOutside, earlier
+      have extensionBound := LessEqual.add_right with priorNat, kNat
+      have result := LessEqual.transitive with boundNat, priorNat, sumNat, prefixBound, extensionBound
+      rw cSum
+      exact result
+
+theorem FrontierCutBound.all_paths (V E weights source S labels bound target cost : Set)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires frontier : FrontierCutBound(V, E, weights, source, S, labels, bound)
+  requires targetIn : target ∈ V
+  requires outside : ¬(target ∈ S)
+  requires costNat : Nat(cost)
+  requires path : HasPathCost(V, E, weights, source, target, cost)
+  shows bound ≤ cost
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have cIn := nat.omega.forward with costNat
+  have boundAll := FrontierCutBound.lower_bound with nNat, settled, frontier
+  exact boundAll with target, targetIn, cost, cIn, outside, reached
+
+-- This is the greedy step: a witnessed minimum at the cut is globally shortest.
+theorem FrontierCutBound.certifies_next (V E weights source S labels bound target : Set)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires frontier : FrontierCutBound(V, E, weights, source, S, labels, bound)
+  requires targetIn : target ∈ V
+  requires outside : ¬(target ∈ S)
+  requires path : HasPathCost(V, E, weights, source, target, bound)
+  shows ShortestPathCost(V, E, weights, source, target, bound)
+proof
+  have boundNat : Nat(bound) by simp [FrontierCutBound]
+  unfold ShortestPathCost
+  refine ⟨boundNat, path, _⟩
+  intros other otherIn otherPath
+  have otherNat := nat.omega.backward with otherIn
+  exact FrontierCutBound.all_paths with settled, frontier, targetIn, outside, otherNat, otherPath
+
+-- F contains the discovered, unsettled vertices with finite tentative labels.
+-- Every edge leaving S has already supplied a candidate in F.
+predicate FrontierTable (V E weights S labels F tentative : Set) :=
+  FunctionBetween(tentative, F, ℕ) ∧
+  (∀ u ∈ S, ∀ v ∈ V, ∀ k ∈ ℕ,
+    ¬(v ∈ S) → WeightedEdge(E, weights, u, v, k) →
+    (v ∈ F ∧ tentative(v) ≤ add(labels(u), k)))
+
+theorem FrontierTable.cut_bound (V E weights source S labels F tentative bound : Set)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires table : FrontierTable(V, E, weights, S, labels, F, tentative)
+  requires boundNat : Nat(bound)
+  requires initial : source ∈ S ∨ bound = 0
+  requires minimal : ∀ v ∈ F, bound ≤ tentative(v)
+  shows FrontierCutBound(V, E, weights, source, S, labels, bound)
+proof
+  rcases settled with ⟨settledFunction, lower⟩
+  rcases table with ⟨tentativeFunction, relaxed⟩
+  unfold FrontierCutBound
+  refine ⟨boundNat, initial, _⟩
+  intros u hu v hv k hk outside edge
+  obtain ⟨discovered, upper⟩ := relaxed with u, hu, v, hv, k, hk, outside, edge
+  have chosenBound := minimal with v, discovered
+  have tentativeIn := FunctionBetween.apply_closed with tentativeFunction, discovered
+  have tentativeNat := nat.omega.backward with tentativeIn
+  have kNat := nat.omega.backward with hk
+  have labelIn := FunctionBetween.apply_closed with settledFunction, hu
+  have labelNat := nat.omega.backward with labelIn
+  exact LessEqual.transitive with boundNat, tentativeNat, chosenBound, upper
+
+theorem FrontierTable.certifies_minimum (V E weights source S labels F tentative target bound : Set)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires table : FrontierTable(V, E, weights, S, labels, F, tentative)
+  requires boundNat : Nat(bound)
+  requires initial : source ∈ S ∨ bound = 0
+  requires minimal : ∀ v ∈ F, bound ≤ tentative(v)
+  requires targetIn : target ∈ V
+  requires outside : ¬(target ∈ S)
+  requires path : HasPathCost(V, E, weights, source, target, bound)
+  shows ShortestPathCost(V, E, weights, source, target, bound)
+proof
+  have cut := FrontierTable.cut_bound with settled, table, boundNat, initial, minimal
+  exact FrontierCutBound.certifies_next with settled, cut, targetIn, outside, path
+
+-- Settling the certified vertex preserves the lower-bound invariant.
+theorem SettledLowerBounds.enlarge (V E weights source S labels target cost updated : Set)
+  requires settled : SettledLowerBounds(V, E, weights, source, S, labels)
+  requires shortest : ShortestPathCost(V, E, weights, source, target, cost)
+  requires function : updated : S ∪ {target} → ℕ
+  requires oldValues : ∀ u ∈ S, updated(u) = labels(u)
+  requires newValue : updated(target) = cost
+  shows SettledLowerBounds(V, E, weights, source, S ∪ {target}, updated)
+proof
+  rcases settled with ⟨oldFunction, oldLower⟩
+  rcases shortest with ⟨costNat, path, least⟩
+  unfold SettledLowerBounds
+  refine ⟨function, _⟩
+  intros u hu c hc candidate
+  have alternatives := union2.membership.forward with hu
+  cases alternatives with old | new
+  . have equality := oldValues with u, old
+    rw equality
+    exact oldLower with u, old, c, hc, candidate
+  . have equality := singleton.membership.forward with new
+    rw [equality, newValue]
+    rw equality at candidate
+    exact least with c, hc, candidate
+
+-- Weighted paths have the same finite reachability meaning as graph routes.
+theorem pathsOfLength.reachable (V E weights source : Set, n : Nat)
+  shows ∀ v ∈ V, ∀ c ∈ ℕ,
+    (v, c) ∈ pathsOfLength(V, E, weights, source, n) → Reachable(V, E, source, v)
+proof
+  induction n
+  | zero =>
+    intros v hv c hc path
+    rw pathsOfLength.zero at path
+    have pair := singleton.membership.forward with path
+    have coordinates := orderedPair.injective with pair
+    rcases coordinates with ⟨vs, c0⟩
+    rw vs
+    exact Reachable.reflexive
+  | succ(m) using ih =>
+    intros v hv c hc path
+    rw pathsOfLength.successor at path
+    have parts := costStep.membership.forward at V, E, weights,
+      pathsOfLength(V, E, weights, source, m), (v, c) with path
+    rcases parts with ⟨bounded, u, hu, y, hy, prior, hprior, k, hk, earlier, edge, pair⟩
+    have coordinates := orderedPair.injective with pair
+    rcases coordinates with ⟨vy, cSum⟩
+    have prefix := ih with u, hu, prior, hprior, earlier
+    rcases edge with ⟨adjacent, kNat, value⟩
+    rw vy
+    exact Reachable.extend with prefix, hy, adjacent
+
+theorem HasPathCost.reachable (V E weights source target cost : Set)
+  requires targetIn : target ∈ V
+  requires costNat : Nat(cost)
+  requires path : HasPathCost(V, E, weights, source, target, cost)
+  shows Reachable(V, E, source, target)
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have costIn := nat.omega.forward with costNat
+  have all := pathsOfLength.reachable at V, E, weights, source, n with nNat
+  exact all with target, targetIn, cost, costIn, reached
+
+theorem EdgeClosed.excludes_path (V E weights source target cost S : Set)
+  requires start : source ∈ S
+  requires closed : EdgeClosed(V, E, S)
+  requires targetIn : target ∈ V
+  requires outside : ¬(target ∈ S)
+  requires costNat : Nat(cost)
+  shows ¬HasPathCost(V, E, weights, source, target, cost)
+proof
+  intro path
+  have route := HasPathCost.reachable with targetIn, costNat, path
+  have contained := Reachable.in_closed_set with start, closed, route
+  exact outside with contained
+
+-- If relaxation has no finite candidates left, no weighted path can leave S.
+theorem FrontierTable.empty_unreachable (V E weights source S labels tentative target cost : Set)
+  requires table : FrontierTable(V, E, weights, S, labels, empty, tentative)
+  requires graph : WeightedGraph(V, E, weights)
+  requires start : source ∈ S
+  requires included : S ⊆ V
+  requires targetIn : target ∈ V
+  requires outside : ¬(target ∈ S)
+  requires costNat : Nat(cost)
+  shows ¬HasPathCost(V, E, weights, source, target, cost)
+proof
+  rcases table with ⟨tentativeFunction, relaxed⟩
+  rcases graph with ⟨relation, weightFunction⟩
+  have closed : EdgeClosed(V, E, S)
+    intros u hu v hv edge
+    have alternatives : v ∈ S ∨ ¬(v ∈ S) by tauto
+    cases alternatives with inside | out
+    . exact inside
+    . exfalso
+      have pairIn : (u, v) ∈ E
+        unfold Adjacent at edge
+        exact edge
+      have weightIn := FunctionBetween.apply_closed with weightFunction, pairIn
+      have weightNat := nat.omega.backward with weightIn
+      have weighted : WeightedEdge(E, weights, u, v, weights((u, v)))
+        unfold WeightedEdge
+        refine ⟨edge, weightNat, rfl⟩
+      obtain ⟨inEmpty, inequality⟩ := relaxed with u, hu, v, hv, weights((u, v)), weightIn, out, weighted
+      exact set.empty with inEmpty
+  exact EdgeClosed.excludes_path with start, closed, targetIn, outside, costNat

@@ -1,0 +1,201 @@
+-- The birthday problem
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Probability.Birthday
+import Uniform
+import Combinatorics.FallingBounds
+
+-- An assignment of birthdays to the people of A from the days of B is a
+-- function A → B. Under the assignments outside the injections, two
+-- people share a birthday.
+def sharedBirthday (A B : Set) : Set :=
+  functionSpace(A, B) ∖ injections(A, B)
+
+theorem sharedBirthday.value (A B : Set)
+  shows sharedBirthday(A, B) = functionSpace(A, B) ∖ injections(A, B)
+proof
+  simp [sharedBirthday]
+
+theorem sharedBirthday.membership (f A B : Set)
+  shows f ∈ sharedBirthday(A, B) ↔
+    (f : A → B) ∧ (∃ x ∈ A, ∃ y ∈ A, x ≠ y ∧ f(x) = f(y))
+proof
+  rw sharedBirthday.value
+  constructor
+  . intro member
+    obtain ⟨inSpace, notInjective⟩ :=
+      difference.membership.forward with member
+    have function := functionSpace.membership.forward with inSpace
+    refine ⟨function, ?_⟩
+    by_contra none
+    apply notInjective
+    have cancel : ∀ x ∈ A, ∀ y ∈ A, f(x) = f(y) → x = y
+      intros x hx y hy same
+      by_contra different
+      apply none
+      exact ⟨x, hx, y, hy, different, same⟩
+    have injective := Injective.of_pointwise with function, cancel
+    exact injections.of_injective with injective
+  . intro shape
+    obtain ⟨function, x, hx, y, hy, different, same⟩ := shape
+    have inSpace := functionSpace.membership.backward with function
+    have notInjective : ¬(f ∈ injections(A, B))
+      intro member
+      have injective := injections.injective with member
+      have equal := Injective.apply_cancel with injective, hx, hy, same
+      exact different with equal
+    have both : f ∈ functionSpace(A, B) ∧ ¬(f ∈ injections(A, B)) :=
+      ⟨inSpace, notInjective⟩
+    exact difference.membership.backward with both
+
+theorem sharedBirthday.subset (A B : Set)
+  shows sharedBirthday(A, B) ⊆ functionSpace(A, B)
+proof
+  rw sharedBirthday.value
+  exact difference.subset_left at functionSpace(A, B), injections(A, B)
+
+-- A constant assignment shows that the assignments exist.
+theorem functionSpace.nonempty (A B : Set)
+  requires inhabited : Nonempty(B)
+  shows Nonempty(functionSpace(A, B))
+proof
+  obtain ⟨y, hy⟩ := inhabited
+  have function := constantFunction.function at A, B, y with hy
+  have member := functionSpace.membership.backward with function
+  exact ⟨constantFunction(A, B, y), member⟩
+
+-- The counting fact: the injective assignments of 365 days to 23 people
+-- are fewer than half of all assignments. The difference between all
+-- assignments and twice the injective ones is a 58-digit natural, written
+-- in two blocks of thirty digits so that it is typed as a natural.
+theorem birthday.counting
+  shows 2 * fallingFactorial(365, 23) < 365 ^ 23
+proof
+  have gap : 2 * fallingFactorial(365, 23) + 1 +
+      (1250040748965601492022941694 * 1000000000000000000000000000000 +
+        577238181855100962491293453124) = 365 ^ 23 by compute
+  have grow := LessEqual.add_right at 2 * fallingFactorial(365, 23) + 1,
+    1250040748965601492022941694 * 1000000000000000000000000000000 +
+      577238181855100962491293453124
+  rw gap at grow
+  exact Less.of_add_one_le with grow
+
+theorem birthday.injections (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires people : cardinality(A) = 23
+  requires days : cardinality(B) = 365
+  shows 2 * cardinality(injections(A, B)) < cardinality(functionSpace(A, B))
+proof
+  have left := injections.count with finiteA, finiteB
+  have right := functionSpace.count with finiteA, finiteB
+  rw [left, right, people, days]
+  exact birthday.counting
+
+-- The probability that two of n people share one of d birthdays, under
+-- the uniform distribution on all assignments, is
+-- 1 - d(d - 1)⋯(d - n + 1) / dⁿ.
+theorem sharedBirthday.probability (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires inhabited : Nonempty(B)
+  shows prob(uniformWeight(functionSpace(A, B)), sharedBirthday(A, B)) =
+    (1:R) - (realNat(fallingFactorial(cardinality(B), cardinality(A))):R) /
+      (realNat(cardinality(B) ^ cardinality(A)):R)
+proof
+  have finite := functionSpace.finite with finiteA, finiteB
+  have spaceInhabited := functionSpace.nonempty at A, B with inhabited
+  have event := injections.subset at A, B
+  have complement := prob.uniform_complement with finite, spaceInhabited, event
+  have left := injections.count with finiteA, finiteB
+  have right := functionSpace.count with finiteA, finiteB
+  rw sharedBirthday.value
+  rw complement
+  rw [realSize.value, realSize.value, left, right]
+  rfl
+
+-- A quotient by a positive real is below C once the numerator is below C
+-- times the denominator.
+theorem realDiv.lt_of_lt_mul (A B C : Real)
+  requires positive : 0 < B
+  requires below : A < C * B
+  shows A / B < C
+proof
+  have nonzero : B ≠ 0
+    intro zero
+    linarith
+  have nonnegative : (0:R) ≤ B by linarith
+  have quotientReal := realDiv.real at A, B with *
+  have product := realDiv.mul_right at A, B with nonzero
+  by_contra
+  have above := realLe.of_not_less at C, A / B with this
+  have scaled :=
+    realLe.mul_right_of_nonnegative at C, A / B, B with above, nonnegative
+  rw product at scaled
+  linarith
+
+theorem realHalf.add_self
+  shows (1:R) / 2 + 1 / 2 = 1
+proof
+  have twoNonzero : (2:R) ≠ 0
+    intro zero
+    linarith
+  have oneReal : (1:R) ∈ ℝ by typecheck
+  have twoReal : (2:R) ∈ ℝ by typecheck
+  have halfReal := realDiv.real at (1:R), (2:R) with *
+  have half := realDiv.mul_right at (1:R), (2:R) with twoNonzero
+  have twice : (1:R) / 2 + 1 / 2 = 1 / 2 * 2 by ring
+  rw [twice, half]
+  rfl
+
+theorem realDiv.lt_half (A B : Real)
+  requires positive : 0 < B
+  requires below : 2 * A < B
+  shows A / B < 1 / 2
+proof
+  have oneReal : (1:R) ∈ ℝ by typecheck
+  have twoReal : (2:R) ∈ ℝ by typecheck
+  have halfReal := realDiv.real at (1:R), (2:R) with *
+  have twice := realHalf.add_self
+  have split : 1 / 2 * B + 1 / 2 * B = (1 / 2 + 1 / 2) * B by ring
+  rw twice at split
+  have unit : (1:R) * B = B by ring
+  have halfBelow : A < 1 / 2 * B by linarith
+  exact realDiv.lt_of_lt_mul with positive, halfBelow
+
+-- The birthday problem: among 23 people with uniformly random birthdays
+-- in a year of 365 days, two share a birthday with probability above 1/2.
+theorem birthday.problem (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires people : cardinality(A) = 23
+  requires days : cardinality(B) = 365
+  shows (1:R) / 2 <
+    (prob(uniformWeight(functionSpace(A, B)), sharedBirthday(A, B)):R)
+proof
+  have positiveDays : 0 < cardinality(B)
+    rw days
+    arith
+  have characterization := cardinality.positive_iff_nonempty with finiteB
+  have inhabited := characterization.backward with positiveDays
+  have formula := sharedBirthday.probability with finiteA, finiteB, inhabited
+  rw [people, days] at formula
+  rw formula
+  have counting := birthday.counting
+  have bound := Less.add_one_le_of_lt with counting
+  have scaled := realNat.le_of_natural_le with bound
+  have two := realNumeral.nat at 2
+  rw [realNat.add, realNat.mul, realNat.one] at scaled
+  rw ← two at scaled
+  have numeratorReal := realNat.real at fallingFactorial(365, 23)
+  have denominatorReal := realNat.real at 365 ^ 23
+  have nonnegative := realNat.zero_le at fallingFactorial(365, 23)
+  have positive : (0:R) < realNat(365 ^ 23) by linarith
+  have strict : 2 * realNat(fallingFactorial(365, 23)) < realNat(365 ^ 23)
+    linarith
+  have half := realDiv.lt_half with positive, strict
+  have twice := realHalf.add_self
+  linarith

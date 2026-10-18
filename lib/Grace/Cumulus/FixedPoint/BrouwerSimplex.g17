@@ -1,0 +1,165 @@
+-- Brouwer's fixed point theorem for a product of simplices: a continuous
+-- self-map of the product is composed with the retraction of the cube onto
+-- it, the cube theorem gives a fixed point, and that point lies in the product
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.FixedPoint.BrouwerSimplex
+import SimplexRetraction
+import BrouwerCube
+
+-- Self-maps of the product of simplices, continuous in the sup metric.
+predicate ProductMap (f n m blk : Set) :=
+  FunctionBetween(f, simplexProduct(n, m, blk), simplexProduct(n, m, blk))
+
+predicate ProductContinuousAt (f n m blk x : Set) :=
+  ∀ E ∈ ℝ, (0:R) < E → ∃ D ∈ ℝ, (0:R) < D ∧
+    (∀ y ∈ simplexProduct(n, m, blk), ((∀ i ∈ n, dist(y(i), x(i)) < D) → (∀ i ∈ n, dist(f(y)(i), f(x)(i)) < E)))
+
+predicate ProductContinuous (f n m blk : Set) :=
+  ProductMap(f, n, m, blk) ∧ ∀ x ∈ simplexProduct(n, m, blk), ProductContinuousAt(f, n, m, blk, x)
+
+theorem ProductMap.function (f n m blk : Set)
+  requires map : ProductMap(f, n, m, blk)
+  shows f : simplexProduct(n, m, blk) → simplexProduct(n, m, blk)
+proof
+  exact map
+
+theorem ProductMap.apply (f n m blk x : Set)
+  requires map : ProductMap(f, n, m, blk)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  shows f(x) ∈ simplexProduct(n, m, blk)
+proof
+  have function := ProductMap.function with map
+  exact FunctionBetween.apply_closed with function, hx
+
+-- The self-map of the cube obtained by retracting first.
+defgraph composedMap (n m blk a f : Set) (x ∈ unitCube(n)) : unitCube(n) := f(retraction(n, blk, a)(x))
+requires nNat : Nat(n)
+requires blkFunction : blk : n → m
+requires ha : a ∈ simplexProduct(n, m, blk)
+requires map : ProductMap(f, n, m, blk)
+proof
+  have image := retraction.in_product with blkFunction, ha, member
+  have value := ProductMap.apply with map, image
+  exact simplexProduct.cube with value
+
+theorem composedMap.continuous (n : Nat) (m blk a f : Set)
+  requires blkFunction : blk : n → m
+  requires ha : a ∈ simplexProduct(n, m, blk)
+  requires continuous : ProductContinuous(f, n, m, blk)
+  shows CubeContinuous(composedMap(n, m, blk, a, f), n)
+proof
+  have map := continuous.left
+  have aCube := simplexProduct.cube with ha
+  have function := composedMap.function at n, m, blk, a, f with *
+  have cubeMap : CubeMap(composedMap(n, m, blk, a, f), n) by exact function
+  constructor
+  . exact cubeMap
+  . intros x hx E EReal Epos
+    have rx := retraction.in_product with blkFunction, ha, hx
+    have fAt := continuous.right with rx
+    obtain ⟨D1, D1Real, D1Pos, fClose⟩ := fAt with EReal, Epos
+    have rContinuous := retraction.continuous at n, blk, a with aCube
+    have rAt := rContinuous.right with hx
+    obtain ⟨D, DReal, DPos, rClose⟩ := rAt with D1Real, D1Pos
+    witness D
+    constructor
+    . exact DReal
+    . constructor
+      . exact DPos
+      . intros y hy near
+        have ry := retraction.in_product with blkFunction, ha, hy
+        have rNear := rClose with hy, near
+        have fNear := fClose with ry, rNear
+        have yValue := composedMap.value at n, m, blk, a, f, y with *
+        have xValue := composedMap.value at n, m, blk, a, f, x with *
+        intros i hi
+        rw [yValue, xValue]
+        exact fNear with hi
+
+-- Brouwer's theorem for the product of simplices.
+theorem brouwer.simplexProduct (n : Nat) (m a f : Set) (blk : n → m)
+  requires ha : a ∈ simplexProduct(n, m, blk)
+  requires continuous : ProductContinuous(f, n, m, blk)
+  shows ∃ x ∈ simplexProduct(n, m, blk), f(x) = x
+proof
+  have blkFunction : blk : n → m by assumption
+  have map := continuous.left
+  have composed := composedMap.continuous with blkFunction, ha, continuous
+  obtain ⟨x, hx, fixed⟩ := brouwer.cube with composed
+  have value := composedMap.value at n, m, blk, a, f, x with *
+  rw value at fixed
+  have rx := retraction.in_product with blkFunction, ha, hx
+  have inProduct := ProductMap.apply with map, rx
+  rw fixed at inProduct
+  have same := retraction.fixed with blkFunction, ha, inProduct
+  rw same at fixed
+  witness x
+  exact ⟨inProduct, fixed⟩
+
+-- A continuous self-map of the whole cube that keeps the product of
+-- simplices also has a fixed point inside the product.
+defgraph composeCube (n f g : Set) (x ∈ unitCube(n)) : unitCube(n) := f(g(x))
+requires fMap : CubeMap(f, n)
+requires gMap : CubeMap(g, n)
+proof
+  have gx := FunctionBetween.apply_closed with (CubeMap.function with gMap), member
+  exact FunctionBetween.apply_closed with (CubeMap.function with fMap), gx
+
+theorem composeCube.continuous (n : Nat) (f g : Set)
+  requires fContinuous : CubeContinuous(f, n)
+  requires gContinuous : CubeContinuous(g, n)
+  shows CubeContinuous(composeCube(n, f, g), n)
+proof
+  have fMap := fContinuous.left
+  have gMap := gContinuous.left
+  have function := composeCube.function with fMap, gMap
+  have map : CubeMap(composeCube(n, f, g), n) by exact function
+  constructor
+  . exact map
+  . intros x hx E EReal Epos
+    have gx := FunctionBetween.apply_closed with (CubeMap.function with gMap), hx
+    have fAt := fContinuous.right with gx
+    obtain ⟨D1, D1Real, D1Pos, fClose⟩ := fAt with EReal, Epos
+    have gAt := gContinuous.right with hx
+    obtain ⟨D, DReal, DPos, gClose⟩ := gAt with D1Real, D1Pos
+    witness D
+    constructor
+    . exact DReal
+    . constructor
+      . exact DPos
+      . intros y hy near
+        have gy := FunctionBetween.apply_closed with (CubeMap.function with gMap), hy
+        have gNear := gClose with hy, near
+        have fNear := fClose with gy, gNear
+        have yValue := composeCube.value with fMap, gMap, hy
+        have xValue := composeCube.value with fMap, gMap, hx
+        intros i hi
+        rw [yValue, xValue]
+        exact fNear with hi
+
+theorem brouwer.simplexProduct_of_cube (n : Nat) (m blk a f : Set)
+  requires blkFunction : blk : n → m
+  requires ha : a ∈ simplexProduct(n, m, blk)
+  requires continuous : CubeContinuous(f, n)
+  requires preserves : ∀ x ∈ simplexProduct(n, m, blk), f(x) ∈ simplexProduct(n, m, blk)
+  shows ∃ x ∈ simplexProduct(n, m, blk), f(x) = x
+proof
+  have aCube := simplexProduct.cube with ha
+  have fMap := continuous.left
+  have rContinuous := retraction.continuous at n, blk, a with aCube
+  have rMap := rContinuous.left
+  have composed := composeCube.continuous with continuous, rContinuous
+  obtain ⟨x, hx, fixed⟩ := brouwer.cube with composed
+  have value := composeCube.value with fMap, rMap, hx
+  rw value at fixed
+  have rx := retraction.in_product with blkFunction, ha, hx
+  have inProduct := preserves with rx
+  rw fixed at inProduct
+  have same := retraction.fixed with blkFunction, ha, inProduct
+  rw same at fixed
+  witness x
+  exact ⟨inProduct, fixed⟩

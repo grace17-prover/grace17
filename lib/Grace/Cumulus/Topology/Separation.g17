@@ -1,0 +1,363 @@
+-- Separation axioms: T0 and T1 spaces below Hausdorff, points and finite
+-- sets closed in T1 spaces, separation passes to subspaces and products,
+-- and the regular and normal properties above Hausdorff
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Separation
+import Product
+import ClosureLaws
+import FiniteIntersection
+
+-- T0: some open set tells two distinct points apart; T1: each of two
+-- distinct points has an open set missing the other.
+predicate T0Space (X T : Set) :=
+  ∀ x ∈ X, ∀ y ∈ X, x ≠ y → ∃ U ∈ T, (x ∈ U ∧ ¬y ∈ U) ∨ (y ∈ U ∧ ¬x ∈ U)
+
+predicate IsT1Space (X T : Set) :=
+  ∀ x ∈ X, ∀ y ∈ X, x ≠ y → ∃ U ∈ T, x ∈ U ∧ ¬y ∈ U
+
+theorem IsT1Space.t0 (X T : Set)
+  requires t1 : IsT1Space(X, T)
+  shows T0Space(X, T)
+proof
+  intros x hx y hy distinct
+  obtain ⟨U, hU, hxU, away⟩ := t1 with x, hx, y, hy, distinct
+  refine ⟨U, hU, ?_⟩
+  left
+  exact ⟨hxU, away⟩
+
+theorem IsHausdorff.t1 (X T : Set)
+  requires hausdorff : IsHausdorff(X, T)
+  shows IsT1Space(X, T)
+proof
+  intros x hx y hy distinct
+  obtain ⟨U, hU, V, hV, hxU, hyV, disjoint⟩ := hausdorff with x, hx, y, hy, distinct
+  have separated := Disjoint.iff.forward with disjoint
+  refine ⟨U, hU, hxU, ?_⟩
+  intro hyU
+  exact separated with y, hyU, hyV
+
+theorem IsHausdorff.t0 (X T : Set)
+  requires hausdorff : IsHausdorff(X, T)
+  shows T0Space(X, T)
+proof
+  exact IsT1Space.t0 with (IsHausdorff.t1 with hausdorff)
+
+-- Points are closed in a T1 space, and that characterises T1.
+
+theorem IsT1Space.singleton_closed (X T x : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires hx : x ∈ X
+  shows IsClosed(X, T, {x})
+proof
+  constructor
+  . intros z hz
+    have same := singleton.membership.forward with hz
+    rwa same
+  . have awayOpen : awayFrom(T, x) ⊆ T
+      intros V hV
+      have parts := awayFrom.membership.forward with hV
+      exact parts.left
+    have isOpen := IsTopology.union with topology, awayOpen
+    have equal : complement(X, {x}) = ⋃(awayFrom(T, x))
+      ext y
+      constructor
+      . intro hy
+        have parts := complement.membership.forward with hy
+        have distinct : y ≠ x
+          intro same
+          apply parts.right
+          rw same
+          simp [singleton.membership]
+        obtain ⟨V, hV, hyV, away⟩ := t1 with y, parts.left, x, hx, distinct
+        have member : V ∈ awayFrom(T, x) := awayFrom.membership.backward with ⟨hV, away⟩
+        exact union.contains with member, hyV
+      . intro hy
+        obtain ⟨V, hV, hyV⟩ := union.membership.forward with hy
+        have parts := awayFrom.membership.forward with hV
+        have inside := IsTopology.subset with topology, parts.left
+        have hyX := inside with y, hyV
+        apply complement.membership.backward
+        refine ⟨hyX, ?_⟩
+        intro same
+        have equalYX := singleton.membership.forward with same
+        apply parts.right
+        rwa ← equalYX
+    rwa equal
+
+theorem IsT1Space.of_singletons_closed (X T : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : ∀ x ∈ X, IsClosed(X, T, {x})
+  shows IsT1Space(X, T)
+proof
+  intros x hx y hy distinct
+  have closedY := closed with y, hy
+  have isOpen := IsClosed.complement_open with closedY
+  refine ⟨complement(X, {y}), isOpen, ?_, ?_⟩
+  . apply complement.membership.backward
+    refine ⟨hx, ?_⟩
+    intro same
+    have equalXY := singleton.membership.forward with same
+    exact distinct with equalXY
+  . intro hyC
+    have parts := complement.membership.forward with hyC
+    apply parts.right
+    simp [singleton.membership]
+
+theorem IsT1Space.iff_singletons_closed (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows IsT1Space(X, T) ↔ ∀ x ∈ X, IsClosed(X, T, {x})
+proof
+  constructor
+  . intros t1 x hx
+    exact IsT1Space.singleton_closed with topology, t1, hx
+  . intro closed
+    exact IsT1Space.of_singletons_closed with topology, closed
+
+theorem IsT1Space.point_complement_open (X T x : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires hx : x ∈ X
+  shows complement(X, {x}) ∈ T
+proof
+  have closed := IsT1Space.singleton_closed with topology, t1, hx
+  exact IsClosed.complement_open with closed
+
+-- Finite sets are closed in a T1 space: the support of a list of points
+-- is a finite union of closed singletons.
+theorem IsClosed.list_support (X T : Set) (xs : List(X))
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  shows IsClosed(X, T, listSupport{X}(xs))
+proof
+  induction xs
+  | List.nil =>
+    rw listSupport.nil
+    exact IsClosed.empty with topology
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ X by assumption
+    have closedPoint := IsT1Space.singleton_closed with topology, t1, element
+    rw listSupport.cons
+    unfold insert
+    exact IsClosed.union2 with topology, closedPoint, ih
+
+theorem IsT1Space.finite_closed (X T F : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires finite : Finite(F)
+  requires hF : F ⊆ X
+  shows IsClosed(X, T, F)
+proof
+  obtain ⟨xs, list, covers⟩ := Finite.list_cover with finite
+  have weakened := List.weaken with hF
+  have support := listSupport.subset with list
+  have equal : listSupport{F}(xs) = F := Subset.antisymmetric with support, covers
+  have carrier := listSupport.change_carrier with hF
+  rw carrier at equal
+  rw ← equal
+  exact IsClosed.list_support with topology, t1
+
+theorem IsHausdorff.finite_closed (X T F : Set)
+  requires topology : IsTopology(X, T)
+  requires hausdorff : IsHausdorff(X, T)
+  requires finite : Finite(F)
+  requires hF : F ⊆ X
+  shows IsClosed(X, T, F)
+proof
+  have t1 := IsHausdorff.t1 with hausdorff
+  exact IsT1Space.finite_closed with topology, t1, finite, hF
+
+theorem IsT1Space.discrete (X : Set)
+  shows IsT1Space(X, 𝒫(X))
+proof
+  exact IsHausdorff.t1 with (IsHausdorff.discrete at X)
+
+-- Separation passes to subspaces.
+
+theorem T0Space.subspace (X T A : Set)
+  requires t0 : T0Space(X, T)
+  requires hA : A ⊆ X
+  shows T0Space(A, subspaceTopology(T, A))
+proof
+  intros x hx y hy distinct
+  obtain ⟨U, hU, split⟩ := t0 with x, (hA with x, hx), y, (hA with y, hy), distinct
+  have traced : U ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨U, hU, rfl⟩
+  refine ⟨U ∩ A, traced, ?_⟩
+  cases split with xSide | ySide
+  . left
+    constructor
+    . exact intersection.membership.backward with ⟨xSide.left, hx⟩
+    . intro hyT
+      have parts := intersection.membership.forward with hyT
+      exact xSide.right with parts.left
+  . right
+    constructor
+    . exact intersection.membership.backward with ⟨ySide.left, hy⟩
+    . intro hxT
+      have parts := intersection.membership.forward with hxT
+      exact ySide.right with parts.left
+
+theorem IsT1Space.subspace (X T A : Set)
+  requires t1 : IsT1Space(X, T)
+  requires hA : A ⊆ X
+  shows IsT1Space(A, subspaceTopology(T, A))
+proof
+  intros x hx y hy distinct
+  obtain ⟨U, hU, hxU, away⟩ := t1 with x, (hA with x, hx), y, (hA with y, hy), distinct
+  have traced : U ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨U, hU, rfl⟩
+  refine ⟨U ∩ A, traced, (intersection.membership.backward with ⟨hxU, hx⟩), ?_⟩
+  intro hyT
+  have parts := intersection.membership.forward with hyT
+  exact away with parts.left
+
+theorem IsHausdorff.subspace (X T A : Set)
+  requires hausdorff : IsHausdorff(X, T)
+  requires hA : A ⊆ X
+  shows IsHausdorff(A, subspaceTopology(T, A))
+proof
+  intros x hx y hy distinct
+  obtain ⟨U, hU, V, hV, hxU, hyV, disjoint⟩ := hausdorff with x, (hA with x, hx), y, (hA with y, hy), distinct
+  have tracedU : U ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨U, hU, rfl⟩
+  have tracedV : V ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨V, hV, rfl⟩
+  refine ⟨U ∩ A, tracedU, V ∩ A, tracedV, (intersection.membership.backward with ⟨hxU, hx⟩), (intersection.membership.backward with ⟨hyV, hy⟩), ?_⟩
+  have below := intersection.subset_left at U, A
+  have belowV := intersection.subset_left at V, A
+  have first := Disjoint.of_subset_left with disjoint, below
+  exact Disjoint.of_subset_right with first, belowV
+
+-- The product of two Hausdorff spaces is Hausdorff: distinct pairs differ
+-- in some coordinate, and a box separates them there.
+theorem IsHausdorff.product (X T Y S : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires hausdorffX : IsHausdorff(X, T)
+  requires hausdorffY : IsHausdorff(Y, S)
+  shows IsHausdorff(X × Y, productTopology(X, T, Y, S))
+proof
+  intros p hp q hq distinct
+  obtain ⟨boundP, x1, hx1, y1, hy1, rfl⟩ := product.membership.forward with hp
+  obtain ⟨boundQ, x2, hx2, y2, hy2, rfl⟩ := product.membership.forward with hq
+  have wholeX := IsTopology.whole with topologyX
+  have wholeY := IsTopology.whole with topologyY
+  have split : x1 = x2 ∨ x1 ≠ x2 by tauto
+  cases split with sameX | differentX
+  . have differentY : y1 ≠ y2
+      intro sameY
+      apply distinct
+      rw [sameX, sameY]
+      rfl
+    obtain ⟨U, hU, V, hV, hy1U, hy2V, disjoint⟩ := hausdorffY with y1, hy1, y2, hy2, differentY
+    have boxU := productTopology.box with topologyX, topologyY, wholeX, hU
+    have boxV := productTopology.box with topologyX, topologyY, wholeX, hV
+    refine ⟨X × U, boxU, X × V, boxV, (product.pair with hx1, hy1U), (product.pair with hx2, hy2V), ?_⟩
+    exact product.disjoint_of_right with disjoint
+  . obtain ⟨U, hU, V, hV, hx1U, hx2V, disjoint⟩ := hausdorffX with x1, hx1, x2, hx2, differentX
+    have boxU := productTopology.box with topologyX, topologyY, hU, wholeY
+    have boxV := productTopology.box with topologyX, topologyY, hV, wholeY
+    refine ⟨U × Y, boxU, V × Y, boxV, (product.pair with hx1U, hy1), (product.pair with hx2V, hy2), ?_⟩
+    exact product.disjoint_of_left with disjoint
+
+-- Regular: a point and a closed set missing it have disjoint open
+-- neighbourhoods; normal: two disjoint closed sets do.
+predicate RegularSpace (X T : Set) :=
+  ∀ x ∈ X, ∀ C, IsClosed(X, T, C) → ¬x ∈ C →
+    ∃ U ∈ T, ∃ V ∈ T, x ∈ U ∧ C ⊆ V ∧ Disjoint(U, V)
+
+predicate NormalSpace (X T : Set) :=
+  ∀ C, IsClosed(X, T, C) → ∀ D, IsClosed(X, T, D) → Disjoint(C, D) →
+    ∃ U ∈ T, ∃ V ∈ T, C ⊆ U ∧ D ⊆ V ∧ Disjoint(U, V)
+
+theorem RegularSpace.hausdorff (X T : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires regular : RegularSpace(X, T)
+  shows IsHausdorff(X, T)
+proof
+  intros x hx y hy distinct
+  have closedY := IsT1Space.singleton_closed with topology, t1, hy
+  have away : ¬x ∈ {y}
+    intro same
+    have equalXY := singleton.membership.forward with same
+    exact distinct with equalXY
+  obtain ⟨U, hU, V, hV, hxU, inside, disjoint⟩ := regular with x, hx, {y}, closedY, away
+  have self : y ∈ {y} by simp [singleton.membership]
+  have hyV := inside with y, self
+  exact ⟨U, hU, V, hV, hxU, hyV, disjoint⟩
+
+theorem NormalSpace.regular (X T : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires normal : NormalSpace(X, T)
+  shows RegularSpace(X, T)
+proof
+  intros x hx C closedC away
+  have closedX := IsT1Space.singleton_closed with topology, t1, hx
+  have disjoint : Disjoint({x}, C)
+    apply Disjoint.iff.backward
+    intros z hz hzC
+    have same := singleton.membership.forward with hz
+    apply away
+    rwa same at hzC
+  obtain ⟨U, hU, V, hV, inside, insideC, separated⟩ := normal with {x}, closedX, C, closedC, disjoint
+  have self : x ∈ {x} by simp [singleton.membership]
+  have hxU := inside with x, self
+  exact ⟨U, hU, V, hV, hxU, insideC, separated⟩
+
+theorem NormalSpace.hausdorff (X T : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires normal : NormalSpace(X, T)
+  shows IsHausdorff(X, T)
+proof
+  have regular := NormalSpace.regular with topology, t1, normal
+  exact RegularSpace.hausdorff with topology, t1, regular
+
+-- In the discrete topology every set is open, so closed sets separate
+-- themselves.
+theorem NormalSpace.discrete (X : Set)
+  shows NormalSpace(X, 𝒫(X))
+proof
+  intros C closedC D closedD disjoint
+  have openC : C ∈ 𝒫(X) := powerset.membership_iff.backward with closedC.left
+  have openD : D ∈ 𝒫(X) := powerset.membership_iff.backward with closedD.left
+  exact ⟨C, openC, D, openD, (Subset.reflexive at C), (Subset.reflexive at D), disjoint⟩
+
+theorem RegularSpace.discrete (X : Set)
+  shows RegularSpace(X, 𝒫(X))
+proof
+  have topology := discreteTopology at X
+  have t1 := IsT1Space.discrete at X
+  have normal := NormalSpace.discrete at X
+  exact NormalSpace.regular with topology, t1, normal
+
+-- In a T1 space every neighbourhood of a limit point of A meets A away
+-- from any finite set of points.
+theorem IsT1Space.limit_point_avoids (X T A x F : Set)
+  requires topology : IsTopology(X, T)
+  requires t1 : IsT1Space(X, T)
+  requires limit : x ∈ limitPoints(X, T, A)
+  requires finite : Finite(F)
+  requires hF : F ⊆ X
+  requires away : ¬x ∈ F
+  shows ∀ U ∈ T, x ∈ U → Nonempty(U ∩ (A ∖ F))
+proof
+  intros U hU hxU
+  have parts := limitPoints.membership.forward with limit
+  have closedF := IsT1Space.finite_closed with topology, t1, finite, hF
+  have openF := IsClosed.complement_open with closedF
+  have hxC : x ∈ complement(X, F) := complement.membership.backward with ⟨parts.left, away⟩
+  have openBoth := IsTopology.intersection2 with topology, hU, openF
+  have inBoth : x ∈ U ∩ complement(X, F) := intersection.membership.backward with ⟨hxU, hxC⟩
+  obtain ⟨a, ha⟩ := parts.right with U ∩ complement(X, F), openBoth, inBoth
+  have inner := intersection.membership.forward with ha
+  have inU := intersection.membership.forward with inner.left
+  have outside := complement.membership.forward with inU.right
+  have inA := difference.singleton_membership.forward with inner.right
+  witness a
+  apply intersection.membership.backward
+  refine ⟨inU.left, ?_⟩
+  exact difference.membership.backward with ⟨inA.left, outside.right⟩

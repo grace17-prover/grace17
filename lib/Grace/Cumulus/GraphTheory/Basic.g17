@@ -1,0 +1,193 @@
+-- Simple graphs and their local structure
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Basic
+import Relation
+
+-- Edges are ordered pairs; symmetry makes their orientation immaterial.
+predicate SimpleGraph (V E : Set) :=
+  RelationOn(E, V) ∧ SymmetricOn(V, E) ∧ IrreflexiveOn(V, E)
+
+predicate Adjacent (E x y : Set) := relates(E, x, y)
+
+theorem SimpleGraph.relation (V E : Set)
+  requires graph : SimpleGraph(V, E)
+  shows RelationOn(E, V)
+proof
+  simp [SimpleGraph]
+
+theorem SimpleGraph.symmetric (V E : Set)
+  requires graph : SimpleGraph(V, E)
+  shows SymmetricOn(V, E)
+proof
+  simp [SimpleGraph]
+
+theorem SimpleGraph.irreflexive (V E : Set)
+  requires graph : SimpleGraph(V, E)
+  shows IrreflexiveOn(V, E)
+proof
+  simp [SimpleGraph]
+
+theorem Adjacent.bounds (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires edge : Adjacent(E, x, y)
+  shows x ∈ V ∧ y ∈ V
+proof
+  unfold Adjacent at edge
+  have relation := SimpleGraph.relation with graph
+  unfold RelationOn at relation
+  exact RelationBetween.bounds with relation, edge
+
+theorem Adjacent.symmetric (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires edge : Adjacent(E, x, y)
+  shows Adjacent(E, y, x)
+proof
+  obtain ⟨hx, hy⟩ := Adjacent.bounds with graph, edge
+  have symmetric := SimpleGraph.symmetric with graph
+  unfold Adjacent
+  exact symmetric with x, hx, y, hy, edge
+
+theorem Adjacent.distinct (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires edge : Adjacent(E, x, y)
+  shows x ≠ y
+proof
+  intro equal
+  obtain ⟨hx, hy⟩ := Adjacent.bounds with graph, edge
+  have noLoop := SimpleGraph.irreflexive with graph
+  have contradiction := noLoop with x, hx
+  rw ← equal at edge
+  apply contradiction
+  exact edge
+
+-- All neighbors lie in V; this is a set by separation.
+def neighbors (V E x : Set) : Set := { y ∈ V | Adjacent(E, x, y) }
+
+theorem neighbors.membership (V E x y : Set)
+  shows y ∈ neighbors(V, E, x) ↔ (y ∈ V ∧ Adjacent(E, x, y))
+proof
+  simp
+
+theorem neighbors.symmetric (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ neighbors(V, E, x)
+  shows x ∈ neighbors(V, E, y)
+proof
+  simp [neighbors.membership] at hy
+  rcases hy with ⟨hyV, edge⟩
+  apply neighbors.membership.backward
+  constructor
+  . exact hx
+  . exact Adjacent.symmetric with graph, edge
+
+theorem neighbors.excludes_self (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  shows ¬(x ∈ neighbors(V, E, x))
+proof
+  intro member
+  simp [neighbors.membership] at member
+  rcases member with ⟨hx, edge⟩
+  have distinct := Adjacent.distinct with graph, edge
+  apply distinct
+  rfl
+
+-- A subgraph can delete vertices and edges independently.
+predicate Subgraph (V E W F : Set) :=
+  SimpleGraph(W, F) ∧ W ⊆ V ∧ F ⊆ E
+
+theorem Subgraph.vertices (V E W F : Set)
+  requires sub : Subgraph(V, E, W, F)
+  shows W ⊆ V
+proof
+  simp [Subgraph]
+
+theorem Subgraph.edges (V E W F : Set)
+  requires sub : Subgraph(V, E, W, F)
+  shows F ⊆ E
+proof
+  simp [Subgraph]
+
+theorem Subgraph.adjacent (V E W F x y : Set)
+  requires sub : Subgraph(V, E, W, F)
+  requires edge : Adjacent(F, x, y)
+  shows Adjacent(E, x, y)
+proof
+  have included := Subgraph.edges with sub
+  unfold Adjacent at edge
+  unfold Adjacent
+  unfold relates
+  exact included with (x, y), edge
+
+-- Restriction to a vertex set keeps precisely the edges with both ends there.
+def inducedEdges (E W : Set) : Set := E ∩ (W × W)
+
+theorem inducedEdges.membership (E W x y : Set)
+  shows relates(inducedEdges(E, W), x, y) ↔
+    (relates(E, x, y) ∧ x ∈ W ∧ y ∈ W)
+proof
+  constructor
+  . intro h
+    unfold relates at h
+    unfold inducedEdges at h
+    simp [intersection.membership] at h
+    rcases h with ⟨edge, pair⟩
+    obtain ⟨bounded, a, ha, b, hb, equality⟩ := product.membership.forward with pair
+    obtain ⟨xa, yb⟩ := orderedPair.injective with equality
+    rw ← xa at ha
+    rw ← yb at hb
+    constructor
+      exact edge
+    . constructor
+      . exact ha
+      . exact hb
+  . intro h
+    rcases h with ⟨edge, hx, hy⟩
+    unfold relates
+    unfold inducedEdges
+    apply intersection.membership.backward
+    have pair := product.pair with hx, hy
+    refine ⟨edge, pair⟩
+
+theorem inducedEdges.graph (V E W : Set)
+  requires graph : SimpleGraph(V, E)
+  requires vertices : W ⊆ V
+  shows SimpleGraph(W, inducedEdges(E, W))
+proof
+  constructor
+    intros p hp
+    unfold inducedEdges at hp
+    simp [intersection.membership] at hp
+    rcases hp with ⟨edge, pair⟩
+    exact pair
+  . constructor
+      intros x hx y hy edge
+      obtain ⟨original, wx, wy⟩ := inducedEdges.membership.forward with edge
+      have symmetric := SimpleGraph.symmetric with graph
+      have xInV := vertices with x, hx
+      have yInV := vertices with y, hy
+      have old := symmetric with x, xInV, y, yInV, original
+      exact inducedEdges.membership.backward with ⟨old, hy, hx⟩
+      intros x hx edge
+      obtain ⟨original, wx, wy⟩ := inducedEdges.membership.forward with edge
+      have noLoop := SimpleGraph.irreflexive with graph
+      have xInV := vertices with x, hx
+      have impossible := noLoop with x, xInV
+      apply impossible
+      exact original
+
+theorem inducedEdges.subgraph (V E W : Set)
+  requires graph : SimpleGraph(V, E)
+  requires vertices : W ⊆ V
+  shows Subgraph(V, E, W, inducedEdges(E, W))
+proof
+  constructor
+  . exact inducedEdges.graph with graph, vertices
+  . constructor
+    . exact vertices
+    . unfold inducedEdges
+      exact intersection.subset_left

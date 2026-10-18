@@ -1,0 +1,189 @@
+-- Krull's maximal ideal theorem, using the axiom of choice through Zorn.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.MaximalIdeal
+import PrimeIdeal
+import GeneratedIdeal
+import Set.MaximalPrinciple
+
+def properIdeals (A add zero neg mul one : Set) : Set :=
+  {I ∈ 𝒫(A) | IsProperIdeal(A, add, zero, neg, mul, one, I)}
+
+theorem properIdeals.membership (I A add zero neg mul one : Set)
+  shows I ∈ properIdeals(A, add, zero, neg, mul, one) ↔
+    I ∈ 𝒫(A) ∧ IsProperIdeal(A, add, zero, neg, mul, one, I)
+proof
+  simp
+
+theorem properIdeals.contains (I A add zero neg mul one : Set)
+  requires proper : IsProperIdeal(A, add, zero, neg, mul, one, I)
+  shows I ∈ properIdeals(A, add, zero, neg, mul, one)
+proof
+  have subset : I ⊆ A by simp [IsProperIdeal, IsIdeal]
+  unfold Subset at subset
+  have bounded := set.powerset.backward with subset
+  exact properIdeals.membership.backward with ⟨bounded, proper⟩
+
+theorem IsMaximalIdeal.exists_above (A add zero neg mul one I : Set)
+  requires initial : IsProperIdeal(A, add, zero, neg, mul, one, I)
+  shows ∃ M, IsMaximalIdeal(A, add, zero, neg, mul, one, M) ∧ I ⊆ M
+proof
+  have seed := properIdeals.contains with initial
+  have closed : ∀ S, Nonempty(S) → S ⊆ properIdeals(A, add, zero, neg, mul, one) →
+    (∀ C ∈ S, ∀ D ∈ S, C ⊆ D ∨ D ⊆ C) → ⋃(S) ∈ properIdeals(A, add, zero, neg, mul, one)
+    intros S inhabited subset nested
+    have ideals : ∀ J ∈ S, IsProperIdeal(A, add, zero, neg, mul, one, J)
+      intros J hJ
+      have member := subset with J, hJ
+      obtain ⟨boundedJ, properJ⟩ := properIdeals.membership.forward with member
+      exact properJ
+    have unionProper := IsProperIdeal.union_chain with inhabited, ideals, nested
+    exact properIdeals.contains with unionProper
+  obtain ⟨M, memberM, extends, maximal⟩ := maximal_extension with seed, closed
+  obtain ⟨boundedM, properM⟩ := properIdeals.membership.forward with memberM
+  witness M
+  constructor
+    constructor
+    . exact properM
+    . intros J properJ contains
+      have memberJ := properIdeals.contains with properJ
+      exact maximal with J, memberJ, contains
+  . exact extends
+
+-- In a nontrivial unital ring the zero ideal supplies the seed.
+theorem IsMaximalIdeal.exists_of_nontrivial (A add zero neg mul one : Set)
+  requires ring : IsRing(A, add, zero, neg, mul, one)
+  requires nontrivial : Nontrivial(A, zero, one)
+  shows ∃ M, IsMaximalIdeal(A, add, zero, neg, mul, one, M)
+proof
+  have initial := IsProperIdeal.zero_ideal with ring, nontrivial
+  obtain ⟨M, maximal, extends⟩ := IsMaximalIdeal.exists_above with initial
+  refine ⟨M, maximal⟩
+
+-- Every proper ideal in a commutative ring is contained in a prime ideal.
+theorem IsPrimeIdeal.exists_above (A add zero neg mul one I : Set)
+  requires commRing : IsCommRing(A, add, zero, neg, mul, one)
+  requires proper : IsProperIdeal(A, add, zero, neg, mul, one, I)
+  shows ∃ P, IsPrimeIdeal(A, add, zero, neg, mul, one, P) ∧ I ⊆ P
+proof
+  obtain ⟨P, maximal, contains⟩ := IsMaximalIdeal.exists_above with proper
+  have prime := IsMaximalIdeal.is_prime with *
+  refine ⟨P, prime, contains⟩
+
+theorem IsPrimeIdeal.exists_of_nontrivial (A add zero neg mul one : Set)
+  requires commRing : IsCommRing(A, add, zero, neg, mul, one)
+  requires nontrivial : Nontrivial(A, zero, one)
+  shows ∃ P, IsPrimeIdeal(A, add, zero, neg, mul, one, P)
+proof
+  have ring := IsCommRing.ring with commRing
+  obtain ⟨P, maximal⟩ := IsMaximalIdeal.exists_of_nontrivial at A, add, zero, neg, mul, one with *
+  have prime := IsMaximalIdeal.is_prime with *
+  refine ⟨P, prime⟩
+
+-- The maximal-ideal reduction needed by the weak Nullstellensatz.
+section GeneratedIdeals
+variable (A add zero neg mul one G : Set)
+hypothesis ring : IsCommRing(A, add, zero, neg, mul, one)
+hypothesis bounded : G ⊆ A
+notation ring R := (A, add, zero, neg, mul, one)
+
+theorem idealSpan.exists_maximal
+  requires proper : ¬(1 ∈ idealSpan(A, add, zero, neg, mul, G))
+  shows ∃ M, IsMaximalIdeal(A, add, zero, neg, mul, one, M) ∧ G ⊆ M
+proof
+  have ideal := idealSpan.ideal at A, add, zero, neg, mul, one, G with ring
+  have properSpan : IsProperIdeal(A, add, zero, neg, mul, one, idealSpan(A, add, zero, neg, mul, G))
+    unfold IsProperIdeal
+    refine ⟨ideal, proper⟩
+  obtain ⟨M, maximal, includes⟩ := IsMaximalIdeal.exists_above with properSpan
+  have generators := idealSpan.contains at A, add, zero, neg, mul, G with bounded
+  have contains := Subset.transitive with generators, includes
+  refine ⟨M, maximal, contains⟩
+
+theorem idealSpan.unit_iff_no_maximal
+  shows 1 ∈ idealSpan(A, add, zero, neg, mul, G) ↔
+    ¬(∃ M, IsMaximalIdeal(A, add, zero, neg, mul, one, M) ∧ G ⊆ M)
+proof
+  constructor
+  . intros certificate witness
+    obtain ⟨M, maximal, contains⟩ := witness
+    have ideal := IsMaximalIdeal.ideal with maximal
+    have proper := IsMaximalIdeal.proper with maximal
+    have included := idealSpan.least with ideal, contains
+    have member := included with one, certificate
+    exact proper.right with member
+  . intro absent
+    have alternatives : 1 ∈ idealSpan(A, add, zero, neg, mul, G) ∨ ¬(1 ∈ idealSpan(A, add, zero, neg, mul, G))
+      tauto
+    cases alternatives with certificate | proper
+    . exact certificate
+    . exfalso
+      have witness := idealSpan.exists_maximal with ring, bounded, proper
+      exact absent with witness
+
+end GeneratedIdeals
+
+-- The same results for a bundled ring.
+section BundledMaximal
+variable (R : Set)
+hypothesis ring : Ring(R)
+
+theorem ProperIdeal.extends_maximal (I : Set)
+  requires proper : ProperIdeal(R, I)
+  shows ∃ M, MaximalIdeal(R, M) ∧ I ⊆ M
+proof
+  have parts := ProperIdeal.parts with proper
+  obtain ⟨M, maximal, includes⟩ := IsMaximalIdeal.exists_above with parts
+  have bundled := MaximalIdeal.of_projections with maximal
+  refine ⟨M, bundled, includes⟩
+
+theorem MaximalIdeal.exists
+  requires nontrivial : R[0] ≠ R[1]
+  shows ∃ M, MaximalIdeal(R, M)
+proof
+  have proper := ProperIdeal.zero with ring, nontrivial
+  obtain ⟨M, maximal, includes⟩ := ProperIdeal.extends_maximal with ring, proper
+  refine ⟨M, maximal⟩
+
+end BundledMaximal
+
+section BundledPrime
+variable (R : Set)
+hypothesis comm : CommRing(R)
+
+theorem ProperIdeal.extends_prime (I : Set)
+  requires proper : ProperIdeal(R, I)
+  shows ∃ P, PrimeIdeal(R, P) ∧ I ⊆ P
+proof
+  have ring := CommRing.to_ring with comm
+  obtain ⟨P, maximal, includes⟩ := ProperIdeal.extends_maximal with ring, proper
+  have prime := MaximalIdeal.prime with comm, maximal
+  refine ⟨P, prime, includes⟩
+
+theorem PrimeIdeal.exists
+  requires nontrivial : R[0] ≠ R[1]
+  shows ∃ P, PrimeIdeal(R, P)
+proof
+  have ring := CommRing.to_ring with comm
+  obtain ⟨M, maximal⟩ := MaximalIdeal.exists with ring, nontrivial
+  have prime := MaximalIdeal.prime with comm, maximal
+  refine ⟨M, prime⟩
+
+-- A set generating a proper ideal lies in a maximal ideal.
+theorem generatedIdeal.exists_maximal (G : Set)
+  requires bounded : G ⊆ R
+  requires proper : R[1] ∉ generatedIdeal(R, G)
+  shows ∃ M, MaximalIdeal(R, M) ∧ G ⊆ M
+proof
+  have ring := CommRing.to_ring with comm
+  have ideal := generatedIdeal.ideal at R, G with comm
+  have properSpan := ProperIdeal.mk with ring, ideal, proper
+  obtain ⟨M, maximal, includes⟩ := ProperIdeal.extends_maximal with ring, properSpan
+  have generators := generatedIdeal.contains with comm, bounded
+  have contains := Subset.transitive with generators, includes
+  refine ⟨M, maximal, contains⟩
+
+end BundledPrime

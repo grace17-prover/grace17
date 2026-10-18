@@ -1,0 +1,833 @@
+-- Sylow's theorems: p-subgroups and Sylow p-subgroups of a finite group of
+-- order p ^ k * m with p prime not dividing m; a group of prime-power order
+-- moves a number of points divisible by p; a subgroup of order p ^ k
+-- exists, every p-subgroup lies in a conjugate of it, any two Sylow
+-- p-subgroups are conjugate, and their number divides m and is 1 modulo p
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Sylow
+import Translation
+import PrimeBinomial
+import NumberTheory.GCDMore
+
+-- A p-subgroup is a subgroup of order a power of p; a Sylow p-subgroup is
+-- a subgroup of order the full power of p in the order of the group.
+predicate PSubgroup (P G : Set, p : Nat) :=
+  Subgroup(P, G) ∧ ∃ j, Nat(j) ∧ cardinality(P) = p ^ j
+
+predicate SylowSubgroup (P G : Set, p : Nat) :=
+  Subgroup(P, G) ∧ ∃ k, Nat(k) ∧ ∃ m, Nat(m) ∧ ¬(p ∣ m) ∧
+    order(G) = p ^ k * m ∧ cardinality(P) = p ^ k
+
+def sylowSubgroups (G : Set, p : Nat) : Set :=
+  { P ∈ 𝒫(G.carrier) | SylowSubgroup(P, G, p) }
+
+theorem sylowSubgroups.membership (G P : Set, p : Nat)
+  shows P ∈ sylowSubgroups(G, p) ↔ P ∈ 𝒫(G.carrier) ∧ SylowSubgroup(P, G, p)
+proof
+  simp [sylowSubgroups]
+
+theorem sylowSubgroups.subset_powerset (G : Set, p : Nat)
+  shows sylowSubgroups(G, p) ⊆ 𝒫(G.carrier)
+proof
+  intros P hP
+  have parts := sylowSubgroups.membership.forward with hP
+  exact parts.left
+
+theorem SylowSubgroup.subgroup (P G : Set, p : Nat)
+  requires sylow : SylowSubgroup(P, G, p)
+  shows Subgroup(P, G)
+proof
+  obtain ⟨subgroup, rest⟩ := sylow
+  exact subgroup
+
+theorem SylowSubgroup.p_subgroup (P G : Set, p : Nat)
+  requires sylow : SylowSubgroup(P, G, p)
+  shows PSubgroup(P, G, p)
+proof
+  obtain ⟨subgroup, k, kNat, m, mNat, notDivides, count, size⟩ := sylow
+  unfold PSubgroup
+  exact ⟨subgroup, k, kNat, size⟩
+
+-- A divisor of a prime power other than one is divisible by the prime.
+theorem Prime.divides_of_divides_pow (p d j : Nat)
+  requires prime : Prime(p)
+  requires divides : d ∣ p ^ j
+  requires nontrivial : d ≠ 1
+  shows p ∣ d
+proof
+  by_contra notDivides
+  have base := Prime.gcd_of_not_divides with prime, notDivides
+  have coprime := coprime.pow_left at p, d, j with base
+  have scaled : d ∣ p ^ j * 1
+    rw mul.right_unit
+    exact divides
+  have one := coprime.cancel at p ^ j, d, 1 with coprime, scaled
+  have dNat : Nat(d) by typecheck
+  exact nontrivial with (divides.one_only with dNat, one)
+
+section PrimePowerActions
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem Subgroup.cardinality_ne_zero (H : Set)
+  requires subgroup : Subgroup(H, G)
+  requires finite : Finite(G)
+  shows cardinality(H) ≠ 0
+proof
+  intro zero
+  have finiteH := Subgroup.finite with *
+  have correct := cardinality.correct with finiteH
+  rw zero at correct
+  have empty := HasCardinality.empty_of_zero at H with correct
+  have unitIn : G.one ∈ H := Subgroup.one_mem with *
+  rw empty at unitIn
+  exact set.empty with unitIn
+
+-- A group of order p ^ j acting on a finite set moves a number of points
+-- divisible by p: every orbit outside the fixed points has more than one
+-- point and a size dividing p ^ j.
+theorem Action.prime_power_moved (act X : Set) (p j : Nat)
+  requires action : act : G ↷ X
+  requires finite : Finite(X)
+  requires finiteGroup : Finite(G)
+  requires prime : Prime(p)
+  requires count : order(G) = p ^ j
+  shows p ∣ cardinality(X ∖ fixedPoints(act, G, X))
+proof
+  apply fixedPoints.difference_dvd with action, finite
+  intros x hx notFixed
+  have orbitDivides := orbit.cardinality_dvd with action, hx, finiteGroup
+  rw count at orbitDivides
+  have nontrivial : cardinality(orbit(x)) ≠ 1
+    intro one
+    apply notFixed
+    apply fixedPoints.of_orbit with action, hx
+    by_contra different
+    have included : {x} ⊆ orbit(x)
+      intros y hy
+      have equal := singleton.membership.forward with hy
+      rw equal
+      exact orbit.self with *
+    have differentSides : {x} ≠ orbit(x)
+      intro equal
+      apply different
+      symm
+      exact equal
+    have finiteOrbit := orbit.finite at act, G, X, x with action, finite
+    have strict := cardinality.strict_of_ne with
+      finiteOrbit, included, differentSides
+    rw [cardinality.singleton, one] at strict
+    exact Less.irreflexive at 1 with strict
+  exact Prime.divides_of_divides_pow with prime, orbitDivides, nontrivial
+
+-- When p does not divide the size of a finite set acted on, some orbit has
+-- size prime to p: otherwise no point is fixed, and p would divide the
+-- number of points.
+theorem Action.exists_orbit_not_dvd (act X : Set) (p : Nat)
+  requires action : act : G ↷ X
+  requires finite : Finite(X)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ cardinality(X))
+  shows ∃ x ∈ X, ¬(p ∣ cardinality(orbit(x)))
+proof
+  by_contra allDivisible
+  apply notDivides
+  have orbitsDivisible : ∀ x ∈ X, p ∣ cardinality(orbit(x))
+    intros x hx
+    by_contra orbitPrime
+    exact allDivisible with ⟨x, hx, orbitPrime⟩
+  have moved : ∀ x ∈ X, ¬x ∈ fixedPoints(act, G, X) → p ∣ cardinality(orbit(x))
+    intros x hx notFixed
+    exact orbitsDivisible with x, hx
+  have noFixed : ∀ x ∈ X, ¬x ∈ fixedPoints(act, G, X)
+    intros x hx fixed
+    have single : orbit(x) = {x} := fixedPoints.orbit with *
+    have divides := orbitsDivisible with x, hx
+    rw [single, cardinality.singleton] at divides
+    have one := divides.one_only with assumption, divides
+    have above := Prime.greater_than_one with prime
+    rw one at above
+    exact Less.irreflexive at 1 with above
+  have divides := fixedPoints.difference_dvd with action, finite, moved
+  have same : X ∖ fixedPoints(act, G, X) = X
+    ext x
+    constructor
+    . intro hx
+      obtain ⟨xIn, notFixed⟩ := difference.membership.forward with hx
+      exact xIn
+    . intro hx
+      exact difference.membership.backward with ⟨hx, (noFixed with x, hx)⟩
+  rw same at divides
+  exact divides
+
+end PrimePowerActions
+
+section SylowExistence
+variable (G : Set)
+hypothesis group : Group(G)
+
+-- Sylow's first theorem: a finite group of order p ^ k * m, with p prime
+-- not dividing m, has a subgroup of order p ^ k. The group acts by
+-- translation on its subsets of size p ^ k; there are
+-- (p ^ k * m) choose (p ^ k) of them, a number prime to p, so some orbit
+-- has size prime to p, and the stabilizer of a subset in that orbit has
+-- order divisible by p ^ k and at most p ^ k.
+theorem sylow.exists_subgroup (p k m : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ m)
+  requires count : order(G) = p ^ k * m
+  shows ∃ P, Subgroup(P, G) ∧ cardinality(P) = p ^ k
+proof
+  have bounded := subsetsOfSize.subset_powerset at G.carrier, p ^ k
+  have closed := subsetsOfSize.translation_closed at G, p ^ k with *
+  have action := translation.action with group, bounded, closed
+  have finiteFamily := subsetsOfSize.finite at G.carrier, p ^ k with finite
+  have familyCount : cardinality(subsetsOfSize(G.carrier, p ^ k)) = (p ^ k * m) choose (p ^ k)
+    have counted := combinations.count at G.carrier, p ^ k with finite
+    rw [counted, ← order.value, count]
+    rfl
+  have familyPrime : ¬(p ∣ cardinality(subsetsOfSize(G.carrier, p ^ k)))
+    rw familyCount
+    exact choose.prime_power_not_divides with *
+  have powerNonzero := pow.ne_zero at p, k with (Prime.nonzero with prime)
+  have someOrbit := Action.exists_orbit_not_dvd with
+    action, finiteFamily, prime, familyPrime
+  obtain ⟨S, hS, orbitPrime⟩ := someOrbit
+  obtain ⟨boundS, countedS⟩ := subsetsOfSize.membership.forward with hS
+  have sizeS := cardinality.eq_of_has with countedS
+  have subgroup := stabilizer.subgroup with action, hS
+  have finiteStabilizer := Subgroup.finite with group, subgroup, finite
+  have stabilizerNat := cardinality.nat with finiteStabilizer
+  have finiteOrbit := orbit.finite_of_group with action, hS, finite
+  have orbitNat := cardinality.nat with finiteOrbit
+  have product := orbit_stabilizer with action, hS, finite
+  rw count at product
+  -- p ^ k divides the order of the stabilizer, which is at most p ^ k.
+  have base := Prime.gcd_of_not_divides with prime, orbitPrime
+  have swapped := coprime.symmetric at p, cardinality(orbit(S)) with base
+  have coprime := coprime.pow_right at cardinality(orbit(S)), p, k with swapped
+  have dividesProduct : p ^ k ∣ cardinality(orbit(S)) * cardinality(stabilizer(S))
+    rw product
+    exact divides.mul_left_self at p ^ k, m
+  have dividesStabilizer := coprime.cancel at
+    cardinality(orbit(S)), p ^ k, cardinality(stabilizer(S)) with
+    coprime, dividesProduct
+  have inhabited := subsetsOfSize.nonempty with hS, powerNonzero
+  have upper := translation.stabilizer_card_le with
+    group, bounded, closed, finite, hS, inhabited
+  rw sizeS at upper
+  have nonzero := Subgroup.cardinality_ne_zero with subgroup, finite
+  have lower := divides.le with dividesStabilizer, nonzero
+  have equal := LessEqual.antisymmetric with upper, lower
+  refine ⟨stabilizer(S), subgroup, equal⟩
+
+theorem SylowSubgroup.exists (p k m : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ m)
+  requires count : order(G) = p ^ k * m
+  shows ∃ P, SylowSubgroup(P, G, p)
+proof
+  obtain ⟨P, subgroup, size⟩ := sylow.exists_subgroup with *
+  witness P
+  unfold SylowSubgroup
+  refine ⟨subgroup, k, assumption, m, assumption, notDivides, count, size⟩
+
+end SylowExistence
+
+-- The exponent of p in p ^ j * a with p not dividing a is determined.
+theorem Prime.divides_of_pow_mul_lt (p a b j i : Nat)
+  requires prime : Prime(p)
+  requires below : j < i
+  requires equal : p ^ j * a = p ^ i * b
+  shows p ∣ a
+proof
+  have pNonzero := Prime.nonzero with prime
+  obtain ⟨d, dNat, shape⟩ := below
+  have baseNat : Nat(p ^ j) by typecheck
+  have restNat : Nat(p ^ d) by typecheck
+  have split : p ^ i = p ^ j * (p * p ^ d)
+    rw [← shape, pow.add, pow.succ]
+    ring
+  have shuffle : p ^ j * (p * p ^ d) * b = p ^ j * (p * p ^ d * b) by ring
+  rw [split, shuffle] at equal
+  have nonzero := pow.ne_zero at p, j with pNonzero
+  have cancelled := mul.left_cancel_positive at a, p * p ^ d * b, p ^ j with
+    nonzero, equal
+  have divides : p ∣ p * p ^ d * b :=
+    divides.multiply_right at p, p * p ^ d, b with (divides.mul_left_self at p, p ^ d)
+  rwa ← cancelled at divides
+
+theorem Prime.pow_mul_exponent (p a b j i : Nat)
+  requires prime : Prime(p)
+  requires notA : ¬(p ∣ a)
+  requires notB : ¬(p ∣ b)
+  requires equal : p ^ j * a = p ^ i * b
+  shows j = i
+proof
+  have jNat : Nat(j) by typecheck
+  have iNat : Nat(i) by typecheck
+  have comparison := Less.trichotomy at j, i with jNat, iNat
+  rcases comparison with below | same | above
+  . exfalso
+    exact notA with (Prime.divides_of_pow_mul_lt with prime, below, equal)
+  . exact same
+  . exfalso
+    symm at equal
+    exact notB with (Prime.divides_of_pow_mul_lt with prime, above, equal)
+
+theorem SylowSubgroup.cardinality_eq (P Q G : Set, p : Nat)
+  requires prime : Prime(p)
+  requires sylowP : SylowSubgroup(P, G, p)
+  requires sylowQ : SylowSubgroup(Q, G, p)
+  shows cardinality(P) = cardinality(Q)
+proof
+  obtain ⟨subgroupP, k, kNat, m, mNat, notDividesM, countP, sizeP⟩ := sylowP
+  obtain ⟨subgroupQ, i, iNat, n, nNat, notDividesN, countQ, sizeQ⟩ := sylowQ
+  have equal : p ^ k * m = p ^ i * n by cc
+  have exponent := Prime.pow_mul_exponent with prime, notDividesM, notDividesN, equal
+  rw [sizeP, sizeQ, exponent]
+  rfl
+
+-- The group on a subgroup: its order, its finiteness, the subgroups of G
+-- inside it, and its conjugates, read back in G.
+section SubgroupGroups
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem subgroupGroup.order (H : Set)
+  shows order(subgroupGroup(G, H)) = cardinality(H)
+proof
+  rw [order.value, subgroupGroup.carrierOf]
+  rfl
+
+theorem subgroupGroup.finite (H : Set)
+  requires finite : Finite(H)
+  shows Finite(Group.carrier(subgroupGroup(G, H)))
+proof
+  rw subgroupGroup.carrierOf
+  exact finite
+
+theorem Subgroup.of_subgroupGroup (S H : Set)
+  requires subgroupS : Subgroup(S, G)
+  requires subgroupH : Subgroup(H, G)
+  requires included : S ⊆ H
+  shows Subgroup(S, subgroupGroup(G, H))
+proof
+  have groupH := subgroupGroup.group with group, subgroupH
+  have bounded : S ⊆ Group.carrier(subgroupGroup(G, H))
+    rw subgroupGroup.carrierOf
+    exact included
+  have unitIn : Group.one(subgroupGroup(G, H)) ∈ S
+    rw subgroupGroup.unit
+    exact Subgroup.one_mem with subgroupS
+  apply Subgroup.mk with groupH, bounded, unitIn
+  . intros x hx y hy
+    have xH := included with x, hx
+    have yH := included with y, hy
+    have restricted : Group.mul(subgroupGroup(G, H))(x, y) = G.mul(x, y) :=
+      subgroupGroup.mul with group, subgroupH, xH, yH
+    rw restricted
+    exact Subgroup.mul_mem with subgroupS, hx, hy
+  . intros x hx
+    have xH := included with x, hx
+    have restricted : Group.inv(subgroupGroup(G, H))(x) = G.inv(x) :=
+      subgroupGroup.inverse_value with group, subgroupH, xH
+    rw restricted
+    exact Subgroup.inv_mem with subgroupS, hx
+
+theorem subgroupGroup.conjugate (H n q : Set)
+  requires subgroup : Subgroup(H, G)
+  requires hn : n ∈ H
+  requires hq : q ∈ H
+  shows conjugate(subgroupGroup(G, H), n, q) = conjugate(G, n, q)
+proof
+  have product : G.mul(n, q) ∈ H := Subgroup.mul_mem with *
+  have inverse : G.inv(n) ∈ H := Subgroup.inv_mem with *
+  have mulValue : Group.mul(subgroupGroup(G, H))(n, q) = G.mul(n, q) :=
+    subgroupGroup.mul with *
+  have invValue : Group.inv(subgroupGroup(G, H))(n) = G.inv(n) :=
+    subgroupGroup.inverse_value with *
+  have outer : Group.mul(subgroupGroup(G, H))(G.mul(n, q), G.inv(n)) =
+      G.mul(G.mul(n, q), G.inv(n)) := subgroupGroup.mul with *
+  rw [conjugate.value, conjugate.value, mulValue, invValue, outer]
+  rfl
+
+theorem subgroupGroup.conjugateSet (H n S : Set)
+  requires subgroup : Subgroup(H, G)
+  requires hn : n ∈ H
+  requires bounded : S ⊆ H
+  shows conjugateSet(subgroupGroup(G, H), n, S) = conjugateSet(G, n, S)
+proof
+  have nIn : n ∈ G := Subgroup.mem_carrier with *
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    rw subgroupGroup.carrierOf at yIn
+    have sH := bounded with s, hs
+    have same := subgroupGroup.conjugate with group, subgroup, hn, sH
+    have yG : y ∈ G := Subgroup.mem_carrier with subgroup, yIn
+    apply conjugateSet.membership.backward
+    refine ⟨yG, s, hs, ?_⟩
+    rw [yEq, same]
+    rfl
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    have sH := bounded with s, hs
+    have same := subgroupGroup.conjugate with group, subgroup, hn, sH
+    have inH : conjugate(G, n, s) ∈ H
+      rw conjugate.value
+      typecheck
+    have yH : y ∈ Group.carrier(subgroupGroup(G, H))
+      rw [subgroupGroup.carrierOf, yEq]
+      exact inH
+    apply conjugateSet.membership.backward
+    refine ⟨yH, s, hs, ?_⟩
+    rw [yEq, same]
+    rfl
+
+end SubgroupGroups
+
+section SylowConjugacy
+variable (G : Set)
+hypothesis group : Group(G)
+
+-- Conjugates of Sylow subgroups are Sylow subgroups.
+theorem SylowSubgroup.conjugate (P : Set) (g : G) (p : Nat)
+  requires finite : Finite(G)
+  requires sylow : SylowSubgroup(P, G, p)
+  shows SylowSubgroup(conjugateSet(G, g, P), G, p)
+proof
+  obtain ⟨subgroup, k, kNat, m, mNat, notDivides, count, size⟩ := sylow
+  have bounded := Subgroup.subset with subgroup
+  have finiteP := Subgroup.finite with *
+  have conjugateSubgroup := conjugateSet.subgroup with *
+  have gIn : g ∈ G by assumption
+  have same := conjugateSet.cardinality with group, gIn, bounded, finiteP
+  unfold SylowSubgroup
+  refine ⟨conjugateSubgroup, k, kNat, m, mNat, notDivides, count, ?_⟩
+  rw same
+  exact size
+
+-- A subgroup of order p ^ k in a group of order p ^ k * m has index m.
+theorem Subgroup.index_of_order (P : Set) (p k m : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires subgroup : Subgroup(P, G)
+  requires count : order(G) = p ^ k * m
+  requires size : cardinality(P) = p ^ k
+  shows index(G, P) = m
+proof
+  have lagrangeP := lagrange with *
+  have indexNat := index.nat with *
+  have powerNat : Nat(p ^ k) by typecheck
+  have commuted : index(G, P) * p ^ k = p ^ k * index(G, P) :=
+    mul.commutative with *
+  rw [count, size, commuted] at lagrangeP
+  have nonzero := pow.ne_zero at p, k with (Prime.nonzero with prime)
+  have cancelled := mul.left_cancel_positive at m, index(G, P), p ^ k with
+    nonzero, lagrangeP
+  symm
+  exact cancelled
+
+-- Sylow's second theorem: every p-subgroup lies in a conjugate of a Sylow
+-- p-subgroup P. The p-subgroup Q acts by translation on the cosets of P,
+-- whose number is prime to p, so it fixes some coset g • P, and then
+-- g⁻¹ * q * g ∈ P for every q ∈ Q.
+theorem sylow.subset_conjugate (P Q : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylow : SylowSubgroup(P, G, p)
+  requires pSubgroup : PSubgroup(Q, G, p)
+  shows ∃ g ∈ G, Q ⊆ conjugateSet(G, g, P)
+proof
+  obtain ⟨subgroupP, k, kNat, m, mNat, notDivides, count, sizeP⟩ := sylow
+  obtain ⟨subgroupQ, j, jNat, sizeQ⟩ := pSubgroup
+  have boundedP := Subgroup.subset with subgroupP
+  have closed := leftCosets.translation_closed with group, subgroupP
+  have cosetAction := leftCosets.action with group, subgroupP
+  have action := Action.restrict with cosetAction, subgroupQ
+  have groupQ := subgroupGroup.group with group, subgroupQ
+  have finiteCosets := leftCosets.finite with group, subgroupP, finite
+  have finiteQ := Subgroup.finite with group, subgroupQ, finite
+  have finiteQGroup := subgroupGroup.finite at G, Q with group, finiteQ
+  have orderQ : order(subgroupGroup(G, Q)) = p ^ j
+    rw subgroupGroup.order
+    exact sizeQ
+  have moved := Action.prime_power_moved at subgroupGroup(G, Q), restrict(translation(G, leftCosets(G, P)), Q × leftCosets(G, P)), leftCosets(G, P), p, j with groupQ, action, finiteCosets, finiteQGroup, prime, orderQ
+  have indexEq := Subgroup.index_of_order with
+    group, finite, prime, subgroupP, count, sizeP
+  -- The number of cosets is m, so some coset is fixed by Q.
+  have someFixed : ∃ C, C ∈ fixedPoints(restrict(translation(G, leftCosets(G, P)), Q × leftCosets(G, P)), subgroupGroup(G, Q), leftCosets(G, P))
+    by_contra none
+    apply notDivides
+    have same : leftCosets(G, P) ∖ fixedPoints(restrict(translation(G, leftCosets(G, P)), Q × leftCosets(G, P)), subgroupGroup(G, Q), leftCosets(G, P)) = leftCosets(G, P)
+      ext C
+      constructor
+      . intro hC
+        obtain ⟨inCosets, notFixed⟩ := difference.membership.forward with hC
+        exact inCosets
+      . intro hC
+        have notFixed : ¬C ∈ fixedPoints(restrict(translation(G, leftCosets(G, P)), Q × leftCosets(G, P)), subgroupGroup(G, Q), leftCosets(G, P))
+          intro fixed
+          exact none with ⟨C, fixed⟩
+        exact difference.membership.backward with ⟨hC, notFixed⟩
+    rw [same, ← index.value, indexEq] at moved
+    exact moved
+  obtain ⟨C, hC⟩ := someFixed
+  have criterion := Action.restrict_fixed_points at translation(G, leftCosets(G, P)), G, leftCosets(G, P), Q, C with cosetAction, subgroupQ
+  obtain ⟨cosetIn, fixes⟩ := criterion.forward with hC
+  obtain ⟨bound, g, hg, CEq⟩ := leftCosets.membership.forward with cosetIn
+  witness g
+  constructor
+  . exact hg
+  . intros q hq
+    have qIn : q ∈ G := Subgroup.mem_carrier with subgroupQ, hq
+    have fixed := fixes with q, hq
+    have value := translation.value with group, closed, qIn, cosetIn
+    have translated : q • C = C by cc
+    rw CEq at translated
+    have merged : q • (g • P) = (q * g) • P := leftCoset.mul_of_subset with *
+    rw merged at translated
+    symm at translated
+    have criterion2 : g • P = (q * g) • P ↔ g⁻¹ * (q * g) ∈ P :=
+      leftCoset.eq_iff with *
+    have member := criterion2.forward with translated
+    have shape : conjugate(G, g⁻¹, q) = g⁻¹ * (q * g)
+      rw [conjugate.value, inv_inv, mul_assoc]
+      rfl
+    have conjugateIn : conjugate(G, g⁻¹, q) ∈ P by rwa shape
+    have criterion3 := conjugateSet.mem_iff at G, g, P, q with group, boundedP, qIn
+    exact criterion3.backward with conjugateIn
+
+-- Any two Sylow p-subgroups are conjugate.
+theorem sylow.conjugate (P Q : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylowP : SylowSubgroup(P, G, p)
+  requires sylowQ : SylowSubgroup(Q, G, p)
+  shows ∃ g ∈ G, Q = conjugateSet(G, g, P)
+proof
+  have pSubgroup := SylowSubgroup.p_subgroup with sylowQ
+  obtain ⟨g, hg, included⟩ := sylow.subset_conjugate at G, P, Q, p with
+    group, finite, prime, sylowP, pSubgroup
+  have sameSize := SylowSubgroup.cardinality_eq with prime, sylowP, sylowQ
+  have subgroupP := SylowSubgroup.subgroup with sylowP
+  have boundedP := Subgroup.subset with subgroupP
+  have finiteP := Subgroup.finite with group, subgroupP, finite
+  have conjugateSize := conjugateSet.cardinality with group, hg, boundedP, finiteP
+  have finiteConjugate := conjugateSet.finite with group, hg, boundedP, finiteP
+  have equalSize : cardinality(Q) = cardinality(conjugateSet(G, g, P)) by cc
+  witness g
+  constructor
+  . exact hg
+  . exact cardinality.eq_subset with finiteConjugate, included, equalSize
+
+-- A Sylow p-subgroup normalized by another is that one: in the normalizer
+-- of Q, the subgroup Q is a normal Sylow p-subgroup and P a p-subgroup,
+-- so P lies in a conjugate of Q, which is Q itself.
+theorem SylowSubgroup.eq_of_normalizes (P Q : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylowP : SylowSubgroup(P, G, p)
+  requires sylowQ : SylowSubgroup(Q, G, p)
+  requires normalizes : P ⊆ normalizer(G, Q)
+  shows P = Q
+proof
+  have sizeP := SylowSubgroup.cardinality_eq with prime, sylowP, sylowQ
+  have subgroupP := SylowSubgroup.subgroup with sylowP
+  obtain ⟨subgroupQ, k, kNat, m, mNat, notDivides, count, sizeQ⟩ := sylowQ
+  have boundedQ := Subgroup.subset with subgroupQ
+  have normalizerSubgroup := normalizer.subgroup with group, boundedQ
+  have containedQ := normalizer.contains with group, subgroupQ
+  have groupN := subgroupGroup.group with group, normalizerSubgroup
+  have finiteN := Subgroup.finite with group, normalizerSubgroup, finite
+  have finiteNGroup := subgroupGroup.finite at G, normalizer(G, Q) with
+    group, finiteN
+  have subgroupQN := Subgroup.of_subgroupGroup with
+    group, subgroupQ, normalizerSubgroup, containedQ
+  have subgroupPN := Subgroup.of_subgroupGroup with
+    group, subgroupP, normalizerSubgroup, normalizes
+  -- The order of the normalizer is p ^ k times a number prime to p.
+  have dividesN := lagrange.theorem at subgroupGroup(G, normalizer(G, Q)), Q with
+    groupN, subgroupQN, finiteNGroup
+  rw [subgroupGroup.order, sizeQ] at dividesN
+  obtain ⟨t, tNat, NEq⟩ := dividesN
+  have dividesG := lagrange.theorem with group, normalizerSubgroup, finite
+  rw [count, ← NEq] at dividesG
+  have nonzero := pow.ne_zero at p, k with (Prime.nonzero with prime)
+  have cancel := divides.mul_cancel_left at p ^ k, t, m with nonzero
+  have tDividesM := cancel.forward with dividesG
+  have tPrime : ¬(p ∣ t)
+    intro pt
+    exact notDivides with (divides.transitive with pt, tDividesM)
+  have sylowQN : SylowSubgroup(Q, subgroupGroup(G, normalizer(G, Q)), p)
+    unfold SylowSubgroup
+    refine ⟨subgroupQN, k, kNat, t, tNat, tPrime, ?_, sizeQ⟩
+    rw subgroupGroup.order
+    symm
+    exact NEq
+  have pSubgroupPN : PSubgroup(P, subgroupGroup(G, normalizer(G, Q)), p)
+    unfold PSubgroup
+    refine ⟨subgroupPN, k, kNat, ?_⟩
+    rw sizeP
+    exact sizeQ
+  obtain ⟨n, hn, included⟩ := sylow.subset_conjugate at
+    subgroupGroup(G, normalizer(G, Q)), Q, P, p with
+    groupN, finiteNGroup, prime, sylowQN, pSubgroupPN
+  rw subgroupGroup.carrierOf at hn
+  have same := subgroupGroup.conjugateSet at G, normalizer(G, Q), n, Q with
+    group, normalizerSubgroup, hn, containedQ
+  obtain ⟨nIn, fixedQ⟩ := normalizer.membership.forward with hn
+  rw [same, fixedQ] at included
+  have finiteQ := Subgroup.finite with group, subgroupQ, finite
+  exact cardinality.eq_subset with finiteQ, included, sizeP
+
+end SylowConjugacy
+
+section SylowCount
+variable (G : Set)
+hypothesis group : Group(G)
+
+-- The Sylow p-subgroups are the conjugates of any one of them, so their
+-- number is the index of its normalizer.
+theorem sylowSubgroups.eq_conjugates (P : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylow : SylowSubgroup(P, G, p)
+  shows sylowSubgroups(G, p) = conjugates(G, P)
+proof
+  have subgroupP := SylowSubgroup.subgroup with sylow
+  have boundedP := Subgroup.subset with subgroupP
+  ext Q
+  constructor
+  . intro hQ
+    obtain ⟨bound, sylowQ⟩ := sylowSubgroups.membership.forward with hQ
+    obtain ⟨g, hg, QEq⟩ := sylow.conjugate at G, P, Q, p with
+      group, finite, prime, sylow, sylowQ
+    have criterion := conjugates.membership at G, P, Q with group, boundedP
+    exact criterion.backward with ⟨g, hg, QEq⟩
+  . intro hQ
+    have criterion := conjugates.membership at G, P, Q with group, boundedP
+    obtain ⟨g, hg, QEq⟩ := criterion.forward with hQ
+    have sylowQ : SylowSubgroup(Q, G, p)
+      rw QEq
+      exact SylowSubgroup.conjugate at G, P, g, p with group, finite, sylow
+    have boundQ := powerset.membership_iff.backward with
+      (Subgroup.subset with (SylowSubgroup.subgroup with sylowQ))
+    exact sylowSubgroups.membership.backward with ⟨boundQ, sylowQ⟩
+
+theorem sylow.count_eq_index (P : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylow : SylowSubgroup(P, G, p)
+  shows cardinality(sylowSubgroups(G, p)) = index(G, normalizer(G, P))
+proof
+  have boundedP := Subgroup.subset with (SylowSubgroup.subgroup with sylow)
+  have same := sylowSubgroups.eq_conjugates with *
+  rw same
+  exact conjugates.cardinality_eq_index with group, boundedP, finite
+
+-- Sylow's third theorem, first half: the number of Sylow p-subgroups
+-- divides m, since it is the index of a normalizer whose order is a
+-- multiple of p ^ k.
+theorem sylow.count_dvd (p k m : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ m)
+  requires count : order(G) = p ^ k * m
+  shows cardinality(sylowSubgroups(G, p)) ∣ m
+proof
+  obtain ⟨P, subgroupP, sizeP⟩ := sylow.exists_subgroup with *
+  have sylow : SylowSubgroup(P, G, p)
+    unfold SylowSubgroup
+    refine ⟨subgroupP, k, assumption, m, assumption, notDivides, count, sizeP⟩
+  have boundedP := Subgroup.subset with subgroupP
+  have normalizerSubgroup := normalizer.subgroup with group, boundedP
+  have contained := normalizer.contains with group, subgroupP
+  have countIndex := sylow.count_eq_index with group, finite, prime, sylow
+  have lagrangeN := lagrange with group, normalizerSubgroup, finite
+  have groupN := subgroupGroup.group with group, normalizerSubgroup
+  have finiteN := Subgroup.finite with group, normalizerSubgroup, finite
+  have finiteNGroup := subgroupGroup.finite at G, normalizer(G, P) with
+    group, finiteN
+  have subgroupPN := Subgroup.of_subgroupGroup with
+    group, subgroupP, normalizerSubgroup, contained
+  have dividesN := lagrange.theorem at subgroupGroup(G, normalizer(G, P)), P with
+    groupN, subgroupPN, finiteNGroup
+  rw [subgroupGroup.order, sizeP] at dividesN
+  obtain ⟨t, tNat, NEq⟩ := dividesN
+  have indexNat := index.nat with group, normalizerSubgroup, finite
+  have powerNat : Nat(p ^ k) by typecheck
+  have shuffle : index(G, normalizer(G, P)) * (p ^ k * t) =
+      p ^ k * (index(G, normalizer(G, P)) * t) by ring
+  rw [count, ← NEq, shuffle] at lagrangeN
+  have nonzero := pow.ne_zero at p, k with (Prime.nonzero with prime)
+  have cancelled := mul.left_cancel_positive at
+    m, index(G, normalizer(G, P)) * t, p ^ k with nonzero, lagrangeN
+  have finiteSyl := Finite.subset with
+    (Finite.powerset with finite), (sylowSubgroups.subset_powerset at G, p)
+  have sylNat := cardinality.nat with finiteSyl
+  witness t
+  rw countIndex
+  symm
+  exact cancelled
+
+end SylowCount
+
+-- The action of a Sylow p-subgroup P on the Sylow p-subgroups by
+-- conjugation: the conjugation action of G on its subsets, restricted to
+-- the Sylow p-subgroups and to P.
+def sylowConjugation (G P : Set, p : Nat) : Set :=
+  restrict(restrict(subsetConjugation(G), G.carrier × sylowSubgroups(G, p)),
+    P × sylowSubgroups(G, p))
+
+theorem sylowConjugation.value (G P : Set, p : Nat)
+  shows sylowConjugation(G, P, p) =
+    restrict(restrict(subsetConjugation(G), G.carrier × sylowSubgroups(G, p)),
+      P × sylowSubgroups(G, p))
+proof
+  simp [sylowConjugation]
+
+section SylowModulo
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem sylowSubgroups.conjugation_closed (p : Nat)
+  requires finite : Finite(G)
+  shows ∀ g ∈ G.carrier, ∀ Q ∈ sylowSubgroups(G, p),
+    subsetConjugation(G)(g, Q) ∈ sylowSubgroups(G, p)
+proof
+  intros g hg Q hQ
+  obtain ⟨boundQ, sylowQ⟩ := sylowSubgroups.membership.forward with hQ
+  have value := subsetConjugation.value with group, hg, boundQ
+  rw value
+  have sylowConjugate := SylowSubgroup.conjugate at G, Q, g, p with
+    group, finite, sylowQ
+  have boundConjugate := powerset.membership_iff.backward with
+    (conjugateSet.subset at G, g, Q)
+  exact sylowSubgroups.membership.backward with ⟨boundConjugate, sylowConjugate⟩
+
+theorem sylowConjugation.action (P : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires subgroup : Subgroup(P, G)
+  shows sylowConjugation(G, P, p) : subgroupGroup(G, P) ↷ sylowSubgroups(G, p)
+proof
+  have action := subsetConjugation.action with group
+  have bounded := sylowSubgroups.subset_powerset at G, p
+  have closed := sylowSubgroups.conjugation_closed at G, p with group, finite
+  have restricted := Action.restrict_subset with action, bounded, closed
+  rw sylowConjugation.value
+  exact Action.restrict with restricted, subgroup
+
+-- A Sylow p-subgroup is fixed by P exactly when P normalizes it.
+theorem sylowConjugation.fixed_iff (P Q : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires subgroup : Subgroup(P, G)
+  shows Q ∈ fixedPoints(sylowConjugation(G, P, p), subgroupGroup(G, P), sylowSubgroups(G, p)) ↔
+    Q ∈ sylowSubgroups(G, p) ∧ P ⊆ normalizer(G, Q)
+proof
+  have action := subsetConjugation.action with group
+  have bounded := sylowSubgroups.subset_powerset at G, p
+  have closed := sylowSubgroups.conjugation_closed at G, p with group, finite
+  have restricted := Action.restrict_subset with action, bounded, closed
+  have criterion := Action.restrict_fixed_points at restrict(subsetConjugation(G), G.carrier × sylowSubgroups(G, p)), G, sylowSubgroups(G, p), P, Q with restricted, subgroup
+  rw sylowConjugation.value
+  constructor
+  . intro fixed
+    obtain ⟨QIn, fixes⟩ := criterion.forward with fixed
+    refine ⟨QIn, ?_⟩
+    intros x hx
+    have xIn : x ∈ G := Subgroup.mem_carrier with subgroup, hx
+    have value := Action.restrict_subset_value at subsetConjugation(G), G, 𝒫(G.carrier), sylowSubgroups(G, p), x, Q with action, bounded, closed, QIn
+    have conjugated := subsetConjugation.value with group, xIn, (bounded with Q, QIn)
+    have fixedX := fixes with x, hx
+    have same : conjugateSet(G, x, Q) = Q by cc
+    exact normalizer.membership.backward with ⟨xIn, same⟩
+  . intro normalizes
+    obtain ⟨QIn, included⟩ := normalizes
+    apply criterion.backward
+    refine ⟨QIn, ?_⟩
+    intros x hx
+    have xIn : x ∈ G := Subgroup.mem_carrier with subgroup, hx
+    have value := Action.restrict_subset_value at subsetConjugation(G), G, 𝒫(G.carrier), sylowSubgroups(G, p), x, Q with action, bounded, closed, QIn
+    have conjugated := subsetConjugation.value with group, xIn, (bounded with Q, QIn)
+    obtain ⟨xG, same⟩ := normalizer.membership.forward with (included with x, hx)
+    cc
+
+-- The only Sylow p-subgroup fixed by P is P itself.
+theorem sylowConjugation.fixed_points (P : Set) (p : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires sylowP : SylowSubgroup(P, G, p)
+  shows fixedPoints(sylowConjugation(G, P, p), subgroupGroup(G, P), sylowSubgroups(G, p)) = {P}
+proof
+  have subgroupP := SylowSubgroup.subgroup with sylowP
+  have boundedP := Subgroup.subset with subgroupP
+  have PIn : P ∈ sylowSubgroups(G, p) :=
+    sylowSubgroups.membership.backward with
+      ⟨(powerset.membership_iff.backward with boundedP), sylowP⟩
+  ext Q
+  have criterion := sylowConjugation.fixed_iff at G, P, Q, p with group, finite, subgroupP
+  constructor
+  . intro hQ
+    obtain ⟨QIn, normalizes⟩ := criterion.forward with hQ
+    obtain ⟨boundQ, sylowQ⟩ := sylowSubgroups.membership.forward with QIn
+    have equal := SylowSubgroup.eq_of_normalizes with
+      group, finite, prime, sylowP, sylowQ, normalizes
+    rw ← equal
+    exact singleton.self
+  . intro hQ
+    have equal := singleton.membership.forward with hQ
+    have criterionP := sylowConjugation.fixed_iff at G, P, P, p with group, finite, subgroupP
+    rw equal
+    apply criterionP.backward
+    exact ⟨PIn, (normalizer.contains with group, subgroupP)⟩
+
+-- Sylow's third theorem, second half: the number of Sylow p-subgroups is
+-- 1 modulo p. Under the conjugation action of a Sylow p-subgroup P the
+-- only fixed point is P, so p divides the number of the others.
+theorem sylow.count_mod (p k m : Nat)
+  requires finite : Finite(G)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ m)
+  requires count : order(G) = p ^ k * m
+  shows cardinality(sylowSubgroups(G, p)) % p = 1
+proof
+  obtain ⟨P, subgroupP, sizeP⟩ := sylow.exists_subgroup with *
+  have sylowP : SylowSubgroup(P, G, p)
+    unfold SylowSubgroup
+    refine ⟨subgroupP, k, assumption, m, assumption, notDivides, count, sizeP⟩
+  have finiteP := Subgroup.finite with group, subgroupP, finite
+  have action := sylowConjugation.action at G, P, p with group, finite, subgroupP
+  have groupP := subgroupGroup.group with group, subgroupP
+  have finitePGroup := subgroupGroup.finite at G, P with group, finiteP
+  have finiteSyl := Finite.subset with
+    (Finite.powerset with finite), (sylowSubgroups.subset_powerset at G, p)
+  have orderP : order(subgroupGroup(G, P)) = p ^ k
+    rw subgroupGroup.order
+    exact sizeP
+  have moved := Action.prime_power_moved at subgroupGroup(G, P), sylowConjugation(G, P, p), sylowSubgroups(G, p), p, k with groupP, action, finiteSyl, finitePGroup, prime, orderP
+  have fixedEq := sylowConjugation.fixed_points at G, P, p with group, finite, prime, sylowP
+  rw fixedEq at moved
+  -- The Sylow p-subgroups are P and a multiple of p others.
+  have fixedSubset := fixedPoints.subset at sylowConjugation(G, P, p), subgroupGroup(G, P), sylowSubgroups(G, p)
+  have split := difference.union2_of_subset with fixedSubset
+  have finiteFixed := Finite.subset with finiteSyl, fixedSubset
+  have finiteRest := Finite.subset with finiteSyl, (difference.subset_left at sylowSubgroups(G, p), fixedPoints(sylowConjugation(G, P, p), subgroupGroup(G, P), sylowSubgroups(G, p)))
+  have disjoint := Disjoint.symmetric with (difference.disjoint at sylowSubgroups(G, p), fixedPoints(sylowConjugation(G, P, p), subgroupGroup(G, P), sylowSubgroups(G, p)))
+  have total := cardinality.union_disjoint with finiteFixed, finiteRest, disjoint
+  rw [split, fixedEq, cardinality.singleton] at total
+  obtain ⟨s, sNat, restEq⟩ := moved
+  rw [total, ← restEq]
+  have wrap := mod.add_multiple at p, 1, s with (Prime.nonzero with prime)
+  rw wrap
+  exact mod.of_less with (Prime.greater_than_one with prime)
+
+end SylowModulo

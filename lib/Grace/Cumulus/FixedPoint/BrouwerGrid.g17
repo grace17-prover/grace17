@@ -1,0 +1,367 @@
+-- Dyadic grids on the unit cube: grid points scaled into the cube, the
+-- labelling of a grid point by comparing it with its image under a self-map
+-- of the cube, and the closeness of the points of one cell
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.FixedPoint.BrouwerGrid
+import CubeContinuity
+import KuhnInduction
+import Real.RootTwo
+
+-- Grid sizes 1, 2, 4, …, matched to the dyadic widths 1, 1/2, 1/4, ….
+def doubling (k : Nat) → Nat
+  | zero => succ(0)
+  | succ(k) => add(doubling(k), doubling(k))
+
+theorem doubling.zero
+  shows doubling(0) = succ(0)
+proof
+  simp [doubling]
+
+theorem doubling.step (k : Nat)
+  shows doubling(succ(k)) = add(doubling(k), doubling(k))
+proof
+  simp [doubling]
+
+theorem doubling.successor (k : Nat)
+  shows ∃ q, Nat(q) ∧ doubling(k) = succ(q)
+proof
+  induction k
+  | zero =>
+    witness 0
+    exact doubling.zero
+  | succ(j) using ih =>
+    obtain ⟨q, qNat, shape⟩ := ih
+    have sumNat : Nat(add(succ(q), q)) by typecheck
+    witness add(succ(q), q)
+    have step := doubling.step at j
+    rw [step, shape]
+    exact add.succ_right at q, succ(q)
+
+theorem doubling.real_scale (k : Nat)
+  shows (realNat(doubling(k)):R) * (dyadicRadius(k):R) = (1:R)
+proof
+  induction k
+  | zero =>
+    have d : dyadicRadius(0) = (1:R)
+      simp [dyadicRadius]
+    rw [doubling.zero, d, realNat.one]
+    exact realMulValue.one_right at (1:R)
+  | succ(j) using ih =>
+    have s := doubling.step at j
+    have d : dyadicRadius(succ(j)) = half(dyadicRadius(j))
+      simp [dyadicRadius]
+    have dReal := dyadicRadius.real at j
+    have aReal := realNat.real at doubling(j)
+    have hReal := half.real at dyadicRadius(j)
+    have halves := half.add_self at dyadicRadius(j)
+    rw [s, d, realNat.add]
+    have expand : ((realNat(doubling(j)):R) + (realNat(doubling(j)):R)) * (half(dyadicRadius(j)):R) = (realNat(doubling(j)):R) * ((half(dyadicRadius(j)):R) + (half(dyadicRadius(j)):R))
+      ring
+    rw [expand, halves]
+    exact ih
+
+-- Scaling a grid point into the unit cube.
+defgraph scaledPoint (k n x : Set) (i ∈ n) : ℝ := (realNat(x(i)):R) * (dyadicRadius(k):R)
+requires kNat : Nat(k)
+requires xFunction : x : n → succ(doubling(k))
+proof
+  have xi := FunctionBetween.apply_closed with xFunction, member
+  have xiNat := natural.member at succ(doubling(k)) with xi
+  exact realMulValue.real at realNat(x(i)), dyadicRadius(k)
+
+theorem realNat.le_of_le (m n : Nat)
+  requires bound : m ≤ n
+  shows realNat(m) ≤ realNat(n)
+proof
+  have less : m < succ(n) by arith
+  have inSucc := membership.of_Less with less
+  have split := bootstrap.succ.membership.forward with inSucc
+  cases split with below | same
+  . have strict := realNat.lt_of_lt with (Less.of_membership with below)
+    exact realLess.implies_le with strict
+  . rw same
+    linarith
+
+theorem scaledPoint.nonnegative (k n : Nat) (x i : Set)
+  requires xFunction : x : n → succ(doubling(k))
+  requires hi : i ∈ n
+  shows (0:R) ≤ scaledPoint(k, n, x)(i)
+proof
+  have value := scaledPoint.value at k, n, x, i with *
+  rw value
+  have xi := FunctionBetween.apply_closed with xFunction, hi
+  have xiNat := natural.member at succ(doubling(k)) with xi
+  have nonneg := realNat.nonnegative at x(i)
+  have positive := dyadicRadius.positive at k
+  have dNonneg := realLess.implies_le with positive
+  have step := realLe.mul_right_of_nonnegative with nonneg, dNonneg
+  have zero := realMulValue.zero_left at dyadicRadius(k)
+  rwa zero at step
+
+theorem scaledPoint.le_one (k n : Nat) (x i : Set)
+  requires xFunction : x : n → succ(doubling(k))
+  requires hi : i ∈ n
+  shows scaledPoint(k, n, x)(i) ≤ (1:R)
+proof
+  have value := scaledPoint.value at k, n, x, i with *
+  rw value
+  have xi := FunctionBetween.apply_closed with xFunction, hi
+  have xiNat := natural.member at succ(doubling(k)) with xi
+  have xiLess := Less.of_membership with xi
+  have xiLe : x(i) ≤ doubling(k) by arith
+  have bound := realNat.le_of_le with xiLe
+  have positive := dyadicRadius.positive at k
+  have dNonneg := realLess.implies_le with positive
+  have step := realLe.mul_right_of_nonnegative with bound, dNonneg
+  have scale := doubling.real_scale at k
+  rwa scale at step
+
+defgraph gridPoint (k n : Set) (x ∈ functionSpace(n, succ(doubling(k)))) : unitCube(n) := scaledPoint(k, n, x)
+requires kNat : Nat(k)
+requires nNat : Nat(n)
+proof
+  have xFunction := functionSpace.membership.forward with member
+  have function := scaledPoint.function with kNat, xFunction
+  apply unitCube.membership.backward
+  constructor
+  . exact functionSpace.membership.backward with function
+  . intros i hi
+    apply closedInterval.membership.backward
+    constructor
+    . exact FunctionBetween.apply_closed with function, hi
+    . constructor
+      . exact scaledPoint.nonnegative with xFunction, hi
+      . exact scaledPoint.le_one with xFunction, hi
+
+theorem gridPoint.coordinate (k n : Nat) (x i : Set)
+  requires hx : x ∈ functionSpace(n, succ(doubling(k)))
+  requires hi : i ∈ n
+  shows gridPoint(k, n)(x)(i) = (realNat(x(i)):R) * (dyadicRadius(k):R)
+proof
+  have xFunction := functionSpace.membership.forward with hx
+  have value := gridPoint.value at k, n, x with *
+  have scaled := scaledPoint.value at k, n, x, i with *
+  rw [value, scaled]
+  rfl
+
+-- The label of a grid point in direction i is 0 when the point lies on the
+-- near wall or below its image there, and 1 otherwise.
+predicate LowLabel (k n f x i : Set) :=
+  x(i) = (0:N) ∨ (x(i) ≠ doubling(k) ∧ (scaledPoint(k, n, x)(i):R) ≤ (f(gridPoint(k, n)(x))(i):R))
+
+theorem two.member (b : Set)
+  requires hb : b ∈ succ(succ(0))
+  shows b = (0:N) ∨ b = succ(0)
+proof
+  have split := bootstrap.succ.membership.forward with hb
+  cases split with below | same
+  . left
+    exact successor.zero_member with below
+  . right
+    exact same
+
+defunique labelBit (k n f x i : Set) (b ∈ succ(succ(0))) := (b = (0:N) ↔ LowLabel(k, n, f, x, i))
+proof
+  have alternatives : LowLabel(k, n, f, x, i) ∨ ¬LowLabel(k, n, f, x, i) by tauto
+  have zeroIn : (0:N) ∈ succ(succ(0))
+    have less : (0:N) < succ(succ(0)) by arith
+    exact membership.of_Less with less
+  have oneIn := bootstrap.succ.self at succ(0)
+  cases alternatives with low | high
+  . refine ⟨(0:N), zeroIn, ?_⟩
+    constructor
+    . intro h
+      exact low
+    . intro h
+      rfl
+  . refine ⟨succ(0), oneIn, ?_⟩
+    constructor
+    . intro h
+      arith
+    . intro h
+      exfalso
+      exact high with h
+uniqueness
+  intros a ha first b hb second
+  have alternatives : LowLabel(k, n, f, x, i) ∨ ¬LowLabel(k, n, f, x, i) by tauto
+  cases alternatives with low | high
+  . have aZero := first.backward with low
+    have bZero := second.backward with low
+    rw [aZero, bZero]
+    rfl
+  . have aSplit := two.member with ha
+    have bSplit := two.member with hb
+    cases aSplit with aZero | aOne
+    . exfalso
+      exact high with (first.forward with aZero)
+    . cases bSplit with bZero | bOne
+      . exfalso
+        exact high with (second.forward with bZero)
+      . rw [aOne, bOne]
+        rfl
+
+defgraph labelVector (k n f x : Set) (i ∈ n) : succ(succ(0)) := labelBit(k, n, f, x, i)
+proof
+  have selected := labelBit.selected at k, n, f, x, i
+  exact selected.left
+
+defgraph gridLabels (k n f : Set) (x ∈ functionSpace(n, succ(doubling(k)))) : functionSpace(n, succ(succ(0))) := labelVector(k, n, f, x)
+proof
+  exact functionSpace.membership.backward with (labelVector.function at k, n, f, x)
+
+theorem gridLabels.bit (k n f x i : Set)
+  requires hx : x ∈ functionSpace(n, succ(doubling(k)))
+  requires hi : i ∈ n
+  shows gridLabels(k, n, f)(x)(i) = (0:N) ↔ LowLabel(k, n, f, x, i)
+proof
+  have value := gridLabels.value at k, n, f, x with hx
+  have vector := labelVector.value at k, n, f, x, i with hi
+  rw [value, vector]
+  have selected := labelBit.selected at k, n, f, x, i
+  exact selected.right
+
+theorem gridLabels.in_two (k n f x i : Set)
+  requires hx : x ∈ functionSpace(n, succ(doubling(k)))
+  requires hi : i ∈ n
+  shows gridLabels(k, n, f)(x)(i) ∈ succ(succ(0))
+proof
+  have value := gridLabels.value at k, n, f, x with hx
+  have vector := labelVector.value at k, n, f, x, i with hi
+  rw [value, vector]
+  have selected := labelBit.selected at k, n, f, x, i
+  exact selected.left
+
+theorem gridLabels.zero_wall (k n q : Nat) (f : Set)
+  requires shape : doubling(k) = succ(q)
+  shows ∀ x ∈ functionSpace(n, succ(succ(q))), ∀ j ∈ n, x(j) = (0:N) → gridLabels(k, n, f)(x)(j) = (0:N)
+proof
+  intros x hx j hj zero
+  rw ← shape at hx
+  have bit := gridLabels.bit at k, n, f, x, j with hx, hj
+  apply bit.backward
+  left
+  exact zero
+
+theorem gridLabels.full_wall (k n q : Nat) (f : Set)
+  requires shape : doubling(k) = succ(q)
+  shows ∀ x ∈ functionSpace(n, succ(succ(q))), ∀ j ∈ n, x(j) = succ(q) → gridLabels(k, n, f)(x)(j) = (1:N)
+proof
+  intros x hx j hj full
+  rw ← shape at hx
+  rw ← shape at full
+  have bit := gridLabels.bit at k, n, f, x, j with hx, hj
+  have inTwo := gridLabels.in_two at k, n, f, x, j with hx, hj
+  have split := two.member with inTwo
+  cases split with zero | one
+  . exfalso
+    have low := bit.forward with zero
+    cases low with isZero | isLow
+    . rw [full, shape] at isZero
+      arith
+    . exact isLow.left with full
+  . exact one
+
+-- The inequalities behind the two labels.
+theorem gridLabels.low_le (k n : Nat) (f x i : Set)
+  requires map : CubeMap(f, n)
+  requires hx : x ∈ functionSpace(n, succ(doubling(k)))
+  requires hi : i ∈ n
+  requires zero : gridLabels(k, n, f)(x)(i) = (0:N)
+  shows (scaledPoint(k, n, x)(i):R) ≤ (f(gridPoint(k, n)(x))(i):R)
+proof
+  have bit := gridLabels.bit at k, n, f, x, i with hx, hi
+  have low := bit.forward with zero
+  have fFunction := CubeMap.function with map
+  have gridFunction := gridPoint.function at k, n with *
+  have gridIn := FunctionBetween.apply_closed with gridFunction, hx
+  have imageIn := FunctionBetween.apply_closed with fFunction, gridIn
+  have coordinate := unitCube.coordinate with imageIn, hi
+  have parts := closedInterval.membership.forward with coordinate
+  cases low with isZero | isLow
+  . have xFunction := functionSpace.membership.forward with hx
+    have value := scaledPoint.value at k, n, x, i with *
+    rw [value, isZero, realNat.zero, realMulValue.zero_left]
+    exact parts.right.left
+  . exact isLow.right
+
+theorem gridLabels.high_ge (k n : Nat) (f x i : Set)
+  requires map : CubeMap(f, n)
+  requires hx : x ∈ functionSpace(n, succ(doubling(k)))
+  requires hi : i ∈ n
+  requires nonzero : gridLabels(k, n, f)(x)(i) ≠ (0:N)
+  shows (f(gridPoint(k, n)(x))(i):R) ≤ (scaledPoint(k, n, x)(i):R)
+proof
+  have bit := gridLabels.bit at k, n, f, x, i with hx, hi
+  have notLow : ¬LowLabel(k, n, f, x, i)
+    intro low
+    exact nonzero with (bit.backward with low)
+  have fFunction := CubeMap.function with map
+  have gridFunction := gridPoint.function at k, n with *
+  have gridIn := FunctionBetween.apply_closed with gridFunction, hx
+  have imageIn := FunctionBetween.apply_closed with fFunction, gridIn
+  have coordinate := unitCube.coordinate with imageIn, hi
+  have parts := closedInterval.membership.forward with coordinate
+  have xFunction := functionSpace.membership.forward with hx
+  have scaledFunction := scaledPoint.function at k, n, x with *
+  have scaledReal := FunctionBetween.apply_closed with scaledFunction, hi
+  have alternatives : x(i) = doubling(k) ∨ x(i) ≠ doubling(k) by tauto
+  cases alternatives with top | notTop
+  . have value := scaledPoint.value at k, n, x, i with *
+    have scale := doubling.real_scale at k
+    rw [value, top, scale]
+    exact parts.right.right
+  . have alternatives2 : (scaledPoint(k, n, x)(i):R) ≤ (f(gridPoint(k, n)(x))(i):R) ∨ ¬((scaledPoint(k, n, x)(i):R) ≤ (f(gridPoint(k, n)(x))(i):R))
+      tauto
+    cases alternatives2 with le | notLe
+    . exfalso
+      apply notLow
+      right
+      exact ⟨notTop, le⟩
+    . have less := realLess.of_not_le with notLe
+      exact realLess.implies_le with less
+
+-- Two grid points of one cell are within one grid width in every coordinate.
+theorem scaledPoint.close (k n : Nat) (base u i : Set)
+  requires baseFunction : base : n → succ(doubling(k))
+  requires uFunction : u : n → succ(doubling(k))
+  requires hi : i ∈ n
+  requires lower : LessEqual(base(i), u(i))
+  requires upper : LessEqual(u(i), add(base(i), (1:N)))
+  shows dist(scaledPoint(k, n, u)(i), scaledPoint(k, n, base)(i)) ≤ (dyadicRadius(k):R)
+proof
+  have uValue := scaledPoint.value at k, n, u, i with *
+  have bValue := scaledPoint.value at k, n, base, i with *
+  rw [uValue, bValue]
+  have bi := FunctionBetween.apply_closed with baseFunction, hi
+  have biNat := natural.member at succ(doubling(k)) with bi
+  have ui := FunctionBetween.apply_closed with uFunction, hi
+  have uiNat := natural.member at succ(doubling(k)) with ui
+  have positive := dyadicRadius.positive at k
+  have dNonneg := realLess.implies_le with positive
+  have below := realNat.le_of_le with lower
+  have succBound : LessEqual(u(i), succ(base(i))) by arith
+  have aboveSucc := realNat.le_of_le with succBound
+  have succValue := realNat.succ at base(i)
+  rw succValue at aboveSucc
+  have same : dist((realNat(u(i)):R) * (dyadicRadius(k):R), (realNat(base(i)):R) * (dyadicRadius(k):R)) = abs((realNat(u(i)):R) * (dyadicRadius(k):R) - (realNat(base(i)):R) * (dyadicRadius(k):R))
+    unfold dist
+    rfl
+  rw same
+  have expand : (realNat(u(i)):R) * (dyadicRadius(k):R) - (realNat(base(i)):R) * (dyadicRadius(k):R) = (dyadicRadius(k):R) * ((realNat(u(i)):R) - (realNat(base(i)):R))
+    ring
+  rw expand
+  have gapNonneg : (0:R) ≤ (realNat(u(i)):R) - (realNat(base(i)):R) by linarith
+  have gapLe : (realNat(u(i)):R) - (realNat(base(i)):R) ≤ (1:R) by linarith
+  have productNonneg : (0:R) ≤ (dyadicRadius(k):R) * ((realNat(u(i)):R) - (realNat(base(i)):R))
+    have step := realLe.mul_left_of_nonnegative with gapNonneg, dNonneg
+    have zero := realMulValue.zero_right at dyadicRadius(k)
+    rwa zero at step
+  have absValue := abs.of_nonnegative with productNonneg
+  rw absValue
+  have step := realLe.mul_left_of_nonnegative with gapLe, dNonneg
+  have one := realMulValue.one_right at dyadicRadius(k)
+  rwa one at step

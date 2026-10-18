@@ -1,0 +1,163 @@
+-- Heine–Borel on the line: a closed interval is compact. The points of
+-- [A, B] up to which finitely many members of an open cover suffice have a
+-- supremum, and the cover member around that supremum pushes it to B.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.HeineBorel
+import Real
+import Real.Analysis.SequentialCompactness
+
+theorem dist.lt_of_bounds (X U E : Real)
+  requires lower : U - E < X
+  requires upper : X < U + E
+  shows dist(X, U) < E
+proof
+  unfold dist
+  have order := realLess.trichotomy at X - U, (0:R)
+  cases order with negative | rest
+  . have nonpositive := realLess.implies_le with negative
+    have value := abs.of_nonpositive with nonpositive
+    rw value
+    linarith
+  . cases rest with zero | positive
+    . rw [zero, abs.zero]
+      linarith
+    . have nonnegative := realLess.implies_le with positive
+      have value := abs.of_nonnegative with nonnegative
+      rw value
+      linarith
+
+theorem closedInterval.singleton_subset (A : Real) (U : Set)
+  requires hA : A ∈ U
+  shows closedInterval(A, A) ⊆ U
+proof
+  intros x hx
+  obtain ⟨realX, lower, upper⟩ := closedInterval.membership.forward with hx
+  have same := realLe.antisymmetric with upper, lower
+  rwa same
+
+-- The points x of [A, B] such that [A, x] is covered by finitely many
+-- members of C.
+def coveredBelow (C : Set, A B : Real) : Set :=
+  { x ∈ closedInterval(A, B) | ∃ F, F ⊆ C ∧ Finite(F) ∧ closedInterval(A, x) ⊆ ⋃(F) }
+
+theorem coveredBelow.membership (x C : Set) (A B : Real)
+  shows x ∈ coveredBelow(C, A, B) ↔ x ∈ closedInterval(A, B) ∧
+    ∃ F, F ⊆ C ∧ Finite(F) ∧ closedInterval(A, x) ⊆ ⋃(F)
+proof
+  simp [coveredBelow]
+
+theorem closedInterval.compact (A B : Real)
+  requires ordered : A ≤ B
+  shows IsCompact(ℝ, realTopology, closedInterval(A, B))
+proof
+  constructor
+  . exact closedInterval.subset_reals at A, B
+  . intros C cover
+    obtain ⟨coverOpen, covers⟩ := cover
+    have leftIn := closedInterval.left_mem with ordered
+    obtain ⟨W0, hW0, hAW0⟩ := union.membership.forward with (covers with A, leftIn)
+    have startMember : A ∈ coveredBelow(C, A, B)
+      apply coveredBelow.membership.backward
+      refine ⟨leftIn, {W0}, ?_, (Finite.singleton at W0), ?_⟩
+      . intros V hV
+        have same := singleton.membership.forward with hV
+        rwa same
+      . rw union.singleton
+        exact closedInterval.singleton_subset with hAW0
+    have inhabited : Nonempty(coveredBelow(C, A, B)) := ⟨A, startMember⟩
+    have subsetInterval : coveredBelow(C, A, B) ⊆ closedInterval(A, B)
+      intros x hx
+      have parts := coveredBelow.membership.forward with hx
+      exact parts.left
+    have subsetReals := Subset.transitive with subsetInterval, (closedInterval.subset_reals at A, B)
+    have realB : Real(B) by typecheck
+    have upperB : RealUpperBound(coveredBelow(C, A, B), B)
+      refine ⟨realB, subsetReals, ?_⟩
+      intros x hx
+      obtain ⟨realX, lower, upper⟩ := closedInterval.membership.forward with (subsetInterval with x, hx)
+      exact realLe.subset with upper
+    have bounded : ∃ D, RealUpperBound(coveredBelow(C, A, B), D) := ⟨B, upperB⟩
+    obtain ⟨U, least⟩ := Real.least_upper_bound_property with inhabited, bounded
+    have upperU := least.left
+    have minimal := least.right
+    obtain ⟨realU, inReals, bounds⟩ := upperU
+    have aBelow := realLe.of_subset with (bounds with A, startMember)
+    have uBelow := realLe.of_subset with (minimal with B, upperB)
+    have realU2 : U ∈ ℝ by simp [Real]
+    have uIn : U ∈ closedInterval(A, B)
+      apply closedInterval.membership.backward
+      exact ⟨realU2, aBelow, uBelow⟩
+    obtain ⟨W, hW, hUW⟩ := union.membership.forward with (covers with U, uIn)
+    have partsW := realTopology.membership.forward with (coverOpen with W, hW)
+    obtain ⟨E, hE, positive, ballInside⟩ := partsW.right with U, hUW
+    obtain ⟨s, hs, near⟩ := RealLeastUpperBound.approached with least, positive
+    obtain ⟨sIn, F, hF, finiteF, coveredS⟩ := coveredBelow.membership.forward with hs
+    obtain ⟨realS, aS, sB⟩ := closedInterval.membership.forward with sIn
+    have sBelowU := realLe.of_subset with (bounds with s, hs)
+    have extendedSubset : insert(W, F) ⊆ C
+      intros V hV
+      have split := insert.membership.forward with hV
+      cases split with isW | inF
+      . rw isW
+        exact hW
+      . exact hF with V, inF
+    have extendedFinite := Finite.insert at F, W with finiteF
+    have memberW : W ∈ insert(W, F)
+      apply insert.membership.backward
+      left
+      rfl
+    have halfPositive := half.positive with positive
+    have halfSmall := half.lt_self with positive
+    have extendedCovers : ∀ t ∈ ℝ, t < U + E → closedInterval(A, t) ⊆ ⋃(insert(W, F))
+      intros t realT tBound x hx
+      obtain ⟨realX, aX, xT⟩ := closedInterval.membership.forward with hx
+      have split := realLess.trichotomy at s, x
+      have viaW : (s:R) < (x:R) → x ∈ ⋃(insert(W, F))
+        intro below
+        have lowerX : U - E < x by linarith
+        have upperX : x < U + E by linarith
+        have close := dist.lt_of_bounds with lowerX, upperX
+        have inBall : x ∈ openBall(U, E) := openBall.membership.backward with ⟨realX, close⟩
+        exact union.contains with memberW, (ballInside with x, inBall)
+      cases split with below | rest
+      . exact viaW with below
+      . have xBelowS : x ≤ s
+          cases rest with equal | above
+          . rw equal
+            exact realLe.reflexive
+          . exact realLess.implies_le with above
+        have inLeft : x ∈ closedInterval(A, s)
+          apply closedInterval.membership.backward
+          exact ⟨realX, aX, xBelowS⟩
+        obtain ⟨V, hV, hxV⟩ := union.membership.forward with (coveredS with x, inLeft)
+        have memberV : V ∈ insert(W, F)
+          apply insert.membership.backward
+          right
+          exact hV
+        exact union.contains with memberV, hxV
+    have split := realLess.trichotomy at B, U + half(E)
+    have finish : B < U + E → ∃ G, G ⊆ C ∧ Finite(G) ∧ closedInterval(A, B) ⊆ ⋃(G)
+      intro bound
+      witness insert(W, F)
+      exact ⟨extendedSubset, extendedFinite, (extendedCovers with B, bound)⟩
+    cases split with smaller | rest
+    . have bound : B < U + E by linarith
+      exact finish with bound
+    . cases rest with equal | larger
+      . have bound : B < U + E by linarith
+        exact finish with bound
+      . exfalso
+        have realT : U + half(E) ∈ ℝ by typecheck
+        have tBound : U + half(E) < U + E by linarith
+        have tIn : U + half(E) ∈ closedInterval(A, B)
+          apply closedInterval.membership.backward
+          refine ⟨realT, ?_, (realLess.implies_le with larger)⟩
+          linarith
+        have tMember : U + half(E) ∈ coveredBelow(C, A, B)
+          exact coveredBelow.membership.backward with ⟨tIn, insert(W, F), extendedSubset, extendedFinite, (extendedCovers with U + half(E), tBound)⟩
+        have tBelow := realLe.of_subset with (bounds with U + half(E), tMember)
+        linarith

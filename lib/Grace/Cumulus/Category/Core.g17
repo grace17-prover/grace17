@@ -1,0 +1,656 @@
+-- Small categories as sets
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Category.Core
+import Algebra.Foundation
+import Set.Function
+import Set.Core
+
+-- The composable pairs (g, f) of a set M of morphisms under domain and
+-- codomain maps d and c: those with d(g) = c(f).
+def composablePairsOf (M d c : Set) : Set :=
+  { p ∈ M × M | ∃ g ∈ M, ∃ f ∈ M, p = (g, f) ∧ d(g) = c(f) }
+
+-- A small category is a structure of its objects, morphisms, domain and
+-- codomain maps, identities, and composition. The projections read the data
+-- back: C.obj and C.mor are the sets of objects and morphisms,
+-- C.dom C.cod : C.mor → C.obj, C.id : C.obj → C.mor, and C.comp is a
+-- function on the composable pairs (g, f) with C.dom(g) = C.cod(f), applied
+-- as C.comp(g, f), read "g after f". Category(C) says that C is such a
+-- structure whose data satisfy the laws below; Category.Data(C) is the
+-- shape alone, and Category.intro builds a category from its fields.
+structure Category
+  | obj mor : Set
+  | dom cod : mor → obj
+  | id : obj → mor
+  | comp : composablePairsOf(mor, dom, cod) → mor
+  where
+    identities : ∀ a ∈ obj, dom(id(a)) = a ∧ cod(id(a)) = a
+    composites : ∀ g f ∈ mor, dom(g) = cod(f) →
+      dom(comp(g, f)) = dom(f) ∧ cod(comp(g, f)) = cod(g)
+    units : ∀ f ∈ mor, comp(id(cod(f)), f) = f ∧ comp(f, id(dom(f))) = f
+    associative : ∀ h g f ∈ mor, dom(h) = cod(g) → dom(g) = cod(f) →
+      comp(comp(h, g), f) = comp(h, comp(g, f))
+
+def composablePairs (C : Set) : Set := composablePairsOf(mor(C), dom(C), cod(C))
+
+theorem composablePairsOf.membership (M d c p : Set)
+  shows p ∈ composablePairsOf(M, d, c) ↔
+    (p ∈ M × M ∧ ∃ g ∈ M, ∃ f ∈ M, p = (g, f) ∧ d(g) = c(f))
+proof
+  simp
+
+theorem composablePairs.membership (C p : Set)
+  shows p ∈ composablePairs(C) ↔ (p ∈ mor(C) × mor(C) ∧
+    ∃ g ∈ mor(C), ∃ f ∈ mor(C), p = (g, f) ∧ dom(C)(g) = cod(C)(f))
+proof
+  simp [composablePairs]
+  exact composablePairsOf.membership at mor(C), dom(C), cod(C), p
+
+theorem composablePairs.mk (O M d c e m : Set)
+  shows composablePairs(Category.mk(O, M, d, c, e, m)) = composablePairsOf(M, d, c)
+proof
+  simp [composablePairs, Category.mk.mor, Category.mk.dom, Category.mk.cod]
+
+theorem composablePairsOf.pair (M d c g f : Set)
+  requires gInM : g ∈ M
+  requires fInM : f ∈ M
+  requires composable : d(g) = c(f)
+  shows (g, f) ∈ composablePairsOf(M, d, c)
+proof
+  apply composablePairsOf.membership.backward
+  constructor
+  . exact product.pair with gInM, fInM
+  . refine ⟨g, gInM, f, fInM, rfl, composable⟩
+
+theorem composablePairs.pair (C g f : Set)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires composable : dom(C)(g) = cod(C)(f)
+  shows (g, f) ∈ composablePairs(C)
+proof
+  apply composablePairs.membership.backward
+  constructor
+  . exact product.pair with gInM, fInM
+  . refine ⟨g, gInM, f, fInM, rfl, composable⟩
+
+theorem composablePairs.pair_iff (C g f : Set)
+  shows (g, f) ∈ composablePairs(C) ↔
+    (g ∈ mor(C) ∧ f ∈ mor(C) ∧ dom(C)(g) = cod(C)(f))
+proof
+  constructor
+  . intro member
+    obtain ⟨bounded, g2, g2InM, f2, f2InM, shape, composable⟩ :=
+      composablePairs.membership.forward with member
+    obtain ⟨gEqual, fEqual⟩ := orderedPair.injective with shape
+    rw [gEqual, fEqual]
+    refine ⟨g2InM, f2InM, composable⟩
+  . intro h
+    obtain ⟨gInM, fInM, composable⟩ := h
+    exact composablePairs.pair with gInM, fInM, composable
+
+theorem composablePairs.subset (C : Set)
+  shows composablePairs(C) ⊆ mor(C) × mor(C)
+proof
+  intros p member
+  obtain ⟨bounded, rest⟩ := composablePairs.membership.forward with member
+  exact bounded
+
+-- The projection laws of a constructed category as one rewrite set.
+tactic category_projections := simp [Category.mk.obj, Category.mk.mor, Category.mk.dom, Category.mk.cod, Category.mk.comp, Category.mk.id, composablePairs.mk]
+
+
+-- Composition is written g ∘ f, read "g after f", wherever a hypothesis in
+-- scope supplies the category; the operands' membership in mor(C) selects
+-- the category when several are in scope.
+notation infixr 70 "∘" => call2(C.comp, _, _) via hypothesis Category(C) for C.mor
+
+-- A morphism from a to b: a member of C.mor with domain a and codomain b.
+-- Written f : a ⟶ b wherever a hypothesis in scope supplies the category.
+-- The guard (f : a ⟶ b) on a binder makes f ∈ C.mor, C.dom(f) = a, and
+-- C.cod(f) = b available to with *, simp, rw, and cc.
+predicate Morphism (C f a b : Set) :=
+  f ∈ C.mor ∧ C.dom(f) = a ∧ C.cod(f) = b
+
+notation mixfix "_ : _ ⟶ _" => Morphism(C, _, _, _) via hypothesis Category(C) for C.obj, C.mor
+
+-- The morphisms from a to b.
+def hom (C a b : Set) : Set := { f ∈ mor(C) | dom(C)(f) = a ∧ cod(C)(f) = b }
+
+theorem hom.membership (C a b f : Set)
+  shows f ∈ hom(C, a, b) ↔ (f ∈ mor(C) ∧ dom(C)(f) = a ∧ cod(C)(f) = b)
+proof
+  simp
+
+theorem hom.subset (C a b : Set)
+  shows hom(C, a, b) ⊆ mor(C)
+proof
+  intros f member
+  obtain ⟨fInM, rest⟩ := hom.membership.forward with member
+  exact fInM
+
+theorem hom.dom (C a b f : Set)
+  requires member : f ∈ hom(C, a, b)
+  shows dom(C)(f) = a
+proof
+  obtain ⟨fInM, domF, codF⟩ := hom.membership.forward with member
+  exact domF
+
+theorem hom.cod (C a b f : Set)
+  requires member : f ∈ hom(C, a, b)
+  shows cod(C)(f) = b
+proof
+  obtain ⟨fInM, domF, codF⟩ := hom.membership.forward with member
+  exact codF
+
+theorem hom.in_morphisms (C a b f : Set)
+  requires member : f ∈ hom(C, a, b)
+  shows f ∈ mor(C)
+proof
+  obtain ⟨fInM, domF, codF⟩ := hom.membership.forward with member
+  exact fInM
+
+theorem hom.of_morphism (C f : Set)
+  requires fInM : f ∈ mor(C)
+  shows f ∈ hom(C, dom(C)(f), cod(C)(f))
+proof
+  apply hom.membership.backward
+  refine ⟨fInM, rfl, rfl⟩
+
+theorem hom.composable (C a b c g f : Set)
+  requires gHom : g ∈ hom(C, b, c)
+  requires fHom : f ∈ hom(C, a, b)
+  shows dom(C)(g) = cod(C)(f)
+proof
+  have domG := hom.dom with gHom
+  have codF := hom.cod with fHom
+  cc
+
+-- Hom-sets with different endpoints are disjoint, and every morphism lies
+-- in exactly one hom-set.
+theorem hom.disjoint (C a b c d : Set)
+  requires different : a ≠ c ∨ b ≠ d
+  shows Disjoint(hom(C, a, b), hom(C, c, d))
+proof
+  unfold Disjoint
+  ext f
+  constructor
+  . intro member
+    obtain ⟨first, second⟩ := intersection.membership.forward with member
+    obtain ⟨fInM, domA, codB⟩ := hom.membership.forward with first
+    obtain ⟨fInM2, domC, codD⟩ := hom.membership.forward with second
+    exfalso
+    cases different with aDiff | bDiff
+    . have same : a = c by cc
+      exact aDiff with same
+    . have same : b = d by cc
+      exact bDiff with same
+  . intro member
+    exfalso
+    exact set.empty with member
+
+theorem hom.unique_endpoints (C a b c d f : Set)
+  requires first : f ∈ hom(C, a, b)
+  requires second : f ∈ hom(C, c, d)
+  shows a = c ∧ b = d
+proof
+  obtain ⟨fInM, domA, codB⟩ := hom.membership.forward with first
+  obtain ⟨fInM2, domC, codD⟩ := hom.membership.forward with second
+  constructor
+  . cc
+  . cc
+
+-- The guard Morphism(C, f, a, b) and the hom-set hom(C, a, b) say the same.
+theorem Morphism.in_morphisms (C f a b : Set)
+  requires fHom : Morphism(C, f, a, b)
+  shows f ∈ mor(C)
+proof
+  obtain ⟨fInM, domF, codF⟩ := fHom
+  exact fInM
+
+theorem Morphism.dom (C f a b : Set)
+  requires fHom : Morphism(C, f, a, b)
+  shows dom(C)(f) = a
+proof
+  obtain ⟨fInM, domF, codF⟩ := fHom
+  exact domF
+
+theorem Morphism.cod (C f a b : Set)
+  requires fHom : Morphism(C, f, a, b)
+  shows cod(C)(f) = b
+proof
+  obtain ⟨fInM, domF, codF⟩ := fHom
+  exact codF
+
+theorem Morphism.hom (C f a b : Set)
+  requires fHom : Morphism(C, f, a, b)
+  shows f ∈ hom(C, a, b)
+proof
+  unfold Morphism at fHom
+  exact hom.membership.backward with fHom
+
+theorem Morphism.of_hom (C f a b : Set)
+  requires member : f ∈ hom(C, a, b)
+  shows Morphism(C, f, a, b)
+proof
+  unfold Morphism
+  exact hom.membership.forward with member
+
+theorem Morphism.composable (C a b c f g : Set)
+  requires fHom : Morphism(C, f, a, b)
+  requires gHom : Morphism(C, g, b, c)
+  shows dom(C)(g) = cod(C)(f)
+proof
+  obtain ⟨fInM, domF, codF⟩ := fHom
+  obtain ⟨gInM, domG, codG⟩ := gHom
+  cc
+
+section CategoryLaws
+variable (C : Set)
+hypothesis category : Category(C)
+
+theorem Category.dom_function
+  shows dom(C) : mor(C) → obj(C)
+proof
+  simp [Category]
+
+theorem Category.cod_function
+  shows cod(C) : mor(C) → obj(C)
+proof
+  simp [Category]
+
+theorem Category.id_function
+  shows id(C) : obj(C) → mor(C)
+proof
+  simp [Category]
+
+theorem Category.comp_function
+  shows comp(C) : composablePairs(C) → mor(C)
+proof
+  simp [Category, composablePairs]
+
+theorem Category.id_dom (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows dom(C)(id(C)(a)) = a
+proof
+  rcases category with ⟨shape, domF, codF, idF, compF, idLaws, rest⟩
+  obtain ⟨domLaw, codLaw⟩ := idLaws with a, aInO
+  exact domLaw
+
+theorem Category.id_cod (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows cod(C)(id(C)(a)) = a
+proof
+  rcases category with ⟨shape, domF, codF, idF, compF, idLaws, rest⟩
+  obtain ⟨domLaw, codLaw⟩ := idLaws with a, aInO
+  exact codLaw
+
+theorem Category.comp_dom (g f : Set)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires composable : dom(C)(g) = cod(C)(f)
+  shows dom(C)(g ∘ f) = dom(C)(f)
+proof
+  rcases category with ⟨shape, domF, codF, idF, compF, idLaws, compLaws, rest⟩
+  obtain ⟨domLaw, codLaw⟩ := compLaws with g, gInM, f, fInM, composable
+  exact domLaw
+
+theorem Category.comp_cod (g f : Set)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires composable : dom(C)(g) = cod(C)(f)
+  shows cod(C)(g ∘ f) = cod(C)(g)
+proof
+  rcases category with ⟨shape, domF, codF, idF, compF, idLaws, compLaws, rest⟩
+  obtain ⟨domLaw, codLaw⟩ := compLaws with g, gInM, f, fInM, composable
+  exact codLaw
+
+theorem Category.left_unit (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows id(C)(cod(C)(f)) ∘ f = f
+proof
+  rcases category with
+    ⟨shape, domF, codF, idF, compF, idLaws, compLaws, unitLaws, associative⟩
+  obtain ⟨leftLaw, rightLaw⟩ := unitLaws with f, fInM
+  exact leftLaw
+
+theorem Category.right_unit (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows f ∘ id(C)(dom(C)(f)) = f
+proof
+  rcases category with
+    ⟨shape, domF, codF, idF, compF, idLaws, compLaws, unitLaws, associative⟩
+  obtain ⟨leftLaw, rightLaw⟩ := unitLaws with f, fInM
+  exact rightLaw
+
+theorem Category.associative (h g f : Set)
+  requires hInM : h ∈ mor(C)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires outer : dom(C)(h) = cod(C)(g)
+  requires inner : dom(C)(g) = cod(C)(f)
+  shows (h ∘ g) ∘ f = h ∘ (g ∘ f)
+proof
+  rcases category with
+    ⟨shape, domF, codF, idF, compF, idLaws, compLaws, unitLaws, associative⟩
+  exact associative with h, hInM, g, gInM, f, fInM, outer, inner
+
+theorem Category.dom_closed (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows dom(C)(f) ∈ obj(C)
+proof
+  have function := Category.dom_function with category
+  exact FunctionBetween.apply_closed with function, fInM
+
+theorem Category.cod_closed (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows cod(C)(f) ∈ obj(C)
+proof
+  have function := Category.cod_function with category
+  exact FunctionBetween.apply_closed with function, fInM
+
+theorem Category.id_closed (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows id(C)(a) ∈ mor(C)
+proof
+  have function := Category.id_function with category
+  exact FunctionBetween.apply_closed with function, aInO
+
+theorem Category.comp_closed (g f : Set)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires composable : dom(C)(g) = cod(C)(f)
+  shows g ∘ f ∈ mor(C)
+proof
+  have function := Category.comp_function with category
+  have pairIn := composablePairs.pair with gInM, fInM, composable
+  unfold call2
+  exact FunctionBetween.apply_closed with function, pairIn
+
+theorem Category.composable_pair_closed (p : Set)
+  requires member : p ∈ composablePairs(C)
+  shows comp(C)(p) ∈ mor(C)
+proof
+  have function := Category.comp_function with category
+  exact FunctionBetween.apply_closed with function, member
+
+theorem Category.comp_value (g f : Set)
+  shows comp(C)(g, f) = comp(C)((g, f))
+proof
+  unfold call2
+  rfl
+
+-- Composition with an identity, stated at a named object.
+theorem Category.id_left_of_cod (b f : Set)
+  requires fInM : f ∈ mor(C)
+  requires codF : cod(C)(f) = b
+  shows id(C)(b) ∘ f = f
+proof
+  have law := Category.left_unit with category, fInM
+  rwa codF at law
+
+theorem Category.id_right_of_dom (a f : Set)
+  requires fInM : f ∈ mor(C)
+  requires domF : dom(C)(f) = a
+  shows f ∘ id(C)(a) = f
+proof
+  have law := Category.right_unit with category, fInM
+  rwa domF at law
+
+theorem Category.id_id (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows id(C)(a) ∘ id(C)(a) = id(C)(a)
+proof
+  have idInM := Category.id_closed with category, aInO
+  have codId := Category.id_cod with category, aInO
+  calc
+    id(C)(a) ∘ id(C)(a) = id(C)(cod(C)(id(C)(a))) ∘ id(C)(a) := by rw codId
+    _ = id(C)(a) := Category.left_unit with category, idInM
+
+theorem hom.id (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows id(C)(a) ∈ hom(C, a, a)
+proof
+  have idInM := Category.id_closed with category, aInO
+  have domId := Category.id_dom with category, aInO
+  have codId := Category.id_cod with category, aInO
+  apply hom.membership.backward
+  refine ⟨idInM, domId, codId⟩
+
+theorem hom.comp (a b c g f : Set)
+  requires gHom : g ∈ hom(C, b, c)
+  requires fHom : f ∈ hom(C, a, b)
+  shows g ∘ f ∈ hom(C, a, c)
+proof
+  obtain ⟨gInM, domG, codG⟩ := hom.membership.forward with gHom
+  obtain ⟨fInM, domF, codF⟩ := hom.membership.forward with fHom
+  have composable : dom(C)(g) = cod(C)(f) by cc
+  have closed := Category.comp_closed with category, gInM, fInM, composable
+  have domComp := Category.comp_dom with category, gInM, fInM, composable
+  have codComp := Category.comp_cod with category, gInM, fInM, composable
+  apply hom.membership.backward
+  refine ⟨closed, ?_, ?_⟩
+  . rwa domF at domComp
+  . rwa codG at codComp
+
+theorem hom.exists_unique (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows ∃ a ∈ obj(C), ∃ b ∈ obj(C), f ∈ hom(C, a, b) ∧
+    (∀ c, ∀ d, f ∈ hom(C, c, d) → c = a ∧ d = b)
+proof
+  have domIn := Category.dom_closed with category, fInM
+  have codIn := Category.cod_closed with category, fInM
+  have member := hom.of_morphism at C, f with fInM
+  refine ⟨dom(C)(f), domIn, cod(C)(f), codIn, member, ?_⟩
+  intros c d other
+  obtain ⟨fInM2, domC, codD⟩ := hom.membership.forward with other
+  constructor
+  . symm
+    exact domC
+  . symm
+    exact codD
+
+theorem hom.union_is_morphisms (f : Set)
+  shows f ∈ mor(C) ↔ ∃ a ∈ obj(C), ∃ b ∈ obj(C), f ∈ hom(C, a, b)
+proof
+  constructor
+  . intro fInM
+    have domIn := Category.dom_closed with category, fInM
+    have codIn := Category.cod_closed with category, fInM
+    have member := hom.of_morphism at C, f with fInM
+    refine ⟨dom(C)(f), domIn, cod(C)(f), codIn, member⟩
+  . intro h
+    obtain ⟨a, aInO, b, bInO, member⟩ := h
+    exact hom.in_morphisms with member
+
+-- The endpoints of a composite, in hom-set form.
+theorem Category.comp_dom_cod (a b c g f : Set)
+  requires gHom : g ∈ hom(C, b, c)
+  requires fHom : f ∈ hom(C, a, b)
+  shows dom(C)(g ∘ f) = a ∧ cod(C)(g ∘ f) = c
+proof
+  have composite := hom.comp with category, gHom, fHom
+  obtain ⟨inM, domC, codC⟩ := hom.membership.forward with composite
+  refine ⟨domC, codC⟩
+
+-- Associativity and the unit laws in hom-set form.
+theorem Category.assoc_hom (a b c d h g f : Set)
+  requires hHom : h ∈ hom(C, c, d)
+  requires gHom : g ∈ hom(C, b, c)
+  requires fHom : f ∈ hom(C, a, b)
+  shows (h ∘ g) ∘ f = h ∘ (g ∘ f)
+proof
+  have hInM := hom.in_morphisms with hHom
+  have gInM := hom.in_morphisms with gHom
+  have fInM := hom.in_morphisms with fHom
+  have outer := hom.composable with hHom, gHom
+  have inner := hom.composable with gHom, fHom
+  exact Category.associative with category, hInM, gInM, fInM, outer, inner
+
+theorem Category.id_left_hom (a b f : Set)
+  requires fHom : f ∈ hom(C, a, b)
+  shows id(C)(b) ∘ f = f
+proof
+  have fInM := hom.in_morphisms with fHom
+  have codF := hom.cod with fHom
+  exact Category.id_left_of_cod with category, fInM, codF
+
+theorem Category.id_right_hom (a b f : Set)
+  requires fHom : f ∈ hom(C, a, b)
+  shows f ∘ id(C)(a) = f
+proof
+  have fInM := hom.in_morphisms with fHom
+  have domF := hom.dom with fHom
+  exact Category.id_right_of_dom with category, fInM, domF
+
+-- An endomorphism that acts as a two-sided unit is the identity.
+theorem Category.id_unique (a e : Set)
+  requires aInO : a ∈ obj(C)
+  requires eHom : e ∈ hom(C, a, a)
+  requires unit : ∀ f ∈ mor(C), dom(C)(f) = a → f ∘ e = f
+  shows e = id(C)(a)
+proof
+  have idInM := Category.id_closed with category, aInO
+  have domId := Category.id_dom with category, aInO
+  have leftUnit := Category.id_left_hom with category, eHom
+  calc
+    e = id(C)(a) ∘ e := by rw leftUnit
+    _ = id(C)(a) := unit with id(C)(a), idInM, domId
+
+theorem Category.id_unique_left (a e : Set)
+  requires aInO : a ∈ obj(C)
+  requires eHom : e ∈ hom(C, a, a)
+  requires unit : ∀ f ∈ mor(C), cod(C)(f) = a → e ∘ f = f
+  shows e = id(C)(a)
+proof
+  have idInM := Category.id_closed with category, aInO
+  have codId := Category.id_cod with category, aInO
+  have rightUnit := Category.id_right_hom with category, eHom
+  calc
+    e = e ∘ id(C)(a) := by rw rightUnit
+    _ = id(C)(a) := unit with id(C)(a), idInM, codId
+
+-- The endomorphisms of an object form a monoid under composition.
+theorem Category.endomorphism_closed (a g f : Set)
+  requires gHom : g ∈ hom(C, a, a)
+  requires fHom : f ∈ hom(C, a, a)
+  shows g ∘ f ∈ hom(C, a, a)
+proof
+  exact hom.comp with category, gHom, fHom
+
+theorem Category.objects_nonempty_of_morphism (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows Nonempty(obj(C))
+proof
+  have domIn := Category.dom_closed with category, fInM
+  refine ⟨dom(C)(f), domIn⟩
+
+theorem Category.morphisms_nonempty_of_object (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows Nonempty(mor(C))
+proof
+  have idIn := Category.id_closed with category, aInO
+  refine ⟨id(C)(a), idIn⟩
+
+theorem Category.id_injective (a b : Set)
+  requires aInO : a ∈ obj(C)
+  requires bInO : b ∈ obj(C)
+  requires same : id(C)(a) = id(C)(b)
+  shows a = b
+proof
+  have domA := Category.id_dom with category, aInO
+  have domB := Category.id_dom with category, bInO
+  cc
+
+-- Typing morphisms by their endpoints.
+theorem Morphism.of_morphism (f : Set)
+  requires fInM : f ∈ mor(C)
+  shows f : dom(C)(f) ⟶ cod(C)(f)
+proof
+  unfold Morphism
+  refine ⟨fInM, rfl, rfl⟩
+
+theorem Morphism.of_composable (g f : Set)
+  requires gInM : g ∈ mor(C)
+  requires fInM : f ∈ mor(C)
+  requires composable : dom(C)(g) = cod(C)(f)
+  shows g : cod(C)(f) ⟶ cod(C)(g)
+proof
+  unfold Morphism
+  refine ⟨gInM, composable, rfl⟩
+
+theorem Morphism.of_dom_cod (f a b : Set)
+  requires fInM : f ∈ mor(C)
+  requires domF : dom(C)(f) = a
+  requires codF : cod(C)(f) = b
+  shows f : a ⟶ b
+proof
+  unfold Morphism
+  refine ⟨fInM, domF, codF⟩
+
+theorem Morphism.dom_object (a b : Set) (f : a ⟶ b)
+  shows a ∈ obj(C)
+proof
+  have domIn : dom(C)(f) ∈ obj(C) := Category.dom_closed with *
+  have domF : dom(C)(f) = a by cc
+  rwa domF at domIn
+
+theorem Morphism.cod_object (a b : Set) (f : a ⟶ b)
+  shows b ∈ obj(C)
+proof
+  have codIn : cod(C)(f) ∈ obj(C) := Category.cod_closed with *
+  have codF : cod(C)(f) = b by cc
+  rwa codF at codIn
+
+instance Morphism.id (a : Set)
+  requires aInO : a ∈ obj(C)
+  shows id(C)(a) : a ⟶ a
+proof
+  have idInM := Category.id_closed with category, aInO
+  have domId := Category.id_dom with category, aInO
+  have codId := Category.id_cod with category, aInO
+  unfold Morphism
+  refine ⟨idInM, domId, codId⟩
+
+instance Morphism.comp (a b c : Set) (f : a ⟶ b) (g : b ⟶ c)
+  shows g ∘ f : a ⟶ c
+proof
+  have composable : dom(C)(g) = cod(C)(f) by cc
+  have closed : g ∘ f ∈ mor(C) := Category.comp_closed with *
+  have domComp : dom(C)(g ∘ f) = dom(C)(f) := Category.comp_dom with *
+  have codComp : cod(C)(g ∘ f) = cod(C)(g) := Category.comp_cod with *
+  unfold Morphism
+  refine ⟨closed, ?_, ?_⟩
+  . cc
+  . cc
+
+-- The unit laws and associativity, stated on hom-typed binders.
+theorem Category.id_left (a b : Set) (f : a ⟶ b)
+  shows id(C)(b) ∘ f = f
+proof
+  have codF : cod(C)(f) = b by cc
+  have law : id(C)(cod(C)(f)) ∘ f = f := Category.left_unit with *
+  rwa codF at law
+
+theorem Category.id_right (a b : Set) (f : a ⟶ b)
+  shows f ∘ id(C)(a) = f
+proof
+  have domF : dom(C)(f) = a by cc
+  have law : f ∘ id(C)(dom(C)(f)) = f := Category.right_unit with *
+  rwa domF at law
+
+theorem Category.assoc (a b c d : Set) (f : a ⟶ b) (g : b ⟶ c) (h : c ⟶ d)
+  shows (h ∘ g) ∘ f = h ∘ (g ∘ f)
+proof
+  have outer : dom(C)(h) = cod(C)(g) by cc
+  have inner : dom(C)(g) = cod(C)(f) by cc
+  exact Category.associative with *
+
+end CategoryLaws
+
+-- The categorical rewrite set: the unit laws and associativity, each
+-- applied where the hom guards of its morphisms are in scope.
+tactic category_simp := simp [Category.id_left, Category.id_right, Category.assoc]

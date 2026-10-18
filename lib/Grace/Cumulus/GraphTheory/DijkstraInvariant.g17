@@ -1,0 +1,99 @@
+-- The executable-state invariant driving Dijkstra verification.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DijkstraInvariant
+import DijkstraProgress
+import DijkstraCut
+
+namespace Dijkstra
+
+def Vertices (count : Set) : Set := { v ∈ ℕ | Less(v, count) }
+
+-- Only entries inside the vertex domain represent graph edges. Extra matrix
+-- padding is irrelevant; missing entries are handled by the executable lookup.
+predicate MatrixRepresents (count rows E weights : Set) :=
+  Dijkstra.TypedRows(rows) ∧ WeightedGraph(Vertices(count), E, weights) ∧
+  (∀ u ∈ Vertices(count), ∀ v ∈ Vertices(count), ∀ k ∈ ℕ,
+    Dijkstra.entry(Dijkstra.rowAt(rows, u), v) = Option.some(k) ↔ WeightedEdge(E, weights, u, v, k))
+
+predicate VectorWitnesses (count E weights source values : Set) :=
+  ∀ v ∈ Vertices(count), Dijkstra.WitnessedDistance(Vertices(count), E, weights, source, v, Dijkstra.entry(values, v))
+
+predicate SettledCorrect (count E weights source values flags : Set) :=
+  ∀ v ∈ Vertices(count), Dijkstra.flagAt(flags, v) = 1 →
+    ∃ d ∈ ℕ, Dijkstra.entry(values, v) = Option.some(d) ∧
+      ShortestPathCost(Vertices(count), E, weights, source, v, d)
+
+-- DistanceAtMost treats none as infinity. The finite settled source of an
+-- edge therefore forces a finite tentative label at its open endpoint.
+predicate RelaxedFrontier (count E weights values flags : Set) :=
+  ∀ u ∈ Vertices(count), ∀ v ∈ Vertices(count), ∀ k ∈ ℕ,
+    Dijkstra.flagAt(flags, u) = 1 → Dijkstra.flagAt(flags, v) ≠ 1 →
+    WeightedEdge(E, weights, u, v, k) →
+      Dijkstra.DistanceAtMost(Dijkstra.entry(values, v), Dijkstra.extension(Dijkstra.entry(values, u), Option.some(k)))
+
+-- The invariant speaks directly about executable accessors. Matrix agreement
+-- is a separate, unchanged input premise. Only 1 means settled; no extra
+-- binary-flag condition is needed for the correctness argument.
+predicate StateInvariant (count E weights source values flags : Set) :=
+  Nat(count) ∧ source ∈ Vertices(count) ∧
+  List(Dijkstra.DistanceValues, values) ∧ List(ℕ, flags) ∧
+  Dijkstra.vectorLength(values) = count ∧ ListOps.length{A := ℕ}(flags) = count ∧
+  Dijkstra.entry(values, source) = Option.some(0) ∧
+  VectorWitnesses(count, E, weights, source, values) ∧
+  SettledCorrect(count, E, weights, source, values, flags) ∧
+  RelaxedFrontier(count, E, weights, values, flags)
+
+-- The flag split needed when transporting the invariant across a mark.
+-- Contextual simplification supplies target ≠ index while rewriting the
+-- second disjunct; no exploratory split is needed in the tactic search.
+theorem mark.flag_cases (index target : Nat, flags : List(ℕ))
+  shows target = index ∨ Dijkstra.flagAt(Dijkstra.mark(flags, index), target) = Dijkstra.flagAt(flags, target)
+proof
+  simp [Dijkstra.mark.at_other]
+
+-- An open vertex after marking was already open before marking. This is
+-- the flag premise needed to reuse the previous relaxed-frontier invariant.
+theorem mark.open_was_open (index target : Nat, flags : List(ℕ))
+  requires stillOpen : Dijkstra.flagAt(Dijkstra.mark(flags, index), target) ≠ 1
+  shows Dijkstra.flagAt(flags, target) ≠ 1
+proof
+  have alternatives := mark.flag_cases at index, target, flags with *
+  cases alternatives with selected | unchanged
+  . exfalso
+    apply stillOpen
+    rw selected
+    exact Dijkstra.mark.at_same at index, flags with *
+  . intro settled
+    apply stillOpen
+    rwa unchanged
+
+theorem StateInvariant.initial (count : Nat, E weights source : Set)
+  requires sourceIn : source ∈ Vertices(count)
+  shows StateInvariant(count, E, weights, source,
+    Dijkstra.initialDistances(count, 0, source), Dijkstra.initialFlags(count))
+proof
+  have sourceZero : Dijkstra.entry(Dijkstra.initialDistances(count, 0, source), source) = Option.some(0)
+    simp (backchain := 2, work := 512) [Dijkstra.initialDistances.lookup, Dijkstra.initialCell.at_source, nat.omega, Vertices.membership]
+  have witnesses : VectorWitnesses(count, E, weights, source, Dijkstra.initialDistances(count, 0, source))
+    unfold VectorWitnesses
+    simp [Vertices.membership, Dijkstra.initialDistances.lookup, Dijkstra.initialCell.witnessed]
+  have allOpen : ∀ target ∈ Vertices(count), Dijkstra.flagAt(Dijkstra.initialFlags(count), target) ≠ 1
+    intros target targetIn
+    simp (backchain := 2, work := 512) [Dijkstra.initialFlags.entry, nat.omega, Vertices.membership]
+    exact Naturals.disjoint.zero.succ at 0
+  have settled : SettledCorrect(count, E, weights, source, Dijkstra.initialDistances(count, 0, source), Dijkstra.initialFlags(count))
+    intros target targetIn marked
+    exfalso
+    exact allOpen with target, targetIn, marked
+  have frontier : RelaxedFrontier(count, E, weights, Dijkstra.initialDistances(count, 0, source), Dijkstra.initialFlags(count))
+    intros u uIn v vIn k kIn marked open edge
+    exfalso
+    exact allOpen with u, uIn, marked
+  unfold StateInvariant
+  simp (backchain := 2, work := 512) [Dijkstra.initialDistances.closed, Dijkstra.initialFlags.closed, Dijkstra.initialDistances.length, Dijkstra.initialFlags.length, nat.omega, Vertices.membership]
+
+end Dijkstra

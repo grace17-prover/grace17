@@ -1,0 +1,172 @@
+-- Pairwise cancellation of finite sums, valid in every characteristic (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.Cancellation
+import SumSupport
+import Set.Involution
+
+section Sums
+variable (D A add zero neg mul one w : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+hypothesis weights : w : D → A
+
+theorem finiteRingSum.remove (V a : Set)
+  requires finite : Finite(V)
+  requires subset : V ⊆ D
+  requires member : a ∈ V
+  shows finiteRingSum(V, A, add, zero, neg, mul, one, restrict(w, V)) =
+    R[finiteRingSum(V ∖ {a}, A, add, zero, neg, mul, one, restrict(w, V ∖ {a})) + w(a)]
+proof
+  have restSubset : V ∖ {a} ⊆ V by simp [Subset, difference.membership]
+  have smaller := Finite.subset with finite, restSubset
+  have fresh : ¬(a ∈ V ∖ {a}) by simp [difference.membership, singleton.membership]
+  have restore := insert.restore with member
+  have restricted := restrict.domain_function with weights, subset
+  have expanded : restrict(w, V) : insert(a, V ∖ {a}) → A by rwa restore
+  have equation := finiteRingSum.insert with *
+  have nested := restrict.nested at w, V ∖ {a}, V with restSubset
+  have value := restrict.domain_apply with *
+  rwa [restore, nested, value] at equation
+
+-- Remove one complete orbit. Fixed points must vanish separately: in
+-- characteristic two, a value being its own negative does not imply zero.
+theorem finiteRingSum.remove_orbit (V a b : Set)
+  requires finite : Finite(V)
+  requires subset : V ⊆ D
+  requires first : a ∈ V
+  requires second : b ∈ V
+  requires opposite : w(b) = R[-w(a)]
+  requires fixed : b = a → w(a) = R[0]
+  shows finiteRingSum(V, A, add, zero, neg, mul, one, restrict(w, V)) =
+    finiteRingSum((V ∖ {a}) ∖ {b}, A, add, zero, neg, mul, one, restrict(w, (V ∖ {a}) ∖ {b}))
+proof
+  have restSubset : V ∖ {a} ⊆ V by simp [Subset, difference.membership]
+  have restDomain := Subset.transitive with restSubset, subset
+  have finiteRest := Finite.subset with finite, restSubset
+  have pairedSubset : (V ∖ {a}) ∖ {b} ⊆ V ∖ {a} by simp [Subset, difference.membership]
+  have pairedDomain := Subset.transitive with pairedSubset, restDomain
+  have finitePair := Finite.subset with finiteRest, pairedSubset
+  have pairWeights := restrict.domain_function with weights, pairedDomain
+  have pairValue := finiteRingSum.closed with ring, finitePair, pairWeights
+  have aIn : a ∈ D by simp [Subset]
+  have value := FunctionBetween.apply_closed with weights, aIn
+  have removed := finiteRingSum.remove at D, A, add, zero, neg, mul, one, w, V, a with *
+  have alternatives : b = a ∨ b ≠ a by tauto
+  cases alternatives with same | different
+  . have vanishes := fixed with same
+    have unchanged : (V ∖ {a}) ∖ {b} = V ∖ {a}
+      rw same
+      ext y
+      simp [difference.membership]
+    rw unchanged
+    have restWeights := restrict.domain_function with weights, restDomain
+    have restValue := finiteRingSum.closed with ring, finiteRest, restWeights
+    rw [removed, vanishes]
+    ring
+  . have member : b ∈ V ∖ {a}
+      simp [difference.membership, singleton.membership]
+    have removedAgain := finiteRingSum.remove at D, A, add, zero, neg, mul, one, w, V ∖ {a}, b with *
+    rw [removed, removedAgain, opposite]
+    ring
+
+-- A list supplies finite induction only; it need not enumerate without repeats.
+theorem finiteRingSum.involution_cover (t : Set) (xs : List(D))
+  requires involution : InvolutionOn(t, D)
+  requires opposite : ∀ a ∈ D, w(t(a)) = R[-w(a)]
+  requires fixed : ∀ a ∈ D, t(a) = a → w(a) = R[0]
+  shows ∀ V, V ⊆ D → V ⊆ listSupport{D}(xs) → (∀ a ∈ V, t(a) ∈ V) →
+    finiteRingSum(V, A, add, zero, neg, mul, one, restrict(w, V)) = R[0]
+proof
+  induction xs
+  | List.nil =>
+    intros V subset covered closed
+    rw listSupport at covered
+    have empty : V = ∅
+      apply Subset.antisymmetric with covered
+      exact empty.subset
+    rw empty
+    have bounded := empty.subset at D
+    have restricted := restrict.domain_function with weights, bounded
+    exact finiteRingSum.empty with ring, restricted
+  | List.cons(a, tail) using ih =>
+    intros V subset covered closed
+    rw listSupport at covered
+    have finiteSupport := listSupport.finite at D, List.cons{D}(a, tail) with *
+    rw listSupport at finiteSupport
+    have finite := Finite.subset with finiteSupport, covered
+    have alternatives : a ∈ V ∨ ¬(a ∈ V) by tauto
+    cases alternatives with present | absent
+    . have partner := closed with a, present
+      have pairedClosed := InvolutionOn.remove_pair with involution, subset, closed, present
+      have pairedSubset : (V ∖ {a}) ∖ {t(a)} ⊆ D by simp [Subset, difference.membership]
+      have pairedCovered : (V ∖ {a}) ∖ {t(a)} ⊆ listSupport{D}(tail)
+        intros y member
+        have outer := difference.membership.forward with member
+        have inner := difference.membership.forward with outer.left
+        have includes := covered
+        have inserted := includes with y, inner.left
+        have choices := insert.membership.forward with inserted
+        cases choices with same | inTail
+        . exfalso
+          have singleton := singleton.membership.backward with same
+          exact inner.right with singleton
+        . exact inTail
+      have previous := ih with (V ∖ {a}) ∖ {t(a)}, pairedSubset, pairedCovered, pairedClosed
+      have aIn : a ∈ D by assumption
+      have negative := opposite with a, aIn
+      have fixedValue := fixed with a, aIn
+      have removed := finiteRingSum.remove_orbit at D, A, add, zero, neg, mul, one, w, V, a, t(a) with *
+      cc
+    . have smaller : V ⊆ listSupport{D}(tail)
+        intros y member
+        have includes := covered
+        have inserted := includes with y, member
+        have choices := insert.membership.forward with inserted
+        cases choices with same | inTail
+        . exfalso
+          rw same at member
+          exact absent with member
+        . exact inTail
+      exact ih with V, subset, smaller, closed
+
+theorem finiteRingSum.involution (t : Set)
+  requires finite : Finite(D)
+  requires involution : InvolutionOn(t, D)
+  requires opposite : ∀ a ∈ D, w(t(a)) = R[-w(a)]
+  requires fixed : ∀ a ∈ D, t(a) = a → w(a) = R[0]
+  shows finiteRingSum(D, A, add, zero, neg, mul, one, w) = R[0]
+proof
+  obtain ⟨xs, list, covered⟩ := Finite.list_cover with finite
+  have reflexive : D ⊆ D by simp [Subset]
+  have function := InvolutionOn.function with involution
+  have closed : ∀ a ∈ D, t(a) ∈ D
+    intros a member
+    exact FunctionBetween.apply_closed with function, member
+  have scan := finiteRingSum.involution_cover with *
+  have sum := scan with D, reflexive, covered, closed
+  have restricted := restrict.domain_function with weights, reflexive
+  have same : restrict(w, D) = w
+    apply FunctionBetween.ext with restricted, weights
+    intros a member
+    exact restrict.domain_apply with weights, reflexive, member
+  rwa same at sum
+
+-- Common determinant/combinatorial case: the pairing has no fixed points.
+theorem finiteRingSum.involution_free (t : Set)
+  requires finite : Finite(D)
+  requires involution : InvolutionOn(t, D)
+  requires opposite : ∀ a ∈ D, w(t(a)) = R[-w(a)]
+  requires free : ∀ a ∈ D, t(a) ≠ a
+  shows finiteRingSum(D, A, add, zero, neg, mul, one, w) = R[0]
+proof
+  have fixed : ∀ a ∈ D, t(a) = a → w(a) = R[0]
+    intros a member same
+    exfalso
+    exact free with a, member, same
+  exact finiteRingSum.involution with *
+
+end Sums

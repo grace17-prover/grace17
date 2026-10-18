@@ -1,0 +1,366 @@
+-- The pigeonhole principle for finite sets: an injection never shrinks a set,
+-- a surjection never grows one, a function from a larger set into a smaller
+-- one collides somewhere, and between finite sets of the same size injective,
+-- surjective, and bijective coincide
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.Pigeonhole
+import InclusionExclusion
+
+theorem Injective.apply_ne (f A B x y : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires hx : x ∈ A
+  requires hy : y ∈ A
+  requires different : x ≠ y
+  shows f(x) ≠ f(y)
+proof
+  intro same
+  apply different
+  exact Injective.apply_cancel with injective, hx, hy, same
+
+theorem Surjective.image_full (f A B : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  shows functionImage(f, A, B) = B
+proof
+  have function := Surjective.function with surjective
+  apply Subset.antisymmetric with (functionImage.subset at f, A, B)
+  intros y hy
+  obtain ⟨x, hx, related⟩ := surjective.right with y, hy
+  have value := FunctionBetween.apply_value with function, hx, related
+  apply functionImage.membership.backward
+  refine ⟨hy, x, hx, ?_⟩
+  symm
+  exact value
+
+theorem Surjective.of_image_full (f A B : Set)
+  requires function : f : A → B
+  requires full : functionImage(f, A, B) = B
+  shows SurjectiveBetween(f, A, B)
+proof
+  unfold SurjectiveBetween
+  refine ⟨function, ?_⟩
+  intros y hy
+  rw ← full at hy
+  obtain ⟨inB, x, hx, shape⟩ := functionImage.membership.forward with hy
+  refine ⟨x, hx, ?_⟩
+  rw shape
+  exact FunctionBetween.relates_apply with function, hx
+
+theorem Injective.image_count (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires finite : Finite(A)
+  shows cardinality(functionImage(f, A, B)) = cardinality(A)
+proof
+  exact cardinality.injective_image with injective, (Subset.reflexive at A), finite
+
+theorem Injective.finite_domain (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires finite : Finite(B)
+  shows Finite(A)
+proof
+  have dominated := Dominated.of_injective with injective
+  exact Finite.of_dominated with finite, dominated
+
+-- An injection never shrinks a finite set.
+theorem Injective.cardinality_le (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires finite : Finite(B)
+  shows cardinality(A) ≤ cardinality(B)
+proof
+  have finiteA := Injective.finite_domain with injective, finite
+  have image := Injective.image_count with injective, finiteA
+  have bound := cardinality.monotone with
+    finite, (functionImage.subset at f, A, B)
+  rw image at bound
+  exact bound
+
+theorem Dominated.cardinality_le (A B : Set)
+  requires dominated : A ≼ B
+  requires finite : Finite(B)
+  shows cardinality(A) ≤ cardinality(B)
+proof
+  obtain ⟨f, injective⟩ := dominated
+  exact Injective.cardinality_le with injective, finite
+
+theorem Surjective.finite_codomain (f A B : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  requires finite : Finite(A)
+  shows Finite(B)
+proof
+  have function := Surjective.function with surjective
+  have full := Surjective.image_full with surjective
+  have finiteImage := Finite.function_image with
+    function, finite, (Subset.reflexive at A)
+  rw full at finiteImage
+  exact finiteImage
+
+-- A surjection never grows a finite set.
+theorem Surjective.cardinality_ge (f A B : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  requires finite : Finite(A)
+  shows cardinality(B) ≤ cardinality(A)
+proof
+  have function := Surjective.function with surjective
+  have full := Surjective.image_full with surjective
+  have bound := cardinality.image_le with
+    function, (Subset.reflexive at A), finite
+  rw full at bound
+  exact bound
+
+-- The pigeonhole principle: more pigeons than holes forces a shared hole.
+theorem pigeonhole.not_injective (f A B : Set)
+  requires function : f : A → B
+  requires finite : Finite(B)
+  requires more : cardinality(B) < cardinality(A)
+  shows ¬InjectiveBetween(f, A, B)
+proof
+  intro injective
+  have bound := Injective.cardinality_le with injective, finite
+  have natA := cardinality.nat with (Injective.finite_domain with
+    injective, finite)
+  have natB := cardinality.nat with finite
+  have strict := Less.transitive_LessEqual with more, bound
+  exact Less.irreflexive at cardinality(B) with strict
+
+theorem pigeonhole.collision (f A B : Set)
+  requires function : f : A → B
+  requires finite : Finite(B)
+  requires more : cardinality(B) < cardinality(A)
+  shows ∃ x ∈ A, ∃ y ∈ A, x ≠ y ∧ f(x) = f(y)
+proof
+  by_contra none
+  have cancel : ∀ x ∈ A, ∀ y ∈ A, f(x) = f(y) → x = y
+    intros x hx y hy same
+    by_contra different
+    apply none
+    exact ⟨x, hx, y, hy, different, same⟩
+  have injective := Injective.of_pointwise with function, cancel
+  exact pigeonhole.not_injective with function, finite, more, injective
+
+theorem pigeonhole.successor (f : Set) (n : Nat)
+  shows ¬InjectiveBetween(f, n + 1, n)
+proof
+  intro injective
+  have bound := Injective.cardinality_le with injective, (Finite.natural at n)
+  have one : n + 1 = succ(n) := add.right_one with *
+  have sizeSucc := cardinality.natural at succ(n)
+  have size := cardinality.natural at n
+  rw one at bound
+  rw [sizeSucc, size] at bound
+  arith
+
+theorem pigeonhole.not_dominated (n : Nat)
+  shows ¬(n + 1 ≼ n)
+proof
+  intro dominated
+  obtain ⟨f, injective⟩ := dominated
+  exact pigeonhole.successor at f, n with injective
+
+theorem pigeonhole.not_equipotent (n : Nat)
+  shows ¬(n + 1 ≃ n)
+proof
+  intro equipotent
+  have dominated := Dominated.of_equipotent with equipotent
+  exact pigeonhole.not_dominated at n with dominated
+
+-- Two naturals are equipotent exactly when they are equal.
+theorem natural.equipotent_iff (m n : Nat)
+  shows m ≃ n ↔ m = n
+proof
+  constructor
+  . intro equipotent
+    have counted : HasCardinality(m, n) := ⟨assumption, equipotent⟩
+    have size := cardinality.eq_of_has with counted
+    have own := cardinality.natural at m
+    rw own at size
+    exact size
+  . intro equal
+    rw equal
+    exact Equipotent.reflexive at n
+
+theorem natural.subset_of_le (m d : Nat)
+  shows m ⊆ m + d
+proof
+  induction d
+  | zero =>
+    have shape : m + 0 = m by ring
+    rw shape
+    exact Subset.reflexive at m
+  | k + 1 using ih =>
+    have shape : m + (k + 1) = succ(m + k) by ring
+    rw shape
+    intros x hx
+    have inside := ih with x, hx
+    have sumNat : Nat(m + k) by typecheck
+    exact membership.into_successor at x, m + k with inside
+
+theorem natural.subset_of_LessEqual (m n : Nat)
+  requires le : m ≤ n
+  shows m ⊆ n
+proof
+  obtain ⟨d, dNat, shape⟩ := le
+  rw ← shape
+  exact natural.subset_of_le at m, d
+
+theorem Dominated.of_cardinality_le (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires le : cardinality(A) ≤ cardinality(B)
+  shows A ≼ B
+proof
+  have natA := cardinality.nat with finiteA
+  have natB := cardinality.nat with finiteB
+  have countedA := HasCardinality.equipotent with (cardinality.correct with
+    finiteA)
+  have countedB := HasCardinality.equipotent with (cardinality.correct with
+    finiteB)
+  have subset := natural.subset_of_LessEqual with le
+  have first := Dominated.of_equipotent with countedA
+  have second := Dominated.of_subset with subset
+  have third := Dominated.of_equipotent with (Equipotent.symmetric with
+    countedB)
+  exact Dominated.transitive with first, (Dominated.transitive with second, third)
+
+theorem Dominated.iff_cardinality_le (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  shows A ≼ B ↔ cardinality(A) ≤ cardinality(B)
+proof
+  constructor
+  . intro dominated
+    exact Dominated.cardinality_le with dominated, finiteB
+  . intro le
+    exact Dominated.of_cardinality_le with finiteA, finiteB, le
+
+-- Between finite sets of the same size, a surjection is injective.
+theorem Finite.injective_of_surjective (f A B : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  requires finite : Finite(A)
+  requires same : cardinality(A) = cardinality(B)
+  shows InjectiveBetween(f, A, B)
+proof
+  have function := Surjective.function with surjective
+  have full := Surjective.image_full with surjective
+  have whole := Subset.reflexive at A
+  apply Injective.of_pointwise with function
+  intros x hx y hy equal
+  have imageCount : cardinality(functionImage(f, A, B)) = cardinality(A)
+    rw [full, same]
+    rfl
+  exact cardinality.injective_of_image with function, whole, finite, imageCount, hx, hy, equal
+
+-- Between finite sets of the same size, an injection is surjective.
+theorem Finite.surjective_of_injective (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires finite : Finite(B)
+  requires same : cardinality(A) = cardinality(B)
+  shows SurjectiveBetween(f, A, B)
+proof
+  have function := Injective.function with injective
+  have finiteA := Injective.finite_domain with injective, finite
+  have image := Injective.image_count with injective, finiteA
+  rw same at image
+  have full := cardinality.eq_subset with
+    finite, (functionImage.subset at f, A, B), image
+  exact Surjective.of_image_full with function, full
+
+theorem Finite.bijective_of_injective (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires finite : Finite(B)
+  requires same : cardinality(A) = cardinality(B)
+  shows BijectiveBetween(f, A, B)
+proof
+  have surjective := Finite.surjective_of_injective with injective, finite, same
+  exact ⟨injective, surjective⟩
+
+theorem Finite.bijective_of_surjective (f A B : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  requires finite : Finite(A)
+  requires same : cardinality(A) = cardinality(B)
+  shows BijectiveBetween(f, A, B)
+proof
+  have injective := Finite.injective_of_surjective with surjective, finite, same
+  exact ⟨injective, surjective⟩
+
+theorem Finite.injective_iff_surjective (f A B : Set)
+  requires function : f : A → B
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires same : cardinality(A) = cardinality(B)
+  shows InjectiveBetween(f, A, B) ↔ SurjectiveBetween(f, A, B)
+proof
+  constructor
+  . intro injective
+    exact Finite.surjective_of_injective with injective, finiteB, same
+  . intro surjective
+    exact Finite.injective_of_surjective with surjective, finiteA, same
+
+theorem Finite.injective_iff_bijective (f A B : Set)
+  requires finiteB : Finite(B)
+  requires same : cardinality(A) = cardinality(B)
+  shows InjectiveBetween(f, A, B) ↔ BijectiveBetween(f, A, B)
+proof
+  constructor
+  . intro injective
+    exact Finite.bijective_of_injective with injective, finiteB, same
+  . intro bijective
+    exact Bijective.injective with bijective
+
+theorem Finite.surjective_iff_bijective (f A B : Set)
+  requires finiteA : Finite(A)
+  requires same : cardinality(A) = cardinality(B)
+  shows SurjectiveBetween(f, A, B) ↔ BijectiveBetween(f, A, B)
+proof
+  constructor
+  . intro surjective
+    exact Finite.bijective_of_surjective with surjective, finiteA, same
+  . intro bijective
+    exact Bijective.surjective with bijective
+
+-- Self-maps of a finite set.
+theorem Finite.self_injective_bijective (f A : Set)
+  requires injective : InjectiveBetween(f, A, A)
+  requires finite : Finite(A)
+  shows BijectiveBetween(f, A, A)
+proof
+  have same : cardinality(A) = cardinality(A) by rfl
+  exact Finite.bijective_of_injective with injective, finite, same
+
+theorem Finite.self_surjective_bijective (f A : Set)
+  requires surjective : SurjectiveBetween(f, A, A)
+  requires finite : Finite(A)
+  shows BijectiveBetween(f, A, A)
+proof
+  have same : cardinality(A) = cardinality(A) by rfl
+  exact Finite.bijective_of_surjective with surjective, finite, same
+
+-- A collision shrinks the image.
+theorem pigeonhole.image_strict (f A B x y : Set)
+  requires function : f : A → B
+  requires finite : Finite(A)
+  requires hx : x ∈ A
+  requires hy : y ∈ A
+  requires different : x ≠ y
+  requires same : f(x) = f(y)
+  shows cardinality(functionImage(f, A, B)) < cardinality(A)
+proof
+  have whole := Subset.reflexive at A
+  have bound := cardinality.image_le with function, whole, finite
+  have natImage := cardinality.nat with (Finite.function_image with
+    function, finite, whole)
+  have natA := cardinality.nat with finite
+  have notFull : cardinality(functionImage(f, A, B)) ≠ cardinality(A)
+    intro full
+    apply different
+    exact cardinality.injective_of_image with function, whole, finite, full, hx, hy, same
+  have alternatives := Less.trichotomy at cardinality(functionImage(f, A, B)), cardinality(A) with natImage, natA
+  rcases alternatives with less | equal | greater
+  . exact less
+  . exfalso
+    exact notFull with equal
+  . exfalso
+    have strict := Less.transitive_LessEqual with greater, bound
+    exact Less.irreflexive at cardinality(A) with strict

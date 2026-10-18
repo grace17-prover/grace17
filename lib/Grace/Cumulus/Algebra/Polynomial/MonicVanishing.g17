@@ -1,0 +1,127 @@
+-- Explicit monic polynomials vanishing on finite lists, without Choice.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Polynomial.MonicVanishing
+import Horner
+import Cardinal.ListSupport
+
+-- If cs represents the monic polynomial P, this list represents carry+(X-a)P.
+def hornerLinearProduct {A : Set} (add neg mul a carry : Set) (cs : List(A)) → Set
+  | add, neg, mul, a, carry, List.nil => [call2(add, carry, neg(a))]
+  | add, neg, mul, a, carry, List.cons(c, tail) => call2(add, carry, neg(call2(mul, a, c))) :: hornerLinearProduct(add, neg, mul, a, c, tail)
+  descends cs
+
+section Rings
+variable (A add zero neg mul one a : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+hypothesis center : a ∈ R
+
+theorem hornerLinearProduct.closed (carry : Set) (cs : List(A))
+  requires constant : carry ∈ R
+  shows List(A, hornerLinearProduct{A}(add, neg, mul, a, carry, cs))
+proof
+  induction cs generalizing carry
+  | List.nil =>
+    intros carry constant
+    have ordinary := IsCommRing.ring with ring
+    have negative := IsRing.neg_closed with ordinary, center
+    have head := IsRing.add_closed with ordinary, constant, negative
+    rw hornerLinearProduct
+    typecheck
+  | List.cons(c, tail) using ih =>
+    intros carry constant
+    have ordinary := IsCommRing.ring with ring
+    have coefficient : c ∈ R by assumption
+    have rest := ih with c, coefficient
+    have product := IsRing.mul_closed with ordinary, center, coefficient
+    have negative := IsRing.neg_closed with ordinary, product
+    have head := IsRing.add_closed with ordinary, constant, negative
+    rw hornerLinearProduct
+    typecheck
+
+theorem hornerLinearProduct.value (x carry : Set) (cs : List(A))
+  requires element : x ∈ R
+  requires constant : carry ∈ R
+  shows hornerAt{A}(add, mul, one, x, hornerLinearProduct{A}(add, neg, mul, a, carry, cs)) = R[carry + (x - a) * hornerAt{A}(add, mul, one, x, cs)]
+proof
+  induction cs generalizing carry
+  | List.nil =>
+    intros carry constant
+    have ordinary := IsCommRing.ring with ring
+    have negative := IsRing.neg_closed with ordinary, center
+    have coefficient := IsRing.add_closed with ordinary, constant, negative
+    have empty : List(A, []) by typecheck
+    rw [hornerLinearProduct, hornerAt.cons, hornerAt.nil]
+    ring
+  | List.cons(c, tail) using ih =>
+    intros carry constant
+    have ordinary := IsCommRing.ring with ring
+    have coefficient : c ∈ R by assumption
+    have product := IsRing.mul_closed with ordinary, center, coefficient
+    have negative := IsRing.neg_closed with ordinary, product
+    have productCoefficient := IsRing.add_closed with ordinary, constant,
+      negative
+    have multiplicative := IsRing.multiplicative with ordinary
+    have unitIn := IsMonoid.unit_in_carrier with multiplicative
+    have rest := hornerLinearProduct.closed at A, add, zero, neg, mul, one, a, c, tail with *
+    have tailValue := hornerAt.closed at A, add, zero, neg, mul, one, one, x, tail with *
+    have previous := ih with c, coefficient
+    have outer := hornerAt.cons at A, add, mul, one, x, R[carry - a * c], hornerLinearProduct{A}(add, neg, mul, a, c, tail) with *
+    have original := hornerAt.cons at A, add, mul, one, x, c, tail with *
+    rw [hornerLinearProduct, outer, original, previous]
+    ring
+
+end Rings
+
+section FiniteSets
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+-- Starting with X guarantees positive degree, even for an empty covering list.
+theorem hornerAt.monic_vanishing_on_list (xs : List(A))
+  shows ∃ c ∈ R, ∃ cs, List(A, cs) ∧ (∀ x ∈ R, x ∈ listSupport{A}(xs) → hornerAt{A}(add, mul, one, x, c :: cs) = R[0])
+proof
+  induction xs
+  | List.nil =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have empty : List(A, []) by typecheck
+    refine ⟨zero, zeroIn, [], empty, ?_⟩
+    intros x element impossible
+    rw listSupport at impossible
+    exfalso
+    exact set.empty with impossible
+  | List.cons(a, tail) using ih =>
+    have ordinary := IsCommRing.ring with ring
+    have center : a ∈ R by assumption
+    obtain ⟨c, coefficient, cs, list, vanishes⟩ := ih
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have productCoefficient := IsRing.mul_closed with ordinary, center, coefficient
+    have newCoefficient := IsRing.neg_closed with ordinary, productCoefficient
+    have newList := hornerLinearProduct.closed at A, add, zero, neg, mul, one, a, c, cs with *
+    refine ⟨R[-(a * c)], newCoefficient, hornerLinearProduct{A}(add, neg, mul, a, c, cs), newList, ?_⟩
+    intros x element member
+    have multiplicative := IsRing.multiplicative with ordinary
+    have unitIn := IsMonoid.unit_in_carrier with multiplicative
+    have value := hornerAt.closed at A, add, zero, neg, mul, one, one, x, c :: cs with *
+    have product := hornerLinearProduct.value at A, add, zero, neg, mul, one, a, x, zero, c :: cs with *
+    rw hornerLinearProduct at product
+    have head : R[0 - a * c] = R[-(a * c)] by ring
+    rw head at product
+    rw product
+    rw listSupport at member
+    have alternatives := insert.membership.forward with member
+    cases alternatives with same | previous
+    . rw same at value
+      rw same
+      ring
+    . have old := vanishes with x, element, previous
+      rw old
+      ring
+
+end FiniteSets

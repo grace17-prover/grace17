@@ -1,0 +1,202 @@
+-- Monic polynomial relations in an algebra, evaluated by Horner's rule (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.MonicRelations
+import LinearSpan
+import Cardinal.ListSupport
+
+-- [a0, ..., a(n-1)] represents a0 + a1 X + ... + X^n; [] represents 1.
+def monicValue {A : Set} (f plus times unit x : Set) (cs : List(A)) → Set
+  | f, plus, times, unit, x, List.nil => unit
+  | f, plus, times, unit, x, List.cons(a, tail) => plus(f(a), times(x, monicValue(f, plus, times, unit, x, tail)))
+  descends cs
+
+notation scoped monicValue(R, f, S, x, cs) => monicValue(R.carrier, f, S.add, S.mul, S.one, x, cs)
+
+-- All the successive Horner tails; this is a finite set, without choosing an enumeration.
+def monicTailSet {A : Set} (f plus times unit x : Set) (cs : List(A)) → Set
+  | f, plus, times, unit, x, List.nil => {unit}
+  | f, plus, times, unit, x, List.cons(a, tail) => insert(monicValue(f, plus, times, unit, x, a :: tail), monicTailSet(f, plus, times, unit, x, tail))
+  descends cs
+
+notation scoped monicTailSet(R, f, S, x, cs) => monicTailSet(R.carrier, f, S.add, S.mul, S.one, x, cs)
+
+predicate IntegralOver (f A B plus z times unit x : Set) :=
+  x ∈ B ∧ ∃ cs, List(A, cs) ∧ monicValue{A}(f, plus, times, unit, x, cs) = z
+
+notation scoped IntegralOver(f, R, S, x) => IntegralOver(f, R.carrier, S.carrier, S.add, S.zero, S.mul, S.one, x)
+
+theorem monicTailSet.finite (A f plus times unit x : Set) (cs : List(A))
+  shows Finite(monicTailSet{A}(f, plus, times, unit, x, cs))
+proof
+  induction cs
+  | List.nil =>
+    rw monicTailSet
+    exact Finite.singleton
+  | List.cons(a, tail) using ih =>
+    rw monicTailSet
+    exact Finite.insert with ih
+
+theorem monicTailSet.unit (A f plus times unit x : Set) (cs : List(A))
+  shows unit ∈ monicTailSet{A}(f, plus, times, unit, x, cs)
+proof
+  induction cs
+  | List.nil =>
+    rw monicTailSet
+    simp
+  | List.cons(a, tail) using ih =>
+    rw monicTailSet
+    exact insert.contains with ih
+
+theorem monicTailSet.head (A f plus times unit x : Set) (cs : List(A))
+  shows monicValue{A}(f, plus, times, unit, x, cs) ∈ monicTailSet{A}(f, plus, times, unit, x, cs)
+proof
+  induction cs
+  | List.nil =>
+    rw [monicTailSet, monicValue]
+    simp
+  | List.cons(a, tail) using ih =>
+    rw monicTailSet
+    exact insert.self
+
+section Algebras
+variable (A add zero neg mul one B plus z minus times unit f x : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+
+theorem monicValue.closed (cs : List(A))
+  shows monicValue{A}(f, plus, times, unit, x, cs) ∈ S
+proof
+  induction cs
+  | List.nil =>
+    rw monicValue
+    have ordinary := IsCommRing.ring with target
+    have monoid := IsRing.multiplicative with ordinary
+    exact IsMonoid.unit_in_carrier with monoid
+  | List.cons(a, tail) using ih =>
+    have ordinary := IsCommRing.ring with target
+    have coefficient : a ∈ R by assumption
+    have scalar := IsRingHom.closed with hom, coefficient
+    have product := IsRing.mul_closed with ordinary, element, ih
+    rw monicValue
+    exact IsRing.add_closed with ordinary, product
+
+theorem monicTailSet.subset (cs : List(A))
+  shows monicTailSet{A}(f, plus, times, unit, x, cs) ⊆ S
+proof
+  induction cs
+  | List.nil =>
+    have unitIn := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, [] with *
+    rw monicValue at unitIn
+    rw monicTailSet
+    intros u hu
+    have equal := singleton.membership.forward with hu
+    rwa equal
+  | List.cons(a, tail) using ih =>
+    have head := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, a :: tail with *
+    rw monicTailSet
+    intros u hu
+    have alternatives := insert.membership.forward with hu
+    cases alternatives with equal | old
+    . rw equal
+      exact head
+    . exact ih with u, old
+
+theorem monicValue.in_subalgebra (T : Set) (cs : List(A))
+  requires subalgebra : Subalgebra(f, R, S, T)
+  requires member : x ∈ T
+  shows monicValue{A}(f, plus, times, unit, x, cs) ∈ T
+proof
+  induction cs
+  | List.nil =>
+    have subring := Subalgebra.subring with source, target, hom, subalgebra
+    rw monicValue
+    exact IsSubring.one_closed with subring
+  | List.cons(a, tail) using ih =>
+    have subring := Subalgebra.subring with source, target, hom, subalgebra
+    have coefficients := Subalgebra.coefficients with source, target, hom, subalgebra
+    have function := IsRingHom.function with hom
+    have image := functionImage.value with *
+    have scalar := coefficients with f(a), image
+    have multiplication := IsSubring.mul_closed with subring
+    have addition := IsSubring.add_closed with subring
+    have product := ClosedBinary.mem with multiplication, member, ih
+    rw monicValue
+    exact ClosedBinary.mem with addition, scalar, product
+
+theorem monicTailSet.in_subalgebra (T : Set) (cs : List(A))
+  requires subalgebra : Subalgebra(f, R, S, T)
+  requires member : x ∈ T
+  shows monicTailSet{A}(f, plus, times, unit, x, cs) ⊆ T
+proof
+  induction cs
+  | List.nil =>
+    have subring := Subalgebra.subring with source, target, hom, subalgebra
+    have unitIn := IsSubring.one_closed with subring
+    rw monicTailSet
+    intros u hu
+    have equal := singleton.membership.forward with hu
+    rwa equal
+  | List.cons(a, tail) using ih =>
+    have head := monicValue.in_subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, T, a :: tail with *
+    rw monicTailSet
+    intros u hu
+    have alternatives := insert.membership.forward with hu
+    cases alternatives with equal | old
+    . rw equal
+      exact head
+    . exact ih with u, old
+
+theorem IntegralOver.of_square (a : Set)
+  requires coefficient : a ∈ R
+  requires quadratic : S[x * x] = f(a)
+  shows IntegralOver(f, R, S, x)
+proof
+  have ordinary := IsCommRing.ring with source
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have negative := IsRing.neg_closed with ordinary, coefficient
+  have mappedZero := IsRingHom.zero with hom
+  have mappedNeg := IsRingHom.neg with hom, coefficient
+  have image := IsRingHom.closed with hom, coefficient
+  have list : List(A, [R[-a], R[0]]) by typecheck
+  have relation : monicValue(R, f, S, x, [R[-a], R[0]]) = S[0]
+    rw [monicValue, monicValue, monicValue, mappedNeg, mappedZero]
+    have normalize : S[(-f(a)) + x * (0 + x * 1)] = S[x * x - f(a)] by ring
+    rw [normalize, quadratic]
+    ring
+  unfold IntegralOver
+  refine ⟨element, [R[-a], R[0]], list, relation⟩
+
+end Algebras
+
+section Coefficients
+variable (A add zero neg mul one B plus z minus times unit f : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+
+theorem IntegralOver.coefficient (a : Set)
+  requires coefficient : a ∈ R
+  shows IntegralOver(f, R, S, f(a))
+proof
+  have ordinary := IsCommRing.ring with source
+  have negative := IsRing.neg_closed with ordinary, coefficient
+  have element := IsRingHom.closed with hom, coefficient
+  have mapped := IsRingHom.neg with hom, coefficient
+  have list : List(A, [R[-a]]) by typecheck
+  have relation : monicValue{A}(f, plus, times, unit, f(a), [R[-a]]) = S[0]
+    rw [monicValue, monicValue, mapped]
+    ring
+  unfold IntegralOver
+  refine ⟨element, [R[-a]], list, relation⟩
+
+end Coefficients

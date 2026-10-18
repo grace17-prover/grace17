@@ -1,0 +1,541 @@
+-- Counting by fibres: a finite set is the sum of the sizes of the preimages
+-- of a function on it, sums of constant and bounded weights, the
+-- generalized pigeonhole principle, and the size of a disjoint union of a
+-- finite family
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.Partitions
+import Permutations
+
+-- Preimages of single points.
+theorem functionPreimage.point_membership (f A b x : Set)
+  shows x ∈ functionPreimage(f, A, {b}) ↔ x ∈ A ∧ f(x) = b
+proof
+  constructor
+  . intro member
+    have parts := functionPreimage.membership.forward with member
+    have equal := singleton.membership.forward with parts.right
+    exact ⟨parts.left, equal⟩
+  . intro parts
+    apply functionPreimage.membership.backward
+    refine ⟨parts.left, ?_⟩
+    rw parts.right
+    exact singleton.self at b
+
+theorem functionPreimage.point_finite (f A b : Set)
+  requires finite : Finite(A)
+  shows Finite(functionPreimage(f, A, {b}))
+proof
+  exact Finite.subset with finite, (functionPreimage.subset at f, A, {b})
+
+theorem functionPreimage.point_nonempty (f A B b : Set)
+  requires surjective : SurjectiveBetween(f, A, B)
+  requires hb : b ∈ B
+  shows Nonempty(functionPreimage(f, A, {b}))
+proof
+  have function := Surjective.function with surjective
+  obtain ⟨x, hx, related⟩ := surjective.right with b, hb
+  have value := FunctionBetween.apply_value with function, hx, related
+  exact ⟨x, functionPreimage.point_membership.backward with ⟨hx, value⟩⟩
+
+theorem functionPreimage.point_le_one (f A B b : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  shows cardinality(functionPreimage(f, A, {b})) ≤ 1
+proof
+  have alternatives : Nonempty(functionPreimage(f, A, {b})) ∨ ¬Nonempty(functionPreimage(f, A, {b})) by tauto
+  cases alternatives with nonempty | empty
+  . obtain ⟨x, hx⟩ := nonempty
+    have partsX := functionPreimage.point_membership.forward with hx
+    have inside : functionPreimage(f, A, {b}) ⊆ {x}
+      intros y hy
+      have partsY := functionPreimage.point_membership.forward with hy
+      have same : f(y) = f(x)
+        rw [partsX.right, partsY.right]
+        rfl
+      have equal := Injective.apply_cancel with
+        injective, partsY.left, partsX.left, same
+      rw equal
+      exact singleton.self at x
+    exact cardinality.le_one_of_subset_singleton with inside
+  . have isEmpty : functionPreimage(f, A, {b}) = ∅
+      by_contra different
+      apply empty
+      exact Nonempty.of_ne_empty with different
+    rw [isEmpty, cardinality.empty]
+    arith
+
+-- The fibre of the converse over a point is the preimage of that point.
+theorem fiber.converse_point (f A B b : Set)
+  requires function : f : A → B
+  shows fiber(converse(f, A, B), A, b) = functionPreimage(f, A, {b})
+proof
+  ext x
+  constructor
+  . intro hx
+    have parts := fiber.membership.forward with hx
+    have converseParts := converse.membership.forward with parts.right
+    obtain ⟨u, hu, y, hy, shape, related⟩ := converseParts.right
+    have coordinates := orderedPair.injective with shape
+    rw [coordinates.left, coordinates.right]
+    have value := FunctionBetween.apply_value with function, hu, related
+    exact functionPreimage.point_membership.backward with ⟨hu, value⟩
+  . intro hx
+    have parts := functionPreimage.point_membership.forward with hx
+    have related := FunctionBetween.relates_apply with function, parts.left
+    rw parts.right at related
+    have inB : b ∈ B
+      rw ← parts.right
+      exact FunctionBetween.apply_closed with function, parts.left
+    have member := converse.relates with parts.left, inB, related
+    have inConverse : (b, x) ∈ converse(f, A, B) := member
+    exact fiber.membership.backward with ⟨parts.left, inConverse⟩
+
+defgraph preimageSize (f A B : Set) (b ∈ B) : ℕ := cardinality(functionPreimage(f, A, {b}))
+requires finiteA : Finite(A)
+proof
+  have finite := functionPreimage.point_finite at f, A, b with finiteA
+  have natural := cardinality.nat with finite
+  exact nat.omega.forward with natural
+
+-- The converse graph of a function is a copy of its domain.
+defgraph converseEntry (f A B : Set) (x ∈ A) : converse(f, A, B) := (f(x), x)
+requires function : f : A → B
+proof
+  have value := FunctionBetween.apply_closed with function, member
+  have related := FunctionBetween.relates_apply with function, member
+  exact converse.relates with member, value, related
+
+theorem converseEntry.injective (f A B : Set)
+  requires function : f : A → B
+  shows InjectiveBetween(converseEntry(f, A, B), A, converse(f, A, B))
+proof
+  have graph := converseEntry.function at f, A, B with function
+  apply Injective.of_pointwise with graph
+  intros x hx y hy same
+  have valueX := converseEntry.value at f, A, B, x with function, hx
+  have valueY := converseEntry.value at f, A, B, y with function, hy
+  rw [valueX, valueY] at same
+  have coordinates := orderedPair.injective with same
+  exact coordinates.right
+
+theorem converseEntry.surjective (f A B : Set)
+  requires function : f : A → B
+  shows SurjectiveBetween(converseEntry(f, A, B), A, converse(f, A, B))
+proof
+  have graph := converseEntry.function at f, A, B with function
+  unfold SurjectiveBetween
+  refine ⟨graph, ?_⟩
+  intros p hp
+  have parts := converse.membership.forward with hp
+  obtain ⟨x, hx, y, hy, shape, related⟩ := parts.right
+  have value := FunctionBetween.apply_value with function, hx, related
+  have entry := converseEntry.value at f, A, B, x with function, hx
+  refine ⟨x, hx, ?_⟩
+  have target : converseEntry(f, A, B)(x) = p
+    rw [entry, shape, value]
+    rfl
+  rw ← target
+  exact FunctionBetween.relates_apply with graph, hx
+
+theorem converseEntry.bijective (f A B : Set)
+  requires function : f : A → B
+  shows BijectiveBetween(converseEntry(f, A, B), A, converse(f, A, B))
+proof
+  have injective := converseEntry.injective with function
+  have surjective := converseEntry.surjective with function
+  exact ⟨injective, surjective⟩
+
+theorem converse.count (f A B : Set)
+  requires function : f : A → B
+  requires finite : Finite(A)
+  shows cardinality(converse(f, A, B)) = cardinality(A)
+proof
+  have bijective := converseEntry.bijective with function
+  symm
+  exact cardinality.bijective with finite, bijective
+
+theorem converse.finite_of_function (f A B : Set)
+  requires function : f : A → B
+  requires finite : Finite(A)
+  shows Finite(converse(f, A, B))
+proof
+  have bijective := converseEntry.bijective with function
+  exact Finite.of_equipotent with finite, ⟨converseEntry(f, A, B), bijective⟩
+
+-- A finite set is the sum of the sizes of the preimages of the points of
+-- the codomain.
+theorem cardinality.sum_of_preimages (f A B : Set)
+  requires function : f : A → B
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  shows cardinality(A) = natSum(B, preimageSize(f, A, B))
+proof
+  have inside : converse(f, A, B) ⊆ B × A := converse.relation at f, A, B
+  have size : cardinality(B) = cardinality(B) by rfl
+  have natB := cardinality.nat with finiteB
+  have count := relation.count at converse(f, A, B), B, A, cardinality(B) with
+    finiteB, finiteA, size, inside
+  have graph := converse.count with function, finiteA
+  rw graph at count
+  have agree : ∀ b ∈ B, fiberSize(converse(f, A, B), B, A)(b) = preimageSize(f, A, B)(b)
+    intros b hb
+    have left := fiberSize.value at converse(f, A, B), B, A, b with finiteA, hb
+    have right := preimageSize.value at f, A, B, b with finiteA, hb
+    have same := fiber.converse_point at f, A, B, b with function
+    rw [left, right, same]
+    rfl
+  rw count
+  exact natSum.congr with agree
+
+-- Sums of constant and of bounded weights.
+theorem natSum.constant_of_cardinality (n : Nat)
+  shows ∀ V, ∀ w, ∀ c, Nat(c) → HasCardinality(V, n) → (∀ v ∈ V, w(v) = c) →
+    natSum(V, w) = n * c
+proof
+  induction n
+  | zero =>
+    intros V w c cNat counted agree
+    have empty := HasCardinality.empty_of_zero at V with counted
+    rw [empty, natSum.empty]
+    ring
+  | k + 1 using ih =>
+    intros V w c cNat counted agree
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at counted
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at V, a, k with counted, member
+    have fresh : ¬a ∈ V ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restAgree : ∀ v ∈ V ∖ {a}, w(v) = c
+      intros v hv
+      exact agree with v, (difference.subset_left at V, {a} with v, hv)
+    have restSum := ih with V ∖ {a}, w, c, cNat, rest, restAgree
+    have restFinite := Finite.from_cardinality with rest
+    have cMember := nat.omega.forward at c with cNat
+    have weights : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ
+      intros v hv
+      have same := restAgree with v, hv
+      rw same
+      exact cMember
+    have valueA := agree with a, member
+    have weight : w(a) ∈ ℕ
+      rw valueA
+      exact cMember
+    have split := natSum.insert at V ∖ {a}, w, a with
+      restFinite, weights, weight, fresh
+    rw restored at split
+    rw [split, restSum, valueA]
+    ring
+
+theorem natSum.constant (V w : Set) (c : Nat)
+  requires finite : Finite(V)
+  requires agree : ∀ v ∈ V, w(v) = c
+  shows natSum(V, w) = cardinality(V) * c
+proof
+  have counted := cardinality.correct with finite
+  have natV := cardinality.nat with finite
+  have all := natSum.constant_of_cardinality at cardinality(V)
+  exact all with V, w, c, assumption, counted, agree
+
+theorem natSum.bounded_of_cardinality (n : Nat)
+  shows ∀ V, ∀ w, ∀ c, Nat(c) → HasCardinality(V, n) →
+    (∀ v ∈ V, w(v) ∈ ℕ ∧ LessEqual(w(v), c)) → natSum(V, w) ≤ n * c
+proof
+  induction n
+  | zero =>
+    intros V w c cNat counted bounds
+    have empty := HasCardinality.empty_of_zero at V with counted
+    rw [empty, natSum.empty]
+    have zero : 0 * c = 0 by ring
+    rw zero
+    arith
+  | k + 1 using ih =>
+    intros V w c cNat counted bounds
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at counted
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at V, a, k with counted, member
+    have fresh : ¬a ∈ V ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restBounds : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ ∧ LessEqual(w(v), c)
+      intros v hv
+      exact bounds with v, (difference.subset_left at V, {a} with v, hv)
+    have restSum := ih with V ∖ {a}, w, c, cNat, rest, restBounds
+    have restFinite := Finite.from_cardinality with rest
+    have weights : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ
+      intros v hv
+      have parts := restBounds with v, hv
+      exact parts.left
+    have boundA := bounds with a, member
+    have weight := boundA.left
+    have weightNat := nat.omega.backward with weight
+    have split := natSum.insert at V ∖ {a}, w, a with
+      restFinite, weights, weight, fresh
+    rw restored at split
+    rw split
+    have expand : (k + 1) * c = k * c + c by ring
+    rw expand
+    have sumNat := natSum.natural with restFinite, weights
+    have productNat : Nat(k * c) by typecheck
+    have valueBound := boundA.right
+    arith
+
+theorem natSum.le_of_bounded (V w : Set) (c : Nat)
+  requires finite : Finite(V)
+  requires bounds : ∀ v ∈ V, w(v) ∈ ℕ ∧ LessEqual(w(v), c)
+  shows natSum(V, w) ≤ cardinality(V) * c
+proof
+  have counted := cardinality.correct with finite
+  have natV := cardinality.nat with finite
+  have all := natSum.bounded_of_cardinality at cardinality(V)
+  exact all with V, w, c, assumption, counted, bounds
+
+theorem natSum.lower_of_cardinality (n : Nat)
+  shows ∀ V, ∀ w, ∀ c, Nat(c) → HasCardinality(V, n) →
+    (∀ v ∈ V, w(v) ∈ ℕ ∧ LessEqual(c, w(v))) → n * c ≤ natSum(V, w)
+proof
+  induction n
+  | zero =>
+    intros V w c cNat counted bounds
+    have empty := HasCardinality.empty_of_zero at V with counted
+    rw [empty, natSum.empty]
+    have zero : 0 * c = 0 by ring
+    rw zero
+    arith
+  | k + 1 using ih =>
+    intros V w c cNat counted bounds
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at counted
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at V, a, k with counted, member
+    have fresh : ¬a ∈ V ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restBounds : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ ∧ LessEqual(c, w(v))
+      intros v hv
+      exact bounds with v, (difference.subset_left at V, {a} with v, hv)
+    have restSum := ih with V ∖ {a}, w, c, cNat, rest, restBounds
+    have restFinite := Finite.from_cardinality with rest
+    have weights : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ
+      intros v hv
+      have parts := restBounds with v, hv
+      exact parts.left
+    have boundA := bounds with a, member
+    have weight := boundA.left
+    have weightNat := nat.omega.backward with weight
+    have split := natSum.insert at V ∖ {a}, w, a with
+      restFinite, weights, weight, fresh
+    rw restored at split
+    rw split
+    have expand : (k + 1) * c = k * c + c by ring
+    rw expand
+    have sumNat := natSum.natural with restFinite, weights
+    have productNat : Nat(k * c) by typecheck
+    have valueBound := boundA.right
+    arith
+
+theorem natSum.ge_of_bounded (V w : Set) (c : Nat)
+  requires finite : Finite(V)
+  requires bounds : ∀ v ∈ V, w(v) ∈ ℕ ∧ LessEqual(c, w(v))
+  shows cardinality(V) * c ≤ natSum(V, w)
+proof
+  have counted := cardinality.correct with finite
+  have natV := cardinality.nat with finite
+  have all := natSum.lower_of_cardinality at cardinality(V)
+  exact all with V, w, c, assumption, counted, bounds
+
+-- The generalized pigeonhole principle: more than k · |B| points cannot
+-- all land in preimages of size at most k.
+theorem pigeonhole.large_preimage (f A B : Set) (k : Nat)
+  requires function : f : A → B
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires more : k * cardinality(B) < cardinality(A)
+  shows ∃ b ∈ B, k < cardinality(functionPreimage(f, A, {b}))
+proof
+  by_contra none
+  have bounds : ∀ b ∈ B, preimageSize(f, A, B)(b) ∈ ℕ ∧ LessEqual(preimageSize(f, A, B)(b), k)
+    intros b hb
+    have value := preimageSize.value at f, A, B, b with finiteA, hb
+    have finitePre := functionPreimage.point_finite at f, A, b with finiteA
+    have natPre := cardinality.nat with finitePre
+    rw value
+    constructor
+    . exact nat.omega.forward with natPre
+    . have notMore : ¬k < cardinality(functionPreimage(f, A, {b}))
+        intro h
+        apply none
+        exact ⟨b, hb, h⟩
+      exact LessEqual.of_not_Less with notMore
+  have total := natSum.le_of_bounded at B, preimageSize(f, A, B), k with
+    finiteB, bounds
+  have sum := cardinality.sum_of_preimages with function, finiteA, finiteB
+  rw ← sum at total
+  have natA := cardinality.nat with finiteA
+  have natB := cardinality.nat with finiteB
+  have commute : cardinality(B) * k = k * cardinality(B) by ring
+  rw commute at total
+  have strict := Less.transitive_LessEqual with more, total
+  exact Less.irreflexive at k * cardinality(B) with strict
+
+theorem pigeonhole.small_preimage (f A B : Set) (k : Nat)
+  requires function : f : A → B
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  requires fewer : cardinality(A) < k * cardinality(B)
+  shows ∃ b ∈ B, cardinality(functionPreimage(f, A, {b})) < k
+proof
+  by_contra none
+  have bounds : ∀ b ∈ B, preimageSize(f, A, B)(b) ∈ ℕ ∧ LessEqual(k, preimageSize(f, A, B)(b))
+    intros b hb
+    have value := preimageSize.value at f, A, B, b with finiteA, hb
+    have finitePre := functionPreimage.point_finite at f, A, b with finiteA
+    have natPre := cardinality.nat with finitePre
+    rw value
+    constructor
+    . exact nat.omega.forward with natPre
+    . have notFewer : ¬cardinality(functionPreimage(f, A, {b})) < k
+        intro h
+        apply none
+        exact ⟨b, hb, h⟩
+      exact LessEqual.of_not_Less with notFewer
+  have total := natSum.ge_of_bounded at B, preimageSize(f, A, B), k with
+    finiteB, bounds
+  have sum := cardinality.sum_of_preimages with function, finiteA, finiteB
+  rw ← sum at total
+  have natA := cardinality.nat with finiteA
+  have natB := cardinality.nat with finiteB
+  have commute : cardinality(B) * k = k * cardinality(B) by ring
+  rw commute at total
+  have strict := Less.transitive_LessEqual with fewer, total
+  exact Less.irreflexive at cardinality(A) with strict
+
+-- Disjoint unions of finite families.
+predicate PairwiseDisjoint (F : Set) := ∀ S ∈ F, ∀ T ∈ F, S ≠ T → Disjoint(S, T)
+
+theorem PairwiseDisjoint.subset (F G : Set)
+  requires subset : G ⊆ F
+  requires disjoint : PairwiseDisjoint(F)
+  shows PairwiseDisjoint(G)
+proof
+  intros S hS T hT different
+  exact disjoint with S, (subset with S, hS), T, (subset with T, hT), different
+
+theorem PairwiseDisjoint.member_union (F S : Set)
+  requires disjoint : PairwiseDisjoint(insert(S, F))
+  requires fresh : ¬S ∈ F
+  shows Disjoint(S, ⋃F)
+proof
+  apply Disjoint.iff.backward
+  intros x hx inUnion
+  obtain ⟨T, hT, hxT⟩ := union.membership.forward with inUnion
+  have different : S ≠ T
+    intro equal
+    apply fresh
+    rw equal
+    exact hT
+  have pair := disjoint with S, (insert.self at S, F), T, (insert.contains with
+    hT), different
+  have free := Disjoint.iff.forward with pair
+  exact free with x, hx, hxT
+
+defgraph sizeMap (F : Set) (S ∈ F) : ℕ := cardinality(S)
+requires members : ∀ S ∈ F, Finite(S)
+proof
+  have finite := members with S, member
+  have natural := cardinality.nat with finite
+  exact nat.omega.forward with natural
+
+theorem cardinality.big_union_of_cardinality (n : Nat)
+  shows ∀ F, HasCardinality(F, n) → (∀ S ∈ F, Finite(S)) → PairwiseDisjoint(F) →
+    cardinality(⋃F) = natSum(F, sizeMap(F))
+proof
+  induction n
+  | zero =>
+    intros F counted members disjoint
+    have empty := HasCardinality.empty_of_zero at F with counted
+    rw [empty, union.empty, natSum.empty]
+    exact cardinality.empty
+  | k + 1 using ih =>
+    intros F counted members disjoint
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at counted
+    obtain ⟨S, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at F, S, k with counted, member
+    have fresh : ¬S ∈ F ∖ {S} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restSubset := difference.subset_left at F, {S}
+    have restMembers : ∀ T ∈ F ∖ {S}, Finite(T)
+      intros T hT
+      exact members with T, (restSubset with T, hT)
+    have restDisjoint := PairwiseDisjoint.subset with restSubset, disjoint
+    have restCount := ih with F ∖ {S}, rest, restMembers, restDisjoint
+    have restFinite := Finite.from_cardinality with rest
+    have finiteS := members with S, member
+    have finiteUnion := Finite.big_union with restFinite, restMembers
+    rw ← restored at disjoint
+    have separated := PairwiseDisjoint.member_union with disjoint, fresh
+    have split := union.insert at F ∖ {S}, S
+    rw restored at split
+    have count := cardinality.union_disjoint with
+      finiteS, finiteUnion, separated
+    have weights : ∀ T ∈ F ∖ {S}, sizeMap(F)(T) ∈ ℕ
+      intros T hT
+      have value := sizeMap.value at F, T with members, (restSubset with T, hT)
+      rw value
+      exact nat.omega.forward with (cardinality.nat with (members with T, (restSubset with T, hT)))
+    have weight : sizeMap(F)(S) ∈ ℕ
+      have value := sizeMap.value at F, S with members, member
+      rw value
+      exact nat.omega.forward with (cardinality.nat with finiteS)
+    have sum := natSum.insert at F ∖ {S}, sizeMap(F), S with
+      restFinite, weights, weight, fresh
+    rw restored at sum
+    have agree : ∀ T ∈ F ∖ {S}, sizeMap(F)(T) = sizeMap(F ∖ {S})(T)
+      intros T hT
+      have left := sizeMap.value at F, T with members, (restSubset with T, hT)
+      have right := sizeMap.value at F ∖ {S}, T with restMembers, hT
+      rw [left, right]
+      rfl
+    have same := natSum.congr with agree
+    have valueS := sizeMap.value at F, S with members, member
+    rw [split, count, restCount, sum, same, valueS]
+    have natS := cardinality.nat with finiteS
+    have restWeights : ∀ T ∈ F ∖ {S}, sizeMap(F ∖ {S})(T) ∈ ℕ
+      intros T hT
+      have value := sizeMap.value at F ∖ {S}, T with restMembers, hT
+      rw value
+      exact nat.omega.forward with (cardinality.nat with (restMembers with T, hT))
+    have sumNat := natSum.natural at F ∖ {S}, sizeMap(F ∖ {S}) with
+      restFinite, restWeights
+    exact add.commutative at natSum(F ∖ {S}, sizeMap(F ∖ {S})), cardinality(S) with sumNat, natS
+
+-- The size of a disjoint union of a finite family of finite sets.
+theorem cardinality.big_union_disjoint (F : Set)
+  requires finite : Finite(F)
+  requires members : ∀ S ∈ F, Finite(S)
+  requires disjoint : PairwiseDisjoint(F)
+  shows cardinality(⋃F) = natSum(F, sizeMap(F))
+proof
+  have counted := cardinality.correct with finite
+  have natF := cardinality.nat with finite
+  have all := cardinality.big_union_of_cardinality at cardinality(F)
+  exact all with F, counted, members, disjoint
+
+theorem cardinality.big_union_constant (F : Set) (c : Nat)
+  requires finite : Finite(F)
+  requires members : ∀ S ∈ F, Finite(S)
+  requires disjoint : PairwiseDisjoint(F)
+  requires sizes : ∀ S ∈ F, cardinality(S) = c
+  shows cardinality(⋃F) = cardinality(F) * c
+proof
+  have count := cardinality.big_union_disjoint with finite, members, disjoint
+  have agree : ∀ S ∈ F, sizeMap(F)(S) = c
+    intros S hS
+    have value := sizeMap.value at F, S with members, hS
+    rw value
+    exact sizes with S, hS
+  rw count
+  exact natSum.constant with finite, agree

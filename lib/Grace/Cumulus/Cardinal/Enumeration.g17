@@ -1,0 +1,382 @@
+-- Counting is independent of a finite enumeration.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Enumeration
+import Set.Indicator
+import ListSupport
+
+predicate DistinctValues (f n : Set) :=
+  ∀ i ∈ n, ∀ j ∈ n, f[i] = f[j] → i = j
+
+predicate Occurs (f n x : Set) := ∃ i ∈ n, f[i] = x
+
+theorem membership.into_successor (x : Set, n : Nat)
+  requires before : x ∈ n
+  shows x ∈ succ(n)
+proof
+  simp
+
+theorem DistinctValues.prefix (f : Set, n : Nat)
+  requires distinct : DistinctValues(f, succ(n))
+  shows DistinctValues(f, n)
+proof
+  intros i hi j hj same
+  have iNext := membership.into_successor with hi
+  have jNext := membership.into_successor with hj
+  exact distinct with i, iNext, j, jNext, same
+
+theorem DistinctValues.last_fresh (f : Set, n : Nat)
+  requires distinct : DistinctValues(f, succ(n))
+  shows ∀ i ∈ n, f[i] ≠ f[n]
+proof
+  intros i hi same
+  have iNext := membership.into_successor with hi
+  have nNext := membership.self_successor at n
+  have equal := distinct with i, iNext, n, nNext, same
+  rw equal at hi
+  exact membership.irreflexive with hi
+
+theorem countMembers.absent (A f : Set, n : Nat)
+  shows (∀ i ∈ n, ¬(f[i] ∈ A)) → countMembers(A, f, n) = 0
+proof
+  induction n
+  | zero =>
+    intro absent
+    rw countMembers
+    rfl
+  | succ(k) using ih =>
+    intro absent
+    have prefix : ∀ i ∈ k, ¬(f[i] ∈ A) by simp
+    have last := absent with k, membership.self_successor at k with assumption
+    have previous := ih with prefix
+    have value := indicator.absent with last
+    rw [countMembers, previous, value]
+    simp [add]
+
+theorem countMembers.singleton_one (f x : Set, n : Nat)
+  shows DistinctValues(f, n) → Occurs(f, n, x) → countMembers({x}, f, n) = 1
+proof
+  induction n
+  | zero =>
+    intros distinct occurs
+    rcases occurs with ⟨i, impossible, same⟩
+    exfalso
+    simp [nat.zero, set.empty]
+  | succ(k) using ih =>
+    intros distinct occurs
+    have alternatives : f[k] = x ∨ f[k] ≠ x by tauto
+    cases alternatives with last | other
+    . have fresh := DistinctValues.last_fresh at f, k with assumption, distinct
+      have absent : ∀ i ∈ k, ¬(f[i] ∈ {x}) by simp
+      have previous := countMembers.absent with assumption, absent
+      have member := singleton.membership.backward with last
+      have value := indicator.member with member
+      rw [countMembers, previous, value]
+      simp [add]
+    . obtain ⟨position, before, equal⟩ := Occurs.forward at f, succ(k), x with occurs
+      have shape := membership.successor_forward{n := k} with before
+      have earlier : position ∈ k by simp
+      have prefix := DistinctValues.prefix with assumption, distinct
+      have occurrence : Occurs(f, k, x)
+        unfold Occurs
+        refine ⟨position, earlier, equal⟩
+      have previous := ih with prefix, occurrence
+      have absent : ¬(f[k] ∈ {x}) by simp
+      have value := indicator.absent with absent
+      rw [countMembers, previous, value]
+      simp [add.right_unit]
+
+-- The weighted equality matrix is symmetric. Its row sum selects a single
+-- occurrence, so its two iterated sums count the same subset in either order.
+
+def matchWeight (A x y : Set) : Set := mul(indicator(A, x), indicator({x}, y))
+
+theorem matchWeight.symmetric (A x y : Set)
+  shows matchWeight(A, x, y) = matchWeight(A, y, x)
+proof
+  have alternatives : x = y ∨ x ≠ y by tauto
+  cases alternatives with same | different
+  . rw same
+    rfl
+  . have xy : ¬(y ∈ {x}) by simp
+    have yx : ¬(x ∈ {y}) by simp
+    have leftZero := indicator.absent with xy
+    have rightZero := indicator.absent with yx
+    simp [matchWeight, leftZero, rightZero, mul.right_zero]
+
+def matchRow (A f x : Set, n : Nat) → Set
+  | A, f, x, zero => 0
+  | A, f, x, succ(k) => add(matchRow(A, f, x, k), matchWeight(A, x, f[k]))
+
+def matchTotal (A f g : Set, n m : Nat) → Set
+  | A, f, g, n, zero => 0
+  | A, f, g, n, succ(k) => add(matchTotal(A, f, g, n, k), matchRow(A, f, g[k], n))
+  descends m
+
+theorem matchWeight.natural (A x y : Set)
+  shows Nat(matchWeight(A, x, y))
+proof
+  unfold matchWeight
+  typecheck
+
+theorem matchRow.natural (A f x : Set, n : Nat)
+  shows Nat(matchRow(A, f, x, n))
+proof
+  induction n
+  | zero =>
+    rw matchRow
+    typecheck
+  | succ(k) using ih =>
+    rw matchRow
+    typecheck
+
+theorem matchTotal.natural (A f g : Set, n m : Nat)
+  shows Nat(matchTotal(A, f, g, n, m))
+proof
+  induction m
+  | zero =>
+    rw matchTotal
+    typecheck
+  | succ(k) using ih =>
+    rw matchTotal
+    have value := matchRow.natural at A, f, g[k], n with assumption
+    typecheck
+
+theorem matchRow.factor (A f x : Set, n : Nat)
+  shows matchRow(A, f, x, n) = mul(indicator(A, x), countMembers({x}, f, n))
+proof
+  induction n
+  | zero =>
+    rw [matchRow, countMembers]
+    simp [mul.right_zero]
+  | succ(k) using ih =>
+    rw [matchRow, countMembers, ih]
+    unfold matchWeight
+    have b := countMembers.natural at {x}, f, k with assumption
+    ring
+
+theorem matchTotal.empty_left (A f g : Set, m : Nat)
+  shows matchTotal(A, f, g, 0, m) = 0
+proof
+  induction m
+  | zero =>
+    rw matchTotal
+    rfl
+  | succ(k) using ih =>
+    rw [matchTotal, matchRow, ih]
+    simp [add]
+
+theorem matchTotal.extend_left (A f g : Set, n m : Nat)
+  shows matchTotal(A, f, g, succ(n), m) =
+    add(matchTotal(A, f, g, n, m), matchRow(A, g, f[n], m))
+proof
+  induction m
+  | zero =>
+    simp [matchTotal, matchRow, add]
+  | succ(k) using ih =>
+    rw [matchTotal, matchTotal, matchRow, matchRow, ih]
+    have symmetric := matchWeight.symmetric at A, g[k], f[n]
+    rw symmetric
+    have a := matchTotal.natural at A, f, g, n, k with *
+    have b := matchRow.natural at A, g, f[n], k with assumption
+    have c := matchRow.natural at A, f, g[k], n with assumption
+    have d := matchWeight.natural at A, f[n], g[k]
+    exact add.four_shuffle with a, b, c, d
+
+theorem matchTotal.transpose (A f g : Set, m n : Nat)
+  shows matchTotal(A, f, g, n, m) = matchTotal(A, g, f, m, n)
+proof
+  induction n
+  | zero =>
+    rw [matchTotal.empty_left, matchTotal]
+    rfl
+  | succ(k) using ih =>
+    rw [matchTotal.extend_left, matchTotal, ih]
+    rfl
+
+theorem matchTotal.count (A f g : Set, n m : Nat)
+  requires distinct : DistinctValues(f, n)
+  shows (∀ j ∈ m, Occurs(f, n, g[j])) →
+    matchTotal(A, f, g, n, m) = countMembers(A, g, m)
+proof
+  induction m
+  | zero =>
+    intro covered
+    simp [matchTotal, countMembers]
+  | succ(k) using ih =>
+    intro covered
+    have prefix : ∀ j ∈ k, Occurs(f, n, g[j]) by simp
+    have last := covered with k, membership.self_successor at k with assumption
+    have singletonCount := countMembers.singleton_one with assumption, distinct, last
+    have factored := matchRow.factor at A, f, g[k], n with assumption
+    rw singletonCount at factored
+    have previous := ih with prefix
+    rw [matchTotal, countMembers, previous, factored]
+    simp [mul.right_unit]
+
+theorem countMembers.same_entries (A f g : Set, n m : Nat)
+  requires distinctF : DistinctValues(f, n)
+  requires distinctG : DistinctValues(g, m)
+  requires coveredF : ∀ i ∈ n, Occurs(g, m, f[i])
+  requires coveredG : ∀ j ∈ m, Occurs(f, n, g[j])
+  shows countMembers(A, f, n) = countMembers(A, g, m)
+proof
+  have left := Enumeration.matchTotal.count at A, g, f, m, n with *
+  have right := Enumeration.matchTotal.count at A, f, g, n, m with *
+  have transpose := Enumeration.matchTotal.transpose at A, f, g, m, n with *
+  rw [← left, ← right]
+  symm
+  exact transpose
+
+theorem Injective.distinct_values (f X V : Set)
+  requires injective : InjectiveBetween(f, X, V)
+  shows DistinctValues(f, X)
+proof
+  rcases injective with ⟨fn, unique⟩
+  intros i hi j hj equal
+  have value := FunctionBetween.apply_closed with fn, hi
+  have left := FunctionBetween.relates_apply with fn, hi
+  have right := FunctionBetween.relates_apply with fn, hj
+  rw ← equal at right
+  exact unique with i, hi, j, hj, f[i], value, left, right
+
+theorem Surjective.occurs (f X V x : Set)
+  requires surjective : SurjectiveBetween(f, X, V)
+  requires member : x ∈ V
+  shows Occurs(f, X, x)
+proof
+  rcases surjective with ⟨fn, onto⟩
+  obtain ⟨i, hi, related⟩ := onto with x, member
+  have equal := FunctionBetween.apply_value with fn, hi, related
+  unfold Occurs
+  refine ⟨i, hi, equal⟩
+
+theorem countMembers.reindex (A V f g : Set, n m : Nat)
+  requires enumerationF : BijectiveBetween(f, n, V)
+  requires enumerationG : BijectiveBetween(g, m, V)
+  shows countMembers(A, f, n) = countMembers(A, g, m)
+proof
+  have injF := Bijective.injective with enumerationF
+  have injG := Bijective.injective with enumerationG
+  have surjF := Bijective.surjective with enumerationF
+  have surjG := Bijective.surjective with enumerationG
+  have fnF := Injective.function with injF
+  have fnG := Injective.function with injG
+  have distinctF := Injective.distinct_values with injF
+  have distinctG := Injective.distinct_values with injG
+  have coveredF : ∀ i ∈ n, Occurs(g, m, f[i])
+    intros i hi
+    have value := FunctionBetween.apply_closed with fnF, hi
+    exact Surjective.occurs with surjG, value
+  have coveredG : ∀ j ∈ m, Occurs(f, n, g[j])
+    intros j hj
+    have value := FunctionBetween.apply_closed with fnG, hj
+    exact Surjective.occurs with surjF, value
+  exact countMembers.same_entries with distinctF, distinctG, coveredF, coveredG
+
+theorem countMembers.all (A f : Set, n : Nat)
+  shows (∀ i ∈ n, f[i] ∈ A) → countMembers(A, f, n) = n
+proof
+  induction n
+  | zero =>
+    intro covered
+    rw countMembers
+    rfl
+  | succ(k) using ih =>
+    intro covered
+    have prefix : ∀ i ∈ k, f[i] ∈ A by simp
+    have last := covered with k, membership.self_successor at k with assumption
+    have value := indicator.member with last
+    have previous := ih with prefix
+    rw [countMembers, previous, value]
+    exact add.right_one with assumption
+
+theorem Bijective.natural_domain_unique (V f g : Set, n m : Nat)
+  requires enumerationF : BijectiveBetween(f, n, V)
+  requires enumerationG : BijectiveBetween(g, m, V)
+  shows n = m
+proof
+  have injF := Bijective.injective with enumerationF
+  have injG := Bijective.injective with enumerationG
+  have fnF := Injective.function with injF
+  have fnG := Injective.function with injG
+  have coveredF : ∀ i ∈ n, f[i] ∈ V
+    intros i hi
+    exact FunctionBetween.apply_closed with fnF, hi
+  have coveredG : ∀ j ∈ m, g[j] ∈ V
+    intros j hj
+    exact FunctionBetween.apply_closed with fnG, hj
+  have countF := countMembers.all with coveredF
+  have countG := countMembers.all with coveredG
+  have equal := countMembers.reindex at V, V, f, g, n, m with *
+  rwa [countF, countG] at equal
+
+theorem HasCardinality.unique (V n m : Set)
+  requires first : HasCardinality(V, n)
+  requires second : HasCardinality(V, m)
+  shows n = m
+proof
+  rcases first with ⟨naturalN, f, forwardF⟩
+  rcases second with ⟨naturalM, g, forwardG⟩
+  have inverseF := converse.bijective with forwardF
+  have inverseG := converse.bijective with forwardG
+  exact Bijective.natural_domain_unique with naturalN, naturalM, inverseF, inverseG
+
+theorem Bijective.values (f X V : Set)
+  requires enumeration : BijectiveBetween(f, X, V)
+  shows ∀ i ∈ X, f[i] ∈ V
+proof
+  have injective := Bijective.injective with enumeration
+  have fn := Injective.function with injective
+  intros i hi
+  exact FunctionBetween.apply_closed with fn, hi
+
+-- Finite cardinality has a canonical value because its witness is unique.
+-- The correctness law requires finiteness.
+defunique cardinality (A : Set) (n ∈ ℕ) := HasCardinality(A, n)
+requires finite : Finite(A)
+proof
+  rcases finite with ⟨n, natural, equivalent⟩
+  witness n
+  constructor
+  . exact nat.omega.forward at n with natural
+  . unfold HasCardinality
+    refine ⟨natural, equivalent⟩
+
+uniqueness
+  intros n nMember first m mMember second
+  exact HasCardinality.unique with first, second
+
+theorem cardinality.correct (A : Set)
+  requires finite : Finite(A)
+  shows HasCardinality(A, cardinality(A))
+proof
+  simp [cardinality.selected]
+
+theorem cardinality.eq_of_has (A n : Set)
+  requires given : HasCardinality(A, n)
+  shows cardinality(A) = n
+proof
+  have finite := Finite.from_cardinality with given
+  have correct := cardinality.correct with finite
+  exact HasCardinality.unique with correct, given
+
+theorem cardinality.natural (n : Nat)
+  shows cardinality(n) = n
+proof
+  have own : HasCardinality(n, n)
+    unfold HasCardinality
+    refine ⟨assumption, Equipotent.reflexive at n⟩
+  exact cardinality.eq_of_has with own
+
+theorem cardinality.singleton (x : Set)
+  shows cardinality({x}) = 1
+proof
+  have one : HasCardinality({x}, 1)
+    constructor
+    . exact Naturals.constructor.succ at 0 with Naturals.constructor.zero
+    . exact Equipotent.singleton_one at x
+  exact cardinality.eq_of_has with one

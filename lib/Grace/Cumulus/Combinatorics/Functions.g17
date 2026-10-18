@@ -1,0 +1,291 @@
+-- Counting functions: a set of size m has n ^ m maps into a set of size n,
+-- by splitting a function on insert(a, A) into its restriction to A and its
+-- value at a; words of length m over an alphabet are functions on the
+-- numeral m
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.Functions
+import Binomial
+
+theorem functionSpace.finite (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  shows Finite(functionSpace(A, B))
+proof
+  have product := Finite.product with finiteA, finiteB
+  have powers := Finite.powerset with product
+  exact Finite.subset with powers, (functionSpace.subset_powerset at A, B)
+
+theorem functionSpace.empty_domain_count (B : Set)
+  shows cardinality(functionSpace(∅, B)) = 1
+proof
+  rw functionSpace.empty_domain
+  exact cardinality.singleton at ∅
+
+theorem functionSpace.empty_codomain_count (A : Set)
+  requires nonempty : Nonempty(A)
+  shows cardinality(functionSpace(A, ∅)) = 0
+proof
+  have empty := functionSpace.empty_codomain with nonempty
+  rw empty
+  exact cardinality.empty
+
+theorem insert.subset_self (A a : Set)
+  shows A ⊆ insert(a, A)
+proof
+  intros x hx
+  exact insert.contains with hx
+
+-- A function on insert(a, A) is its restriction to A together with its
+-- value at a.
+defgraph functionSplit (A B a : Set) (f ∈ functionSpace(insert(a, A), B)) : functionSpace(A, B) × B :=
+  (restrict(f, A), f(a))
+proof
+  have function := functionSpace.membership.forward with member
+  have subset := insert.subset_self at A, a
+  have restricted := restrict.domain_function with function, subset
+  have value := FunctionBetween.apply_closed with
+    function, (insert.self at a, A)
+  apply product.pair
+  . exact functionSpace.membership.backward with restricted
+  . exact value
+
+theorem functionSplit.injective (A B a : Set)
+  shows
+    InjectiveBetween(functionSplit(A, B, a), functionSpace(insert(a, A), B), functionSpace(A, B) × B)
+proof
+  have function := functionSplit.function at A, B, a
+  have subset := insert.subset_self at A, a
+  apply Injective.of_pointwise with function
+  intros f hf g hg same
+  have valueF := functionSplit.value at A, B, a, f with hf
+  have valueG := functionSplit.value at A, B, a, g with hg
+  rw [valueF, valueG] at same
+  have parts := orderedPair.injective with same
+  have fFunction := functionSpace.membership.forward with hf
+  have gFunction := functionSpace.membership.forward with hg
+  apply FunctionBetween.ext with fFunction, gFunction
+  intros x hx
+  have split := insert.membership.forward with hx
+  cases split with isA | inA
+  . rw isA
+    exact parts.right
+  . have restrictF := restrict.domain_apply with fFunction, subset, inA
+    have restrictG := restrict.domain_apply with gFunction, subset, inA
+    rw [← restrictF, ← restrictG, parts.left]
+    rfl
+
+theorem functionSplit.adjoin_member (A B a g b : Set)
+  requires fresh : ¬a ∈ A
+  requires hg : g ∈ functionSpace(A, B)
+  requires hb : b ∈ B
+  shows adjoinMap(g, a, b) ∈ functionSpace(insert(a, A), B)
+proof
+  have gFunction := functionSpace.membership.forward with hg
+  have extended := adjoinMap.function at g, A, B, a, b with gFunction, fresh
+  have absorb := insert.eq_of_member with hb
+  rw absorb at extended
+  exact functionSpace.membership.backward with extended
+
+theorem functionSplit.adjoin_value (A B a g b : Set)
+  requires fresh : ¬a ∈ A
+  requires hg : g ∈ functionSpace(A, B)
+  requires hb : b ∈ B
+  shows functionSplit(A, B, a)(adjoinMap(g, a, b)) = (g, b)
+proof
+  have subset := insert.subset_self at A, a
+  have gFunction := functionSpace.membership.forward with hg
+  have inSpace := functionSplit.adjoin_member with fresh, hg, hb
+  have extended := functionSpace.membership.forward with inSpace
+  have value := functionSplit.value at A, B, a, adjoinMap(g, a, b) with inSpace
+  have valueA : adjoinMap(g, a, b)(a) = b
+    exact FunctionBetween.apply_value with extended, (insert.self at a, A), (adjoinMap.relates_new at g, a, b)
+  have restricted : restrict(adjoinMap(g, a, b), A) = g
+    have restrictFunction := restrict.domain_function with extended, subset
+    apply FunctionBetween.ext with restrictFunction, gFunction
+    intros x hx
+    have step := restrict.domain_apply with extended, subset, hx
+    rw step
+    have related := adjoinMap.relates_old at g, a, b, x, g(x) with (FunctionBetween.relates_apply with gFunction, hx)
+    exact FunctionBetween.apply_value with extended, (subset with x, hx), related
+  rw [value, restricted, valueA]
+  rfl
+
+theorem functionSplit.surjective (A B a : Set)
+  requires fresh : ¬a ∈ A
+  shows
+    SurjectiveBetween(functionSplit(A, B, a), functionSpace(insert(a, A), B), functionSpace(A, B) × B)
+proof
+  have function := functionSplit.function at A, B, a
+  unfold SurjectiveBetween
+  refine ⟨function, ?_⟩
+  intros p hp
+  obtain ⟨bound, g, hg, b, hb, shape⟩ := product.membership.forward with hp
+  have inSpace := functionSplit.adjoin_member with fresh, hg, hb
+  have target := functionSplit.adjoin_value with fresh, hg, hb
+  refine ⟨adjoinMap(g, a, b), inSpace, ?_⟩
+  rw [shape, ← target]
+  exact FunctionBetween.relates_apply with function, inSpace
+
+theorem functionSplit.bijective (A B a : Set)
+  requires fresh : ¬a ∈ A
+  shows
+    BijectiveBetween(functionSplit(A, B, a), functionSpace(insert(a, A), B), functionSpace(A, B) × B)
+proof
+  have injective := functionSplit.injective at A, B, a
+  have surjective := functionSplit.surjective at A, B, a with fresh
+  exact ⟨injective, surjective⟩
+
+theorem functionSpace.insert_equipotent (A B a : Set)
+  requires fresh : ¬a ∈ A
+  shows functionSpace(insert(a, A), B) ≃ functionSpace(A, B) × B
+proof
+  witness functionSplit(A, B, a)
+  exact functionSplit.bijective with fresh
+
+-- The number of functions from an m-element set to an n-element set.
+theorem functionSpace.cardinality (m : Nat)
+  shows ∀ A, ∀ B, ∀ n, Nat(n) → HasCardinality(A, m) → HasCardinality(B, n) →
+    HasCardinality(functionSpace(A, B), n ^ m)
+proof
+  induction m
+  | zero =>
+    intros A B n nNat countedA countedB
+    have empty := HasCardinality.empty_of_zero at A with countedA
+    rw [empty, functionSpace.empty_domain, pow.zero]
+    constructor
+    . exact Naturals.constructor.succ at 0 with Naturals.constructor.zero
+    . exact Equipotent.singleton_one at ∅
+  | k + 1 using ih =>
+    intros A B n nNat countedA countedB
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at countedA
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with countedA
+    have rest := HasCardinality.remove at A, a, k with countedA, member
+    have fresh : ¬a ∈ A ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restCount := ih with A ∖ {a}, B, n, nNat, rest, countedB
+    have product := HasCardinality.product with restCount, countedB
+    have split := functionSpace.insert_equipotent at A ∖ {a}, B, a with fresh
+    rw restored at split
+    have powNat := pow.closed at n, k
+    have shape : n ^ (k + 1) = mul(n ^ k, n)
+      rw [hk, pow.succ]
+      ring
+    rw shape
+    constructor
+    . exact HasCardinality.natural with product
+    . exact Equipotent.transitive with split, (HasCardinality.equipotent with product)
+
+theorem functionSpace.count (A B : Set)
+  requires finiteA : Finite(A)
+  requires finiteB : Finite(B)
+  shows cardinality(functionSpace(A, B)) = cardinality(B) ^ cardinality(A)
+proof
+  have countedA := cardinality.correct with finiteA
+  have countedB := cardinality.correct with finiteB
+  have natA := cardinality.nat with finiteA
+  have natB := cardinality.nat with finiteB
+  have all := functionSpace.cardinality at cardinality(A)
+  have counted := all with A, B, cardinality(B), natB, countedA, countedB
+  exact cardinality.eq_of_has with counted
+
+theorem functionSpace.self_count (A : Set)
+  requires finite : Finite(A)
+  shows cardinality(functionSpace(A, A)) = cardinality(A) ^ cardinality(A)
+proof
+  exact functionSpace.count with finite, finite
+
+theorem pow.one_base (m : Nat)
+  shows 1 ^ m = 1
+proof
+  induction m
+  | zero => exact pow.zero at 1
+  | k + 1 using ih =>
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw [hk, pow.succ, ih]
+    compute
+
+theorem functionSpace.singleton_codomain_count (A y : Set)
+  requires finite : Finite(A)
+  shows cardinality(functionSpace(A, {y})) = 1
+proof
+  have count := functionSpace.count with finite, (Finite.singleton at y)
+  rw [count, cardinality.singleton]
+  have natA := cardinality.nat with finite
+  exact pow.one_base at cardinality(A)
+
+-- Functions into a two-element set are as many as subsets.
+theorem functionSpace.two_count (A : Set)
+  requires finite : Finite(A)
+  shows cardinality(functionSpace(A, 2)) = 2 ^ cardinality(A)
+proof
+  have two : Nat(2) by typecheck
+  have count := functionSpace.count with finite, (Finite.natural at 2)
+  rw [count, cardinality.natural]
+  rfl
+
+theorem functionSpace.two_equipotent_powerset (A : Set)
+  requires finite : Finite(A)
+  shows functionSpace(A, 2) ≃ 𝒫(A)
+proof
+  have two : Nat(2) by typecheck
+  have finiteSpace := functionSpace.finite with finite, (Finite.natural at 2)
+  have finitePower := Finite.powerset with finite
+  have same : cardinality(functionSpace(A, 2)) = cardinality(𝒫(A))
+    have left := functionSpace.two_count with finite
+    have right := powerset.count with finite
+    rw [left, right]
+    rfl
+  exact cardinality.equipotent_of_eq with finiteSpace, finitePower, same
+
+-- Words of length m over an alphabet are functions on the numeral m.
+def words (A : Set, m : Nat) : Set := functionSpace(m, A)
+
+theorem words.membership (w A : Set, m : Nat)
+  shows w ∈ words(A, m) ↔ w : m → A
+proof
+  simp [words, functionSpace.membership]
+
+theorem words.finite (A : Set, m : Nat)
+  requires finite : Finite(A)
+  shows Finite(words(A, m))
+proof
+  unfold words
+  exact functionSpace.finite with (Finite.natural at m), finite
+
+theorem words.zero (A : Set)
+  shows words(A, 0) = {∅}
+proof
+  unfold words
+  have shape := functionSpace.empty_domain at A
+  rw nat.zero
+  exact shape
+
+theorem words.count (A : Set, m : Nat)
+  requires finite : Finite(A)
+  shows cardinality(words(A, m)) = cardinality(A) ^ m
+proof
+  unfold words
+  have count := functionSpace.count with (Finite.natural at m), finite
+  rw [count, cardinality.natural]
+  rfl
+
+theorem words.binary_count (m : Nat)
+  shows cardinality(words(2, m)) = 2 ^ m
+proof
+  have two : Nat(2) by typecheck
+  have count := words.count at 2, m with (Finite.natural at 2)
+  rw [count, cardinality.natural]
+  rfl
+
+theorem words.letter (w A x : Set, m : Nat)
+  requires word : w ∈ words(A, m)
+  requires position : x ∈ m
+  shows w(x) ∈ A
+proof
+  have function := words.membership.forward with word
+  exact FunctionBetween.apply_closed with function, position

@@ -1,0 +1,196 @@
+-- Finite degree sums and undirected edge counts.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Counting
+import Basic
+import Set.Indicator
+import Cardinal.Finite
+
+namespace GraphCount
+
+-- f enumerates the vertices. Degree counts adjacent entries in its prefix.
+-- A bijection f : n → V gives the usual degree in a finite graph.
+def degree (E f x : Set, n : Nat) → Set
+  | E, f, x, zero => 0
+  | E, f, x, succ(k) => add(degree(E, f, x, k), indicator(E, (x, f[k])))
+
+-- Sum the degrees of the first m vertices, using n vertices as neighbors.
+def degreeSum (E f : Set, n m : Nat) → Set
+  | E, f, n, zero => 0
+  | E, f, n, succ(k) => add(degreeSum(E, f, n, k), degree(E, f, f[k], n))
+  descends m
+
+-- Count each undirected edge once: its larger enumeration index is last.
+-- In particular this is NOT the cardinality of the symmetric relation E.
+def edgeCount (E f : Set, n : Nat) → Set
+  | E, f, zero => 0
+  | E, f, succ(k) => add(edgeCount(E, f, k), degree(E, f, f[k], k))
+
+theorem degree.natural (E f x : Set, n : Nat)
+  shows Nat(degree(E, f, x, n))
+proof
+  induction n
+  | zero =>
+    rw degree
+    typecheck
+  | succ(k) using ih =>
+    rw degree
+    typecheck
+
+theorem degreeSum.natural (E f : Set, n m : Nat)
+  shows Nat(degreeSum(E, f, n, m))
+proof
+  induction m
+  | zero =>
+    rw degreeSum
+    typecheck
+  | succ(k) using ih =>
+    rw degreeSum
+    have value := degree.natural at E, f, f[k], n with assumption
+    typecheck
+
+theorem edgeCount.natural (E f : Set, n : Nat)
+  shows Nat(edgeCount(E, f, n))
+proof
+  induction n
+  | zero =>
+    rw edgeCount
+    typecheck
+  | succ(k) using ih =>
+    rw edgeCount
+    have value := degree.natural at E, f, f[k], k with assumption
+    typecheck
+
+theorem indicator.symmetric (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  shows indicator(E, (x, y)) = indicator(E, (y, x))
+proof
+  apply indicator.congr
+  constructor
+  . intro edge
+    have adjacent : Adjacent(E, x, y)
+      unfold Adjacent
+      exact edge
+    have reversed := Adjacent.symmetric with graph, adjacent
+    unfold Adjacent at reversed
+    exact reversed
+  . intro edge
+    have adjacent : Adjacent(E, y, x)
+      unfold Adjacent
+      exact edge
+    have reversed := Adjacent.symmetric with graph, adjacent
+    unfold Adjacent at reversed
+    exact reversed
+
+theorem indicator.diagonal (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  shows indicator(E, (x, x)) = 0
+proof
+  apply indicator.absent
+  intro loop
+  have adjacent : Adjacent(E, x, x)
+    unfold Adjacent
+    exact loop
+  have distinct := Adjacent.distinct with graph, adjacent
+  apply distinct
+  rfl
+
+-- Adding one possible neighbor adds its incidence count to the degree sum.
+theorem degreeSum.extend_neighbors (V E f : Set, n m : Nat)
+  requires graph : SimpleGraph(V, E)
+  shows degreeSum(E, f, succ(n), m) =
+    add(degreeSum(E, f, n, m), degree(E, f, f[n], m))
+proof
+  induction m
+  | zero =>
+    simp [degreeSum, degree, add]
+  | succ(k) using ih =>
+    rw [degreeSum, degreeSum, degree, degree, ih]
+    have symmetric := indicator.symmetric at V, E, f[k], f[n] with graph
+    rw symmetric
+    have a := degreeSum.natural at E, f, n, k with *
+    have b := degree.natural at E, f, f[n], k
+    have c := degree.natural at E, f, f[k], n
+    have d := indicator.natural at E, (f[n], f[k])
+    exact add.four_shuffle with a, b, c, d
+
+-- Each new edge contributes to two degrees, and no loop contributes a third.
+theorem handshaking (V E f : Set, n : Nat)
+  requires graph : SimpleGraph(V, E)
+  shows degreeSum(E, f, n, n) = mul(2, edgeCount(E, f, n))
+proof
+  induction n
+  | zero =>
+    simp [degreeSum, edgeCount, mul, add]
+  | succ(k) using ih =>
+    rw degreeSum
+    have extended := degreeSum.extend_neighbors at V, E, f, k, k with *
+    rw [extended, degree]
+    have noLoop := indicator.diagonal at V, E, f[k] with graph
+    rw [noLoop, ih, edgeCount]
+    simp [mul.two_left, add.right_unit]
+    ring
+
+-- The degree really counts membership in the previously defined neighbor set.
+theorem degree.neighbors (V E f x : Set, n : Nat)
+  shows (∀ i ∈ n, f[i] ∈ V) →
+    degree(E, f, x, n) = countMembers(neighbors(V, E, x), f, n)
+proof
+  induction n
+  | zero =>
+    intro enumeration
+    simp [degree, countMembers]
+  | succ(k) using ih =>
+    intro enumeration
+    have prefix : ∀ i ∈ k, f[i] ∈ V
+      intros i before
+      have earlier : i ∈ k ∨ i = k
+        left
+        exact before
+      have included := membership.successor_backward{n := k} with earlier
+      exact enumeration with i, included
+    have last := enumeration with k, membership.self_successor at k with assumption
+    have equivalent : (x, f[k]) ∈ E ↔ f[k] ∈ neighbors(V, E, x)
+      have member := neighbors.membership at V, E, x, f[k]
+      have edgeIff : Adjacent(E, x, f[k]) ↔ (x, f[k]) ∈ E
+        constructor
+        . intro edge
+          unfold Adjacent at edge
+          exact edge
+        . intro edge
+          unfold Adjacent
+          exact edge
+      tauto
+    have same := indicator.congr with equivalent
+    have previous := ih with prefix
+    rw [degree, countMembers, previous, same]
+    rfl
+
+end GraphCount
+
+-- Public finite-graph formulation. A bijection lists every vertex exactly
+-- once, so the lower triangle counts every undirected edge exactly once.
+theorem SimpleGraph.handshaking (V E f : Set, n : Nat)
+  requires graph : SimpleGraph(V, E)
+  requires enumeration : BijectiveBetween(f, n, V)
+  shows GraphCount.degreeSum(E, f, n, n) = 2 * GraphCount.edgeCount(E, f, n)
+proof
+  exact GraphCount.handshaking with graph
+
+-- Finiteness supplies an enumeration; no fixed size or numeric vertex labels
+-- are imposed on V.
+theorem Finite.handshaking (V E : Set)
+  requires graph : SimpleGraph(V, E)
+  requires finite : Finite(V)
+  shows ∃ n ∈ ℕ, ∃ f, BijectiveBetween(f, n, V) ∧
+    GraphCount.degreeSum(E, f, n, n) = 2 * GraphCount.edgeCount(E, f, n)
+proof
+  rcases finite with ⟨n, natural, equivalent⟩
+  obtain ⟨f, enumeration⟩ := Equipotent.symmetric with equivalent
+  witness n
+  constructor
+  . exact nat.omega.forward at n with natural
+  . refine ⟨f, enumeration, (SimpleGraph.handshaking at V, E, f, n with natural, graph, enumeration)⟩

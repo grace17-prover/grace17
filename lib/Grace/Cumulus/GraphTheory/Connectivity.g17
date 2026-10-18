@@ -1,0 +1,541 @@
+-- Finite reachability, connected components, and their partition laws.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Connectivity
+import Reachability
+
+-- Closure is relative to V; it also makes sense for directed graphs.
+predicate EdgeClosed (V E A : Set) :=
+  ∀ u ∈ A, ∀ v ∈ V, Adjacent(E, u, v) → v ∈ A
+
+-- One induction covers all finite lengths and arbitrary vertex sets.
+theorem reachableWithin.in_closed_set (V E x A : Set, n : Nat)
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  shows reachableWithin(V, E, x, n) ⊆ A
+proof
+  induction n
+  | zero =>
+    rw reachableWithin.zero
+    intros y member
+    have equality := singleton.membership.forward with member
+    rw equality
+    exact start
+  | succ(k) using ih =>
+    rw reachableWithin.successor
+    intros y member
+    have alternatives := union2.membership.forward at y,
+      reachableWithin(V, E, x, k), nextNeighbors(V, E, reachableWithin(V, E, x, k)) with member
+    cases alternatives with old | new
+      exact ih with y, old
+    . have parts := nextNeighbors.membership.forward at V, E, reachableWithin(V, E, x, k), y with new
+      rcases parts with ⟨hy, z, hz, edge⟩
+      have zInA := ih with z, hz
+      exact closed with z, zInA, y, hy, edge
+
+theorem Reachable.in_closed_set (V E x y A : Set)
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  requires path : Reachable(V, E, x, y)
+  shows y ∈ A
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have included := reachableWithin.in_closed_set with nNat, start, closed
+  exact included with y, reached
+
+theorem Reachable.vertex (V E x y : Set)
+  requires hx : x ∈ V
+  requires path : Reachable(V, E, x, y)
+  shows y ∈ V
+proof
+  have closed : EdgeClosed(V, E, V)
+    intros u hu v hv edge
+    exact hv
+  exact Reachable.in_closed_set with hx, closed, path
+
+theorem Reachable.extend (V E x y z : Set)
+  requires path : Reachable(V, E, x, y)
+  requires hz : z ∈ V
+  requires edge : Adjacent(E, y, z)
+  shows Reachable(V, E, x, z)
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have nextNat := Naturals.constructor.succ with nNat
+  have nextIn := nat.omega.forward with nextNat
+  have next := reachableWithin.advance with nNat, reached, hz, edge
+  unfold Reachable
+  refine ⟨succ(n), nextIn, next⟩
+
+-- Separation gives a set even when the graph is infinite.
+def component (V E x : Set) : Set := { y ∈ V | Reachable(V, E, x, y) }
+
+theorem component.membership (V E x y : Set)
+  shows y ∈ component(V, E, x) ↔ (y ∈ V ∧ Reachable(V, E, x, y))
+proof
+  simp
+
+theorem component.source (V E x : Set)
+  requires hx : x ∈ V
+  shows x ∈ component(V, E, x)
+proof
+  apply component.membership.backward
+  have path := Reachable.reflexive at V, E, x
+  refine ⟨hx, path⟩
+
+theorem component.closed (V E x : Set)
+  shows EdgeClosed(V, E, component(V, E, x))
+proof
+  intros u hu v hv edge
+  obtain ⟨uInV, reached⟩ := component.membership.forward with hu
+  have extended := Reachable.extend with reached, hv, edge
+  exact component.membership.backward with ⟨hv, extended⟩
+
+theorem component.minimal (V E x A : Set)
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  shows component(V, E, x) ⊆ A
+proof
+  intros y member
+  obtain ⟨hy, path⟩ := component.membership.forward with member
+  exact Reachable.in_closed_set with start, closed, path
+
+theorem Reachable.transitive (V E x y z : Set)
+  requires hy : y ∈ V
+  requires first : Reachable(V, E, x, y)
+  requires second : Reachable(V, E, y, z)
+  shows Reachable(V, E, x, z)
+proof
+  have start : y ∈ component(V, E, x) := component.membership.backward with ⟨hy, first⟩
+  have member := Reachable.in_closed_set with start, second
+  obtain ⟨hz, path⟩ := component.membership.forward with member
+  exact path
+
+-- Reversal is proved at every finite length, using concatenation above.
+theorem reachableWithin.reverse (V E x : Set, n : Nat)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  shows ∀ y ∈ reachableWithin(V, E, x, n), Reachable(V, E, y, x)
+proof
+  induction n
+  | zero =>
+    intros y member
+    rw reachableWithin.zero at member
+    have equality := singleton.membership.forward with member
+    rw equality
+    exact Reachable.reflexive
+  | succ(k) using ih =>
+    intros y member
+    rw reachableWithin.successor at member
+    have alternatives := union2.membership.forward at y,
+      reachableWithin(V, E, x, k), nextNeighbors(V, E, reachableWithin(V, E, x, k)) with member
+    cases alternatives with old | new
+    . exact ih with y, old
+    . have parts := nextNeighbors.membership.forward at V, E, reachableWithin(V, E, x, k), y with new
+      rcases parts with ⟨hy, z, hz, edge⟩
+      have back := ih with z, hz
+      have reverseEdge := Adjacent.symmetric with graph, edge
+      have bounds := Adjacent.bounds with graph, edge
+      rcases bounds with ⟨zInV, yInV⟩
+      have first := Reachable.of_edge with zInV, reverseEdge
+      exact Reachable.transitive with zInV, first, back
+
+theorem Reachable.symmetric (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires path : Reachable(V, E, x, y)
+  shows Reachable(V, E, y, x)
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have reverse := reachableWithin.reverse with nNat, graph, hx
+  exact reverse with y, reached
+
+theorem component.subset_vertices (V E x : Set)
+  shows component(V, E, x) ⊆ V
+proof
+  intros y member
+  obtain ⟨hy, path⟩ := component.membership.forward with member
+  exact hy
+
+theorem component.equal_of_reachable (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  requires path : Reachable(V, E, x, y)
+  shows component(V, E, x) = component(V, E, y)
+proof
+  have back := Reachable.symmetric with graph, hx, path
+  ext z
+  constructor
+  . intro member
+    obtain ⟨hz, xz⟩ := component.membership.forward with member
+    have yz := Reachable.transitive with hx, back, xz
+    exact component.membership.backward with ⟨hz, yz⟩
+  . intro member
+    obtain ⟨hz, yz⟩ := component.membership.forward with member
+    have xz := Reachable.transitive with hy, path, yz
+    exact component.membership.backward with ⟨hz, xz⟩
+
+theorem component.equal_iff (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  shows component(V, E, x) = component(V, E, y) ↔ Reachable(V, E, x, y)
+proof
+  constructor
+  . intro equality
+    have member := component.source at V, E, y with hy
+    rw ← equality at member
+    obtain ⟨yInV, path⟩ := component.membership.forward with member
+    exact path
+  . intro path
+    exact component.equal_of_reachable with graph, hx, hy, path
+
+theorem component.equal_of_common_vertex (V E x y z : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  requires first : z ∈ component(V, E, x)
+  requires second : z ∈ component(V, E, y)
+  shows component(V, E, x) = component(V, E, y)
+proof
+  have partsX := component.membership.forward with first
+  have partsY := component.membership.forward with second
+  rcases partsX with ⟨hz, xz⟩
+  rcases partsY with ⟨hz2, yz⟩
+  have firstEqual := component.equal_of_reachable with graph, hx, hz, xz
+  have secondEqual := component.equal_of_reachable with graph, hy, hz, yz
+  rw firstEqual
+  symm
+  exact secondEqual
+
+theorem component.equal_or_disjoint (V E x y : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  shows component(V, E, x) = component(V, E, y) ∨
+    Disjoint(component(V, E, x), component(V, E, y))
+proof
+  have alternatives : component(V, E, x) = component(V, E, y) ∨ component(V, E, x) ≠ component(V, E, y) by tauto
+  cases alternatives with equal | different
+  . left
+    exact equal
+  . right
+    unfold Disjoint
+    ext z
+    constructor
+    . intro member
+      obtain ⟨first, second⟩ := intersection.membership.forward with member
+      exfalso
+      apply different
+      exact component.equal_of_common_vertex with graph, hx, hy, first, second
+    . intro impossible
+      exfalso
+      exact set.empty with impossible
+
+predicate GraphConnected (V E : Set) :=
+  ∀ x ∈ V, ∀ y ∈ V, Reachable(V, E, x, y)
+
+theorem component.connected (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  shows ∀ u ∈ component(V, E, x), ∀ v ∈ component(V, E, x), Reachable(V, E, u, v)
+proof
+  intros u hu v hv
+  have partsU := component.membership.forward with hu
+  have partsV := component.membership.forward with hv
+  rcases partsU with ⟨uInV, xu⟩
+  rcases partsV with ⟨vInV, xv⟩
+  have ux := Reachable.symmetric with graph, hx, xu
+  exact Reachable.transitive with hx, ux, xv
+
+theorem GraphConnected.component (V E x : Set)
+  requires connected : GraphConnected(V, E)
+  requires hx : x ∈ V
+  shows component(V, E, x) = V
+proof
+  ext y
+  constructor
+  . intro member
+    have included := component.subset_vertices at V, E, x
+    exact included with y, member
+  . intro hy
+    have path := connected with x, hx, y, hy
+    exact component.membership.backward with ⟨hy, path⟩
+
+theorem GraphConnected.of_component (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  requires entire : component(V, E, x) = V
+  shows GraphConnected(V, E)
+proof
+  have connected := component.connected with graph, hx
+  intros u hu v hv
+  rw ← entire at hu
+  rw ← entire at hv
+  exact connected with u, hu, v, hv
+
+-- This set of sets is the component partition, bounded by the powerset.
+def components (V E : Set) : Set :=
+  { A ∈ 𝒫(V) | ∃ x ∈ V, A = component(V, E, x) }
+
+theorem components.membership (V E A : Set)
+  shows A ∈ components(V, E) ↔
+    (A ∈ 𝒫(V) ∧ ∃ x ∈ V, A = component(V, E, x))
+proof
+  simp
+
+theorem components.contains (V E x : Set)
+  requires hx : x ∈ V
+  shows component(V, E, x) ∈ components(V, E)
+proof
+  have included := component.subset_vertices at V, E, x
+  unfold Subset at included
+  have inPower := set.powerset.backward with included
+  exact components.membership.backward with ⟨inPower, x, hx, rfl⟩
+
+theorem components.nonempty_members (V E A : Set)
+  requires member : A ∈ components(V, E)
+  shows ∃ x ∈ A, x ∈ V
+proof
+  obtain ⟨inPower, x, hx, equality⟩ := components.membership.forward with member
+  have source := component.source at V, E, x with hx
+  rw ← equality at source
+  refine ⟨x, source, hx⟩
+
+theorem components.cover (V E : Set)
+  shows ⋃(components(V, E)) = V
+proof
+  ext x
+  constructor
+  . intro member
+    obtain ⟨A, inFamily, inA⟩ := set.union.forward with member
+    obtain ⟨inPower, witness⟩ := components.membership.forward with inFamily
+    have included := set.powerset.forward with inPower
+    exact included with x, inA
+  . intro hx
+    have inFamily := components.contains at V, E, x with hx
+    have inComponent := component.source at V, E, x with hx
+    exact union.contains with inFamily, inComponent
+
+theorem components.equal_or_disjoint (V E A B : Set)
+  requires graph : SimpleGraph(V, E)
+  requires first : A ∈ components(V, E)
+  requires second : B ∈ components(V, E)
+  shows A = B ∨ Disjoint(A, B)
+proof
+  have partsA := components.membership.forward with first
+  have partsB := components.membership.forward with second
+  rcases partsA with ⟨powerA, x, hx, equalityA⟩
+  rcases partsB with ⟨powerB, y, hy, equalityB⟩
+  rw [equalityA, equalityB]
+  exact component.equal_or_disjoint with graph, hx, hy
+
+-- A route starting in an edge-closed set never needs to leave that set.
+theorem reachableWithin.restrict_closed (V E x A : Set, n : Nat)
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  shows ∀ y ∈ reachableWithin(V, E, x, n), Reachable(A, inducedEdges(E, A), x, y)
+proof
+  induction n
+  | zero =>
+    intros y member
+    rw reachableWithin.zero at member
+    have equality := singleton.membership.forward with member
+    rw equality
+    exact Reachable.reflexive
+  | succ(k) using ih =>
+    intros y member
+    rw reachableWithin.successor at member
+    have alternatives := union2.membership.forward with member
+    cases alternatives with old | new
+    . exact ih with y, old
+    . have parts := nextNeighbors.membership.forward at V, E, reachableWithin(V, E, x, k), y with new
+      rcases parts with ⟨hy, z, hz, edge⟩
+      have previous := ih with z, hz
+      have included := reachableWithin.in_closed_set with start, closed
+      have zInA := included with z, hz
+      have yInA := closed with z, zInA, y, hy, edge
+      have restricted : Adjacent(inducedEdges(E, A), z, y)
+        unfold Adjacent
+        exact inducedEdges.membership.backward with ⟨edge, zInA, yInA⟩
+      exact Reachable.extend with previous, yInA, restricted
+
+theorem Reachable.restrict_closed (V E x y A : Set)
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  requires path : Reachable(V, E, x, y)
+  shows Reachable(A, inducedEdges(E, A), x, y)
+proof
+  rcases path with ⟨n, hn, reached⟩
+  have nNat := nat.omega.backward with hn
+  have restricted := reachableWithin.restrict_closed with nNat, start, closed
+  exact restricted with y, reached
+
+theorem component.induced_connected (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  requires hx : x ∈ V
+  shows GraphConnected(component(V, E, x), inducedEdges(E, component(V, E, x)))
+proof
+  intros u hu v hv
+  have connected := component.connected with graph, hx
+  have path := connected with u, hu, v, hv
+  exact Reachable.restrict_closed with hu, path
+
+theorem component.induced_graph (V E x : Set)
+  requires graph : SimpleGraph(V, E)
+  shows SimpleGraph(component(V, E, x), inducedEdges(E, component(V, E, x)))
+proof
+  have included := component.subset_vertices at V, E, x
+  exact inducedEdges.graph with graph, included
+
+theorem component.no_crossing_edge (V E x u v : Set)
+  requires inside : u ∈ component(V, E, x)
+  requires hv : v ∈ V
+  requires outside : ¬(v ∈ component(V, E, x))
+  shows ¬Adjacent(E, u, v)
+proof
+  intro edge
+  have closed := component.closed at V, E, x
+  apply outside
+  exact closed with u, inside, v, hv, edge
+
+theorem GraphConnected.closed_set (V E A x : Set)
+  requires connected : GraphConnected(V, E)
+  requires included : A ⊆ V
+  requires start : x ∈ A
+  requires closed : EdgeClosed(V, E, A)
+  shows A = V
+proof
+  have hx := included with x, start
+  have entire := GraphConnected.component with connected, hx
+  have minimal := component.minimal with start, closed
+  rw entire at minimal
+  ext y
+  constructor
+  . intro hy
+    exact included with y, hy
+  . intro hy
+    exact minimal with y, hy
+
+theorem component.empty_graph (V x : Set)
+  requires hx : x ∈ V
+  shows component(V, empty, x) = {x}
+proof
+  have closed : EdgeClosed(V, empty, {x})
+    intros u hu v hv edge
+    exfalso
+    unfold Adjacent at edge
+    unfold relates at edge
+    exact set.empty with edge
+  have start := singleton.self at x
+  have minimal := component.minimal with start, closed
+  ext y
+  constructor
+  . intro member
+    exact minimal with y, member
+  . intro member
+    have equality := singleton.membership.forward with member
+    rw equality
+    exact component.source with hx
+
+theorem completeEdges.connected (V : Set)
+  shows GraphConnected(V, completeEdges(V))
+proof
+  intros x hx y hy
+  have alternatives : x = y ∨ x ≠ y by tauto
+  cases alternatives with equal | distinct
+  . rw equal
+    exact Reachable.reflexive
+  . apply Reachable.of_edge at V, completeEdges(V), x, y
+    . exact hy
+    . apply completeEdges.adjacent.backward at V, x, y
+      refine ⟨hx, hy, distinct⟩
+
+-- This characterization also applies to directed graphs: GraphConnected
+-- means that every vertex reaches every other vertex.
+theorem GraphConnected.iff_closed_sets (V E : Set)
+  shows GraphConnected(V, E) ↔
+    (∀ A, A ⊆ V → EdgeClosed(V, E, A) → (A = ∅ ∨ A = V))
+proof
+  constructor
+  . intros connected A included closed
+    have alternatives : A = ∅ ∨ A ≠ ∅ by tauto
+    cases alternatives with vacant | nonempty
+    . left
+      exact vacant
+    . right
+      have inhabited := Nonempty.of_ne_empty at A with *
+      rcases inhabited with ⟨x, start⟩
+      exact GraphConnected.closed_set at V, E, A, x with *
+  . intros closedSets x hx y hy
+    have included := component.subset_vertices at V, E, x
+    have closed := component.closed at V, E, x
+    have start := component.source at V, E, x with *
+    have alternatives := closedSets with component(V, E, x), included, closed
+    cases alternatives with vacant | entire
+    . exfalso
+      rw vacant at start
+      exact set.empty with start
+    . have member : y ∈ component(V, E, x)
+        rwa entire
+      have parts := component.membership.forward at V, E, x, y with *
+      rcases parts with ⟨vertex, path⟩
+      exact path
+
+theorem GraphConnected.no_closed_cut (V E A : Set)
+  requires included : A ⊆ V
+  requires inhabited : Nonempty(A)
+  requires proper : A ≠ V
+  requires closed : EdgeClosed(V, E, A)
+  shows ¬GraphConnected(V, E)
+proof
+  intro connected
+  rcases inhabited with ⟨x, start⟩
+  have entire := GraphConnected.closed_set with *
+  exact proper with entire
+
+-- Every nontrivial cut of a connected graph has an outgoing crossing edge.
+theorem GraphConnected.crossing_edge (V E A : Set)
+  requires connected : GraphConnected(V, E)
+  requires included : A ⊆ V
+  requires inhabited : Nonempty(A)
+  requires proper : A ≠ V
+  shows ∃ u ∈ A, ∃ v ∈ V, ¬(v ∈ A) ∧ Adjacent(E, u, v)
+proof
+  by_contra noCrossing
+  have closed : EdgeClosed(V, E, A)
+    intros u hu v hv edge
+    by_contra outside
+    apply noCrossing
+    refine ⟨u, hu, v, hv, outside, edge⟩
+  have disconnected := GraphConnected.no_closed_cut with *
+  exact disconnected with connected
+
+-- Connectivity is equivalent to an outgoing edge across every nontrivial cut.
+theorem GraphConnected.iff_crossing_cuts (V E : Set)
+  shows GraphConnected(V, E) ↔
+    (∀ A, A ⊆ V → Nonempty(A) → A ≠ V →
+      ∃ u ∈ A, ∃ v ∈ V, ¬(v ∈ A) ∧ Adjacent(E, u, v))
+proof
+  constructor
+  . intros connected A included inhabited proper
+    exact GraphConnected.crossing_edge with *
+  . intro crossingCuts
+    apply GraphConnected.iff_closed_sets.backward
+    intros A included closed
+    have alternatives : A = ∅ ∨ A ≠ ∅ by tauto
+    cases alternatives with vacant | nonempty
+    . left
+      exact vacant
+    . right
+      by_contra proper
+      have inhabited := Nonempty.of_ne_empty with *
+      obtain ⟨u, hu, v, hv, outside, edge⟩ := crossingCuts with A, included, inhabited, proper
+      have inside := closed with u, hu, v, hv, edge
+      exact outside with inside

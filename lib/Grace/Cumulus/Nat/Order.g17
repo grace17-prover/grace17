@@ -1,0 +1,497 @@
+-- Natural-number order and its von Neumann membership interpretation
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Nat.Order
+import Core
+import Foundation
+
+theorem LessEqual.zero (a : Nat)
+  shows 0 ≤ a
+proof
+  witness a
+  simp [add]
+
+-- These four addition laws are the small proof-producing certificate basis
+-- used by linear arithmetic automation.  They are Cumulus
+-- theorems: an arithmetic oracle may search for combinations, but the kernel
+-- sees only applications of these checked laws.
+theorem LessEqual.add (a b c d : Nat)
+  requires hab : a ≤ b
+  requires hcd : c ≤ d
+  shows a + c ≤ b + d
+proof
+  obtain ⟨k, hkNat, hkEq⟩ := hab
+  obtain ⟨l, hlNat, hlEq⟩ := hcd
+  witness k + l
+  have shuffle := add.four_shuffle at a, c, k, l
+  rw [shuffle, hkEq, hlEq]
+  rfl
+
+theorem Less.add_LessEqual (a b c d : Nat)
+  requires hab : a < b
+  requires hcd : c ≤ d
+  shows a + c < b + d
+proof
+  unfold Less at hab
+  have haSucc := Naturals.constructor.succ at a
+  have sum := LessEqual.add with hab, hcd
+  unfold Less
+  simpa [add] using sum
+
+theorem LessEqual.add_Less (a b c d : Nat)
+  requires hab : a ≤ b
+  requires hcd : c < d
+  shows a + c < b + d
+proof
+  unfold Less at hcd
+  have sum := LessEqual.add at a, b, succ(c), d with *
+  unfold Less
+  simpa [add.succ_right] using sum
+
+theorem Less.add (a b c d : Nat)
+  requires hab : a < b
+  requires hcd : c < d
+  shows a + c < b + d
+proof
+  simp [Less.implies_LessEqual, Less.add_LessEqual]
+
+-- Adding a nonzero natural number moves strictly to the right.  This compact
+-- certificate is useful when polynomial normalization has isolated a positive
+-- remainder.
+theorem Less.add_positive (a k : Nat)
+  requires nonzero : k ≠ 0
+  shows a < a + k
+proof
+  have shape := natural.zero_or_successor at k
+  cases shape with zero | successor
+  . exfalso
+    exact nonzero with zero
+  . obtain ⟨j, jNatural, kShape⟩ := successor
+    rw kShape
+    witness j
+    simp [add.successor_shift]
+
+theorem LessEqual.mul_left (a b k : Nat)
+  requires hab : a ≤ b
+  shows k * a ≤ k * b
+proof
+  induction k
+  | zero =>
+    have zeroA := mul.left_zero at a
+    have zeroB := mul.left_zero at b
+    rw [zeroA, zeroB]
+    apply LessEqual.reflexive
+  | succ(j) using ih =>
+    have leftStep := mul.succ_left at j, a with h_j
+    have rightStep := mul.succ_left at j, b with h_j
+    rw [leftStep, rightStep]
+    have products := ih
+    apply LessEqual.add
+    . assumption
+    . assumption
+
+theorem Less.mul_left (a b k : Nat)
+  requires positive : k ≠ 0
+  requires hab : a < b
+  shows k * a < k * b
+proof
+  have shape := natural.zero_or_successor at k
+  cases shape with zero | successor
+  . exfalso
+    apply positive
+    exact zero
+  . obtain ⟨j, hj⟩ := successor
+    rcases hj with ⟨hjNat, kShape⟩
+    rw kShape
+    have leftStep := mul.succ_left at j, a with hjNat
+    have rightStep := mul.succ_left at j, b with hjNat
+    rw [leftStep, rightStep]
+    have weak := Less.implies_LessEqual with *
+    have products := LessEqual.mul_left at a, b, j with hjNat, weak
+    apply Less.add_LessEqual
+    . assumption
+    . assumption
+
+theorem LessEqual.add_right_cancel (a b c : Nat)
+  requires hab : a + c ≤ b + c
+  shows a ≤ b
+proof
+  obtain ⟨k, hkNat, hkEq⟩ := hab
+  witness k
+  apply add.right_cancel at a + k, b, c
+  . have shuffle := add.swap_last at a, c, k with hkNat
+    rwa ← shuffle
+
+theorem LessEqual.add_left_cancel (a b c : Nat)
+  requires hab : c + a ≤ c + b
+  shows a ≤ b
+proof
+  have left := add.commutative at a, c with *
+  rw left at hab
+  have right := add.commutative at b, c with *
+  rw right at hab
+  apply LessEqual.add_right_cancel
+  . assumption
+
+theorem Less.add_right_cancel (a b c : Nat)
+  requires hab : a + c < b + c
+  shows a < b
+proof
+  have shift : succ(a + c) = succ(a) + c by simp [add]
+  unfold Less at hab
+  unfold Less
+  apply LessEqual.add_right_cancel at succ(a), b, c
+  . settle with Naturals.constructor.succ
+
+theorem Less.gap (a b : Nat)
+  shows a < b ↔ a + 1 ≤ b
+proof
+  simp [Less, add.right_one]
+
+-- Users reason with `<`; this bridge reveals that it is membership for the
+-- von Neumann implementation of Nat only when set-theoretic access is useful.
+theorem Less.of_membership (a b : Nat)
+  shows a ∈ b → a < b
+proof
+  induction b
+  | zero =>
+    intro h
+    exfalso
+    settle with nat.zero, set.empty
+  | succ(k) using ih =>
+    intro h
+    have shape := membership.successor_forward{n := k} at a
+    cases shape with hEarlier | hEqual
+    . have earlier := ih with hEarlier
+      unfold Less at earlier
+      unfold Less
+      apply LessEqual.transitive
+      . exact earlier
+      . apply LessEqual.successor at k
+    . rw hEqual
+      unfold Less
+      apply LessEqual.reflexive
+
+-- The converse bridge is kept here, at the explicit boundary between the
+-- Nat order API and its von Neumann implementation.
+lemma membership.add_right_successor (a : Set, k : Nat)
+  requires haNat : Nat(a)
+  shows a ∈ add(k, succ(a))
+proof
+  induction k
+  | zero =>
+    settle with add, membership.self_successor
+  | succ(j) using ih =>
+    have haSucc := Naturals.constructor.succ with haNat
+    have sumNat := add.closed with haSucc, h_j
+    settle with add, membership.successor_backward, ih, sumNat
+
+theorem membership.of_Less (a b : Set)
+  requires haNat : Nat(a)
+  requires hbNat : Nat(b)
+  shows a < b → a ∈ b
+proof
+  intro h
+  obtain ⟨k, hkNat, hSum⟩ := h
+  rw ← hSum
+  have haSucc := Naturals.constructor.succ with haNat
+  have commute := add.commutative with hkNat, haSucc
+  rw commute
+  apply membership.add_right_successor at a, k
+
+theorem Less.trichotomy (a b : Set)
+  requires haNat : Nat(a)
+  requires hbNat : Nat(b)
+  shows a < b ∨ a = b ∨ b < a
+proof
+  simp [Ordinal.natural, Ordinal.trichotomy, Less.of_membership]
+
+theorem Less.irreflexive (a : Nat)
+  shows ¬a < a
+proof
+  intro h
+  have member := membership.of_Less with *, h
+  have irreflexive := membership.irreflexive at a
+  apply irreflexive
+  exact member
+
+theorem mul.left_cancel_positive (a b k : Nat)
+  requires positive : k ≠ 0
+  requires products : k * a = k * b
+  shows a = b
+proof
+  have comparison := Less.trichotomy at a, b with *
+  cases comparison with hab | rest
+  . have strict := Less.mul_left with positive, hab
+    rw products at strict
+    have productNat := mul.closed at b, k with *
+    have impossible := Less.irreflexive with productNat
+    exfalso
+    apply impossible
+    exact strict
+  . cases rest with equal | hba
+    . exact equal
+    . have strict := Less.mul_left with positive, hba
+      rw products at strict
+      have productNat := mul.closed at b, k with *
+      have impossible := Less.irreflexive with productNat
+      exfalso
+      apply impossible
+      exact strict
+
+theorem Less.mul_left_cancel_positive (a b k : Nat)
+  requires positive : k ≠ 0
+  requires products : k * a < k * b
+  shows a < b
+proof
+  have comparison := Less.trichotomy at a, b with *
+  cases comparison with less | rest
+  . exact less
+  . cases rest with equal | greater
+    . rw equal at products
+      have productNat := mul.closed at b, k with *
+      have impossible := Less.irreflexive with productNat
+      exfalso
+      apply impossible
+      exact products
+    . have reverseProducts := Less.mul_left with positive, greater
+      have productANat : Nat(k * a) by simp [mul.closed]
+      have reverseWeak := Less.implies_LessEqual with reverseProducts
+      have cycle : k * a < k * a
+        unfold Less
+        apply LessEqual.transitive
+        . exact products
+        . exact reverseWeak
+      have impossible := Less.irreflexive with productANat
+      exfalso
+      apply impossible
+      exact cycle
+
+theorem Less.transitive_LessEqual (a b c : Nat)
+  requires hab : a < b
+  requires hbc : b ≤ c
+  shows a < c
+proof
+  unfold Less at hab
+  unfold Less
+  apply LessEqual.transitive
+  . settle with Naturals.constructor.succ
+  . assumption
+
+theorem Less.transitive (a b c : Nat)
+  requires hab : a < b
+  requires hbc : b < c
+  shows a < c
+proof
+  have weak := Less.implies_LessEqual at b, c with *
+  exact Less.transitive_LessEqual with *
+
+theorem LessEqual.transitive_Less (a b c : Nat)
+  requires hab : a ≤ b
+  requires hbc : b < c
+  shows a < c
+proof
+  have shifted := LessEqual.add_monotone_right at a, b, 1 with *
+  simp [add.succ_right, add.right_unit] at shifted
+  unfold Less at hbc
+  unfold Less
+  apply LessEqual.transitive
+  . settle with Naturals.constructor.succ
+  . settle with Naturals.constructor.succ
+
+theorem LessEqual.antisymmetric (a b : Nat)
+  requires hab : a ≤ b
+  requires hba : b ≤ a
+  shows a = b
+proof
+  have tri := Less.trichotomy at a, b with *
+  cases tri with habStrict | rest
+  . have cycle := Less.transitive_LessEqual with habStrict, hba
+    have impossible := Less.irreflexive at a
+    exfalso
+    apply impossible
+    exact cycle
+  . cases rest with equal | hbaStrict
+    . exact equal
+    . have cycle := Less.transitive_LessEqual with hbaStrict, hab
+      have impossible := Less.irreflexive at b
+      exfalso
+      apply impossible
+      exact cycle
+
+theorem Less.of_not_LessEqual (a b : Nat)
+  requires h : ¬a ≤ b
+  shows b < a
+proof
+  have tri := Less.trichotomy at a, b with *
+  cases tri with hab | rest
+  . exfalso
+    apply h
+    apply Less.implies_LessEqual
+    . exact hab
+  . cases rest with eqab | hba
+    . exfalso
+      apply h
+      rw eqab
+      apply LessEqual.reflexive
+      assumption
+
+theorem LessEqual.of_not_Less (a b : Nat)
+  requires h : ¬a < b
+  shows b ≤ a
+proof
+  have tri := Less.trichotomy at a, b with *
+  cases tri with hab | rest
+  . exfalso
+    apply h
+    exact hab
+  . cases rest with eqab | hba
+    . rw eqab
+      apply LessEqual.reflexive
+    . apply Less.implies_LessEqual at b, a
+      . assumption
+
+-- These replacement laws package the ordered-additive reasoning used
+-- after a denominator has been cleared. They keep client proofs focused on
+-- the mathematical substitution rather than reassociation and cancellation.
+theorem Less.replace_right (a b c d e f : Nat)
+  requires less : a + d < b + c
+  requires equal : c + f = d + e
+  shows a + f < b + e
+proof
+  have reflexive := LessEqual.reflexive at f
+  have augmented := Less.add_LessEqual with less, reflexive
+  have leftShape : (a + d) + f = (a + f) + d by ring
+  have rightShape : (b + c) + f = b + (c + f) by ring
+  rw [leftShape, rightShape, equal] at augmented
+  have finalShape : b + (d + e) = (b + e) + d by ring
+  rw finalShape at augmented
+  exact Less.add_right_cancel with augmented
+
+theorem Less.replace_left (a b c d e f : Nat)
+  requires equal : a + f = b + e
+  requires less : a + d < b + c
+  shows d + e < c + f
+proof
+  have reflexive := LessEqual.reflexive at f
+  have augmented := Less.add_LessEqual with less, reflexive
+  have leftShape : (a + d) + f = (a + f) + d by ring
+  have rightShape : (b + c) + f = (c + f) + b by ring
+  rw [leftShape, rightShape, equal] at augmented
+  have finalShape : (b + e) + d = (d + e) + b by ring
+  rw finalShape at augmented
+  exact Less.add_right_cancel with augmented
+
+theorem Less.cross_transitive (a b c d e f : Nat)
+  requires left : a + d < b + c
+  requires right : c + f < d + e
+  shows a + f < b + e
+proof
+  have reflexiveF := LessEqual.reflexive at f
+  have first := Less.add_LessEqual with left, reflexiveF
+  have firstLeft : (a + d) + f = (a + f) + d by ring
+  have firstRight : (b + c) + f = (c + f) + b by ring
+  rw [firstLeft, firstRight] at first
+  have reflexiveB := LessEqual.reflexive at b
+  have second := Less.add_LessEqual with right, reflexiveB
+  have secondRight : (d + e) + b = (b + e) + d by ring
+  rw secondRight at second
+  have secondWeak := Less.implies_LessEqual with second
+  have composed := Less.transitive_LessEqual with first, secondWeak
+  exact Less.add_right_cancel with composed
+
+-- A finite Boolean crossing on the naturals has a last included point.  The
+-- set S need not itself be finite or downward closed; only the finite interval
+-- from zero to the omitted endpoint is inspected.
+theorem natural.exists_boundary (S : Set, n : Nat)
+  shows 0 ∈ S → ¬(n ∈ S) →
+    ∃ k, Nat(k) ∧ k ∈ S ∧ ¬(succ(k) ∈ S)
+proof
+  induction n
+  | zero =>
+    intros zeroIn nMissing
+    exfalso
+    exact nMissing with zeroIn
+  | succ(j) using ih =>
+    intros zeroIn nMissing
+    have split : j ∈ S ∨ ¬(j ∈ S) by tauto
+    cases split with jIn | jMissing
+    . witness j
+      refine ⟨jIn, nMissing⟩
+    . exact ih with zeroIn, jMissing
+
+theorem membership.successor_monotone (a b x : Set)
+  requires haNat : Nat(a)
+  requires hbNat : Nat(b)
+  requires hbInA : b ∈ a
+  requires hx : x ∈ succ(b)
+  shows x ∈ succ(a)
+proof
+  have shape := membership.successor_forward{n := b} at x
+  apply membership.successor_backward{n := a} at x
+  left
+  cases shape with hxInB | hxEqB
+  . have haOrdinal := Ordinal.natural at a with haNat
+    have transitive := Ordinal.transitive with haOrdinal
+    have bSubset := transitive with hbInA
+    exact bSubset with x, hxInB
+  . rw hxEqB
+    exact hbInA
+
+theorem LessEqual.total (a b : Nat)
+  shows a ≤ b ∨ b ≤ a
+proof
+  have comparison := Less.trichotomy at a, b with *
+  rcases comparison with less | equal | greater
+  . left
+    arith
+  . left
+    rw equal
+    exact LessEqual.reflexive with *
+  . right
+    arith
+
+theorem Less.successor_upper (a b : Nat)
+  requires below : a < succ(b)
+  shows a ≤ b
+proof
+  obtain ⟨d, natural, equation⟩ := below
+  simp [add] at equation
+  have cancelled := Naturals.injective.succ with equation
+  unfold LessEqual
+  refine ⟨d, natural, cancelled⟩
+
+theorem Less.successor_lower_of_ne (a b : Nat)
+  requires below : a < b
+  requires separated : b ≠ succ(a)
+  shows succ(a) < b
+proof
+  have cases := Less.trichotomy at succ(a), b with *
+  cases cases with less | remaining
+  . exact less
+  . cases remaining with equal | reverse
+    . have same : b = succ(a)
+        cc
+      exfalso
+      exact separated with same
+    . have bound := Less.successor_upper with *
+      have impossible : a < a by arith
+      have excluded := Less.irreflexive at a with *
+      exfalso
+      exact excluded with impossible
+
+theorem Less.of_successor_upper_ne (a b : Nat)
+  requires below : a < succ(b)
+  requires separated : a ≠ b
+  shows a < b
+proof
+  have member := membership.of_Less with *, below
+  have shape := membership.successor_forward{n := b} with member
+  cases shape with before | same
+  . have bridge := Less.of_membership at a, b with *
+    exact bridge with before
+  . exfalso
+    exact separated with same

@@ -1,0 +1,401 @@
+-- Topological spaces: a topology on a set is a family of subsets closed
+-- under arbitrary unions and binary intersections and containing the whole
+-- set; closed sets, interior, and closure, with their basic laws
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Space
+import Set
+
+predicate IsTopology (X T : Set) :=
+  (T ⊆ 𝒫(X)) ∧ X ∈ T ∧
+  (∀ S, S ⊆ T → ⋃(S) ∈ T) ∧
+  (∀ U ∈ T, ∀ V ∈ T, U ∩ V ∈ T)
+
+-- The members of T are the open sets; a closed set is a subset of X whose
+-- complement in X is open.
+predicate IsClosed (X T C : Set) := (C ⊆ X) ∧ complement(X, C) ∈ T
+
+theorem IsTopology.subset (X T U : Set)
+  requires topology : IsTopology(X, T)
+  requires hU : U ∈ T
+  shows U ⊆ X
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  have member := subsets with U, hU
+  exact powerset.membership_iff.forward with member
+
+theorem IsTopology.whole (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows X ∈ T
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  exact whole
+
+theorem IsTopology.union (X T S : Set)
+  requires topology : IsTopology(X, T)
+  requires hS : S ⊆ T
+  shows ⋃(S) ∈ T
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  exact unions with S, hS
+
+theorem IsTopology.intersection2 (X T U V : Set)
+  requires topology : IsTopology(X, T)
+  requires hU : U ∈ T
+  requires hV : V ∈ T
+  shows U ∩ V ∈ T
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  exact intersections with U, hU, V, hV
+
+theorem IsTopology.empty (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows ∅ ∈ T
+proof
+  have inside := empty.subset at T
+  have member := IsTopology.union with topology, inside
+  rwa union.empty at member
+
+theorem IsTopology.union2 (X T U V : Set)
+  requires topology : IsTopology(X, T)
+  requires hU : U ∈ T
+  requires hV : V ∈ T
+  shows U ∪ V ∈ T
+proof
+  have inside : {U, V} ⊆ T
+    intros W hW
+    have split := pair.membership.forward with hW
+    cases split with isU | isV
+    . rw isU
+      exact hU
+    . rw isV
+      exact hV
+  have member := IsTopology.union with topology, inside
+  rwa union.pair at member
+
+-- Closed sets
+
+theorem IsClosed.whole (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows IsClosed(X, T, X)
+proof
+  constructor
+  . exact Subset.reflexive at X
+  . rw complement.self
+    exact IsTopology.empty with topology
+
+theorem IsClosed.empty (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows IsClosed(X, T, ∅)
+proof
+  constructor
+  . exact empty.subset at X
+  . rw complement.empty
+    exact IsTopology.whole with topology
+
+theorem IsClosed.complement_open (X T C : Set)
+  requires closed : IsClosed(X, T, C)
+  shows complement(X, C) ∈ T
+proof
+  exact closed.right
+
+theorem Open.complement_closed (X T U : Set)
+  requires topology : IsTopology(X, T)
+  requires hU : U ∈ T
+  shows IsClosed(X, T, complement(X, U))
+proof
+  have inside := IsTopology.subset with topology, hU
+  constructor
+  . exact complement.subset at X, U
+  . have double := complement.complement with inside
+    rwa double
+
+theorem IsClosed.union2 (X T C D : Set)
+  requires topology : IsTopology(X, T)
+  requires hC : IsClosed(X, T, C)
+  requires hD : IsClosed(X, T, D)
+  shows IsClosed(X, T, C ∪ D)
+proof
+  constructor
+  . exact union2.subset with hC.left, hD.left
+  . rw complement.union2_distrib
+    exact IsTopology.intersection2 with topology, hC.right, hD.right
+
+theorem IsClosed.intersection2 (X T C D : Set)
+  requires topology : IsTopology(X, T)
+  requires hC : IsClosed(X, T, C)
+  requires hD : IsClosed(X, T, D)
+  shows IsClosed(X, T, C ∩ D)
+proof
+  constructor
+  . exact Subset.transitive with (intersection.subset_left at C, D), hC.left
+  . rw complement.intersection_distrib
+    exact IsTopology.union2 with topology, hC.right, hD.right
+
+theorem IsClosed.family_intersection (X T S : Set)
+  requires topology : IsTopology(X, T)
+  requires nonempty : Nonempty(S)
+  requires closed : ∀ C ∈ S, IsClosed(X, T, C)
+  shows IsClosed(X, T, ⋂(S))
+proof
+  obtain ⟨C, hC⟩ := nonempty
+  have inhabited : Nonempty(S) := ⟨C, hC⟩
+  constructor
+  . have below := familyIntersection.subset_of_member with hC
+    have closedC := closed with C, hC
+    exact Subset.transitive with below, closedC.left
+  . have demorgan := complements.intersection at X, S with inhabited
+    rw demorgan
+    apply IsTopology.union with topology
+    intros V hV
+    obtain ⟨D, hD, shape⟩ := complements.membership.forward with hV
+    rw ← shape
+    have closedD := closed with D, hD
+    have openD := closedD.right
+    unfold complement at openD
+    exact openD
+
+-- Interior: the largest open set inside A.
+
+def openSubsets (T A : Set) : Set := { U ∈ T | U ⊆ A }
+def interiorIn (T A : Set) : Set := ⋃(openSubsets(T, A))
+
+theorem openSubsets.membership (U T A : Set)
+  shows U ∈ openSubsets(T, A) ↔ U ∈ T ∧ U ⊆ A
+proof
+  simp [openSubsets]
+
+theorem interiorIn.open (X T A : Set)
+  requires topology : IsTopology(X, T)
+  shows interiorIn(T, A) ∈ T
+proof
+  unfold interiorIn
+  apply IsTopology.union with topology
+  intros U hU
+  have parts := openSubsets.membership.forward with hU
+  exact parts.left
+
+theorem interiorIn.subset (T A : Set)
+  shows interiorIn(T, A) ⊆ A
+proof
+  unfold interiorIn
+  apply union.subset
+  intros U hU
+  have parts := openSubsets.membership.forward with hU
+  exact parts.right
+
+theorem interiorIn.greatest (T A U : Set)
+  requires hU : U ∈ T
+  requires inside : U ⊆ A
+  shows U ⊆ interiorIn(T, A)
+proof
+  have member : U ∈ openSubsets(T, A) := openSubsets.membership.backward with ⟨hU, inside⟩
+  unfold interiorIn
+  exact union.subset_of_member with member
+
+theorem interiorIn.of_open (T U : Set)
+  requires hU : U ∈ T
+  shows interiorIn(T, U) = U
+proof
+  apply Subset.antisymmetric
+  . exact interiorIn.subset at T, U
+  . exact interiorIn.greatest with hU, (Subset.reflexive at U)
+
+theorem interiorIn.monotone (X T A B : Set)
+  requires topology : IsTopology(X, T)
+  requires hAB : A ⊆ B
+  shows interiorIn(T, A) ⊆ interiorIn(T, B)
+proof
+  have isOpen := interiorIn.open at X, T, A with topology
+  have inside := Subset.transitive with (interiorIn.subset at T, A), hAB
+  exact interiorIn.greatest with isOpen, inside
+
+theorem interiorIn.idempotent (X T A : Set)
+  requires topology : IsTopology(X, T)
+  shows interiorIn(T, interiorIn(T, A)) = interiorIn(T, A)
+proof
+  exact interiorIn.of_open with (interiorIn.open at X, T, A with topology)
+
+theorem interiorIn.intersection2 (X T A B : Set)
+  requires topology : IsTopology(X, T)
+  shows interiorIn(T, A ∩ B) = interiorIn(T, A) ∩ interiorIn(T, B)
+proof
+  apply Subset.antisymmetric
+  . apply intersection.greatest
+    . exact interiorIn.monotone with topology, (intersection.subset_left at A, B)
+    . exact interiorIn.monotone with topology, (intersection.subset_right at A, B)
+  . have openA := interiorIn.open at X, T, A with topology
+    have openB := interiorIn.open at X, T, B with topology
+    have isOpen := IsTopology.intersection2 with topology, openA, openB
+    have inside := intersection.monotone with (interiorIn.subset at T, A), (interiorIn.subset at T, B)
+    exact interiorIn.greatest with isOpen, inside
+
+theorem Open.iff_interior (X T U : Set)
+  requires topology : IsTopology(X, T)
+  shows U ∈ T ↔ interiorIn(T, U) = U
+proof
+  constructor
+  . intro hU
+    exact interiorIn.of_open with hU
+  . intro equal
+    have isOpen := interiorIn.open at X, T, U with topology
+    rwa equal at isOpen
+
+-- Closure: the smallest closed set around A.
+
+def closedSupersets (X T A : Set) : Set := { C ∈ 𝒫(X) | IsClosed(X, T, C) ∧ A ⊆ C }
+def closure (X T A : Set) : Set := ⋂(closedSupersets(X, T, A))
+
+theorem closedSupersets.membership (C X T A : Set)
+  shows C ∈ closedSupersets(X, T, A) ↔ C ∈ 𝒫(X) ∧ IsClosed(X, T, C) ∧ A ⊆ C
+proof
+  simp [closedSupersets]
+
+theorem closedSupersets.whole (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows X ∈ closedSupersets(X, T, A)
+proof
+  exact closedSupersets.membership.backward with ⟨(powerset.membership_iff.backward with (Subset.reflexive at X)), (IsClosed.whole with topology), hA⟩
+
+theorem closure.closed (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows IsClosed(X, T, closure(X, T, A))
+proof
+  have whole := closedSupersets.whole with topology, hA
+  have inhabited : Nonempty(closedSupersets(X, T, A)) := ⟨X, whole⟩
+  unfold closure
+  apply IsClosed.family_intersection with topology, inhabited
+  intros C hC
+  have parts := closedSupersets.membership.forward with hC
+  have rest := parts.right
+  exact rest.left
+
+theorem closure.contains (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows A ⊆ closure(X, T, A)
+proof
+  have whole := closedSupersets.whole with topology, hA
+  have inhabited : Nonempty(closedSupersets(X, T, A)) := ⟨X, whole⟩
+  unfold closure
+  apply familyIntersection.greatest with inhabited
+  intros C hC
+  have parts := closedSupersets.membership.forward with hC
+  have rest := parts.right
+  exact rest.right
+
+theorem closure.least (X T A C : Set)
+  requires closed : IsClosed(X, T, C)
+  requires hAC : A ⊆ C
+  shows closure(X, T, A) ⊆ C
+proof
+  have member : C ∈ closedSupersets(X, T, A)
+    exact closedSupersets.membership.backward with ⟨(powerset.membership_iff.backward with closed.left), closed, hAC⟩
+  unfold closure
+  exact familyIntersection.subset_of_member with member
+
+theorem closure.subset (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows closure(X, T, A) ⊆ X
+proof
+  exact closure.least with (IsClosed.whole with topology), hA
+
+theorem closure.of_closed (X T C : Set)
+  requires topology : IsTopology(X, T)
+  requires closed : IsClosed(X, T, C)
+  shows closure(X, T, C) = C
+proof
+  apply Subset.antisymmetric
+  . exact closure.least with closed, (Subset.reflexive at C)
+  . exact closure.contains with topology, closed.left
+
+theorem closure.monotone (X T A B : Set)
+  requires topology : IsTopology(X, T)
+  requires hB : B ⊆ X
+  requires hAB : A ⊆ B
+  shows closure(X, T, A) ⊆ closure(X, T, B)
+proof
+  have inside := Subset.transitive with hAB, (closure.contains with topology, hB)
+  exact closure.least with inside
+
+theorem closure.idempotent (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows closure(X, T, closure(X, T, A)) = closure(X, T, A)
+proof
+  exact closure.of_closed with topology, (closure.closed with topology, hA)
+
+theorem closure.union2 (X T A B : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  requires hB : B ⊆ X
+  shows closure(X, T, A ∪ B) = closure(X, T, A) ∪ closure(X, T, B)
+proof
+  have hAB := union2.subset with hA, hB
+  apply Subset.antisymmetric
+  . have closed := IsClosed.union2 with topology, (closure.closed with topology, hA), (closure.closed with topology, hB)
+    have inside := union2.monotone with (closure.contains with topology, hA), (closure.contains with topology, hB)
+    exact closure.least with closed, inside
+  . apply union2.subset
+    . exact closure.monotone with topology, hAB, (union2.subset_left at A, B)
+    . exact closure.monotone with topology, hAB, (union2.subset_right at A, B)
+
+theorem IsClosed.iff_closure (X T C : Set)
+  requires topology : IsTopology(X, T)
+  requires hC : C ⊆ X
+  shows IsClosed(X, T, C) ↔ closure(X, T, C) = C
+proof
+  constructor
+  . intro closed
+    exact closure.of_closed with topology, closed
+  . intro equal
+    have closed := closure.closed with topology, hC
+    rwa equal at closed
+
+-- A point lies in the closure of A exactly when every open set around it
+-- meets A.
+theorem closure.membership (X T A x : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows x ∈ closure(X, T, A) ↔ x ∈ X ∧ (∀ U ∈ T, x ∈ U → Nonempty(U ∩ A))
+proof
+  constructor
+  . intro hx
+    have inside := closure.subset with topology, hA
+    have inX := inside with x, hx
+    refine ⟨inX, ?_⟩
+    intros U hU hxU
+    by_contra empty
+    have missing : A ⊆ complement(X, U)
+      intros a ha
+      apply complement.membership.backward
+      refine ⟨(hA with a, ha), ?_⟩
+      intro inU
+      apply empty
+      witness a
+      exact intersection.membership.backward with ⟨inU, ha⟩
+    have closed := Open.complement_closed with topology, hU
+    have below := closure.least with missing
+    have inside2 := below with x, hx
+    have parts := complement.membership.forward with inside2
+    exact parts.right with hxU
+  . intro meets
+    obtain ⟨inX, touches⟩ := meets
+    by_contra outside
+    have closed := closure.closed with topology, hA
+    have hU := IsClosed.complement_open with closed
+    have hxU : x ∈ complement(X, closure(X, T, A)) := complement.membership.backward with ⟨inX, outside⟩
+    obtain ⟨a, ha⟩ := touches with complement(X, closure(X, T, A)), hU, hxU
+    have parts := intersection.membership.forward with ha
+    have contains := closure.contains with topology, hA
+    have inClosure := contains with a, parts.right
+    have away := complement.membership.forward with parts.left
+    exact away.right with inClosure
+
+predicate IsDense (X T A : Set) := closure(X, T, A) = X

@@ -1,0 +1,916 @@
+-- Conjugation as a group action: the action of G on itself by conjugation,
+-- whose orbits are the conjugacy classes, stabilizers the centralizers,
+-- and fixed points the center, so the class equation; the action of G on
+-- its subsets by conjugation, conjugate subgroups, and the normalizer of a
+-- subgroup
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Conjugation
+import Action
+import Center
+import Restricted
+
+-- The action of G on its carrier by conjugation, as a graph on pairs.
+def conjugationAction (G : Set) : Set :=
+  { p ∈ (G.carrier × G.carrier) × G.carrier |
+    ∃ g ∈ G.carrier, ∃ x ∈ G.carrier, p = ((g, x) ↦ conjugate(G, g, x)) }
+
+-- The conjugacy class of x.
+def conjugacyClass (G x : Set) : Set :=
+  { y ∈ G.carrier | ∃ g ∈ G.carrier, y = conjugate(G, g, x) }
+
+theorem conjugationAction.membership (G p : Set)
+  shows p ∈ conjugationAction(G) ↔
+    p ∈ (G.carrier × G.carrier) × G.carrier ∧
+    ∃ g ∈ G.carrier, ∃ x ∈ G.carrier, p = ((g, x) ↦ conjugate(G, g, x))
+proof
+  simp [conjugationAction]
+
+theorem conjugacyClass.membership (G x y : Set)
+  shows y ∈ conjugacyClass(G, x) ↔
+    y ∈ G.carrier ∧ ∃ g ∈ G.carrier, y = conjugate(G, g, x)
+proof
+  simp [conjugacyClass]
+
+theorem conjugacyClass.subset (G x : Set)
+  shows conjugacyClass(G, x) ⊆ G.carrier
+proof
+  intros y hy
+  have parts := conjugacyClass.membership.forward with hy
+  exact parts.left
+
+section ConjugationAction
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem conjugationAction.relates (g x : G)
+  shows relates(conjugationAction(G), (g, x), conjugate(G, g, x))
+proof
+  have gIn : g ∈ G by assumption
+  have xIn : x ∈ G by assumption
+  have output : conjugate(G, g, x) ∈ G := conjugate.mem with *
+  have pair := product.pair at g, x, G.carrier, G.carrier with *
+  have bounded := product.pair at (g, x), conjugate(G, g, x),
+    G.carrier × G.carrier, G.carrier with *
+  unfold relates
+  apply conjugationAction.membership.backward
+  refine ⟨bounded, g, gIn, x, xIn, rfl⟩
+
+theorem conjugationAction.function
+  shows conjugationAction(G) : G.carrier × G.carrier → G.carrier
+proof
+  unfold FunctionBetween
+  refine ⟨?_, ?_, ?_⟩
+  . intros p hp
+    have parts := conjugationAction.membership.forward with hp
+    exact parts.left
+  . intros p y edge z edge2
+    unfold relates at edge
+    unfold relates at edge2
+    obtain ⟨bounded, g, gIn, x, xIn, shape⟩ :=
+      conjugationAction.membership.forward with edge
+    obtain ⟨bounded2, g2, gIn2, x2, xIn2, shape2⟩ :=
+      conjugationAction.membership.forward with edge2
+    have outer := orderedPair.injective with shape
+    have outer2 := orderedPair.injective with shape2
+    have inputs : (g, x) = (g2, x2) by cc
+    have halves := orderedPair.injective with inputs
+    cc
+  . intros p hp
+    obtain ⟨bound, g, gIn, x, xIn, shape⟩ :=
+      product.membership.forward with hp
+    have output : conjugate(G, g, x) ∈ G := conjugate.mem with *
+    have edge := conjugationAction.relates at G, g, x with *
+    refine ⟨conjugate(G, g, x), output, ?_⟩
+    rw shape
+    exact edge
+
+theorem conjugationAction.value (g x : G)
+  shows conjugationAction(G)(g, x) = conjugate(G, g, x)
+proof
+  have function := conjugationAction.function with group
+  have edge := conjugationAction.relates at G, g, x with *
+  have input := product.pair at g, x, G.carrier, G.carrier with *
+  have value := FunctionBetween.apply_value with function, input, edge
+  have called : conjugationAction(G)(g, x) = conjugationAction(G)((g, x))
+    unfold call2
+    rfl
+  rw called
+  exact value
+
+theorem conjugationAction.action
+  shows conjugationAction(G) : G ↷ G.carrier
+proof
+  have function := conjugationAction.function with group
+  apply Action.mk with group, function
+  . intros x hx
+    have value := conjugationAction.value at G, G.one, x with *
+    have fixed : conjugate(G, G.one, x) = x := conjugate.by_one with *
+    rw [value, fixed]
+    rfl
+  . intros g hg h hh x hx
+    have closed : g * h ∈ G by typecheck
+    have first := conjugationAction.value at G, g * h, x with *
+    have inner := conjugationAction.value at G, h, x with *
+    have innerIn : conjugate(G, h, x) ∈ G := conjugate.mem with *
+    have outer := conjugationAction.value at G, g, conjugate(G, h, x) with *
+    have merged : conjugate(G, g, conjugate(G, h, x)) =
+        conjugate(G, g * h, x) := conjugate.conjugate with *
+    rw [first, inner, outer, merged]
+    rfl
+
+-- The conjugacy class of x is its orbit, its stabilizer the centralizer
+-- of x, and the fixed points form the center.
+theorem conjugacyClass.self (x : G)
+  shows x ∈ conjugacyClass(G, x)
+proof
+  have xIn : x ∈ G by assumption
+  have unitIn : G.one ∈ G := Group.one_mem with *
+  have fixed : conjugate(G, G.one, x) = x := conjugate.by_one with *
+  apply conjugacyClass.membership.backward
+  refine ⟨xIn, G.one, unitIn, ?_⟩
+  symm
+  exact fixed
+
+theorem conjugacyClass.eq_orbit (x : G)
+  shows conjugacyClass(G, x) = orbit(conjugationAction(G), G, G.carrier, x)
+proof
+  have action := conjugationAction.action with group
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, g, gIn, yEq⟩ := conjugacyClass.membership.forward with hy
+    have value := conjugationAction.value at G, g, x with *
+    apply orbit.membership.backward
+    refine ⟨yIn, g, gIn, ?_⟩
+    rw [yEq, value]
+    rfl
+  . intro hy
+    obtain ⟨yIn, g, gIn, yEq⟩ := orbit.membership.forward with hy
+    have value := conjugationAction.value at G, g, x with *
+    apply conjugacyClass.membership.backward
+    refine ⟨yIn, g, gIn, ?_⟩
+    rw [yEq, value]
+    rfl
+
+theorem conjugationAction.stabilizer_eq (x : G)
+  shows stabilizer(conjugationAction(G), G, G.carrier, x) = centralizer(G, {x})
+proof
+  have action := conjugationAction.action with group
+  ext g
+  constructor
+  . intro hg
+    obtain ⟨gIn, fixed⟩ := stabilizer.membership.forward with hg
+    have value := conjugationAction.value at G, g, x with *
+    have fixedConjugate : conjugate(G, g, x) = x by cc
+    have commute : g * x = x * g := conjugate.commute_of_fixed with *
+    apply centralizer.membership.backward
+    refine ⟨gIn, ?_⟩
+    intros y hy
+    have equal := singleton.membership.forward with hy
+    rw equal
+    exact commute
+  . intro hg
+    obtain ⟨gIn, commutes⟩ := centralizer.membership.forward with hg
+    have selfIn := singleton.self at x
+    have commute := commutes with x, selfIn
+    have fixed : conjugate(G, g, x) = x := conjugate.of_commute with *
+    have value := conjugationAction.value at G, g, x with *
+    apply stabilizer.membership.backward
+    refine ⟨gIn, ?_⟩
+    rw value
+    exact fixed
+
+theorem conjugationAction.fixed_points
+  shows fixedPoints(conjugationAction(G), G, G.carrier) = center(G)
+proof
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨xIn, fixed⟩ := fixedPoints.membership.forward with hx
+    apply center.membership.backward
+    refine ⟨xIn, ?_⟩
+    intros g gIn
+    have value := conjugationAction.value at G, g, x with *
+    have fixedG := fixed with g, gIn
+    have fixedConjugate : conjugate(G, g, x) = x by cc
+    have commute : g * x = x * g := conjugate.commute_of_fixed with *
+    symm
+    exact commute
+  . intro hx
+    obtain ⟨xIn, commutes⟩ := center.membership.forward with hx
+    apply fixedPoints.membership.backward
+    refine ⟨xIn, ?_⟩
+    intros g gIn
+    have commute := commutes with g, gIn
+    have swapped : g * x = x * g by cc
+    have fixed : conjugate(G, g, x) = x := conjugate.of_commute with *
+    have value := conjugationAction.value at G, g, x with *
+    rw value
+    exact fixed
+
+theorem conjugacyClass.cardinality_eq_index (x : G)
+  requires finite : Finite(G)
+  shows cardinality(conjugacyClass(G, x)) = index(G, centralizer(G, {x}))
+proof
+  have action := conjugationAction.action with group
+  have xIn : x ∈ G by assumption
+  have same := orbit.cardinality_eq_index with action, xIn, finite
+  rw [conjugacyClass.eq_orbit, ← conjugationAction.stabilizer_eq]
+  exact same
+
+theorem conjugacyClass.cardinality_dvd (x : G)
+  requires finite : Finite(G)
+  shows cardinality(conjugacyClass(G, x)) ∣ order(G)
+proof
+  have action := conjugationAction.action with group
+  have xIn : x ∈ G by assumption
+  have divides := orbit.cardinality_dvd with action, xIn, finite
+  rw conjugacyClass.eq_orbit
+  exact divides
+
+end ConjugationAction
+
+-- The conjugacy classes, and those not inside the center.
+def conjugacyClasses (G : Set) : Set :=
+  { C ∈ 𝒫(G.carrier) | ∃ x ∈ G.carrier, C = conjugacyClass(G, x) }
+def noncentralClasses (G : Set) : Set :=
+  { C ∈ conjugacyClasses(G) | ¬(C ⊆ center(G)) }
+
+theorem conjugacyClasses.membership (G C : Set)
+  shows C ∈ conjugacyClasses(G) ↔
+    C ∈ 𝒫(G.carrier) ∧ ∃ x ∈ G.carrier, C = conjugacyClass(G, x)
+proof
+  simp [conjugacyClasses]
+
+theorem noncentralClasses.membership (G C : Set)
+  shows C ∈ noncentralClasses(G) ↔
+    C ∈ conjugacyClasses(G) ∧ ¬(C ⊆ center(G))
+proof
+  simp [noncentralClasses]
+
+section ClassEquation
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem conjugacyClasses.eq_orbits
+  shows conjugacyClasses(G) = orbits(conjugationAction(G), G, G.carrier)
+proof
+  ext C
+  constructor
+  . intro hC
+    obtain ⟨bound, x, hx, CEq⟩ :=
+      conjugacyClasses.membership.forward with hC
+    have same : conjugacyClass(G, x) =
+        orbit(conjugationAction(G), G, G.carrier, x) :=
+      conjugacyClass.eq_orbit with *
+    apply orbits.membership.backward
+    refine ⟨bound, x, hx, ?_⟩
+    rw [CEq, same]
+    rfl
+  . intro hC
+    obtain ⟨bound, x, hx, CEq⟩ := orbits.membership.forward with hC
+    have same : conjugacyClass(G, x) =
+        orbit(conjugationAction(G), G, G.carrier, x) :=
+      conjugacyClass.eq_orbit with *
+    apply conjugacyClasses.membership.backward
+    refine ⟨bound, x, hx, ?_⟩
+    rw [CEq, same]
+    rfl
+
+theorem noncentralClasses.eq_moved
+  shows noncentralClasses(G) = movedOrbits(conjugationAction(G), G, G.carrier)
+proof
+  have classes := conjugacyClasses.eq_orbits with group
+  have fixed := conjugationAction.fixed_points with group
+  ext C
+  constructor
+  . intro hC
+    obtain ⟨inClasses, notCentral⟩ :=
+      noncentralClasses.membership.forward with hC
+    rw classes at inClasses
+    rw ← fixed at notCentral
+    exact movedOrbits.membership.backward at
+      conjugationAction(G), G, G.carrier, C with ⟨inClasses, notCentral⟩
+  . intro hC
+    obtain ⟨inOrbits, notFixed⟩ := movedOrbits.membership.forward with hC
+    rw ← classes at inOrbits
+    rw fixed at notFixed
+    exact noncentralClasses.membership.backward with ⟨inOrbits, notFixed⟩
+
+theorem noncentralClasses.representative (C : Set)
+  requires hC : C ∈ noncentralClasses(G)
+  shows ∃ x ∈ G, ¬x ∈ center(G) ∧ C = conjugacyClass(G, x)
+proof
+  obtain ⟨inClasses, notCentral⟩ :=
+    noncentralClasses.membership.forward with hC
+  obtain ⟨bound, x, hx, CEq⟩ :=
+    conjugacyClasses.membership.forward with inClasses
+  witness x
+  refine ⟨hx, ?_, CEq⟩
+  intro central
+  apply notCentral
+  rw CEq
+  intros y hy
+  obtain ⟨yIn, g, gIn, yEq⟩ := conjugacyClass.membership.forward with hy
+  have fixed : conjugate(G, g, x) = x := center.conjugate_fixed with *
+  rw [yEq, fixed]
+  exact central
+
+-- The class equation: the order of a finite group is the size of its
+-- center plus the sizes of its noncentral conjugacy classes.
+theorem class_equation
+  requires finite : Finite(G)
+  shows order(G) = cardinality(center(G)) +
+    natSum(noncentralClasses(G), sizeMap(noncentralClasses(G)))
+proof
+  have action := conjugationAction.action with group
+  have centerSubset := center.subset at G
+  have finiteCenter := Finite.subset with finite, centerSubset
+  have finiteRest := Finite.subset with
+    finite, (difference.subset_left at G.carrier, center(G))
+  have disjoint := Disjoint.symmetric with
+    (difference.disjoint at G.carrier, center(G))
+  have restored := difference.union2_of_subset with centerSubset
+  have split := cardinality.union_disjoint with
+    finiteCenter, finiteRest, disjoint
+  rw restored at split
+  have cover := movedOrbits.cover with action
+  have fixed := conjugationAction.fixed_points with group
+  have moved := noncentralClasses.eq_moved with group
+  have movedSubset := movedOrbits.subset at conjugationAction(G), G, G.carrier
+  rw fixed at cover
+  have finiteMoved : Finite(noncentralClasses(G))
+    rw moved
+    exact Finite.subset with (orbits.finite with action, finite), movedSubset
+  have members : ∀ C ∈ noncentralClasses(G), Finite(C)
+    intros C hC
+    rw moved at hC
+    exact orbits.member_finite with action, (movedSubset with C, hC), finite
+  have pairwise : PairwiseDisjoint(noncentralClasses(G))
+    rw moved
+    exact PairwiseDisjoint.subset with
+      movedSubset, (orbits.pairwise_disjoint with action)
+  have count := cardinality.big_union_disjoint with
+    finiteMoved, members, pairwise
+  have unionEq : ⋃(noncentralClasses(G)) = G.carrier ∖ center(G)
+    rw moved
+    exact cover
+  rw unionEq at count
+  rw [order.value, split, count]
+  rfl
+
+-- If a prime divides the order of the group and the index of every
+-- noncentral centralizer, it divides the order of the center.
+theorem center.dvd_of_classes (p : Nat)
+  requires finite : Finite(G)
+  requires dividesOrder : p ∣ order(G)
+  requires dividesClasses : ∀ x ∈ G,
+    ¬x ∈ center(G) → p ∣ index(G, centralizer(G, {x}))
+  shows p ∣ cardinality(center(G))
+proof
+  have action := conjugationAction.action with group
+  have fixed := conjugationAction.fixed_points with group
+  have orbitsDivisible : ∀ x ∈ G.carrier,
+      ¬x ∈ fixedPoints(conjugationAction(G), G, G.carrier) →
+      p ∣ cardinality(orbit(conjugationAction(G), G, G.carrier, x))
+    intros x hx notFixed
+    rw fixed at notFixed
+    have same := conjugacyClass.cardinality_eq_index with group, hx, finite
+    rw [← conjugacyClass.eq_orbit, same]
+    exact dividesClasses with x, hx, notFixed
+  have restDivides := fixedPoints.difference_dvd with
+    action, finite, orbitsDivisible
+  rw fixed at restDivides
+  have centerSubset := center.subset at G
+  have restored := difference.union2_of_subset with centerSubset
+  have finiteCenter := Finite.subset with finite, centerSubset
+  have finiteRest := Finite.subset with
+    finite, (difference.subset_left at G.carrier, center(G))
+  have disjoint := Disjoint.symmetric with
+    (difference.disjoint at G.carrier, center(G))
+  have split := cardinality.union_disjoint with finiteCenter, finiteRest, disjoint
+  rw restored at split
+  rw [order.value, split] at dividesOrder
+  have centerNat := cardinality.nat with finiteCenter
+  have restNat := cardinality.nat with finiteRest
+  exact divides.add_cancel_right with restDivides, dividesOrder
+
+end ClassEquation
+
+-- The conjugate g S g⁻¹ of a subset S by g.
+def conjugateSet (G g S : Set) : Set :=
+  { y ∈ G.carrier | ∃ s ∈ S, y = conjugate(G, g, s) }
+
+theorem conjugateSet.membership (G g S y : Set)
+  shows y ∈ conjugateSet(G, g, S) ↔
+    y ∈ G.carrier ∧ ∃ s ∈ S, y = conjugate(G, g, s)
+proof
+  simp [conjugateSet]
+
+theorem conjugateSet.subset (G g S : Set)
+  shows conjugateSet(G, g, S) ⊆ G.carrier
+proof
+  intros y hy
+  have parts := conjugateSet.membership.forward with hy
+  exact parts.left
+
+section ConjugateSets
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem conjugateSet.conjugate_mem (g : G) (S s : Set)
+  requires bounded : S ⊆ G
+  requires hs : s ∈ S
+  shows conjugate(G, g, s) ∈ conjugateSet(G, g, S)
+proof
+  have sIn := bounded with s, hs
+  have closed : conjugate(G, g, s) ∈ G := conjugate.mem with *
+  exact conjugateSet.membership.backward with ⟨closed, s, hs, rfl⟩
+
+theorem conjugateSet.one (S : Set)
+  requires bounded : S ⊆ G
+  shows conjugateSet(G, G.one, S) = S
+proof
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    have sIn := bounded with s, hs
+    have fixed : conjugate(G, G.one, s) = s := conjugate.by_one with *
+    rw [yEq, fixed]
+    exact hs
+  . intro hy
+    have yIn := bounded with y, hy
+    have fixed : conjugate(G, G.one, y) = y := conjugate.by_one with *
+    have member : conjugate(G, G.one, y) ∈ conjugateSet(G, G.one, S) :=
+      conjugateSet.conjugate_mem with *
+    rwa fixed at member
+
+theorem conjugateSet.mul (g h : G) (S : Set)
+  requires bounded : S ⊆ G
+  shows conjugateSet(G, g, conjugateSet(G, h, S)) = conjugateSet(G, g * h, S)
+proof
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, t, ht, yEq⟩ := conjugateSet.membership.forward with hy
+    obtain ⟨tIn, s, hs, tEq⟩ := conjugateSet.membership.forward with ht
+    have sIn := bounded with s, hs
+    have merged : conjugate(G, g, conjugate(G, h, s)) =
+        conjugate(G, g * h, s) := conjugate.conjugate with *
+    apply conjugateSet.membership.backward
+    refine ⟨yIn, s, hs, ?_⟩
+    rw [yEq, tEq, merged]
+    rfl
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    have sIn := bounded with s, hs
+    have merged : conjugate(G, g, conjugate(G, h, s)) = conjugate(G, g * h, s) :=
+      conjugate.conjugate with *
+    have inner : conjugate(G, h, s) ∈ conjugateSet(G, h, S) :=
+      conjugateSet.conjugate_mem with *
+    apply conjugateSet.membership.backward
+    refine ⟨yIn, conjugate(G, h, s), inner, ?_⟩
+    rw [yEq, merged]
+    rfl
+
+theorem conjugateSet.eq_image (g : G) (S : Set)
+  requires bounded : S ⊆ G
+  shows conjugateSet(G, g, S) = functionImage(conjugation(G, g), S, G.carrier)
+proof
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    have sIn := bounded with s, hs
+    have value := conjugation.value at G, g, s with *
+    apply functionImage.membership.backward
+    refine ⟨yIn, s, hs, ?_⟩
+    rw [yEq, value]
+    rfl
+  . intro hy
+    obtain ⟨yIn, s, hs, yEq⟩ := functionImage.membership.forward with hy
+    have sIn := bounded with s, hs
+    have value := conjugation.value at G, g, s with *
+    apply conjugateSet.membership.backward
+    refine ⟨yIn, s, hs, ?_⟩
+    rw [yEq, value]
+    rfl
+
+theorem conjugateSet.finite (g : G) (S : Set)
+  requires bounded : S ⊆ G
+  requires finite : Finite(S)
+  shows Finite(conjugateSet(G, g, S))
+proof
+  have function := conjugation.function at G, g with *
+  rw conjugateSet.eq_image
+  exact Finite.function_image with function, finite, bounded
+
+theorem conjugateSet.cardinality (g : G) (S : Set)
+  requires bounded : S ⊆ G
+  requires finite : Finite(S)
+  shows cardinality(conjugateSet(G, g, S)) = cardinality(S)
+proof
+  have injective := conjugation.injective with *
+  rw conjugateSet.eq_image
+  exact cardinality.injective_image with injective, bounded, finite
+
+theorem conjugateSet.subgroup (g : G) (H : Set)
+  requires subgroup : Subgroup(H, G)
+  shows Subgroup(conjugateSet(G, g, H), G)
+proof
+  have bounded := Subgroup.subset with subgroup
+  have unitIn : G.one ∈ conjugateSet(G, g, H)
+    have unitH : G.one ∈ H := Subgroup.one_mem with *
+    have fixed : conjugate(G, g, G.one) = G.one := conjugate.one with *
+    have member : conjugate(G, g, G.one) ∈ conjugateSet(G, g, H) :=
+      conjugateSet.conjugate_mem with *
+    rwa fixed at member
+  apply Subgroup.mk with group, (conjugateSet.subset at G, g, H), unitIn
+  . intros x hx y hy
+    obtain ⟨xIn, s, hs, xEq⟩ := conjugateSet.membership.forward with hx
+    obtain ⟨yIn, t, ht, yEq⟩ := conjugateSet.membership.forward with hy
+    have sIn := bounded with s, hs
+    have tIn := bounded with t, ht
+    have product : s * t ∈ H := Subgroup.mul_mem with *
+    have merged : conjugate(G, g, s * t) =
+        conjugate(G, g, s) * conjugate(G, g, t) := conjugate.mul with *
+    have member : conjugate(G, g, s * t) ∈ conjugateSet(G, g, H) :=
+      conjugateSet.conjugate_mem with *
+    rw [xEq, yEq, ← merged]
+    exact member
+  . intros x hx
+    obtain ⟨xIn, s, hs, xEq⟩ := conjugateSet.membership.forward with hx
+    have sIn := bounded with s, hs
+    have inverse : s⁻¹ ∈ H := Subgroup.inv_mem with *
+    have merged : conjugate(G, g, s⁻¹) = conjugate(G, g, s)⁻¹ :=
+      conjugate.inv with *
+    have member : conjugate(G, g, s⁻¹) ∈ conjugateSet(G, g, H) :=
+      conjugateSet.conjugate_mem with *
+    rw [xEq, ← merged]
+    exact member
+
+theorem conjugateSet.mem_iff (g : G) (S y : Set)
+  requires bounded : S ⊆ G
+  requires hy : y ∈ G
+  shows y ∈ conjugateSet(G, g, S) ↔ conjugate(G, g⁻¹, y) ∈ S
+proof
+  constructor
+  . intro member
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with member
+    have sIn := bounded with s, hs
+    have cancel : conjugate(G, g⁻¹, conjugate(G, g, s)) = s :=
+      conjugate.cancel with *
+    rw [yEq, cancel]
+    exact hs
+  . intro member
+    have back : conjugate(G, g⁻¹, y) ∈ G := conjugate.mem with *
+    have cancel : conjugate(G, (g⁻¹)⁻¹, conjugate(G, g⁻¹, y)) = y :=
+      conjugate.cancel with *
+    rw inv_inv at cancel
+    have image : conjugate(G, g, conjugate(G, g⁻¹, y)) ∈ conjugateSet(G, g, S) :=
+      conjugateSet.conjugate_mem with *
+    rwa cancel at image
+
+theorem NormalSubgroup.conjugateSet (g : G) (N : Set)
+  requires normal : NormalSubgroup(N, G)
+  shows conjugateSet(G, g, N) = N
+proof
+  have subgroup := NormalSubgroup.subgroup with normal
+  have bounded := Subgroup.subset with subgroup
+  apply Subset.antisymmetric
+  . intros y hy
+    obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+    have closed : conjugate(G, g, s) ∈ N :=
+      NormalSubgroup.conjugate_mem with *
+    rwa yEq
+  . intros y hy
+    have yIn := bounded with y, hy
+    have criterion : y ∈ conjugateSet(G, g, N) ↔
+        conjugate(G, g⁻¹, y) ∈ N := conjugateSet.mem_iff with *
+    apply criterion.backward
+    exact NormalSubgroup.conjugate_mem with *
+
+theorem NormalSubgroup.of_conjugateSet (N : Set)
+  requires subgroup : Subgroup(N, G)
+  requires conjugates : ∀ g ∈ G, conjugateSet(G, g, N) = N
+  shows NormalSubgroup(N, G)
+proof
+  have bounded := Subgroup.subset with subgroup
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  have member : conjugate(G, g, n) ∈ conjugateSet(G, g, N) :=
+    conjugateSet.conjugate_mem with *
+  have same := conjugates with g, hg
+  rwa same at member
+
+end ConjugateSets
+
+-- The action of G on its subsets by conjugation, as a graph on pairs.
+def subsetConjugation (G : Set) : Set :=
+  { p ∈ (G.carrier × 𝒫(G.carrier)) × 𝒫(G.carrier) |
+    ∃ g ∈ G.carrier, ∃ S ∈ 𝒫(G.carrier), p = ((g, S) ↦ conjugateSet(G, g, S)) }
+
+-- The normalizer of H: the elements conjugating H onto itself. The
+-- conjugates of H form its orbit under the conjugation action on subsets.
+def normalizer (G H : Set) : Set :=
+  { g ∈ G.carrier | conjugateSet(G, g, H) = H }
+def conjugates (G H : Set) : Set :=
+  orbit(subsetConjugation(G), G, 𝒫(G.carrier), H)
+
+theorem subsetConjugation.membership (G p : Set)
+  shows p ∈ subsetConjugation(G) ↔
+    p ∈ (G.carrier × 𝒫(G.carrier)) × 𝒫(G.carrier) ∧
+    ∃ g ∈ G.carrier, ∃ S ∈ 𝒫(G.carrier), p = ((g, S) ↦ conjugateSet(G, g, S))
+proof
+  simp [subsetConjugation]
+
+theorem conjugates.eq_orbit (G H : Set)
+  shows conjugates(G, H) = orbit(subsetConjugation(G), G, 𝒫(G.carrier), H)
+proof
+  simp [conjugates]
+
+theorem normalizer.membership (G H g : Set)
+  shows g ∈ normalizer(G, H) ↔ g ∈ G.carrier ∧ conjugateSet(G, g, H) = H
+proof
+  simp [normalizer]
+
+theorem normalizer.subset (G H : Set)
+  shows normalizer(G, H) ⊆ G.carrier
+proof
+  intros g hg
+  have parts := normalizer.membership.forward with hg
+  exact parts.left
+
+section SubsetConjugation
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem subsetConjugation.relates (g : G) (S : Set)
+  requires hS : S ∈ 𝒫(G.carrier)
+  shows relates(subsetConjugation(G), (g, S), conjugateSet(G, g, S))
+proof
+  have gIn : g ∈ G by assumption
+  have output : conjugateSet(G, g, S) ∈ 𝒫(G.carrier) :=
+    powerset.membership_iff.backward with (conjugateSet.subset at G, g, S)
+  have pair := product.pair at g, S, G.carrier, 𝒫(G.carrier) with *
+  have bounded := product.pair at (g, S), conjugateSet(G, g, S),
+    G.carrier × 𝒫(G.carrier), 𝒫(G.carrier) with *
+  unfold relates
+  apply subsetConjugation.membership.backward
+  refine ⟨bounded, g, gIn, S, hS, rfl⟩
+
+theorem subsetConjugation.function
+  shows subsetConjugation(G) : G.carrier × 𝒫(G.carrier) → 𝒫(G.carrier)
+proof
+  unfold FunctionBetween
+  refine ⟨?_, ?_, ?_⟩
+  . intros p hp
+    have parts := subsetConjugation.membership.forward with hp
+    exact parts.left
+  . intros p y edge z edge2
+    unfold relates at edge
+    unfold relates at edge2
+    obtain ⟨bounded, g, gIn, S, SIn, shape⟩ :=
+      subsetConjugation.membership.forward with edge
+    obtain ⟨bounded2, g2, gIn2, S2, SIn2, shape2⟩ :=
+      subsetConjugation.membership.forward with edge2
+    have outer := orderedPair.injective with shape
+    have outer2 := orderedPair.injective with shape2
+    have inputs : (g, S) = (g2, S2) by cc
+    have halves := orderedPair.injective with inputs
+    cc
+  . intros p hp
+    obtain ⟨bound, g, gIn, S, SIn, shape⟩ :=
+      product.membership.forward with hp
+    have output : conjugateSet(G, g, S) ∈ 𝒫(G.carrier) :=
+      powerset.membership_iff.backward with (conjugateSet.subset at G, g, S)
+    have edge := subsetConjugation.relates at G, g, S with *
+    refine ⟨conjugateSet(G, g, S), output, ?_⟩
+    rw shape
+    exact edge
+
+theorem subsetConjugation.value (g : G) (S : Set)
+  requires hS : S ∈ 𝒫(G.carrier)
+  shows subsetConjugation(G)(g, S) = conjugateSet(G, g, S)
+proof
+  have function := subsetConjugation.function with group
+  have edge := subsetConjugation.relates at G, g, S with *
+  have input := product.pair at g, S, G.carrier, 𝒫(G.carrier) with *
+  have value := FunctionBetween.apply_value with function, input, edge
+  have called : subsetConjugation(G)(g, S) = subsetConjugation(G)((g, S))
+    unfold call2
+    rfl
+  rw called
+  exact value
+
+theorem subsetConjugation.action
+  shows subsetConjugation(G) : G ↷ 𝒫(G.carrier)
+proof
+  have function := subsetConjugation.function with group
+  apply Action.mk with group, function
+  . intros S hS
+    have bounded := powerset.membership_iff.forward with hS
+    have value := subsetConjugation.value at G, G.one, S with *
+    have fixed : conjugateSet(G, G.one, S) = S := conjugateSet.one with *
+    rw [value, fixed]
+    rfl
+  . intros g hg h hh S hS
+    have bounded := powerset.membership_iff.forward with hS
+    have closed : g * h ∈ G by typecheck
+    have first := subsetConjugation.value at G, g * h, S with *
+    have inner := subsetConjugation.value at G, h, S with *
+    have innerIn : conjugateSet(G, h, S) ∈ 𝒫(G.carrier) :=
+      powerset.membership_iff.backward with (conjugateSet.subset at G, h, S)
+    have outer := subsetConjugation.value at G, g, conjugateSet(G, h, S) with *
+    have merged : conjugateSet(G, g, conjugateSet(G, h, S)) =
+        conjugateSet(G, g * h, S) := conjugateSet.mul with *
+    rw [first, inner, outer, merged]
+    rfl
+
+-- The normalizer is the stabilizer of H under conjugation, so a subgroup;
+-- it contains H, and it is the whole group exactly for a normal subgroup.
+theorem normalizer.eq_stabilizer (H : Set)
+  requires bounded : H ⊆ G
+  shows normalizer(G, H) =
+    stabilizer(subsetConjugation(G), G, 𝒫(G.carrier), H)
+proof
+  have action := subsetConjugation.action with group
+  have HIn := powerset.membership_iff.backward with bounded
+  ext g
+  constructor
+  . intro hg
+    obtain ⟨gIn, fixed⟩ := normalizer.membership.forward with hg
+    have value := subsetConjugation.value at G, g, H with *
+    apply stabilizer.membership.backward
+    refine ⟨gIn, ?_⟩
+    rw value
+    exact fixed
+  . intro hg
+    obtain ⟨gIn, fixed⟩ := stabilizer.membership.forward with hg
+    have value := subsetConjugation.value at G, g, H with *
+    rw value at fixed
+    exact normalizer.membership.backward with ⟨gIn, fixed⟩
+
+theorem normalizer.subgroup (H : Set)
+  requires bounded : H ⊆ G
+  shows Subgroup(normalizer(G, H), G)
+proof
+  have action := subsetConjugation.action with group
+  have HIn := powerset.membership_iff.backward with bounded
+  rw normalizer.eq_stabilizer
+  exact stabilizer.subgroup with action, HIn
+
+theorem normalizer.contains (H : Set)
+  requires subgroup : Subgroup(H, G)
+  shows H ⊆ normalizer(G, H)
+proof
+  have bounded := Subgroup.subset with subgroup
+  intros h hh
+  have hIn := bounded with h, hh
+  have fixed : conjugateSet(G, h, H) = H
+    apply Subset.antisymmetric
+    . intros y hy
+      obtain ⟨yIn, s, hs, yEq⟩ := conjugateSet.membership.forward with hy
+      have closed : conjugate(G, h, s) ∈ H
+        rw conjugate.value
+        typecheck
+      rwa yEq
+    . intros y hy
+      have yIn := bounded with y, hy
+      have criterion : y ∈ conjugateSet(G, h, H) ↔
+          conjugate(G, h⁻¹, y) ∈ H := conjugateSet.mem_iff with *
+      apply criterion.backward
+      rw conjugate.value
+      typecheck
+  exact normalizer.membership.backward with ⟨hIn, fixed⟩
+
+theorem normalizer.conjugate_mem (H g h : Set)
+  requires bounded : H ⊆ G
+  requires hg : g ∈ normalizer(G, H)
+  requires hh : h ∈ H
+  shows conjugate(G, g, h) ∈ H
+proof
+  obtain ⟨gIn, fixed⟩ := normalizer.membership.forward with hg
+  have member : conjugate(G, g, h) ∈ conjugateSet(G, g, H) :=
+    conjugateSet.conjugate_mem with *
+  rwa fixed at member
+
+theorem normalizer.whole_of_normal (N : Set)
+  requires normal : NormalSubgroup(N, G)
+  shows normalizer(G, N) = G.carrier
+proof
+  apply Subset.antisymmetric with (normalizer.subset at G, N)
+  intros g hg
+  have fixed : conjugateSet(G, g, N) = N := NormalSubgroup.conjugateSet with *
+  exact normalizer.membership.backward with ⟨hg, fixed⟩
+
+-- A subgroup is normal in its normalizer.
+theorem normalizer.normal (H : Set)
+  requires subgroup : Subgroup(H, G)
+  shows NormalSubgroup(H, subgroupGroup(G, normalizer(G, H)))
+proof
+  have bounded := Subgroup.subset with subgroup
+  have normalizerSubgroup := normalizer.subgroup with group, bounded
+  have contained := normalizer.contains with group, subgroup
+  have inner := subgroupGroup.group with group, normalizerSubgroup
+  have innerSubgroup : Subgroup(H, subgroupGroup(G, normalizer(G, H)))
+    have innerBounded : H ⊆ Group.carrier(subgroupGroup(G, normalizer(G, H)))
+      rw subgroupGroup.carrierOf
+      exact contained
+    have unitIn : Group.one(subgroupGroup(G, normalizer(G, H))) ∈ H
+      rw subgroupGroup.unit
+      exact Subgroup.one_mem with *
+    apply Subgroup.mk with inner, innerBounded, unitIn
+    . intros x hx y hy
+      have xN := contained with x, hx
+      have yN := contained with y, hy
+      have value : Group.mul(subgroupGroup(G, normalizer(G, H)))(x, y) =
+          G.mul(x, y) := subgroupGroup.mul with *
+      rw value
+      exact Subgroup.mul_mem with *
+    . intros x hx
+      have xN := contained with x, hx
+      have value : Group.inv(subgroupGroup(G, normalizer(G, H)))(x) =
+          G.inv(x) := subgroupGroup.inverse_value with *
+      rw value
+      exact Subgroup.inv_mem with *
+  apply NormalSubgroup.mk with innerSubgroup
+  intros g hg n hn
+  rw subgroupGroup.carrierOf at hg
+  have gIn := normalizer.subset at G, H with g, hg
+  have nIn := bounded with n, hn
+  have nN := contained with n, hn
+  have product : G.mul(g, n) ∈ normalizer(G, H) := Subgroup.mul_mem with *
+  have inverseN : G.inv(g) ∈ normalizer(G, H) := Subgroup.inv_mem with *
+  have inverseValue : Group.inv(subgroupGroup(G, normalizer(G, H)))(g) =
+      G.inv(g) := subgroupGroup.inverse_value with *
+  have mulValue : Group.mul(subgroupGroup(G, normalizer(G, H)))(g, n) =
+      G.mul(g, n) := subgroupGroup.mul with *
+  have mulValue2 : Group.mul(subgroupGroup(G, normalizer(G, H)))(G.mul(g, n), G.inv(g)) =
+      G.mul(G.mul(g, n), G.inv(g)) := subgroupGroup.mul with *
+  have same : conjugate(subgroupGroup(G, normalizer(G, H)), g, n) =
+      conjugate(G, g, n)
+    rw [conjugate.value, conjugate.value, inverseValue, mulValue, mulValue2]
+    rfl
+  rw same
+  exact normalizer.conjugate_mem with *
+
+theorem conjugates.membership (H S : Set)
+  requires bounded : H ⊆ G
+  shows S ∈ conjugates(G, H) ↔
+    ∃ g ∈ G.carrier, S = conjugateSet(G, g, H)
+proof
+  have action := subsetConjugation.action with group
+  have HIn := powerset.membership_iff.backward with bounded
+  rw conjugates.eq_orbit
+  constructor
+  . intro hS
+    obtain ⟨SIn, g, gIn, SEq⟩ := orbit.membership.forward with hS
+    have value := subsetConjugation.value at G, g, H with *
+    witness g
+    refine ⟨gIn, ?_⟩
+    rw [SEq, value]
+    rfl
+  . intro given
+    obtain ⟨g, gIn, SEq⟩ := given
+    have value := subsetConjugation.value at G, g, H with *
+    have SIn : S ∈ 𝒫(G.carrier)
+      rw SEq
+      exact powerset.membership_iff.backward with
+        (conjugateSet.subset at G, g, H)
+    apply orbit.membership.backward
+    refine ⟨SIn, g, gIn, ?_⟩
+    rw [SEq, value]
+    rfl
+
+theorem conjugates.self (H : Set)
+  requires bounded : H ⊆ G
+  shows H ∈ conjugates(G, H)
+proof
+  have unitIn : G.one ∈ G := Group.one_mem with *
+  have fixed : conjugateSet(G, G.one, H) = H := conjugateSet.one with *
+  have criterion := conjugates.membership at G, H, H with group, bounded
+  apply criterion.backward
+  witness G.one
+  refine ⟨unitIn, ?_⟩
+  symm
+  exact fixed
+
+-- The number of conjugates of H is the index of its normalizer.
+theorem conjugates.cardinality_eq_index (H : Set)
+  requires bounded : H ⊆ G
+  requires finite : Finite(G)
+  shows cardinality(conjugates(G, H)) = index(G, normalizer(G, H))
+proof
+  have action := subsetConjugation.action with group
+  have HIn := powerset.membership_iff.backward with bounded
+  have same := orbit.cardinality_eq_index with action, HIn, finite
+  rw [conjugates.eq_orbit, normalizer.eq_stabilizer]
+  exact same
+
+end SubsetConjugation

@@ -1,0 +1,671 @@
+-- Connectedness: a space with no splitting into two disjoint nonempty open
+-- sets, connected subsets through open separations, the clopen
+-- characterisation, examples, continuous images, closures, unions through
+-- a common point, and connected components
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Connected
+import Separation
+
+-- A disconnection of the space; an open separation of a subset A uses two
+-- open sets whose traces on A are disjoint, nonempty, and cover A.
+predicate Disconnection (X T U V : Set) :=
+  U ∈ T ∧ V ∈ T ∧ Nonempty(U) ∧ Nonempty(V) ∧ Disjoint(U, V) ∧ U ∪ V = X
+
+predicate OpenSeparation (T A U V : Set) :=
+  U ∈ T ∧ V ∈ T ∧ A ⊆ U ∪ V ∧ Disjoint(U ∩ A, V ∩ A) ∧
+  Nonempty(U ∩ A) ∧ Nonempty(V ∩ A)
+
+predicate IsConnected (X T : Set) := ¬(∃ U, ∃ V, Disconnection(X, T, U, V))
+
+predicate IsConnectedSubset (X T A : Set) :=
+  A ⊆ X ∧ ¬(∃ U, ∃ V, OpenSeparation(T, A, U, V))
+
+theorem IsConnectedSubset.subset (X T A : Set)
+  requires connected : IsConnectedSubset(X, T, A)
+  shows A ⊆ X
+proof
+  exact connected.left
+
+theorem IsConnectedSubset.no_separation (X T A U V : Set)
+  requires connected : IsConnectedSubset(X, T, A)
+  requires separation : OpenSeparation(T, A, U, V)
+  shows ⊥
+proof
+  apply connected.right
+  exact ⟨U, V, separation⟩
+
+theorem OpenSeparation.symmetric (T A U V : Set)
+  requires separation : OpenSeparation(T, A, U, V)
+  shows OpenSeparation(T, A, V, U)
+proof
+  obtain ⟨hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := separation
+  have swapped : A ⊆ V ∪ U
+    rw union2.commutative
+    exact covers
+  exact ⟨hV, hU, swapped, (Disjoint.symmetric with disjoint), inhabitedV, inhabitedU⟩
+
+-- The clopen characterisation.
+
+theorem IsConnected.clopen (X T U : Set)
+  requires topology : IsTopology(X, T)
+  requires connected : IsConnected(X, T)
+  requires isOpen : U ∈ T
+  requires closed : IsClosed(X, T, U)
+  shows U = ∅ ∨ U = X
+proof
+  have hUX := closed.left
+  by_contra neither
+  have notEmpty : U ≠ ∅
+    intro equal
+    apply neither
+    left
+    exact equal
+  have notWhole : U ≠ X
+    intro equal
+    apply neither
+    right
+    exact equal
+  have negation : ¬(∃ U, ∃ V, Disconnection(X, T, U, V)) := connected
+  apply negation
+  witness U
+  witness complement(X, U)
+  refine ⟨isOpen, closed.right, (Nonempty.of_ne_empty with notEmpty), ?_, ?_, (complement.union2 with hUX)⟩
+  . by_contra none
+    apply notWhole
+    apply Subset.antisymmetric
+    . exact hUX
+    . intros x hx
+      by_contra outside
+      apply none
+      witness x
+      exact complement.membership.backward with ⟨hx, outside⟩
+  . have same := complement.intersection at X, U
+    exact same
+
+theorem IsConnected.of_clopen (X T : Set)
+  requires topology : IsTopology(X, T)
+  requires trivial : ∀ U ∈ T, IsClosed(X, T, U) → U = ∅ ∨ U = X
+  shows IsConnected(X, T)
+proof
+  unfold IsConnected
+  intro split
+  obtain ⟨U, V, hU, hV, inhabitedU, inhabitedV, disjoint, whole⟩ := split
+  have hUX := IsTopology.subset with topology, hU
+  have hVX := IsTopology.subset with topology, hV
+  have separated := Disjoint.iff.forward with disjoint
+  have complementV : complement(X, U) = V
+    ext x
+    constructor
+    . intro hx
+      have parts := complement.membership.forward with hx
+      have hxX := parts.left
+      rw ← whole at hxX
+      have split2 := union2.membership.forward with hxX
+      cases split2 with inU | inV
+      . exfalso
+        exact parts.right with inU
+      . exact inV
+    . intro hx
+      apply complement.membership.backward
+      refine ⟨(hVX with x, hx), ?_⟩
+      intro inU
+      exact separated with x, inU, hx
+  have closedU : IsClosed(X, T, U)
+    constructor
+    . exact hUX
+    . rw complementV
+      exact hV
+  have cases := trivial with U, hU, closedU
+  cases cases with isEmpty | isWhole
+  . obtain ⟨x, hx⟩ := inhabitedU
+    rw isEmpty at hx
+    exact empty.membership with x, hx
+  . obtain ⟨y, hy⟩ := inhabitedV
+    have hyU : y ∈ U
+      rw isWhole
+      exact hVX with y, hy
+    exact separated with y, hyU, hy
+
+theorem IsConnected.iff_clopen (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows IsConnected(X, T) ↔ ∀ U ∈ T, IsClosed(X, T, U) → U = ∅ ∨ U = X
+proof
+  constructor
+  . intros connected U hU closed
+    exact IsConnected.clopen with topology, connected, hU, closed
+  . intro trivial
+    exact IsConnected.of_clopen with topology, trivial
+
+-- Examples: the indiscrete space is connected; a discrete two-point space
+-- is not.
+
+theorem IsConnected.indiscrete (X : Set)
+  shows IsConnected(X, {∅, X})
+proof
+  unfold IsConnected
+  intro split
+  obtain ⟨U, V, hU, hV, inhabitedU, inhabitedV, disjoint, whole⟩ := split
+  have separated := Disjoint.iff.forward with disjoint
+  obtain ⟨x, hx⟩ := inhabitedU
+  obtain ⟨y, hy⟩ := inhabitedV
+  have splitU := pair.membership.forward with hU
+  have splitV := pair.membership.forward with hV
+  cases splitU with emptyU | wholeU
+  . rw emptyU at hx
+    exact empty.membership with x, hx
+  . cases splitV with emptyV | wholeV
+    . rw emptyV at hy
+      exact empty.membership with y, hy
+    . have hxV : x ∈ V
+        rw [wholeV, ← wholeU]
+        exact hx
+      exact separated with x, hx, hxV
+
+theorem IsConnected.not_discrete_pair (a b : Set)
+  requires distinct : a ≠ b
+  shows ¬IsConnected({a, b}, 𝒫({a, b}))
+proof
+  intro connected
+  have negation : ¬(∃ U, ∃ V, Disconnection({a, b}, 𝒫({a, b}), U, V)) := connected
+  apply negation
+  have singletonA : {a} ⊆ {a, b} := singleton.subset_pair at a, b
+  have singletonB : {b} ⊆ {a, b}
+    intros z hz
+    have same := singleton.membership.forward with hz
+    rw same
+    exact pair.right at a, b
+  witness {a}
+  witness {b}
+  refine ⟨(powerset.membership_iff.backward with singletonA), (powerset.membership_iff.backward with singletonB), (Nonempty.singleton at a), (Nonempty.singleton at b), ?_, ?_⟩
+  . apply Disjoint.iff.backward
+    intros z hz hz2
+    have sameA := singleton.membership.forward with hz
+    have sameB := singleton.membership.forward with hz2
+    apply distinct
+    rw [← sameA, ← sameB]
+    rfl
+  . symm
+    exact pair.eq_union2 at a, b
+
+-- The whole space is a connected subset exactly when the space is
+-- connected.
+
+theorem IsConnectedSubset.whole_iff (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows IsConnectedSubset(X, T, X) ↔ IsConnected(X, T)
+proof
+  constructor
+  . intros connected split
+    obtain ⟨U, V, hU, hV, inhabitedU, inhabitedV, disjoint, whole⟩ := split
+    have hUX := IsTopology.subset with topology, hU
+    have hVX := IsTopology.subset with topology, hV
+    have traceU := intersection.eq_left_of_subset with hUX
+    have traceV := intersection.eq_left_of_subset with hVX
+    apply connected.right
+    witness U
+    witness V
+    refine ⟨hU, hV, ?_, ?_, ?_, ?_⟩
+    . rw whole
+      exact Subset.reflexive at X
+    . rw [traceU, traceV]
+      exact disjoint
+    . rw traceU
+      exact inhabitedU
+    . rw traceV
+      exact inhabitedV
+  . intro connected
+    constructor
+    . exact Subset.reflexive at X
+    . intro split
+      obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+      have hUX := IsTopology.subset with topology, hU
+      have hVX := IsTopology.subset with topology, hV
+      have traceU := intersection.eq_left_of_subset with hUX
+      have traceV := intersection.eq_left_of_subset with hVX
+      rw [traceU, traceV] at disjoint
+      rw traceU at inhabitedU
+      rw traceV at inhabitedV
+      have negation : ¬(∃ U, ∃ V, Disconnection(X, T, U, V)) := connected
+      apply negation
+      witness U
+      witness V
+      refine ⟨hU, hV, inhabitedU, inhabitedV, disjoint, ?_⟩
+      exact Subset.antisymmetric with (union2.subset with hUX, hVX), covers
+
+theorem IsConnectedSubset.empty (X T : Set)
+  shows IsConnectedSubset(X, T, ∅)
+proof
+  constructor
+  . exact empty.subset at X
+  . intro split
+    obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+    obtain ⟨x, hx⟩ := inhabitedU
+    have parts := intersection.membership.forward with hx
+    exact empty.membership with x, parts.right
+
+theorem IsConnectedSubset.singleton (X T x : Set)
+  requires hx : x ∈ X
+  shows IsConnectedSubset(X, T, {x})
+proof
+  constructor
+  . exact singleton.subset_iff.backward with hx
+  . intro split
+    obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+    have separated := Disjoint.iff.forward with disjoint
+    obtain ⟨y, hy⟩ := inhabitedU
+    obtain ⟨z, hz⟩ := inhabitedV
+    have partsY := intersection.membership.forward with hy
+    have partsZ := intersection.membership.forward with hz
+    have sameY := singleton.membership.forward with partsY.right
+    have sameZ := singleton.membership.forward with partsZ.right
+    rw sameY at hy
+    rw sameZ at hz
+    exact separated with x, hy, hz
+
+-- A connected subset meeting one side of a would-be separation lies in it.
+theorem IsConnectedSubset.absorbed (X T A U V x : Set)
+  requires connected : IsConnectedSubset(X, T, A)
+  requires hU : U ∈ T
+  requires hV : V ∈ T
+  requires covers : A ⊆ U ∪ V
+  requires disjoint : Disjoint(U ∩ A, V ∩ A)
+  requires hxA : x ∈ A
+  requires hxU : x ∈ U
+  shows A ⊆ U
+proof
+  intros a ha
+  by_contra outside
+  have inUnion := covers with a, ha
+  have split := union2.membership.forward with inUnion
+  cases split with inU | inV
+  . exact outside with inU
+  . apply connected.right
+    have inhabitedU : Nonempty(U ∩ A) := ⟨x, (intersection.membership.backward with ⟨hxU, hxA⟩)⟩
+    have inhabitedV : Nonempty(V ∩ A) := ⟨a, (intersection.membership.backward with ⟨inV, ha⟩)⟩
+    witness U
+    witness V
+    exact ⟨hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩
+
+-- The continuous image of a connected subset is connected.
+theorem IsConnectedSubset.image (f X T Y S A : Set)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires connected : IsConnectedSubset(X, T, A)
+  shows IsConnectedSubset(Y, S, functionImage(f, A, Y))
+proof
+  have function := continuous.left
+  have hAX := connected.left
+  constructor
+  . exact functionImage.subset at f, A, Y
+  . intro split
+    obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+    have separated := Disjoint.iff.forward with disjoint
+    have openU := continuous.right with U, hU
+    have openV := continuous.right with V, hV
+    apply connected.right
+    witness functionPreimage(f, X, U)
+    witness functionPreimage(f, X, V)
+    refine ⟨openU, openV, ?_, ?_, ?_, ?_⟩
+    . intros a ha
+      have haX := hAX with a, ha
+      have valueY := FunctionBetween.apply_closed with function, haX
+      have imageMember : f(a) ∈ functionImage(f, A, Y) by simp [functionImage.membership]
+      have inUnion := covers with f(a), imageMember
+      have split2 := union2.membership.forward with inUnion
+      apply union2.membership.backward
+      cases split2 with inU | inV
+      . left
+        exact functionPreimage.membership.backward with ⟨haX, inU⟩
+      . right
+        exact functionPreimage.membership.backward with ⟨haX, inV⟩
+    . apply Disjoint.iff.backward
+      intros a haU haV
+      have partsU := intersection.membership.forward with haU
+      have partsV := intersection.membership.forward with haV
+      have valueU := functionPreimage.membership.forward with partsU.left
+      have valueV := functionPreimage.membership.forward with partsV.left
+      have haX := hAX with a, partsU.right
+      have valueY := FunctionBetween.apply_closed with function, haX
+      have imageMember : f(a) ∈ functionImage(f, A, Y) by simp [functionImage.membership]
+      have inTraceU : f(a) ∈ U ∩ functionImage(f, A, Y) := intersection.membership.backward with ⟨valueU.right, imageMember⟩
+      have inTraceV : f(a) ∈ V ∩ functionImage(f, A, Y) := intersection.membership.backward with ⟨valueV.right, imageMember⟩
+      exact separated with f(a), inTraceU, inTraceV
+    . obtain ⟨y, hy⟩ := inhabitedU
+      have parts := intersection.membership.forward with hy
+      have hyU := parts.left
+      have imageParts := functionImage.membership.forward with parts.right
+      obtain ⟨hyY, a, ha, shape⟩ := imageParts
+      have haX := hAX with a, ha
+      rw shape at hyU
+      witness a
+      exact intersection.membership.backward with ⟨(functionPreimage.membership.backward with ⟨haX, hyU⟩), ha⟩
+    . obtain ⟨y, hy⟩ := inhabitedV
+      have parts := intersection.membership.forward with hy
+      have hyV := parts.left
+      have imageParts := functionImage.membership.forward with parts.right
+      obtain ⟨hyY, a, ha, shape⟩ := imageParts
+      have haX := hAX with a, ha
+      rw shape at hyV
+      witness a
+      exact intersection.membership.backward with ⟨(functionPreimage.membership.backward with ⟨haX, hyV⟩), ha⟩
+
+theorem IsConnected.image (f X T Y S : Set)
+  requires topology : IsTopology(X, T)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires connected : IsConnected(X, T)
+  shows IsConnectedSubset(Y, S, functionImage(f, X, Y))
+proof
+  have whole := IsConnectedSubset.whole_iff.backward with topology, connected
+  exact IsConnectedSubset.image with continuous, whole
+
+-- A continuous surjection carries connectedness to the codomain.
+theorem IsConnected.of_surjection (f X T Y S : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires surjective : SurjectiveBetween(f, X, Y)
+  requires connected : IsConnected(X, T)
+  shows IsConnected(Y, S)
+proof
+  have function := continuous.left
+  have image := IsConnected.image with topologyX, continuous, connected
+  have whole : functionImage(f, X, Y) = Y
+    apply Subset.antisymmetric
+    . exact functionImage.subset at f, X, Y
+    . intros y hy
+      obtain ⟨x, hx, edge⟩ := surjective.right with y, hy
+      have value := FunctionBetween.apply_value with function, hx, edge
+      rw ← value
+      exact functionImage.value with function, hx
+  rw whole at image
+  exact IsConnectedSubset.whole_iff.forward with topologyY, image
+
+theorem IsConnected.of_homeomorphism (f X T Y S : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires homeomorphism : IsHomeomorphism(f, X, T, Y, S)
+  requires connected : IsConnected(X, T)
+  shows IsConnected(Y, S)
+proof
+  obtain ⟨bijective, continuous, inverse⟩ := homeomorphism
+  have surjective := Bijective.surjective with bijective
+  exact IsConnected.of_surjection with topologyX, topologyY, continuous, surjective, connected
+
+theorem IsConnected.homeomorphic_iff (f X T Y S : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires homeomorphism : IsHomeomorphism(f, X, T, Y, S)
+  shows IsConnected(X, T) ↔ IsConnected(Y, S)
+proof
+  have inverse := IsHomeomorphism.inverse with homeomorphism
+  constructor
+  . intro connected
+    exact IsConnected.of_homeomorphism with topologyX, topologyY, homeomorphism, connected
+  . intro connected
+    exact IsConnected.of_homeomorphism with topologyY, topologyX, inverse, connected
+
+-- Anything between a connected set and its closure is connected.
+theorem IsConnectedSubset.between (X T A B : Set)
+  requires topology : IsTopology(X, T)
+  requires connected : IsConnectedSubset(X, T, A)
+  requires hAB : A ⊆ B
+  requires hB : B ⊆ closure(X, T, A)
+  shows IsConnectedSubset(X, T, B)
+proof
+  have hAX := connected.left
+  have closureInside := closure.subset with topology, hAX
+  constructor
+  . exact Subset.transitive with hB, closureInside
+  . intro split
+    obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+    have separated := Disjoint.iff.forward with disjoint
+    apply connected.right
+    have meetsU : Nonempty(U ∩ A)
+      obtain ⟨b, hb⟩ := inhabitedU
+      have parts := intersection.membership.forward with hb
+      have inClosure := hB with b, parts.right
+      have touches := closure.membership.forward with topology, hAX, inClosure
+      exact touches.right with U, hU, parts.left
+    have meetsV : Nonempty(V ∩ A)
+      obtain ⟨b, hb⟩ := inhabitedV
+      have parts := intersection.membership.forward with hb
+      have inClosure := hB with b, parts.right
+      have touches := closure.membership.forward with topology, hAX, inClosure
+      exact touches.right with V, hV, parts.left
+    witness U
+    witness V
+    refine ⟨hU, hV, (Subset.transitive with hAB, covers), ?_, meetsU, meetsV⟩
+    apply Disjoint.iff.backward
+    intros a haU haV
+    have partsU := intersection.membership.forward with haU
+    have partsV := intersection.membership.forward with haV
+    have inB := hAB with a, partsU.right
+    have inTraceU : a ∈ U ∩ B := intersection.membership.backward with ⟨partsU.left, inB⟩
+    have inTraceV : a ∈ V ∩ B := intersection.membership.backward with ⟨partsV.left, inB⟩
+    exact separated with a, inTraceU, inTraceV
+
+theorem IsConnectedSubset.closure (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires connected : IsConnectedSubset(X, T, A)
+  shows IsConnectedSubset(X, T, closure(X, T, A))
+proof
+  have contains := Space.closure.contains with topology, connected.left
+  exact IsConnectedSubset.between with topology, connected, contains, (Subset.reflexive at closure(X, T, A))
+
+-- Unions of connected subsets through a common point are connected.
+
+theorem IsConnectedSubset.union_family (X T F p : Set)
+  requires connected : ∀ A ∈ F, IsConnectedSubset(X, T, A)
+  requires common : ∀ A ∈ F, p ∈ A
+  shows IsConnectedSubset(X, T, ⋃(F))
+proof
+  constructor
+  . apply union.subset
+    intros A hA
+    have connectedA := connected with A, hA
+    exact connectedA.left
+  . intro split
+    obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+    have separated := Disjoint.iff.forward with disjoint
+    have memberDisjoint : ∀ A ∈ F, Disjoint(U ∩ A, V ∩ A)
+      intros A hA
+      have below := union.subset_of_member with hA
+      have leftBelow := intersection.monotone_right at A, ⋃(F), U with below
+      have rightBelow := intersection.monotone_right at A, ⋃(F), V with below
+      have first := Disjoint.of_subset_left with disjoint, leftBelow
+      exact Disjoint.of_subset_right with first, rightBelow
+    have memberCovers : ∀ A ∈ F, A ⊆ U ∪ V
+      intros A hA
+      exact Subset.transitive with (union.subset_of_member with hA), covers
+    obtain ⟨x, hx⟩ := inhabitedU
+    have partsX := intersection.membership.forward with hx
+    obtain ⟨A0, hA0, hxA0⟩ := union.membership.forward with partsX.right
+    have hpA0 := common with A0, hA0
+    have hpUnion := union.contains with hA0, hpA0
+    have hpUnionV := union.contains with hA0, hpA0
+    have splitP := union2.membership.forward with (covers with p, hpUnion)
+    cases splitP with inU | inV
+    . have inside : ⋃(F) ⊆ U
+        apply union.subset
+        intros A hA
+        exact IsConnectedSubset.absorbed with (connected with A, hA), hU, hV, (memberCovers with A, hA), (memberDisjoint with A, hA), (common with A, hA), inU
+      obtain ⟨y, hy⟩ := inhabitedV
+      have partsY := intersection.membership.forward with hy
+      have hyU := inside with y, partsY.right
+      have inTraceU : y ∈ U ∩ ⋃(F) := intersection.membership.backward with ⟨hyU, partsY.right⟩
+      exact separated with y, inTraceU, hy
+    . have inside : ⋃(F) ⊆ V
+        apply union.subset
+        intros A hA
+        have swappedCovers : A ⊆ V ∪ U
+          rw union2.commutative
+          exact memberCovers with A, hA
+        have swappedDisjoint := Disjoint.symmetric with (memberDisjoint with A, hA)
+        exact IsConnectedSubset.absorbed with (connected with A, hA), hV, hU, swappedCovers, swappedDisjoint, (common with A, hA), inV
+      have hxV := inside with x, partsX.right
+      have inTraceV : x ∈ V ∩ ⋃(F) := intersection.membership.backward with ⟨hxV, partsX.right⟩
+      exact separated with x, hx, inTraceV
+
+theorem IsConnectedSubset.union2 (X T A B : Set)
+  requires connectedA : IsConnectedSubset(X, T, A)
+  requires connectedB : IsConnectedSubset(X, T, B)
+  requires meets : Nonempty(A ∩ B)
+  shows IsConnectedSubset(X, T, A ∪ B)
+proof
+  obtain ⟨p, hp⟩ := meets
+  have parts := intersection.membership.forward with hp
+  have connected : ∀ C ∈ {A, B}, IsConnectedSubset(X, T, C)
+    intros C hC
+    have split := pair.membership.forward with hC
+    cases split with isA | isB
+    . rw isA
+      exact connectedA
+    . rw isB
+      exact connectedB
+  have common : ∀ C ∈ {A, B}, p ∈ C
+    intros C hC
+    have split := pair.membership.forward with hC
+    cases split with isA | isB
+    . rw isA
+      exact parts.left
+    . rw isB
+      exact parts.right
+  have joined := IsConnectedSubset.union_family with connected, common
+  rwa union.pair at joined
+
+-- Connected components: the union of the connected subsets through a
+-- point.
+
+def connectedThrough (X T x : Set) : Set :=
+  { A ∈ 𝒫(X) | IsConnectedSubset(X, T, A) ∧ x ∈ A }
+
+def component (X T x : Set) : Set := ⋃(connectedThrough(X, T, x))
+
+theorem connectedThrough.membership (A X T x : Set)
+  shows A ∈ connectedThrough(X, T, x) ↔ A ∈ 𝒫(X) ∧ IsConnectedSubset(X, T, A) ∧ x ∈ A
+proof
+  simp [connectedThrough]
+
+theorem component.connected (X T x : Set)
+  shows IsConnectedSubset(X, T, component(X, T, x))
+proof
+  unfold component
+  apply IsConnectedSubset.union_family at X, T, connectedThrough(X, T, x), x
+  . intros A hA
+    have parts := connectedThrough.membership.forward with hA
+    exact parts.right.left
+  . intros A hA
+    have parts := connectedThrough.membership.forward with hA
+    exact parts.right.right
+
+theorem component.subset (X T x : Set)
+  shows component(X, T, x) ⊆ X
+proof
+  have connected := component.connected at X, T, x
+  exact connected.left
+
+theorem component.maximal (X T x A : Set)
+  requires connected : IsConnectedSubset(X, T, A)
+  requires hx : x ∈ A
+  shows A ⊆ component(X, T, x)
+proof
+  have found : A ∈ connectedThrough(X, T, x)
+    apply connectedThrough.membership.backward
+    exact ⟨(powerset.membership_iff.backward with connected.left), connected, hx⟩
+  unfold component
+  exact union.subset_of_member with found
+
+theorem component.contains (X T x : Set)
+  requires hx : x ∈ X
+  shows x ∈ component(X, T, x)
+proof
+  have connected := IsConnectedSubset.singleton at X, T, x with hx
+  have self : x ∈ {x} by simp [singleton.membership]
+  have below := component.maximal with connected, self
+  exact below with x, self
+
+theorem component.closed (X T x : Set)
+  requires topology : IsTopology(X, T)
+  requires hx : x ∈ X
+  shows IsClosed(X, T, component(X, T, x))
+proof
+  have connected := component.connected at X, T, x
+  have closureConnected := IsConnectedSubset.closure with topology, connected
+  have contains := Space.closure.contains with topology, connected.left
+  have hxClosure := contains with x, (component.contains with hx)
+  have below := component.maximal with closureConnected, hxClosure
+  apply IsClosed.iff_closure.backward with topology, connected.left
+  exact Subset.antisymmetric with below, contains
+
+theorem component.eq_of_member (X T x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ component(X, T, x)
+  shows component(X, T, y) = component(X, T, x)
+proof
+  have connectedX := component.connected at X, T, x
+  have connectedY := component.connected at X, T, y
+  have hyX := component.subset at X, T, x with y, hy
+  have first := component.maximal with connectedX, hy
+  have hxY := first with x, (component.contains with hx)
+  have second := component.maximal with connectedY, hxY
+  exact Subset.antisymmetric with second, first
+
+-- Connected subsets agree with connectedness of the subspace.
+theorem IsConnectedSubset.iff_subspace (X T A : Set)
+  requires topology : IsTopology(X, T)
+  requires hA : A ⊆ X
+  shows IsConnectedSubset(X, T, A) ↔ IsConnected(A, subspaceTopology(T, A))
+proof
+  constructor
+  . intro connected
+    unfold IsConnected
+    intro split
+    obtain ⟨U1, V1, hU1, hV1, inhabitedU, inhabitedV, disjoint, whole⟩ := split
+    obtain ⟨U, hU, shapeU⟩ := subspaceTopology.membership.forward with hU1
+    obtain ⟨V, hV, shapeV⟩ := subspaceTopology.membership.forward with hV1
+    rw ← shapeU at inhabitedU
+    rw ← shapeV at inhabitedV
+    rw [← shapeU, ← shapeV] at disjoint
+    rw [← shapeU, ← shapeV] at whole
+    apply connected.right
+    witness U
+    witness V
+    refine ⟨hU, hV, ?_, disjoint, inhabitedU, inhabitedV⟩
+    intros a ha
+    have inWhole : a ∈ U ∩ A ∪ V ∩ A
+      rw whole
+      exact ha
+    have split2 := union2.membership.forward with inWhole
+    apply union2.membership.backward
+    cases split2 with inU | inV
+    . left
+      have parts := intersection.membership.forward with inU
+      exact parts.left
+    . right
+      have parts := intersection.membership.forward with inV
+      exact parts.left
+  . intro connected
+    constructor
+    . exact hA
+    . intro split
+      obtain ⟨U, V, hU, hV, covers, disjoint, inhabitedU, inhabitedV⟩ := split
+      have tracedU : U ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨U, hU, rfl⟩
+      have tracedV : V ∩ A ∈ subspaceTopology(T, A) := subspaceTopology.membership.backward with ⟨V, hV, rfl⟩
+      have negation : ¬(∃ U, ∃ V, Disconnection(A, subspaceTopology(T, A), U, V)) := connected
+      apply negation
+      witness U ∩ A
+      witness V ∩ A
+      refine ⟨tracedU, tracedV, inhabitedU, inhabitedV, disjoint, ?_⟩
+      apply Subset.antisymmetric
+      . exact union2.subset with (intersection.subset_right at U, A), (intersection.subset_right at V, A)
+      . intros a ha
+        have split2 := union2.membership.forward with (covers with a, ha)
+        apply union2.membership.backward
+        cases split2 with inU | inV
+        . left
+          exact intersection.membership.backward with ⟨inU, ha⟩
+        . right
+          exact intersection.membership.backward with ⟨inV, ha⟩

@@ -1,0 +1,142 @@
+-- Normalizing polynomial relations over a coefficient homomorphism (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.HornerRelations
+import Polynomial.HornerNormalization
+
+theorem monicValue.mapped_coefficients (A B plus times f leading x : Set) (cs : List(A))
+  requires function : f : A → B
+  shows monicValue{A}(f, plus, times, leading, x, cs) = hornerAt{B}(plus, times, leading, x, listMap{A}(f, cs))
+proof
+  induction cs
+  | List.nil =>
+    rw [listMap, monicValue, hornerAt.nil]
+    rfl
+  | List.cons(c, tail) using ih =>
+    have coefficient : c ∈ A by assumption
+    have mapped := listMap.closed with *
+    have image := FunctionBetween.apply_closed with function, coefficient
+    rw [listMap, monicValue, hornerAt.cons, ih]
+    rfl
+
+theorem monicValue.change_coefficients (A B plus times f g h leading x : Set) (cs : List(A))
+  requires function : f : A → B
+  requires agreement : ∀ a ∈ A, h(a) = g(f(a))
+  shows monicValue{A}(h, plus, times, leading, x, cs) = monicValue{B}(g, plus, times, leading, x, listMap{A}(f, cs))
+proof
+  induction cs
+  | List.nil => simp [listMap, monicValue]
+  | List.cons(c, tail) using ih =>
+    have coefficient : c ∈ A by assumption
+    have image := FunctionBetween.apply_closed with function, coefficient
+    have equal := agreement with c, coefficient
+    simp [listMap, monicValue, ih, equal]
+
+section Rings
+variable (A add z neg mul one B plus o minus times unit f x : Set)
+notation ring R := (A, add, z, neg, mul, one)
+notation ring S := (B, plus, o, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+
+theorem monicValue.zero_coefficients (cs : List(A))
+  requires coefficients : ∀ n, Nat(n) → listCoefficient{A}(z, cs, n) = z
+  shows monicValue{A}(f, plus, times, o, x, cs) = o
+proof
+  have function := IsRingHom.function with hom
+  have zero := IsRingHom.zero with hom
+  have zeroIn : R[0] ∈ R by typecheck
+  have values : ∀ n, Nat(n) → listCoefficient{B}(o, listMap{A}(f, cs), n) = o
+    intros n natural
+    have value := listCoefficient.map at A, B, f, z, cs, n with *
+    rw zero at value
+    have original := coefficients with n, natural
+    cc
+  have zeros := hornerAt.zero_coefficients at B, plus, o, minus, times, unit, listMap{A}(f, cs) with *
+  have vanishes := zeros with x, element
+  have mappedValue := monicValue.mapped_coefficients at A, B, plus, times, f, o, x, cs with *
+  cc
+
+theorem monicValue.normalize (cs : List(A))
+  requires nonzero : ∃ n, Nat(n) ∧ listCoefficient{A}(z, cs, n) ≠ z
+  shows ∃ leading ∈ R, leading ≠ z ∧ (∃ lower, List(A, lower) ∧
+    monicValue{A}(f, plus, times, o, x, cs) = polynomialHorner{A}(f, plus, times, x, leading, lower))
+proof
+  induction cs
+  | List.nil =>
+    intro nonzero
+    obtain ⟨n, natural, different⟩ := nonzero
+    have value := listCoefficient.nil at A, z, n with *
+    exfalso
+    exact different with value
+  | List.cons(c, tail) using ih =>
+    intro nonzero
+    have coefficient : c ∈ R by assumption
+    have alternatives : (∃ n, Nat(n) ∧ listCoefficient{A}(z, tail, n) ≠ z) ∨ ¬(∃ n, Nat(n) ∧ listCoefficient{A}(z, tail, n) ≠ z)
+      tauto
+    cases alternatives with tailNonzero | tailZero
+    . obtain ⟨leading, initial, different, lower, list, equal⟩ := ih with tailNonzero
+      have consList : List(A, c :: lower) by typecheck
+      refine ⟨leading, initial, different, c :: lower, consList, ?_⟩
+      unfold polynomialHorner at equal
+      unfold polynomialHorner
+      rw [monicValue, monicValue, equal]
+      rfl
+    . have zeros : ∀ n, Nat(n) → listCoefficient{A}(z, tail, n) = z
+        intros n natural
+        by_contra different
+        apply tailZero
+        refine ⟨n, natural, different⟩
+      have different : c ≠ z
+        intro headZero
+        obtain ⟨n, natural, value⟩ := nonzero
+        have cases := natural.zero_or_successor with natural
+        cases cases with zero | successor
+        . rw [zero, listCoefficient.zero] at value
+          exact value with headZero
+        . obtain ⟨k, kNat, shape⟩ := successor
+          rw [shape, listCoefficient.succ] at value
+          have tailValue := zeros with k, kNat
+          exact value with tailValue
+      have empty : List(A, []) by typecheck
+      refine ⟨c, coefficient, different, [], empty, ?_⟩
+      have tailValue := monicValue.zero_coefficients with *
+      have image := IsRingHom.closed with hom, coefficient
+      unfold polynomialHorner
+      rw [monicValue, monicValue, tailValue]
+      ring
+
+theorem AlgebraicOver.of_coefficient_relation (cs : List(A))
+  requires nonzero : ∃ n, Nat(n) ∧ listCoefficient{A}(z, cs, n) ≠ z
+  requires relation : monicValue{A}(f, plus, times, o, x, cs) = o
+  shows AlgebraicOver(f, R, S, x)
+proof
+  obtain ⟨leading, initial, different, lower, list, equal⟩ := monicValue.normalize at A, add, z, neg, mul, one, B, plus, o, minus, times, unit, f, x, cs with *
+  unfold AlgebraicOver
+  refine ⟨element, leading, initial, different, lower, list, ?_⟩
+  cc
+
+theorem IntegralOver.algebraic_of_nontrivial
+  requires nontrivial : Nontrivial(R)
+  requires integral : IntegralOver(f, R, S, x)
+  shows AlgebraicOver(f, R, S, x)
+proof
+  have oneIn : R[1] ∈ R by typecheck
+  have distinct := Nontrivial.distinct with nontrivial
+  have nonzero : R[1] ≠ R[0]
+    intro equal
+    apply distinct
+    cc
+  have one := IsRingHom.one with hom
+  obtain ⟨cs, list, relation⟩ := integral.right
+  unfold AlgebraicOver
+  refine ⟨element, R[1], oneIn, nonzero, cs, list, ?_⟩
+  unfold polynomialHorner
+  rfl
+
+end Rings

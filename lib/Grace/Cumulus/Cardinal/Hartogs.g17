@@ -1,0 +1,668 @@
+-- Hartogs construction
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Hartogs
+import Product
+import Order
+
+-- All well-orders carried by subsets of A form a set. The first
+-- coordinate is bounded by 𝒫(A), and the relation coordinate by 𝒫(A × A).
+-- Hartogs' ordinal will arise from the order types represented here.
+def wellOrderCodes (A : Set) : Set := {
+  p ∈ 𝒫(A) × 𝒫(A × A) |
+  ∃ B, (B ⊆ A) ∧ ∃ r, RelationBetween(r, A, A) ∧ p = (B, r) ∧ WellOrder(B, r)
+}
+
+-- Guarding the relation makes the recursive definition below total in A and
+-- r. When r is a well-order this is just r; otherwise it is empty.
+def activeWellOrderRelation (A r : Set) : Set := { p ∈ r | WellOrder(A, r) }
+
+theorem activeWellOrderRelation.relates (x y A r : Set)
+  shows relates(activeWellOrderRelation(A, r), x, y) ↔
+    relates(r, x, y) ∧ WellOrder(A, r)
+proof
+  simp [activeWellOrderRelation, relates]
+
+theorem activeWellOrderRelation.well_founded (A r : Set)
+  shows wellFoundedOn(activeWellOrderRelation(A, r), A)
+proof
+  have alternatives : WellOrder(A, r) ∨ ¬WellOrder(A, r) by tauto
+  cases alternatives with wellOrdered | notWellOrdered
+  . have founded := WellOrder.well_founded with wellOrdered
+    intros s hs
+    specialize founded with s, hs
+    obtain ⟨m, hm⟩ := founded
+    witness m
+    rcases hm with ⟨hmS, minimal⟩
+    constructor
+    . exact hmS
+    . intros y hyS hActive
+      obtain ⟨hRelation, retainedOrder⟩ := activeWellOrderRelation.relates.forward with hActive
+      exact minimal with y, hyS, hRelation
+    intros s hs
+    rcases hs with ⟨hSubset, hNonempty⟩
+    obtain ⟨m2, hm2⟩ := set.foundation with hNonempty
+    witness m2
+    rcases hm2 with ⟨hmS2, minimal2⟩
+    constructor
+    . exact hmS2
+    . intros y hyS hActive
+      have shape := activeWellOrderRelation.relates.forward with hActive
+      tauto
+
+theorem activeWellOrderRelation.transitive (A r : Set)
+  requires order : WellOrder(A, r)
+  shows TransitiveOn(A, activeWellOrderRelation(A, r))
+proof
+  have linear := WellOrder.strict_linear with order
+  have transitive := StrictLinearOrder.transitive with linear
+  intros x hx y hy z hz hxy hyz
+  have xy := activeWellOrderRelation.relates.forward with hxy
+  have yz := activeWellOrderRelation.relates.forward with hyz
+  rcases xy with ⟨rxy, retainedOrder⟩
+  rcases yz with ⟨ryz, retainedOrder2⟩
+  specialize transitive with x, hx, y, hy, z, hz, rxy, ryz
+  exact activeWellOrderRelation.relates.backward with ⟨transitive, order⟩
+
+-- The first genuinely recursive layer of the well-order collapse. The value
+-- at x is the set of values already assigned to r-predecessors of x.
+noncomputable well-founded def wellOrderCollapse (A r x : Set) : Set
+  over A ordered by activeWellOrderRelation(A, r)
+  certified by activeWellOrderRelation.well_founded
+  | x using history => Relation.range(history)
+
+def wellOrderCollapseGraph (A r : Set) : Set := {
+  (x ↦ wellOrderCollapse(A, r, x)) | x ∈ A
+}
+
+def wellOrderType (A r : Set) : Set := Relation.range(wellOrderCollapseGraph(A, r))
+
+theorem wellOrderCollapse.membership (z A r x : Set)
+  requires hx : x ∈ A
+  shows z ∈ wellOrderCollapse(A, r, x) ↔
+    ∃ y ∈ A, relates(activeWellOrderRelation(A, r), y, x) ∧
+      z = wellOrderCollapse(A, r, y)
+proof
+  have equation := wellOrderCollapse.equation.direct at A, r, x with hx
+  rw equation
+  constructor
+  . intro hz
+    obtain ⟨bounded, source, sourcePair⟩ := Relation.range.membership.forward with hz
+    obtain ⟨y, hyA, hyx, pairEqual⟩ := wellOrderCollapse.history.membership.forward with sourcePair
+    obtain ⟨sourceEqual, valueEqual⟩ := orderedPair.injective with pairEqual
+    refine ⟨y, hyA, hyx, valueEqual⟩
+  . intro witness
+    obtain ⟨y2, hyA2, hyx2, valueEqual2⟩ := witness
+    have inHistory : (y2 ↦ wellOrderCollapse(A, r, y2)) ∈ wellOrderCollapse.history(A, r, x)
+      exact wellOrderCollapse.history.membership.backward with ⟨y2, hyA2, hyx2, rfl⟩
+    have inRange := Relation.range.contains with inHistory
+    rwa valueEqual2
+
+theorem wellOrderCollapseGraph.membership (p A r : Set)
+  shows p ∈ wellOrderCollapseGraph(A, r) ↔
+    ∃ x ∈ A, (x ↦ wellOrderCollapse(A, r, x)) = p
+proof
+  simp
+
+theorem wellOrderCollapseGraph.relates (x y A r : Set)
+  shows relates(wellOrderCollapseGraph(A, r), x, y) ↔
+    x ∈ A ∧ y = wellOrderCollapse(A, r, x)
+proof
+  constructor
+  . intro hPair
+    unfold relates at hPair
+    obtain ⟨source, sourceInA, pairEqual⟩ := wellOrderCollapseGraph.membership.forward with hPair
+    obtain ⟨sourceEqual, valueEqual⟩ := orderedPair.injective with pairEqual
+    constructor
+    . rw ← sourceEqual
+      exact sourceInA
+    . rw [← sourceEqual, valueEqual]
+      rfl
+  . intro shape
+    rcases shape with ⟨hx, valueEqual⟩
+    unfold relates
+    apply wellOrderCollapseGraph.membership.backward
+    witness x
+    constructor
+    . exact hx
+    . rw valueEqual
+      rfl
+
+theorem wellOrderType.membership (y A r : Set)
+  shows y ∈ wellOrderType(A, r) ↔
+    ∃ x ∈ A, y = wellOrderCollapse(A, r, x)
+proof
+  constructor
+  . intro hy
+    unfold wellOrderType at hy
+    obtain ⟨bounded, x, pair⟩ := Relation.range.membership.forward with hy
+    have graphShape := wellOrderCollapseGraph.relates.forward at x, y, A, r
+    have related : relates(wellOrderCollapseGraph(A, r), x, y) by exact pair
+    specialize graphShape with related
+    witness x
+    exact graphShape
+  . intro witnessData
+    obtain ⟨x2, hxA, valueEqual⟩ := witnessData
+    unfold wellOrderType
+    apply Relation.range.contains at x2, y, wellOrderCollapseGraph(A, r)
+    have graphPair := wellOrderCollapseGraph.relates.backward at x2, y, A, r
+    have related : relates(wellOrderCollapseGraph(A, r), x2, y) by simp
+  simp [wellOrderType, relates]
+
+-- The predecessor-collapse at every point of a well-order is a von Neumann
+-- ordinal. This is the heart of the Mostowski collapse in the linear case.
+theorem wellOrderCollapse.ordinal (A r : Set)
+  requires order : WellOrder(A, r)
+  shows ∀ x ∈ A, wellOrderCollapse(A, r, x) ∈ Ordinal
+proof
+  induction x over A ordered by activeWellOrderRelation(A, r) certified by activeWellOrderRelation.well_founded at A, r
+  intros x hx ih
+  constructor
+    intros value valueInCollapse member memberInValue
+    have valueShape := wellOrderCollapse.membership at value, A, r, x with hx
+    have decodedValue : ∃ y ∈ A, relates(activeWellOrderRelation(A, r), y, x) ∧ value = wellOrderCollapse(A, r, y)
+      simp [valueShape]
+    obtain ⟨y, hyA, hyx, valueEqual⟩ := decodedValue
+    have memberShape := wellOrderCollapse.membership at member, A, r, y with hyA
+    rw valueEqual at memberInValue
+    have decodedMember : ∃ w ∈ A, relates(activeWellOrderRelation(A, r), w, y) ∧ member = wellOrderCollapse(A, r, w)
+      simp [memberShape]
+    obtain ⟨w, hwA, hwy, memberEqual⟩ := decodedMember
+    have relationTransitive := activeWellOrderRelation.transitive with order, w, hwA, y, hyA, x, hx, hwy, hyx
+    have targetShape := wellOrderCollapse.membership at member, A, r, x with hx
+    simp [targetShape]
+  . intros value valueInCollapse
+    have valueShape := wellOrderCollapse.membership at value, A, r, x with hx
+    have decodedValue : ∃ y2 ∈ A, relates(activeWellOrderRelation(A, r), y2, x) ∧ value = wellOrderCollapse(A, r, y2)
+      simp [valueShape]
+    obtain ⟨y2, hyA2, hyx2, valueEqual2⟩ := decodedValue
+    specialize ih with y2
+    have predecessor : y2 ∈ A ∧ relates(activeWellOrderRelation(A, r), y2, x) by refine ⟨hyA2, hyx2⟩
+    specialize ih with predecessor
+    have valueOrdinal := ih
+    have valueTransitive := Ordinal.transitive with valueOrdinal
+    rwa valueEqual2
+
+theorem wellOrderCollapse.injective (x y A r : Set)
+  requires order : WellOrder(A, r)
+  requires hx : x ∈ A
+  requires hy : y ∈ A
+  requires equalValues : wellOrderCollapse(A, r, x) = wellOrderCollapse(A, r, y)
+  shows x = y
+proof
+  by_contra unequal
+  have linear := WellOrder.strict_linear with order
+  have connected := StrictLinearOrder.connected with linear, x, hx, y, hy, unequal
+  cases connected with xBeforeY | yBeforeX
+  . have activeXY := activeWellOrderRelation.relates.backward at x, y, A, r
+    have active : relates(activeWellOrderRelation(A, r), x, y) by simp
+    have memberRule := wellOrderCollapse.membership at wellOrderCollapse(A, r, x), A, r, y with hy
+    have member : wellOrderCollapse(A, r, x) ∈ wellOrderCollapse(A, r, y) by simp [memberRule]
+    rw equalValues at member
+    have irreflexive := membership.irreflexive at wellOrderCollapse(A, r, y)
+    apply irreflexive
+    exact member
+  . have activeYX := activeWellOrderRelation.relates.backward at y, x, A, r
+    have active2 : relates(activeWellOrderRelation(A, r), y, x) by simp
+    have memberRule2 := wellOrderCollapse.membership at wellOrderCollapse(A, r, y), A, r, x with hx
+    have member2 : wellOrderCollapse(A, r, y) ∈ wellOrderCollapse(A, r, x) by simp [memberRule2]
+    rw ← equalValues at member2
+    have irreflexive2 := membership.irreflexive at wellOrderCollapse(A, r, x)
+    apply irreflexive2
+    exact member2
+
+theorem wellOrderCollapseGraph.function (A r : Set)
+  shows wellOrderCollapseGraph(A, r) : A → wellOrderType(A, r)
+proof
+  constructor
+    intros p hp
+    obtain ⟨x, hxA, pairEqual⟩ := wellOrderCollapseGraph.membership.forward with hp
+    rw ← pairEqual
+    apply product.pair
+    . exact hxA
+    . apply wellOrderType.membership.backward at wellOrderCollapse(A, r, x), A, r
+      refine ⟨x, hxA, rfl⟩
+  . constructor
+      intros x2 y hxy z hxz
+      have yShape := wellOrderCollapseGraph.relates.forward with hxy
+      have zShape := wellOrderCollapseGraph.relates.forward with hxz
+      rcases yShape with ⟨hxA2, yEqual⟩
+      rcases zShape with ⟨hxA3, zEqual⟩
+      rw [yEqual, zEqual]
+      rfl
+    . intros x3 hxA3
+      witness wellOrderCollapse(A, r, x3)
+      constructor
+      . apply wellOrderType.membership.backward at wellOrderCollapse(A, r, x3), A, r
+        refine ⟨x3, hxA3, rfl⟩
+      . apply wellOrderCollapseGraph.relates.backward at x3, wellOrderCollapse(A, r, x3), A, r
+        refine ⟨hxA3, rfl⟩
+
+theorem wellOrderCollapseGraph.injective (A r : Set)
+  requires order : WellOrder(A, r)
+  shows InjectiveBetween(wellOrderCollapseGraph(A, r), A, wellOrderType(A, r))
+proof
+  constructor
+  . exact wellOrderCollapseGraph.function at A, r
+  . intros x hx y hy z hz hxz hyz
+    have xShape := wellOrderCollapseGraph.relates.forward with hxz
+    have yShape := wellOrderCollapseGraph.relates.forward with hyz
+    rcases xShape with ⟨hxA, xValue⟩
+    rcases yShape with ⟨hyA, yValue⟩
+    have equalValues : wellOrderCollapse(A, r, x) = wellOrderCollapse(A, r, y) by cc
+    exact wellOrderCollapse.injective with order, hx, hy, equalValues
+
+theorem wellOrderCollapseGraph.surjective (A r : Set)
+  shows SurjectiveBetween(wellOrderCollapseGraph(A, r), A, wellOrderType(A, r))
+proof
+  constructor
+  . exact wellOrderCollapseGraph.function at A, r
+  . intros y hy
+    obtain ⟨x, hxA, valueEqual⟩ := wellOrderType.membership.forward with hy
+    witness x
+    constructor
+    . exact hxA
+    . apply wellOrderCollapseGraph.relates.backward at x, y, A, r
+      refine ⟨hxA, valueEqual⟩
+
+theorem wellOrderCollapseGraph.bijective (A r : Set)
+  requires order : WellOrder(A, r)
+  shows BijectiveBetween(wellOrderCollapseGraph(A, r), A, wellOrderType(A, r))
+proof
+  simp [BijectiveBetween, wellOrderCollapseGraph.injective, wellOrderCollapseGraph.surjective]
+
+theorem wellOrderCollapseGraph.order_isomorphism (A r : Set)
+  requires order : WellOrder(A, r)
+  shows OrderIsomorphism(
+    wellOrderCollapseGraph(A, r), A, activeWellOrderRelation(A, r),
+    wellOrderType(A, r), membershipOn(wellOrderType(A, r)))
+proof
+  constructor
+  . have bijective := wellOrderCollapseGraph.bijective at A, r
+    exact bijective with order
+  . intros x hx y hy u hu v hv hxu hyv
+    have uShape := wellOrderCollapseGraph.relates.forward with hxu
+    have vShape := wellOrderCollapseGraph.relates.forward with hyv
+    rcases uShape with ⟨hxA, uEqual⟩
+    rcases vShape with ⟨hyA, vEqual⟩
+    constructor
+    . intro hxy
+      have collapseRule := wellOrderCollapse.membership at wellOrderCollapse(A, r, x), A, r, y with hy
+      have collapseMember : wellOrderCollapse(A, r, x) ∈ wellOrderCollapse(A, r, y) by simp [collapseRule]
+      have uvMember : u ∈ v by simp
+      have membershipRule := membershipOn.relates with hu, hv
+      simp
+    . intro huv
+      have membershipRule := membershipOn.relates with hu, hv
+      have uvMember : u ∈ v by simp [membershipRule]
+      rw [uEqual, vEqual] at uvMember
+      have collapseRule := wellOrderCollapse.membership at wellOrderCollapse(A, r, x), A, r, y with hy
+      have predecessorData : ∃ w ∈ A, relates(activeWellOrderRelation(A, r), w, y) ∧ wellOrderCollapse(A, r, x) = wellOrderCollapse(A, r, w)
+        simp [collapseRule]
+      obtain ⟨w, hwA, hwy, equalValues⟩ := predecessorData
+      have injective := wellOrderCollapse.injective with order, hx, hwA, equalValues
+      rwa injective
+
+theorem wellOrderType.ordinal (A r : Set)
+  requires order : WellOrder(A, r)
+  shows wellOrderType(A, r) ∈ Ordinal
+proof
+  constructor
+    intros value valueInType member memberInValue
+    obtain ⟨x, hxA, valueEqual⟩ := wellOrderType.membership.forward with valueInType
+    rw valueEqual at memberInValue
+    have memberRule := wellOrderCollapse.membership at member, A, r, x with hxA
+    have memberShape : ∃ y ∈ A, relates(activeWellOrderRelation(A, r), y, x) ∧ member = wellOrderCollapse(A, r, y)
+      simp [memberRule]
+    obtain ⟨y, hyA, hyx, memberEqual⟩ := memberShape
+    exact wellOrderType.membership.backward with ⟨y, hyA, memberEqual⟩
+  . intros value2 valueInType2
+    obtain ⟨x2, hxA2, valueEqual2⟩ := wellOrderType.membership.forward with valueInType2
+    have collapseOrdinals := wellOrderCollapse.ordinal with order, x2, hxA2
+    have collapseTransitive := Ordinal.transitive with collapseOrdinals
+    rwa valueEqual2
+
+theorem wellOrderCodes.membership (p A : Set)
+  shows p ∈ wellOrderCodes(A) ↔
+    p ∈ 𝒫(A) × 𝒫(A × A) ∧
+    ∃ B, (B ⊆ A) ∧ ∃ r, RelationBetween(r, A, A) ∧ p = (B, r) ∧ WellOrder(B, r)
+proof
+  simp
+
+theorem wellOrderCodes.empty (A : Set)
+  shows (∅, membershipOn(∅)) ∈ wellOrderCodes(A)
+proof
+  apply wellOrderCodes.membership.backward
+  have emptySubset := empty.subset at A
+  have emptyRelation := membershipOn.relation at empty
+  have relationOnA := RelationBetween.monotone with emptyRelation, emptySubset, emptySubset
+  constructor
+  . apply product.pair at empty, membershipOn(∅), 𝒫(A), 𝒫(A × A)
+    . apply set.powerset.backward at empty, A
+      exact emptySubset
+    . apply set.powerset.backward at membershipOn(∅), A × A
+      have relationBound := relationOnA
+      unfold RelationBetween at relationBound
+      exact relationBound
+  . witness empty
+    constructor
+    . exact emptySubset
+    . witness membershipOn(∅)
+      constructor
+      . exact relationOnA
+      . constructor
+        . rfl
+        . exact Ordinal.well_order at empty
+
+theorem wellOrderCodes.nonempty (A : Set)
+  shows Nonempty(wellOrderCodes(A))
+proof
+  witness (∅, membershipOn(∅))
+  exact wellOrderCodes.empty
+
+-- Collapsing an ordinal with its membership order returns the ordinal itself.
+-- This will identify order types after transporting an ordinal into a set.
+theorem wellOrderCollapse.on_ordinal (α : Set)
+  requires ordinal : α ∈ Ordinal
+  shows ∀ x ∈ α, wellOrderCollapse(α, membershipOn(α), x) = x
+proof
+  have order := Ordinal.well_order with ordinal
+  have transitive := Ordinal.transitive with ordinal
+  induction x over α ordered by membershipOn(α) certified by membershipOn.wellFounded at α
+  intros x hx ih
+  ext z
+  constructor
+  . intro member
+    have shape := wellOrderCollapse.membership at z, α, membershipOn(α), x with hx
+    have decoded : ∃ y ∈ α, relates(activeWellOrderRelation(α, membershipOn(α)), y, x) ∧
+      z = wellOrderCollapse(α, membershipOn(α), y)
+      exact shape.forward with member
+    obtain ⟨y, hy, active, value⟩ := decoded
+    obtain ⟨related, ordered⟩ := activeWellOrderRelation.relates.forward with active
+    have predecessor : y ∈ α ∧ relates(membershipOn(α), y, x) by refine ⟨hy, related⟩
+    have collapsed := ih with y, predecessor
+    have rule := membershipOn.relates with hy, hx
+    have inside := rule.forward with related
+    rw collapsed at value
+    rwa value
+  . intro insideZ
+    have xSubset := transitive with x, hx
+    have hz := xSubset with z, insideZ
+    have ruleZ := membershipOn.relates with hz, hx
+    have relatedZ := ruleZ.backward with insideZ
+    have predecessorZ : z ∈ α ∧ relates(membershipOn(α), z, x) by refine ⟨hz, relatedZ⟩
+    have collapsedZ := ih with z, predecessorZ
+    have activeZ : relates(activeWellOrderRelation(α, membershipOn(α)), z, x)
+      exact activeWellOrderRelation.relates.backward with ⟨relatedZ, order⟩
+    have shapeZ := wellOrderCollapse.membership at z, α, membershipOn(α), x with hx
+    apply shapeZ.backward
+    witness z
+    constructor
+    . exact hz
+    . constructor
+      . exact activeZ
+      . symm
+        exact collapsedZ
+
+theorem wellOrderType.on_ordinal (α : Set)
+  requires ordinal : α ∈ Ordinal
+  shows wellOrderType(α, membershipOn(α)) = α
+proof
+  have collapse := wellOrderCollapse.on_ordinal with ordinal
+  ext x
+  constructor
+  . intro member
+    obtain ⟨y, hy, value⟩ := wellOrderType.membership.forward with member
+    have same := collapse with y, hy
+    rw same at value
+    rwa value
+  . intro hx
+    have sameX := collapse with x, hx
+    apply wellOrderType.membership.backward
+    witness x
+    constructor
+    . exact hx
+    . symm
+      exact sameX
+
+-- The same collapse identity survives transport along any injection.
+theorem wellOrderCollapse.on_injected_ordinal (f α A : Set)
+  requires ordinal : α ∈ Ordinal
+  requires injective : InjectiveBetween(f, α, A)
+  shows ∀ x ∈ α,
+    wellOrderCollapse(functionImage(f, α, A), transportedOrder(f, α, A, membershipOn(α)), f[x]) = x
+proof
+  have function := Injective.function with injective
+  have originalOrder := Ordinal.well_order with ordinal
+  have order := transportedOrder.well_order with *
+  have transitive := Ordinal.transitive with ordinal
+  induction x over α ordered by membershipOn(α) certified by membershipOn.wellFounded at α
+  intros x hx ih
+  have fxMember := functionImage.value with *
+  ext z
+  constructor
+  . intro member
+    have rule := wellOrderCollapse.membership at z, functionImage(f, α, A),
+      transportedOrder(f, α, A, membershipOn(α)), f[x] with fxMember
+    obtain ⟨v, vMember, active, value⟩ := rule.forward with member
+    obtain ⟨edge, ordered⟩ := activeWellOrderRelation.relates.forward with active
+    obtain ⟨bounded, y, hy, vValue⟩ := functionImage.membership.forward with vMember
+    rw vValue at edge
+    have original := transportedOrder.reflect with *
+    have predecessor : y ∈ α ∧ relates(membershipOn(α), y, x) by refine ⟨hy, original⟩
+    have collapsed := ih with y, predecessor
+    have membershipRule := membershipOn.relates with hy, hx
+    have inside := membershipRule.forward with original
+    rw [vValue, collapsed] at value
+    rwa value
+  . intro insideZ
+    have xSubset := transitive with x, hx
+    have hz := xSubset with z, insideZ
+    have membershipRuleZ := membershipOn.relates with hz, hx
+    have originalZ := membershipRuleZ.backward with insideZ
+    have predecessorZ : z ∈ α ∧ relates(membershipOn(α), z, x) by refine ⟨hz, originalZ⟩
+    have collapsedZ := ih with z, predecessorZ
+    have fzMember := functionImage.value with hz
+    have edgeZ := transportedOrder.edge with *
+    have activeZ : relates(activeWellOrderRelation(functionImage(f, α, A),
+      transportedOrder(f, α, A, membershipOn(α))), f[z], f[x])
+      exact activeWellOrderRelation.relates.backward with ⟨edgeZ, order⟩
+    have ruleZ := wellOrderCollapse.membership at z, functionImage(f, α, A),
+      transportedOrder(f, α, A, membershipOn(α)), f[x] with fxMember
+    apply ruleZ.backward
+    witness f[z]
+    constructor
+    . exact fzMember
+    . constructor
+      . exact activeZ
+      . symm
+        exact collapsedZ
+
+theorem wellOrderType.on_injected_ordinal (f α A : Set)
+  requires ordinal : α ∈ Ordinal
+  requires injective : InjectiveBetween(f, α, A)
+  shows wellOrderType(functionImage(f, α, A), transportedOrder(f, α, A, membershipOn(α))) = α
+proof
+  have function := Injective.function with injective
+  have collapse := wellOrderCollapse.on_injected_ordinal with *
+  ext z
+  constructor
+  . intro member
+    obtain ⟨v, vMember, value⟩ := wellOrderType.membership.forward with member
+    obtain ⟨bounded, x, hx, vValue⟩ := functionImage.membership.forward with vMember
+    have same := collapse with x, hx
+    rw [vValue, same] at value
+    rwa value
+  . intro hz
+    have fzMember := functionImage.value with *
+    have sameZ := collapse with z, hz
+    apply wellOrderType.membership.backward
+    witness f[z]
+    constructor
+    . exact fzMember
+    . symm
+      exact sameZ
+
+-- Collect the ordinal types in two bounded stages. This avoids selecting a
+-- representative well-order for each type: Replacement takes all of them.
+def wellOrdersOn (A B : Set) : Set :=
+  {r ∈ 𝒫(A × A) | WellOrder(B, r)}
+
+def wellOrderTypesOn (A B : Set) : Set :=
+  {wellOrderType(B, r) | r ∈ wellOrdersOn(A, B)}
+
+def wellOrderTypeRows (A : Set) : Set :=
+  {wellOrderTypesOn(A, B) | B ∈ 𝒫(A)}
+
+def wellOrderTypes (A : Set) : Set := ⋃(wellOrderTypeRows(A))
+
+def wellOrderTypeSuccessors (A : Set) : Set :=
+  {next(α) | α ∈ wellOrderTypes(A)}
+
+-- An ordinal strictly above every ordinal type represented on a subset of A.
+-- The non-injection theorem additionally needs transport along an injection.
+def hartogsBound (A : Set) : Set := ⋃(wellOrderTypeSuccessors(A))
+
+theorem wellOrdersOn.membership (r A B : Set)
+  shows r ∈ wellOrdersOn(A, B) ↔ r ∈ 𝒫(A × A) ∧ WellOrder(B, r)
+proof
+  simp
+
+theorem wellOrderTypesOn.membership (α A B : Set)
+  shows α ∈ wellOrderTypesOn(A, B) ↔
+    ∃ r ∈ wellOrdersOn(A, B), wellOrderType(B, r) = α
+proof
+  simp
+
+theorem wellOrderTypeRows.membership (row A : Set)
+  shows row ∈ wellOrderTypeRows(A) ↔
+    ∃ B ∈ 𝒫(A), wellOrderTypesOn(A, B) = row
+proof
+  simp
+
+theorem wellOrderTypes.membership (α A : Set)
+  shows α ∈ wellOrderTypes(A) ↔
+    ∃ B ∈ 𝒫(A), ∃ r ∈ wellOrdersOn(A, B), wellOrderType(B, r) = α
+proof
+  constructor
+  . intro member
+    unfold wellOrderTypes at member
+    obtain ⟨row, rowMember, inRow⟩ := set.union.forward with member
+    obtain ⟨B, subset, rowEqual⟩ := wellOrderTypeRows.membership.forward with rowMember
+    rw ← rowEqual at inRow
+    have represented := wellOrderTypesOn.membership.forward with inRow
+    refine ⟨B, subset, represented⟩
+  . intro represented
+    obtain ⟨C, subsetC, r, order, equal⟩ := represented
+    have rowInFamily : wellOrderTypesOn(A, C) ∈ wellOrderTypeRows(A)
+      exact wellOrderTypeRows.membership.backward with ⟨C, subsetC, rfl⟩
+    have inSelectedRow : α ∈ wellOrderTypesOn(A, C) := wellOrderTypesOn.membership.backward with ⟨r, order, equal⟩
+    unfold wellOrderTypes
+    exact set.union.backward with ⟨wellOrderTypesOn(A, C), rowInFamily, inSelectedRow⟩
+
+theorem wellOrderTypes.contains (A B r : Set)
+  requires subset : B ⊆ A
+  requires order : WellOrder(B, r)
+  shows wellOrderType(B, r) ∈ wellOrderTypes(A)
+proof
+  have strict := WellOrder.strict_linear with order
+  have relation := StrictLinearOrder.relation with strict
+  have bounded := RelationBetween.monotone with relation, subset, subset
+  unfold RelationBetween at bounded
+  unfold Subset at bounded
+  have relationMember := set.powerset.backward with bounded
+  have orderMember : r ∈ wellOrdersOn(A, B) := wellOrdersOn.membership.backward with ⟨relationMember, order⟩
+  have subsetLaw := subset
+  unfold Subset at subsetLaw
+  have carrierMember := set.powerset.backward with subsetLaw
+  exact wellOrderTypes.membership.backward with ⟨B, carrierMember, r, orderMember, rfl⟩
+
+theorem wellOrderTypes.ordinal (α A : Set)
+  requires member : α ∈ wellOrderTypes(A)
+  shows α ∈ Ordinal
+proof
+  simp [wellOrderTypes.membership, wellOrdersOn.membership, wellOrderType.ordinal]
+
+theorem wellOrderTypeSuccessors.membership (β A : Set)
+  shows β ∈ wellOrderTypeSuccessors(A) ↔
+    ∃ α ∈ wellOrderTypes(A), next(α) = β
+proof
+  simp
+
+theorem hartogsBound.ordinal (A : Set)
+  shows hartogsBound(A) ∈ Ordinal
+proof
+  unfold hartogsBound
+  apply Ordinal.union
+  intros β member
+  obtain ⟨α, represented, equal⟩ := wellOrderTypeSuccessors.membership.forward with member
+  have ordinal := wellOrderTypes.ordinal with represented
+  rw ← equal
+  exact Ordinal.next with ordinal
+
+theorem hartogsBound.contains_type (α A : Set)
+  requires represented : α ∈ wellOrderTypes(A)
+  shows α ∈ hartogsBound(A)
+proof
+  have successorMember : next(α) ∈ wellOrderTypeSuccessors(A)
+    exact wellOrderTypeSuccessors.membership.backward with ⟨α, represented, rfl⟩
+  have inside := next.contains at α
+  unfold hartogsBound
+  exact set.union.backward with ⟨next(α), successorMember, inside⟩
+
+theorem hartogsBound.not_represented (A : Set)
+  shows ¬hartogsBound(A) ∈ wellOrderTypes(A)
+proof
+  simp [hartogsBound.contains_type, membership.irreflexive]
+
+theorem hartogsBound.above_well_order (A B r : Set)
+  requires subset : B ⊆ A
+  requires order : WellOrder(B, r)
+  shows wellOrderType(B, r) ∈ hartogsBound(A)
+proof
+  simp [wellOrderTypes.contains, hartogsBound.contains_type]
+
+theorem hartogsBound.not_order_type (A B r : Set)
+  requires subset : B ⊆ A
+  requires order : WellOrder(B, r)
+  shows wellOrderType(B, r) ≠ hartogsBound(A)
+proof
+  have represented := wellOrderTypes.contains with *
+  intro equal
+  rw equal at represented
+  exact hartogsBound.not_represented with represented
+
+theorem hartogsBound.above_ordinal_subset (α A : Set)
+  requires ordinal : α ∈ Ordinal
+  requires subset : α ⊆ A
+  shows α ∈ hartogsBound(A)
+proof
+  have order := Ordinal.well_order with ordinal
+  have above := hartogsBound.above_well_order with *
+  have identity := wellOrderType.on_ordinal with ordinal
+  rwa identity at above
+
+-- Hartogs' theorem: the constructed ordinal is too large to inject into A.
+theorem hartogsBound.no_injection (A f : Set)
+  shows ¬InjectiveBetween(f, hartogsBound(A), A)
+proof
+  intro injective
+  have ordinal := hartogsBound.ordinal at A
+  have originalOrder := Ordinal.well_order with ordinal
+  have order := transportedOrder.well_order at f, hartogsBound(A), A,
+    membershipOn(hartogsBound(A)) with *
+  have subset := functionImage.subset at f, hartogsBound(A), A
+  have forbidden := hartogsBound.not_order_type at A, functionImage(f, hartogsBound(A), A),
+    transportedOrder(f, hartogsBound(A), A, membershipOn(hartogsBound(A))) with *
+  have same := wellOrderType.on_injected_ordinal with *
+  exact forbidden with same
+
+theorem Hartogs.theorem (A : Set)
+  shows ∃ α, α ∈ Ordinal ∧ (∀ f, ¬InjectiveBetween(f, α, A))
+proof
+  witness hartogsBound(A)
+  intro f
+  exact hartogsBound.no_injection

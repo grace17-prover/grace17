@@ -1,0 +1,345 @@
+-- Infinite sets: a set is infinite exactly when the naturals inject into it,
+-- and exactly when it is Dedekind-infinite, carrying an injective self-map
+-- that is not onto. The forward direction well-orders the set and compares
+-- its order type with ω; the backward direction follows the orbit of a
+-- point outside the image.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Infinite
+import Set.WellOrdering
+import Dominance
+import ListSupport
+
+-- An infinite set admits an injection from the naturals: well-order it and
+-- compare the order type with ω.
+theorem Infinite.omega_dominated (A : Set)
+  requires infinite : Infinite(A)
+  shows ℕ ≼ A
+proof
+  obtain ⟨r, order⟩ := WellOrder.exists at A
+  have typeOrdinal := wellOrderType.ordinal with order
+  have omegaOrdinal := Ordinal.omega
+  have collapse := wellOrderCollapseGraph.bijective with order
+  have equipotent : A ≃ wellOrderType(A, r) := ⟨wellOrderCollapseGraph(A, r), collapse⟩
+  have comparison := Ordinal.subset_or_member with omegaOrdinal, typeOrdinal
+  cases comparison with below | small
+  . have typeDominated := Dominated.of_equipotent with (Equipotent.symmetric with equipotent)
+    have omegaDominated := Dominated.of_subset with below
+    exact Dominated.transitive with omegaDominated, typeDominated
+  . exfalso
+    unfold Infinite at infinite
+    apply infinite
+    have natural := nat.omega.backward with small
+    witness wellOrderType(A, r)
+    exact ⟨natural, equipotent⟩
+
+-- The shift along an injective sequence g : ℕ → A sends g(n) to g(n + 1)
+-- and fixes every point outside the range of g.
+def shiftMap (g A : Set) : Set :=
+  { p ∈ A × A | ∃ x ∈ A, ∃ y ∈ A,
+      ((¬x ∈ functionImage(g, ℕ, A) ∧ y = x) ∨
+        (∃ n ∈ ℕ, x = g(n) ∧ y = g(succ(n)))) ∧ p = (x, y) }
+
+theorem shiftMap.relates (g A x y : Set)
+  shows relates(shiftMap(g, A), x, y) ↔ x ∈ A ∧ y ∈ A ∧
+    ((¬x ∈ functionImage(g, ℕ, A) ∧ y = x) ∨
+      (∃ n ∈ ℕ, x = g(n) ∧ y = g(succ(n))))
+proof
+  constructor
+  . intro h
+    unfold relates at h
+    simp [shiftMap] at h
+    obtain ⟨hproduct, u, hu, v, hv, rule, hpair⟩ := h
+    obtain ⟨hxu, hyv⟩ := orderedPair.injective with hpair
+    rw under hxu
+    rw under hyv
+    exact ⟨hu, hv, rule⟩
+  . intro h
+    obtain ⟨hx, hy, rule⟩ := h
+    unfold relates
+    exact shiftMap.backward with ⟨(product.pair with hx, hy), x, hx, y, hy, rule, rfl⟩
+
+theorem shiftMap.in_image (g A n : Set)
+  requires function : g : ℕ → A
+  requires hn : n ∈ ℕ
+  shows g(n) ∈ functionImage(g, ℕ, A)
+proof
+  have value := FunctionBetween.apply_closed with function, hn
+  simp [functionImage.membership]
+
+theorem shiftMap.function (g A : Set)
+  requires injective : InjectiveBetween(g, ℕ, A)
+  shows shiftMap(g, A) : A → A
+proof
+  have function := Injective.function with injective
+  constructor
+  . intros p hp
+    simp [shiftMap] at hp
+    exact hp.left
+  . constructor
+    . intros x y hxy z hxz
+      obtain ⟨hx, hy, caseY⟩ := shiftMap.relates.forward with hxy
+      obtain ⟨hx2, hz, caseZ⟩ := shiftMap.relates.forward with hxz
+      cases caseY with fixedY | movedY
+      . cases caseZ with fixedZ | movedZ
+        . rw [fixedY.right, fixedZ.right]
+          rfl
+        . exfalso
+          obtain ⟨n, hn, shapeX, shapeZ⟩ := movedZ
+          apply fixedY.left
+          rw shapeX
+          exact shiftMap.in_image with function, hn
+      . cases caseZ with fixedZ | movedZ
+        . exfalso
+          obtain ⟨n, hn, shapeX, shapeY⟩ := movedY
+          apply fixedZ.left
+          rw shapeX
+          exact shiftMap.in_image with function, hn
+        . obtain ⟨n, hn, xn, yn⟩ := movedY
+          obtain ⟨m, hm, xm, zm⟩ := movedZ
+          have same : g(n) = g(m) by cc
+          have equal := Injective.apply_cancel with injective, hn, hm, same
+          rw [yn, zm, equal]
+          rfl
+    . intros x hx
+      have split : x ∈ functionImage(g, ℕ, A) ∨ ¬x ∈ functionImage(g, ℕ, A) by tauto
+      cases split with inside | outside
+      . simp [functionImage.membership] at inside
+        obtain ⟨hxA, n, hn, shape⟩ := inside
+        have hsucc := omega.successor with hn
+        have value := FunctionBetween.apply_closed with function, hsucc
+        witness g(succ(n))
+        constructor
+        . exact value
+        . apply shiftMap.relates.backward
+          refine ⟨hx, value, ?_⟩
+          right
+          refine ⟨n, hn, shape, rfl⟩
+      . witness x
+        constructor
+        . exact hx
+        . apply shiftMap.relates.backward
+          refine ⟨hx, hx, ?_⟩
+          left
+          exact ⟨outside, rfl⟩
+
+theorem shiftMap.injective (g A : Set)
+  requires injective : InjectiveBetween(g, ℕ, A)
+  shows InjectiveBetween(shiftMap(g, A), A, A)
+proof
+  have function := Injective.function with injective
+  constructor
+  . exact shiftMap.function with injective
+  . intros x hx y hy z hz hxz hyz
+    obtain ⟨hx2, hz2, caseX⟩ := shiftMap.relates.forward with hxz
+    obtain ⟨hy2, hz3, caseY⟩ := shiftMap.relates.forward with hyz
+    cases caseX with fixedX | movedX
+    . cases caseY with fixedY | movedY
+      . rw [← fixedX.right, ← fixedY.right]
+        rfl
+      . exfalso
+        obtain ⟨m, hm, ym, zm⟩ := movedY
+        apply fixedX.left
+        rw [← fixedX.right, zm]
+        have hsucc := omega.successor with hm
+        exact shiftMap.in_image with function, hsucc
+    . cases caseY with fixedY | movedY
+      . exfalso
+        obtain ⟨n, hn, xn, zn⟩ := movedX
+        apply fixedY.left
+        rw [← fixedY.right, zn]
+        have hsucc := omega.successor with hn
+        exact shiftMap.in_image with function, hsucc
+      . obtain ⟨n, hn, xn, zn⟩ := movedX
+        obtain ⟨m, hm, ym, zm⟩ := movedY
+        have hsuccN := omega.successor with hn
+        have hsuccM := omega.successor with hm
+        have same : g(succ(n)) = g(succ(m)) by cc
+        have equalSucc := Injective.apply_cancel with injective, hsuccN, hsuccM, same
+        have equal := Naturals.injective.succ with equalSucc
+        rw [xn, ym, equal]
+        rfl
+
+theorem shiftMap.not_surjective (g A : Set)
+  requires injective : InjectiveBetween(g, ℕ, A)
+  shows ¬SurjectiveBetween(shiftMap(g, A), A, A)
+proof
+  have function := Injective.function with injective
+  have zeroNat : Nat(0) by typecheck
+  have hzero : 0 ∈ ℕ := nat.omega.forward with zeroNat
+  have start := FunctionBetween.apply_closed with function, hzero
+  intro surjective
+  obtain ⟨x, hx, hit⟩ := surjective.right with g(0), start
+  obtain ⟨hx2, hstart, rule⟩ := shiftMap.relates.forward with hit
+  cases rule with fixed | moved
+  . apply fixed.left
+    rw ← fixed.right
+    exact shiftMap.in_image with function, hzero
+  . obtain ⟨n, hn, xn, shape⟩ := moved
+    have hsucc := omega.successor with hn
+    have equal := Injective.apply_cancel with injective, hzero, hsucc, shape
+    exact Naturals.disjoint.zero.succ at n with equal
+
+theorem DedekindInfinite.of_omega_dominated (A : Set)
+  requires dominated : ℕ ≼ A
+  shows DedekindInfinite(A)
+proof
+  obtain ⟨g, injective⟩ := dominated
+  refine ⟨shiftMap(g, A), shiftMap.injective with injective, shiftMap.not_surjective with injective⟩
+
+-- The orbit of a point under a self-map.
+def orbit (f a : Set, n : Nat) → Set
+  | f, a, zero => a
+  | f, a, succ(k) => f(orbit(f, a, k))
+
+theorem orbit.zero (f a : Set)
+  shows orbit(f, a, 0) = a
+proof
+  simp [orbit]
+
+theorem orbit.succ (f a : Set, k : Nat)
+  shows orbit(f, a, succ(k)) = f(orbit(f, a, k))
+proof
+  simp [orbit]
+
+theorem orbit.closed (f A a : Set, n : Nat)
+  requires function : f : A → A
+  requires ha : a ∈ A
+  shows orbit(f, a, n) ∈ A
+proof
+  induction n
+  | zero =>
+    rw orbit.zero
+    exact ha
+  | succ(k) using ih =>
+    rw orbit.succ
+    exact FunctionBetween.apply_closed with function, ih
+
+-- Starting outside the image of an injection, the orbit never repeats.
+theorem orbit.distinct (f A a : Set, m : Nat)
+  requires injective : InjectiveBetween(f, A, A)
+  requires ha : a ∈ A
+  requires outside : ¬a ∈ functionImage(f, A, A)
+  shows ∀ n, Nat(n) → m < n → orbit(f, a, m) ≠ orbit(f, a, n)
+proof
+  induction m
+  | zero =>
+    have function := Injective.function with injective
+    intros n hn below equal
+    have shape := natural.zero_or_successor with hn
+    cases shape with isZero | isSucc
+    . rw isZero at below
+      exact Less.irreflexive at 0 with below
+    . obtain ⟨k, hk, nk⟩ := isSucc
+      rw [nk, orbit.zero, orbit.succ] at equal
+      apply outside
+      rw equal
+      have closed := orbit.closed at f, A, a, k with function, ha
+      have value := FunctionBetween.apply_closed with function, closed
+      simp [functionImage.membership]
+  | succ(j) using ih =>
+    have function := Injective.function with injective
+    intros n hn below equal
+    have shape := natural.zero_or_successor with hn
+    cases shape with isZero | isSucc
+    . rw isZero at below
+      arith
+    . obtain ⟨k, hk, nk⟩ := isSucc
+      rw [nk, orbit.succ, orbit.succ] at equal
+      rw nk at below
+      have upper := Less.successor_upper with below
+      have self := bootstrap.succ.self at j
+      have selfLess := Less.of_membership at j, succ(j) with self
+      have jk := Less.transitive_LessEqual with selfLess, upper
+      have closedJ := orbit.closed at f, A, a, j with function, ha
+      have closedK := orbit.closed at f, A, a, k with function, ha
+      have same := Injective.apply_cancel with injective, closedJ, closedK, equal
+      exact ih with k, hk, jk, same
+
+defgraph orbitMap (f A a : Set) (n ∈ ℕ) : A := orbit(f, a, n)
+requires function : f : A → A
+requires ha : a ∈ A
+proof
+  exact orbit.closed with function, ha
+
+theorem orbitMap.injective (f A a : Set)
+  requires injective : InjectiveBetween(f, A, A)
+  requires ha : a ∈ A
+  requires outside : ¬a ∈ functionImage(f, A, A)
+  shows InjectiveBetween(orbitMap(f, A, a), ℕ, A)
+proof
+  have function := Injective.function with injective
+  have graph := orbitMap.function at f, A, a with *
+  constructor
+  . exact graph
+  . intros m hm n hn z hz mappedM mappedN
+    have valueM := FunctionBetween.apply_value with graph, hm, mappedM
+    have valueN := FunctionBetween.apply_value with graph, hn, mappedN
+    have stepM := orbitMap.value at f, A, a, m with *
+    have stepN := orbitMap.value at f, A, a, n with *
+    have equal : orbit(f, a, m) = orbit(f, a, n) by cc
+    have mNat := nat.omega.backward with hm
+    have nNat := nat.omega.backward with hn
+    have alternatives := Less.trichotomy with mNat, nNat
+    cases alternatives with mn | rest
+    . exfalso
+      have distinct := orbit.distinct at f, A, a, m with injective, ha, outside
+      exact distinct with n, nNat, mn, equal
+    . cases rest with same | nm
+      . exact same
+      . exfalso
+        have distinct := orbit.distinct at f, A, a, n with injective, ha, outside
+        apply distinct with m, mNat, nm
+        symm
+        exact equal
+
+theorem DedekindInfinite.omega_dominated (A : Set)
+  requires dedekind : DedekindInfinite(A)
+  shows ℕ ≼ A
+proof
+  obtain ⟨f, injective, notOnto⟩ := dedekind
+  have function := Injective.function with injective
+  have missed : ∃ a ∈ A, ¬a ∈ functionImage(f, A, A)
+    by_contra none
+    apply notOnto
+    constructor
+    . exact function
+    . intros y hy
+      have covered : y ∈ functionImage(f, A, A)
+        by_contra absent
+        apply none
+        refine ⟨y, hy, absent⟩
+      simp [functionImage.membership] at covered
+      obtain ⟨hyA, x, hx, shape⟩ := covered
+      refine ⟨x, hx, ?_⟩
+      rw shape
+      exact FunctionBetween.relates_apply with function, hx
+  obtain ⟨a, ha, outside⟩ := missed
+  witness orbitMap(f, A, a)
+  exact orbitMap.injective with injective, ha, outside
+
+-- The three faces of infinity coincide.
+theorem Infinite.iff_omega_dominated (A : Set)
+  shows Infinite(A) ↔ ℕ ≼ A
+proof
+  constructor
+  . intro infinite
+    exact Infinite.omega_dominated with infinite
+  . intro dominated
+    unfold Infinite
+    intro finite
+    have omegaFinite := Finite.of_dominated with finite, dominated
+    exact omega.infinite with omegaFinite
+
+theorem Infinite.iff_dedekind (A : Set)
+  shows Infinite(A) ↔ DedekindInfinite(A)
+proof
+  constructor
+  . intro infinite
+    exact DedekindInfinite.of_omega_dominated with (Infinite.omega_dominated with infinite)
+  . intro dedekind
+    have dominated := DedekindInfinite.omega_dominated with dedekind
+    exact Infinite.iff_omega_dominated.backward with dominated

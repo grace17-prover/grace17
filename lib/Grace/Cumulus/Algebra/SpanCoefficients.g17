@@ -1,0 +1,168 @@
+-- Explicit finite coefficient lists for relative linear spans (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.SpanCoefficients
+import SpanInsert
+import CoefficientLists
+import Cardinal.ListSupport
+
+-- Missing coefficients are zero; extra coefficients are ignored.
+-- Existence results below provide exactly one coefficient per generator.
+def linearCombination (A sourceZero B plus z times f : Set) (xs : List(B)) (cs : List(A)) → Set
+  | A, sourceZero, B, plus, z, times, f, List.nil, cs => z
+  | A, sourceZero, B, plus, z, times, f, List.cons(x, tail), cs => plus(times(f(listHeadOr{A}(sourceZero, cs)), x), linearCombination(A, sourceZero, B, plus, z, times, f, tail, listTail{A}(cs)))
+  descends xs
+
+notation scoped linearCombination(R, S, f, xs, cs) => linearCombination(R.carrier, R.zero, S.carrier, S.add, S.zero, S.mul, f, xs, cs)
+
+theorem listHeadOr.closed (A zero : Set) (cs : List(A))
+  requires zeroIn : zero ∈ A
+  shows listHeadOr{A}(zero, cs) ∈ A
+proof
+  induction cs
+  | List.nil =>
+    rwa listHeadOr
+  | List.cons(a, tail) using ih =>
+    rwa listHeadOr
+
+section Algebras
+variable (A add zero neg mul one B plus z minus times unit f : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+
+theorem linearCombination.cons (x : Set) (xs : List(B)) (a : Set) (cs : List(A))
+  requires element : x ∈ S
+  requires coefficient : a ∈ R
+  shows linearCombination(R, S, f, x :: xs, a :: cs) = S[f(a) * x + linearCombination(R, S, f, xs, cs)]
+proof
+  rw [linearCombination, listHeadOr, listTail]
+  rfl
+
+theorem linearCombination.mem_span (xs : List(B))
+  shows ∀ cs, List(A, cs) → linearCombination(R, S, f, xs, cs) ∈ linearSpan(f, R, S, listSupport{B}(xs))
+proof
+  induction xs
+  | List.nil =>
+    intros cs list
+    rw [linearCombination, listSupport]
+    have span := linearSpan.submodule at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, ∅ with *
+    exact Submodule.zero_mem with source, target, hom, span
+  | List.cons(x, tail) using ih =>
+    intros cs list
+    have element : x ∈ S by assumption
+    have r := IsCommRing.ring with source
+    have zeroIn := IsRing.zero_in_carrier with r
+    have head := listHeadOr.closed at A, zero, cs with *
+    have tailList := listTail.closed at A, cs with *
+    have rest := ih with listTail{A}(cs), tailList
+    have bound := listSupport.subset at B, tail with *
+    have enlargedBound : insert(x, listSupport{B}(tail)) ⊆ S by simp [Subset, insert.membership]
+    have span := linearSpan.submodule at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, insert(x, listSupport{B}(tail)) with *
+    have contains := linearSpan.contains with source, target, hom, enlargedBound
+    have xIn : x ∈ linearSpan(f, R, S, insert(x, listSupport{B}(tail))) by simp [Subset, insert.membership]
+    have subset : listSupport{B}(tail) ⊆ insert(x, listSupport{B}(tail)) by simp [Subset, insert.membership]
+    have included := linearSpan.mono with source, target, hom, enlargedBound, subset
+    have restIn : linearCombination(R, S, f, tail, listTail{A}(cs)) ∈ linearSpan(f, R, S, insert(x, listSupport{B}(tail)))
+      exact included with linearCombination(R, S, f, tail, listTail{A}(cs)), rest
+    have scalar := Submodule.scalar_mul_mem with source, target, hom, span, head, xIn
+    have addition := Submodule.add_closed with source, target, hom, span
+    rw [linearCombination, listSupport]
+    exact ClosedBinary.mem with addition, scalar, restIn
+
+theorem linearCombination.closed (xs : List(B)) (cs : List(A))
+  shows linearCombination(R, S, f, xs, cs) ∈ S
+proof
+  have combinations := linearCombination.mem_span at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, xs with *
+  have member := combinations with cs, assumption
+  have bounded := linearSpan.subset at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, listSupport{B}(xs) with *
+  exact bounded with linearCombination(R, S, f, xs, cs), member
+
+theorem linearSpan.list_coefficients (xs : List(B))
+  shows ∀ y ∈ linearSpan(f, R, S, listSupport{B}(xs)), ∃ cs, List(A, cs) ∧
+    ListOps.length{A}(cs) = ListOps.length{B}(xs) ∧ y = linearCombination(R, S, f, xs, cs)
+proof
+  induction xs
+  | List.nil =>
+    intros y hy
+    rw listSupport at hy
+    have empty := linearSpan.empty with *
+    rw empty at hy
+    have equal := singleton.membership.forward with hy
+    have list : List(A, []) by typecheck
+    refine ⟨[], list, ?_⟩
+    constructor
+    . rw [ListOps.length, ListOps.length]
+      rfl
+    . rw linearCombination
+      exact equal
+  | List.cons(x, tail) using ih =>
+    intros y hy
+    have element : x ∈ S by assumption
+    have bounded := listSupport.subset with *
+    rw listSupport at hy
+    have decomposition := linearSpan.insert_membership.forward with *
+    obtain ⟨a, ha, u, hu, equation⟩ := decomposition.right
+    obtain ⟨cs, list, length, value⟩ := ih with u, hu
+    have nextList : List(A, a :: cs) by typecheck
+    refine ⟨a :: cs, nextList, ?_⟩
+    constructor
+    . rw [ListOps.length, ListOps.length, length]
+      rfl
+    . have combination := linearCombination.cons at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, tail, a, cs with *
+      rw combination
+      rwa value at equation
+
+theorem linearSpan.list_membership (xs : List(B)) (y : Set)
+  shows y ∈ linearSpan(f, R, S, listSupport{B}(xs)) ↔
+    (∃ cs, List(A, cs) ∧ ListOps.length{A}(cs) = ListOps.length{B}(xs) ∧ y = linearCombination(R, S, f, xs, cs))
+proof
+  constructor
+  . intro member
+    have coefficients := linearSpan.list_coefficients with *
+    exact coefficients with y, member
+  . intro representation
+    obtain ⟨cs, list, length, equal⟩ := representation
+    have combinations := linearCombination.mem_span with *
+    rw equal
+    exact combinations with cs, list
+
+theorem FiniteAlgebraModule.coefficients
+  requires finiteModule : FiniteAlgebraModule(f, R, S)
+  shows ∃ xs, List(B, xs) ∧ (∀ y ∈ S, ∃ cs, List(A, cs) ∧
+    ListOps.length{A}(cs) = ListOps.length{B}(xs) ∧ y = linearCombination(R, S, f, xs, cs))
+proof
+  obtain ⟨G, finite, bounded, spans⟩ := finiteModule
+  obtain ⟨xs, list, covers⟩ := Finite.cover_in with finite, bounded
+  have supportBound := listSupport.subset with *
+  have included := linearSpan.mono with source, target, hom, supportBound, covers
+  rw spans at included
+  have coefficients := linearSpan.list_coefficients with *
+  refine ⟨xs, list, ?_⟩
+  intros y hy
+  have member : y ∈ linearSpan(f, R, S, listSupport{B}(xs)) by exact included with y, hy
+  exact coefficients with y, member
+
+theorem FiniteAlgebraModule.of_coefficients (xs : List(B))
+  requires representations : ∀ y ∈ S, ∃ cs, List(A, cs) ∧ y = linearCombination(R, S, f, xs, cs)
+  shows FiniteAlgebraModule(f, R, S)
+proof
+  have finite := listSupport.finite with *
+  have bounded := listSupport.subset with *
+  have first := linearSpan.subset at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, listSupport{B}(xs) with *
+  have combinations := linearCombination.mem_span with *
+  have second : S ⊆ linearSpan(f, R, S, listSupport{B}(xs))
+    intros y hy
+    obtain ⟨cs, list, equal⟩ := representations with y, hy
+    rw equal
+    exact combinations with cs, list
+  have spans := Subset.antisymmetric with first, second
+  unfold FiniteAlgebraModule
+  refine ⟨listSupport{B}(xs), finite, bounded, spans⟩
+
+end Algebras

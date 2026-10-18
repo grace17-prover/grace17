@@ -1,0 +1,172 @@
+-- Set-theoretic weighted paths: the specification for shortest paths.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.WeightedPaths
+import Reachability
+import Nat.Order
+
+predicate WeightedGraph (V E weights : Set) :=
+  RelationOn(E, V) ∧ FunctionBetween(weights, E, ℕ)
+
+predicate WeightedEdge (E weights u v cost : Set) :=
+  Adjacent(E, u, v) ∧ Nat(cost) ∧ weights((u, v)) = cost
+
+-- A path result is the set-theoretic pair (ending vertex, total cost).
+-- Each level is bounded by V × ℕ, and the union over finite levels
+-- specifies all finite walks, including those in infinite graphs.
+def costStep (V E weights previous : Set) : Set :=
+  { p ∈ V × ℕ | ∃ u ∈ V, ∃ v ∈ V, ∃ c ∈ ℕ, ∃ k ∈ ℕ,
+    (u, c) ∈ previous ∧ WeightedEdge(E, weights, u, v, k) ∧
+    p = (v, add(c, k)) }
+
+def pathsOfLength (V E weights source : Set, n : Nat) → Set
+  | V, E, weights, source, zero => {(source, 0)}
+  | V, E, weights, source, succ(n) =>
+    costStep(V, E, weights, pathsOfLength(V, E, weights, source, n))
+
+predicate HasPathCost (V E weights source target cost : Set) :=
+  ∃ n ∈ ℕ, (target, cost) ∈ pathsOfLength(V, E, weights, source, n)
+
+predicate ShortestPathCost (V E weights source target cost : Set) :=
+  Nat(cost) ∧ HasPathCost(V, E, weights, source, target, cost) ∧
+  (∀ other ∈ ℕ, HasPathCost(V, E, weights, source, target, other) →
+    LessEqual(cost, other))
+
+theorem ShortestPathCost.unique (V E weights source target a b : Set)
+  requires first : ShortestPathCost(V, E, weights, source, target, a)
+  requires second : ShortestPathCost(V, E, weights, source, target, b)
+  shows a = b
+proof
+  rcases first with ⟨aNat, aPath, aMinimal⟩
+  rcases second with ⟨bNat, bPath, bMinimal⟩
+  have aIn := nat.omega.forward with aNat
+  have bIn := nat.omega.forward with bNat
+  have ab := aMinimal with b, bIn, bPath
+  have ba := bMinimal with a, aIn, aPath
+  exact LessEqual.antisymmetric with aNat, bNat, ab, ba
+
+theorem pathsOfLength.zero (V E weights source : Set)
+  shows pathsOfLength(V, E, weights, source, 0) = {(source, 0)}
+proof
+  unfold pathsOfLength
+  rfl
+
+theorem pathsOfLength.successor (V E weights source : Set, n : Nat)
+  shows pathsOfLength(V, E, weights, source, succ(n)) =
+    costStep(V, E, weights, pathsOfLength(V, E, weights, source, n))
+proof
+  unfold pathsOfLength
+  rfl
+
+theorem HasPathCost.source (V E weights source : Set)
+  shows HasPathCost(V, E, weights, source, source, 0)
+proof
+  unfold HasPathCost
+  have zeroNat := nat.omega.forward with Naturals.constructor.zero
+  have initial : (source, 0) ∈ pathsOfLength(V, E, weights, source, 0)
+    rw pathsOfLength.zero
+    exact singleton.self
+  refine ⟨0, zeroNat, initial⟩
+
+theorem costStep.membership (V E weights previous p : Set)
+  shows p ∈ costStep(V, E, weights, previous) ↔
+    (p ∈ V × ℕ ∧ ∃ u ∈ V, ∃ v ∈ V, ∃ c ∈ ℕ, ∃ k ∈ ℕ,
+      (u, c) ∈ previous ∧ WeightedEdge(E, weights, u, v, k) ∧
+      p = (v, add(c, k)))
+proof
+  simp
+
+theorem HasPathCost.extend (V E weights source u v c k : Set)
+  requires hu : u ∈ V
+  requires hv : v ∈ V
+  requires hc : Nat(c)
+  requires hk : Nat(k)
+  requires reached : HasPathCost(V, E, weights, source, u, c)
+  requires edge : WeightedEdge(E, weights, u, v, k)
+  shows HasPathCost(V, E, weights, source, v, add(c, k))
+proof
+  rcases reached with ⟨n, hn, previous⟩
+  have cIn := nat.omega.forward with hc
+  have kIn := nat.omega.forward with hk
+  have sumNat := add.closed at k, c with hk
+  have sumIn := nat.omega.forward with sumNat
+  have pair := product.pair with hv, sumIn
+  have stepped : (v, add(c, k)) ∈ costStep(V, E, weights,
+      pathsOfLength(V, E, weights, source, n))
+    exact costStep.membership.backward with ⟨pair, u, hu, v, hv, c, cIn, k, kIn, previous, edge, rfl⟩
+  have nNat := nat.omega.backward with hn
+  have nextNat := Naturals.constructor.succ with nNat
+  have nextIn := nat.omega.forward with nextNat
+  witness succ(n)
+  constructor
+  . exact nextIn
+  . rw pathsOfLength.successor
+    exact stepped
+
+-- A feasible potential is a lower bound on the cost of *every* walk.
+predicate PathPotential (V E weights source labels : Set) :=
+  FunctionBetween(labels, V, ℕ) ∧ labels(source) = 0 ∧
+  (∀ u ∈ V, ∀ v ∈ V, ∀ k ∈ ℕ,
+    WeightedEdge(E, weights, u, v, k) →
+    LessEqual(labels(v), add(labels(u), k)))
+
+theorem PathPotential.lower_bound (V E weights source labels : Set, n : Nat)
+  requires potential : PathPotential(V, E, weights, source, labels)
+  shows ∀ v ∈ V, ∀ c ∈ ℕ,
+    (v, c) ∈ pathsOfLength(V, E, weights, source, n) →
+    LessEqual(labels(v), c)
+proof
+  induction n
+  | zero =>
+    intros v hv c hc path
+    rw pathsOfLength.zero at path
+    have equal := singleton.membership.forward with path
+    obtain ⟨vs, c0⟩ := orderedPair.injective with equal
+    rcases potential with ⟨function, initial, edges⟩
+    rw [vs, c0, initial]
+    exact LessEqual.reflexive with Naturals.constructor.zero
+  | succ(m) using ih =>
+    intros v hv c hc path
+    rw pathsOfLength.successor at path
+    have parts := costStep.membership.forward with path
+    rcases parts with ⟨bounded, u, hu, y, hy, prior, hprior,
+      k, hk, earlier, edge, pairShape⟩
+    obtain ⟨vy, cSum⟩ := orderedPair.injective with pairShape
+    rcases potential with ⟨function, initial, edges⟩
+    have priorBound := ih with u, hu, prior, hprior, earlier
+    have edgeBound := edges with u, hu, y, hy, k, hk, edge
+    have uNat := FunctionBetween.apply_closed with function, hu
+    have yNat := FunctionBetween.apply_closed with function, hy
+    have uNumber := nat.omega.backward with uNat
+    have yNumber := nat.omega.backward with yNat
+    have priorNat := nat.omega.backward with hprior
+    have kNat := nat.omega.backward with hk
+    have rightRefl := LessEqual.reflexive with kNat
+    have sumBound := LessEqual.add with uNumber, priorNat, kNat, kNat, priorBound, rightRefl
+    have result := LessEqual.transitive with yNumber, *{2}, edgeBound, sumBound
+    rw [vy, cSum]
+    exact result
+
+-- A feasible labeling plus a witnessed path of the same weight is a
+-- complete shortest-path certificate, for paths of arbitrary finite length.
+theorem PathPotential.certifies_shortest (V E weights source labels target cost : Set)
+  requires potential : PathPotential(V, E, weights, source, labels)
+  requires targetIn : target ∈ V
+  requires costNat : Nat(cost)
+  requires witness : HasPathCost(V, E, weights, source, target, cost)
+  requires value : labels(target) = cost
+  shows ShortestPathCost(V, E, weights, source, target, cost)
+proof
+  constructor
+  . exact costNat
+  . constructor
+    . exact witness
+    . intros other otherIn otherPath
+      rcases otherPath with ⟨n, nIn, path⟩
+      have nNat := nat.omega.backward with nIn
+      have lower := PathPotential.lower_bound with nNat, potential
+      have bound := lower with target, targetIn, other, otherIn, path
+      rwa value at bound

@@ -1,0 +1,300 @@
+-- Zorn's lemma from the axiom of choice and Hartogs' theorem.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+-- Copyright (c) 2026 Grant Passmore. Apache License 2.0.
+module Grace.Cumulus.Set.Zorn
+import Cardinal.Hartogs
+import ChoiceFunctions
+
+predicate NoMaximal (A r : Set) := ∀ x ∈ A, ¬Maximal(A, r, x)
+def strictUpperBounds (A r C : Set) : Set :=
+  {u ∈ A | ∀ x ∈ C, relates(r, x, u) ∧ x ≠ u}
+
+theorem strictUpperBounds.membership (u A r C : Set)
+  shows u ∈ strictUpperBounds(A, r, C) ↔
+    u ∈ A ∧ (∀ x ∈ C, relates(r, x, u) ∧ x ≠ u)
+proof
+  simp
+
+theorem strictUpperBounds.subset (A r C : Set)
+  shows strictUpperBounds(A, r, C) ⊆ A
+proof
+  simp
+
+theorem NoMaximal.extension (A r u : Set)
+  requires noMaximal : NoMaximal(A, r)
+  requires hu : u ∈ A
+  shows ∃ v ∈ A, relates(r, u, v) ∧ v ≠ u
+proof
+  by_contra noExtension
+  apply noMaximal with u, hu
+  constructor
+  . exact hu
+  . intros v hv edge
+    by_contra distinct
+    apply noExtension
+    refine ⟨v, hv, edge, distinct⟩
+
+theorem strictUpperBounds.nonempty (A r C : Set)
+  requires zorn : ZornCondition(A, r)
+  requires noMaximal : NoMaximal(A, r)
+  requires chain : Chain(A, r, C)
+  shows Nonempty(strictUpperBounds(A, r, C))
+proof
+  have order := ZornCondition.order with zorn
+  have transitive := IsPartialOrder.transitive with order
+  have antisymmetric := IsPartialOrder.antisymmetric with order
+  obtain ⟨u, upper⟩ := ZornCondition.upper_bound with zorn, chain
+  rcases upper with ⟨hu, subset, bounds⟩
+  obtain ⟨v, hv, uv, distinct⟩ := NoMaximal.extension with noMaximal, hu
+  witness v
+  apply strictUpperBounds.membership.backward
+  constructor
+  . exact hv
+  . intros x hx
+    have hxA := subset with x, hx
+    have xu := bounds with x, hx
+    have xv := transitive with x, hxA, u, hu, v, hv, xu, uv
+    constructor
+    . exact xv
+    . intro equal
+      rw equal at xu
+      have same := antisymmetric with v, hv, u, hu, xu, uv
+      exact distinct with same
+
+-- At stage x choose a strict upper bound of all earlier values. The term is
+-- total; its useful laws below require a choice function and no maximal point.
+theorem zornStep.well_founded (A r H c : Set)
+  shows wellFoundedOn(membershipOn(H), H)
+proof
+  simp [membershipOn.wellFounded]
+
+noncomputable well-founded def zornStep (A r H c x : Set) : Set
+  over H ordered by membershipOn(H)
+  certified by zornStep.well_founded
+  | x using history => c[strictUpperBounds(A, r, Relation.range(history))]
+
+def zornEarlier (A r H c x : Set) : Set := Relation.range(zornStep.history(A, r, H, c, x))
+
+theorem zornEarlier.membership (z A r H c x : Set)
+  shows z ∈ zornEarlier(A, r, H, c, x) ↔
+    ∃ y ∈ H, relates(membershipOn(H), y, x) ∧ z = zornStep(A, r, H, c, y)
+proof
+  constructor
+  . intro member
+    unfold zornEarlier at member
+    obtain ⟨bounded, source, pair⟩ := Relation.range.membership.forward with member
+    obtain ⟨y, hy, earlier, equal⟩ := zornStep.history.membership.forward with pair
+    obtain ⟨sameSource, sameValue⟩ := orderedPair.injective with equal
+    refine ⟨y, hy, earlier, sameValue⟩
+  . intro represented
+    obtain ⟨y2, hy2, earlier2, value2⟩ := represented
+    have pair2 : (y2, zornStep(A, r, H, c, y2)) ∈ zornStep.history(A, r, H, c, x)
+      exact zornStep.history.membership.backward with ⟨y2, hy2, earlier2, rfl⟩
+    have rangeMember := Relation.range.contains with pair2
+    unfold zornEarlier
+    rwa value2
+
+theorem zornStep.selects (A r H c x : Set)
+  requires hx : x ∈ H
+  shows zornStep(A, r, H, c, x) = c[strictUpperBounds(A, r, zornEarlier(A, r, H, c, x))]
+proof
+  have equation := zornStep.equation.direct at A, r, H, c, x with hx
+  simpa [zornEarlier] using equation
+
+predicate ZornPosition (A r H c x : Set) :=
+  zornStep(A, r, H, c, x) ∈ A ∧
+  (∀ y ∈ H, relates(membershipOn(H), y, x) →
+    relates(r, zornStep(A, r, H, c, y), zornStep(A, r, H, c, x)) ∧
+    zornStep(A, r, H, c, y) ≠ zornStep(A, r, H, c, x))
+
+theorem zornStep.position (A r H c : Set)
+  requires ordinal : H ∈ Ordinal
+  requires zorn : ZornCondition(A, r)
+  requires noMaximal : NoMaximal(A, r)
+  requires choice : SubsetChoice(c, A)
+  shows ∀ x ∈ H, ZornPosition(A, r, H, c, x)
+proof
+  have order := ZornCondition.order with zorn
+  have reflexive := IsPartialOrder.reflexive with order
+  induction x over H ordered by membershipOn(H) certified by membershipOn.wellFounded at H
+  intros x hx ih
+  have chain : Chain(A, r, zornEarlier(A, r, H, c, x))
+    constructor
+      intros u member
+      obtain ⟨y, hy, earlier, value⟩ := zornEarlier.membership.forward with member
+      obtain ⟨closed, increasing⟩ := ih with y, ⟨hy, earlier⟩
+      rwa value
+    . intros u hu v hv
+      obtain ⟨a, ha, ax, uValue⟩ := zornEarlier.membership.forward with hu
+      obtain ⟨b, hb, bx, vValue⟩ := zornEarlier.membership.forward with hv
+      obtain ⟨aClosed, aIncreasing⟩ := ih with a, ⟨ha, ax⟩
+      obtain ⟨bClosed, bIncreasing⟩ := ih with b, ⟨hb, bx⟩
+      have aOrdinal := Ordinal.member with ordinal, ha
+      have bOrdinal := Ordinal.member with ordinal, hb
+      have alternatives := Ordinal.trichotomy with aOrdinal, b, bOrdinal
+      unfold Comparable
+      rw [uValue, vValue]
+      cases alternatives with ab | rest
+      . have earlierAB := membershipOn.relates.backward with ha, hb, ab
+        obtain ⟨edgeAB, distinctAB⟩ := bIncreasing with a, ha, earlierAB
+        left
+        exact edgeAB
+      . cases rest with equal | ba
+        . rw equal
+          left
+          exact reflexive with zornStep(A, r, H, c, b), bClosed
+        . have earlierBA := membershipOn.relates.backward with hb, ha, ba
+          obtain ⟨edgeBA, distinctBA⟩ := aIncreasing with b, hb, earlierBA
+          right
+          exact edgeBA
+  have inhabited := strictUpperBounds.nonempty with *
+  have subset := strictUpperBounds.subset at A, r, zornEarlier(A, r, H, c, x)
+  have selected := SubsetChoice.member with *
+  have equation := zornStep.selects at A, r, H, c, x with hx
+  have member : zornStep(A, r, H, c, x) ∈ strictUpperBounds(A, r, zornEarlier(A, r, H, c, x)) by rwa equation
+  obtain ⟨closed, above⟩ := strictUpperBounds.membership.forward with member
+  constructor
+  . exact closed
+  . intros y hy earlier
+    have prior : zornStep(A, r, H, c, y) ∈ zornEarlier(A, r, H, c, x) := zornEarlier.membership.backward with ⟨y, hy, earlier, rfl⟩
+    exact above with zornStep(A, r, H, c, y), prior
+
+defgraph zornSequence (A r H c : Set) (x ∈ H) : A := zornStep(A, r, H, c, x)
+requires ordinal : H ∈ Ordinal
+requires zorn : ZornCondition(A, r)
+requires noMaximal : NoMaximal(A, r)
+requires choice : SubsetChoice(c, A)
+proof
+  have position := zornStep.position with *
+  obtain ⟨closed, increasing⟩ := position with x, assumption
+  exact closed
+
+theorem zornSequence.injective (A r H c : Set)
+  requires ordinal : H ∈ Ordinal
+  requires zorn : ZornCondition(A, r)
+  requires noMaximal : NoMaximal(A, r)
+  requires choice : SubsetChoice(c, A)
+  shows InjectiveBetween(zornSequence(A, r, H, c), H, A)
+proof
+  have function := zornSequence.function at A, r, H, c with *
+  have positions := zornStep.position at A, r, H, c with *
+  constructor
+  . exact function
+  . intros x hx y hy z hz mappedX mappedY
+    have valueX := FunctionBetween.apply_value at zornSequence(A, r, H, c), H, A, x, z with *
+    have valueY := FunctionBetween.apply_value at zornSequence(A, r, H, c), H, A, y, z with *
+    have stepX := zornSequence.value at A, r, H, c, x with *
+    have stepY := zornSequence.value at A, r, H, c, y with *
+    have equalValues : zornStep(A, r, H, c, x) = zornStep(A, r, H, c, y) by cc
+    have xOrdinal := Ordinal.member with ordinal, hx
+    have yOrdinal := Ordinal.member with ordinal, hy
+    have alternatives := Ordinal.trichotomy with xOrdinal, y, yOrdinal
+    cases alternatives with xy | rest
+    . have positionY := positions with y, hy
+      rcases positionY with ⟨closedY, increasingY⟩
+      have ruleXY := membershipOn.relates with hx, hy
+      have earlierXY := ruleXY.backward with xy
+      obtain ⟨edgeXY, distinctXY⟩ := increasingY with x, hx, earlierXY
+      exfalso
+      exact distinctXY with equalValues
+    . cases rest with equal | yx
+      . exact equal
+      . have positionX := positions with x, hx
+        rcases positionX with ⟨closedX, increasingX⟩
+        have ruleYX := membershipOn.relates with hy, hx
+        have earlierYX := ruleYX.backward with yx
+        obtain ⟨edgeYX, distinctYX⟩ := increasingX with y, hy, earlierYX
+        exfalso
+        apply distinctYX
+        symm
+        exact equalValues
+
+theorem Zorn.theorem (A r : Set)
+  requires zorn : ZornCondition(A, r)
+  shows ∃ m, Maximal(A, r, m)
+proof
+  obtain ⟨c, choice⟩ := SubsetChoice.exists at A
+  by_contra none
+  have noMaximal : NoMaximal(A, r)
+    intros x hx maximal
+    apply none
+    witness x
+    exact maximal
+  have ordinal := hartogsBound.ordinal at A
+  have injection := zornSequence.injective with *
+  exact hartogsBound.no_injection with injection
+
+-- A first application: every partial order has a maximal chain.
+def chains (A r : Set) : Set := {C ∈ 𝒫(A) | Chain(A, r, C)}
+
+theorem chains.membership (C A r : Set)
+  shows C ∈ chains(A, r) ↔ C ∈ 𝒫(A) ∧ Chain(A, r, C)
+proof
+  simp
+
+theorem chains.contains (C A r : Set)
+  requires chain : Chain(A, r, C)
+  shows C ∈ chains(A, r)
+proof
+  have subset := Chain.subset with chain
+  unfold Subset at subset
+  have bounded := set.powerset.backward with subset
+  exact chains.membership.backward with ⟨bounded, chain⟩
+
+theorem chains.zorn (A r : Set)
+  shows ZornCondition(chains(A, r), inclusionOrder(chains(A, r)))
+proof
+  constructor
+  . exact inclusionOrder.partial at chains(A, r)
+  . intros S chainS
+    rcases chainS with ⟨subsetS, comparable⟩
+    have family : ChainOfChains(A, r, S)
+      constructor
+      . intros C hC
+        have member := subsetS with C, hC
+        obtain ⟨bounded, chainC⟩ := chains.membership.forward with member
+        exact chainC
+      . intros C hC D hD
+        have memberC := subsetS with C, hC
+        have memberD := subsetS with D, hD
+        have directions := comparable with C, hC, D, hD
+        have forward := inclusionOrder.relates with memberC, memberD
+        have backward := inclusionOrder.relates with memberD, memberC
+        cases directions with cd | dc
+        . left
+          exact forward.forward with cd
+        . right
+          exact backward.forward with dc
+    have unionChain := Chain.union with family
+    have unionMember := chains.contains with unionChain
+    witness ⋃(S)
+    constructor
+    . exact unionMember
+    . constructor
+        exact subsetS
+      . intros C hC
+        have memberC := subsetS with C, hC
+        have rule := inclusionOrder.relates with memberC, unionMember
+        apply rule.backward
+        intros x hx
+        exact set.union.backward with ⟨C, hC, hx⟩
+
+theorem Chain.exists_maximal (A r : Set)
+  shows ∃ C, Chain(A, r, C) ∧ (∀ D, Chain(A, r, D) → C ⊆ D → D = C)
+proof
+  have condition := chains.zorn at A, r
+  obtain ⟨C, maximal⟩ := Zorn.theorem with condition
+  rcases maximal with ⟨memberC, greatest⟩
+  obtain ⟨bounded, chainC⟩ := chains.membership.forward with memberC
+  witness C
+  constructor
+  . exact chainC
+  . intros D chainD subset
+    have memberD := chains.contains with chainD
+    have rule := inclusionOrder.relates with memberC, memberD
+    have extension := rule.backward with subset
+    exact greatest with D, memberD, extension

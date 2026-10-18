@@ -1,0 +1,211 @@
+-- Abelian groups: powers distribute over products, the elements killed
+-- by a fixed exponent form a subgroup, and so do the elements of finite
+-- order
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Abelian
+import Cyclic
+
+-- The elements killed by the exponent n, and the elements of finite order.
+def exponentKernel (G : Set, n : Nat) : Set := { x ∈ G.carrier | groupPow(G, x, n) = G.one }
+def torsion (G : Set) : Set := { x ∈ G.carrier | HasFiniteOrder(G, x) }
+
+theorem exponentKernel.membership (G x : Set, n : Nat)
+  shows x ∈ exponentKernel(G, n) ↔ x ∈ G.carrier ∧ groupPow(G, x, n) = G.one
+proof
+  simp [exponentKernel]
+
+theorem exponentKernel.subset (G : Set, n : Nat)
+  shows exponentKernel(G, n) ⊆ G.carrier
+proof
+  intros x hx
+  have parts := exponentKernel.membership.forward with hx
+  exact parts.left
+
+theorem torsion.membership (G x : Set)
+  shows x ∈ torsion(G) ↔ x ∈ G.carrier ∧ HasFiniteOrder(G, x)
+proof
+  simp [torsion]
+
+theorem torsion.subset (G : Set)
+  shows torsion(G) ⊆ G.carrier
+proof
+  intros x hx
+  have parts := torsion.membership.forward with hx
+  exact parts.left
+
+-- In an abelian group, raising to a fixed power is an endomorphism.
+defgraph powerEndomorphism (G : Set, n : Nat) (x ∈ G.carrier) : G.carrier := groupPow(G, x, n)
+requires group : Group(G)
+proof
+  exact Group.pow_mem with *
+
+section Torsion
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem HasFiniteOrder.inv (x : G)
+  requires finite : HasFiniteOrder(G, x)
+  shows HasFiniteOrder(G, x⁻¹)
+proof
+  obtain ⟨n, nNat, positive, vanishes⟩ := finite
+  have inverted : x⁻¹ ^ n = (x ^ n)⁻¹ := inv_pow with *
+  have inverseVanishes : x⁻¹ ^ n = G.one
+    rw [inverted, vanishes, inv_one]
+    rfl
+  exact HasFiniteOrder.of_pow with positive, inverseVanishes
+
+theorem exponentKernel.of_order_dvd (x : G) (n : Nat)
+  requires finite : HasFiniteOrder(G, x)
+  requires divides : elementOrder(G, x) ∣ n
+  shows x ∈ exponentKernel(G, n)
+proof
+  have vanishes : x ^ n = G.one := elementOrder.pow_eq_one_of_dvd with *
+  have xIn : x ∈ G by assumption
+  exact exponentKernel.membership.backward with ⟨xIn, vanishes⟩
+
+theorem exponentKernel.subset_torsion (n : Nat)
+  requires positive : 0 < n
+  shows exponentKernel(G, n) ⊆ torsion(G)
+proof
+  intros x hx
+  obtain ⟨xIn, vx⟩ := exponentKernel.membership.forward with hx
+  have finite := HasFiniteOrder.of_pow with positive, vx
+  exact torsion.membership.backward with ⟨xIn, finite⟩
+
+end Torsion
+
+section AbelianPowers
+variable (G : Set)
+hypothesis abelian : AbelianGroup(G)
+
+theorem AbelianGroup.mul_pow (x y : G) (n : Nat)
+  shows (x * y) ^ n = x ^ n * y ^ n
+proof
+  have group := AbelianGroup.to_group with abelian
+  induction n
+  | zero =>
+    rw [pow_zero, pow_zero, pow_zero, one_mul]
+    rfl
+  | succ(k) using ih =>
+    have shuffle : x ^ k * y ^ k * (x * y) = x ^ k * x * (y ^ k * y) := mul_mul_mul_comm with *
+    rw [← add.right_one, pow_succ, pow_succ, pow_succ, ih, shuffle]
+    rfl
+
+theorem exponentKernel.subgroup (n : Nat)
+  shows Subgroup(exponentKernel(G, n), G)
+proof
+  have group := AbelianGroup.to_group with abelian
+  have unitIn : G.one ∈ exponentKernel(G, n)
+    have unitPower : G.one ^ n = G.one := one_pow with *
+    exact exponentKernel.membership.backward with ⟨(Group.one_mem with group), unitPower⟩
+  apply Subgroup.mk with group, (exponentKernel.subset at G, n), unitIn
+  . intros x hx y hy
+    obtain ⟨xIn, vx⟩ := exponentKernel.membership.forward with hx
+    obtain ⟨yIn, vy⟩ := exponentKernel.membership.forward with hy
+    have vanishes : (x * y) ^ n = G.one
+      rw [AbelianGroup.mul_pow, vx, vy, one_mul]
+      rfl
+    exact exponentKernel.membership.backward with ⟨(Group.mul_mem with *), vanishes⟩
+  . intros x hx
+    obtain ⟨xIn, vx⟩ := exponentKernel.membership.forward with hx
+    have vanishes : x⁻¹ ^ n = G.one
+      rw [inv_pow, vx, inv_one]
+      rfl
+    exact exponentKernel.membership.backward with ⟨(Group.inv_mem with *), vanishes⟩
+
+theorem exponentKernel.normal (n : Nat)
+  shows NormalSubgroup(exponentKernel(G, n), G)
+proof
+  have subgroup := exponentKernel.subgroup with *
+  exact NormalSubgroup.of_abelian with abelian, subgroup
+
+theorem AbelianGroup.finite_order_mul (x y : G)
+  requires finiteX : HasFiniteOrder(G, x)
+  requires finiteY : HasFiniteOrder(G, y)
+  shows HasFiniteOrder(G, x * y)
+proof
+  have group := AbelianGroup.to_group with abelian
+  obtain ⟨m, mNat, mPositive, mVanishes⟩ := finiteX
+  obtain ⟨n, nNat, nPositive, nVanishes⟩ := finiteY
+  have distributed : (x * y) ^ (m * n) = x ^ (m * n) * y ^ (m * n) := AbelianGroup.mul_pow with *
+  have xPower : x ^ (m * n) = (x ^ m) ^ n := pow_mul with *
+  have swap := mul.commutative at n, m
+  have yPower : y ^ (n * m) = (y ^ n) ^ m := pow_mul with *
+  have unitM : G.one ^ m = G.one := one_pow with *
+  have unitN : G.one ^ n = G.one := one_pow with *
+  have mNonzero : m ≠ 0
+    intro zero
+    rw zero at mPositive
+    exact Less.irreflexive at 0 with mPositive
+  have nNonzero : n ≠ 0
+    intro zero
+    rw zero at nPositive
+    exact Less.irreflexive at 0 with nPositive
+  have productNonzero := mul.nonzero with mNonzero, nNonzero
+  have productPositive := Less.add_positive at 0, m * n with productNonzero
+  have zeroAdd : 0 + m * n = m * n by ring
+  rw zeroAdd at productPositive
+  have vanishes : (x * y) ^ (m * n) = G.one
+    rw [distributed, xPower, mVanishes, unitN, swap, yPower, nVanishes, unitM, one_mul]
+    rfl
+  exact HasFiniteOrder.of_pow with productPositive, vanishes
+
+theorem torsion.subgroup
+  shows Subgroup(torsion(G), G)
+proof
+  have group := AbelianGroup.to_group with abelian
+  have unitFinite := HasFiniteOrder.one with group
+  have unitIn : G.one ∈ torsion(G) := torsion.membership.backward with ⟨(Group.one_mem with group), unitFinite⟩
+  apply Subgroup.mk with group, (torsion.subset at G), unitIn
+  . intros x hx y hy
+    obtain ⟨xIn, finiteX⟩ := torsion.membership.forward with hx
+    obtain ⟨yIn, finiteY⟩ := torsion.membership.forward with hy
+    have finite : HasFiniteOrder(G, x * y) := AbelianGroup.finite_order_mul with *
+    exact torsion.membership.backward with ⟨(Group.mul_mem with *), finite⟩
+  . intros x hx
+    obtain ⟨xIn, finiteX⟩ := torsion.membership.forward with hx
+    have finite : HasFiniteOrder(G, x⁻¹) := HasFiniteOrder.inv with *
+    exact torsion.membership.backward with ⟨(Group.inv_mem with *), finite⟩
+
+theorem torsion.normal
+  shows NormalSubgroup(torsion(G), G)
+proof
+  have subgroup := torsion.subgroup with abelian
+  exact NormalSubgroup.of_abelian with abelian, subgroup
+
+theorem powerEndomorphism.hom (n : Nat)
+  shows powerEndomorphism(G, n) : G →* G
+proof
+  have group := AbelianGroup.to_group with abelian
+  have function := powerEndomorphism.function at G, n with *
+  apply GroupHom.mk with group, group, function
+  intros x hx y hy
+  have closed : x * y ∈ G by typecheck
+  have vx := powerEndomorphism.value at G, n, x with *
+  have vy := powerEndomorphism.value at G, n, y with *
+  have output := powerEndomorphism.value at G, n, x * y with *
+  have distributed : (x * y) ^ n = x ^ n * y ^ n := AbelianGroup.mul_pow with *
+  cc
+
+theorem powerEndomorphism.kernel (n : Nat)
+  shows kernel(powerEndomorphism(G, n), G, G) = exponentKernel(G, n)
+proof
+  have group := AbelianGroup.to_group with abelian
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+    have value := powerEndomorphism.value at G, n, x with *
+    have vanishes : x ^ n = G.one by cc
+    exact exponentKernel.membership.backward with ⟨xIn, vanishes⟩
+  . intro hx
+    obtain ⟨xIn, vx⟩ := exponentKernel.membership.forward with hx
+    have value := powerEndomorphism.value at G, n, x with *
+    have vanishes : powerEndomorphism(G, n)(x) = G.one by cc
+    exact kernel.of_value with xIn, vanishes
+
+end AbelianPowers

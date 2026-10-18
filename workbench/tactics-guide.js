@@ -1,0 +1,445 @@
+// Part of the Grace17 proof assistant for mathematics based on set theory.
+// Copyright (c) 2026 Grant Passmore.
+// Released under the Apache License 2.0. See LICENSE in the repository root.
+// Authors: Grant Passmore
+
+// The Workbench Help. docs/tactics.md is rendered from this file and
+// tactics-reference.js by `npm run docs:tactics`; keep both in step with the
+// tactic parser in src/surface.ts. Tests require every built-in tactic family
+// to be represented here, and every entry must carry a concrete example.
+export const tacticGuideSections = [
+  {
+    id: "language",
+    title: "Writing Grace17",
+    intro: "A Grace17 file is a module with imports, definitions, and theorems. This is the structure you need before the first proof.",
+    entries: [
+      { syntax: "module  /  import  /  open", summary: "Name a module and bring checked mathematics into scope.", detail: "A fresh Workbench buffer imports Grace.Cumulus.Main, which gives a broad set-theoretic and arithmetic environment. More focused developments may import a subject module directly. Hover over an imported module name for its source path and documentation; Command-click (Control-click on Windows/Linux) opens its module declaration, even before checking finishes. open M makes the public names in M available without qualification while checking only the current module.", example: "module My.FirstProof\nimport Grace.Cumulus.Set.Ordinal\nopen Grace.Cumulus.Set.Ordinal" },
+      { syntax: "long_name  /  Namespace.long_name", summary: "Use underscores inside names and dots for namespaces.", detail: "Identifiers contain letters, digits, and underscores. A dot qualifies a name through its namespace. The hyphen is an operator, so a name like transitive_on takes an underscore. Completion, hover, and jump to definition all use this same grammar. A module may declare one name at two arities, Compact(X) beside Compact(X, A): a written name resolves by its number of arguments, goals print the plain name, and unfold Compact means the one the goal mentions.", example: "theorem rationalLess.transitive_on\n  shows TransitiveOn(ℚ, rationalLess)\nproof\n  exact rationalLess.transitive_on" },
+      { syntax: "section Name / variable / hypothesis", forms: ["section", "variable", "hypothesis"], summary: "Share theorem parameters and hypotheses within a lexical section.", detail: "A theorem section prepends its variables and hypotheses to each theorem, lemma, or instance. The exported theorem lists every shared parameter and assumption, including unused ones. Nested sections restore the outer context at end. A section adds no namespace and no axiom; each theorem is checked as a quantified implication. Names must be distinct. A def or predicate may stand inside a section too: it takes the section variables as its leading parameters, in order, and is applied without them inside the section, so predicate Ideal (I : Set) under variable (R : Set) and hypothesis ring : Ring(R) is Ideal(I) there and Ideal(R, I) everywhere else. Imports, namespaces, and export open stay outside; plain open directives are restored when the section ends. A bare apply of a section theorem under its own hypotheses discharges them, as with * does.", example: "section Membership\nvariable (A x : Set)\nhypothesis hx : x ∈ A\n\npredicate Marked (y : Set) := y ∈ A ∧ y = x\n\ntheorem marked\n  shows Marked(x)\nproof\n  unfold Marked\n  exact ⟨hx, rfl⟩\nend Membership\n\n-- Outside the section the predicate is Marked(A, x, y)\n-- and the theorem takes A, x, and hx." },
+      { syntax: "export open Module.Name", summary: "Make an opened namespace part of this module's public interface.", detail: "Like open M, export open M makes M's public names available without qualification in the current module. It also passes that opening to modules that import the current module, including through curated entrypoint modules. An ordinary open stays local and is never passed on. Use export open to choose the short names that clients receive. It does not bypass imports.", example: "module My.OrdinalTools\nimport Grace.Cumulus.Set.Ordinal\nexport open Grace.Cumulus.Set.Ordinal\n\n-- A module importing My.OrdinalTools may write Ordinal\n-- instead of Grace.Cumulus.Set.Ordinal.Ordinal." },
+      { forms: ["def"], syntax: "def name (x : Set) : Set := term", summary: "Give a reusable construction a name.", detail: "Use def when some mathematical object is determined by its inputs. The parameters come before := and the value comes after it. Grace17 records a checked defining equation. A non-Set result annotation generates a checked name.type theorem using bounded type inference; attach a proof block when inference needs help. Its goal is the result predicate applied to the defined function. Structural definitions also try checked induction. A pending annotation supplies no evidence and must be proved before the module finishes. A def introduces a function symbol. For a set-valued graph, with FunctionBetween and set-function application, use defgraph. For a proposition, use predicate.", example: "def duplicate (x : Set) : Set := {x, x}\n\n-- duplicate(a) is definitionally {a}" },
+      { forms: ["defgraph"], syntax: "defgraph g (A : Set) (x ∈ A) : B := value", summary: "Define a bounded function graph from a codomain proof.", detail: "The proof block must establish value ∈ B, with member : x ∈ A in scope. Named, possibly multiline requires clauses are carried into the generated .closed, .relates, .function, and .value laws. Explicit Set, Nat, and Real parameters are supported, and may be omitted: defgraph g (x ∈ A) : B := value. With no parameters, .function has no term arguments; .value still takes its index. For A = ℕ or ℝ, .relates and .value accept a typed Nat or Real index without a separate membership premise. The closure proof also treats such an index as Nat or Real, allowing parameterized recursively defined values. The graph is a bounded Replacement image. Moving the cursor through the codomain proof shows its goals, including after a cached check; generated scaffolding is hidden. A failed proof keeps its source line and partial history. The shorter defgraph g (n : Nat) : Real := value form uses typecheck for Nat/Real codomains and needs no proof block.", example: "defgraph inclusionMap (A B : Set) (x ∈ A) : B := x\nrequires subset : A ⊆ B\nproof\n  unfold Subset at subset\n  exact subset with x, member\n\n-- inclusionMap.function and inclusionMap.value are checked laws." },
+      {"forms": ["defunique"], "syntax": "defunique f (p : Set) (x ∈ A) := P(x)", "summary": "Define a uniquely determined bounded value in ZF, without Choice.", "detail": "The proof block establishes existence; the uniqueness block proves ∀ x ∈ A, P(x) → ∀ y ∈ A, P(y) → x = y, under the same requires hypotheses. The generated f.candidates is a Separation set and f is its union. The laws f.exists, f.unique, and f.selected are checked theorems; the last proves f ∈ A ∧ P(f). Uniqueness must be proved. Explicit Set, Nat, and Real parameters are supported.", "example": "defunique identityValue (A : Set) (x ∈ {A}) := x = A\nproof\n  witness A\n  refine ⟨singleton.self at A, rfl⟩\nuniqueness\n  intro x\n  intro xMember\n  intro xValue\n  intro y\n  intro yMember\n  intro yValue\n  cc"},
+      { forms: ["defchoose"], syntax: "defchoose c (p : Set) (x ∈ A) := P(x)", summary: "Choose a witness from a bounded predicate, justified by existence.", detail: "The proof block must establish ∃ x ∈ A, P(x), under any named, possibly multiline requires clauses. Import Grace.Cumulus.Set.Choice. Grace17 defines c.candidates by bounded Separation and c as choose(c.candidates), then checks c.exists and c.selected. The latter proves c ∈ A ∧ P(c). Explicit Set, Nat, and Real parameters are supported. Selection is not a computable search and does not prove that the witness is unique. The selected law keeps all requires hypotheses. The checked existence proof and the generated laws replay in the kernel and in the independent checkers.", example: "defchoose selected (A : Set) (x ∈ A) := x ∈ A\nrequires inhabited : ∃ x, x ∈ A\nproof\n  obtain ⟨x, member⟩ := inhabited\n  witness x\n  refine ⟨member, member⟩" },
+      { forms: ["predicate", "class"], syntax: "predicate  /  class", summary: "Name a proposition or a mathematical collection.", detail: "Use predicate for a relation or property. A class is a predicate read as a collection: x ∈ Natural and Natural(x) are the same statement. It need not be a set, and it has nothing to do with type-class instances. Soft-typed predicate parameters contribute guards: predicate P(x : Nat) := Q(x) defines Nat(x) ∧ Q(x).", example: "predicate FixedBy (f x : Set) := f(x) = x\nclass Natural (x : Set) := Nat(x)" },
+      { syntax: "f(x)  /  apply(f, x)", summary: "Apply a set-theoretic function.", detail: "If f is a set variable, f(x) elaborates to apply(f, x). A constructed function can be applied as identity(ℝ)(x). A binary operation graph applies to two arguments, op(x, y), the kernel term call2(op, x, y), and so does a projected operation, G.mul(a, b). The apply spelling is handy when working with the set-theoretic function laws. Both forms give the same kernel term.", example: "-- f : Set, x : Real\nhave value : f(x) = apply(f, x)\n  rfl" },
+      { forms: ["notation"], syntax: "notation infix  /  infixl  /  infixr  /  prefix  /  postfix", summary: "Declare an operator token and what it elaborates to.", detail: "A declaration names the fixity, the precedence, the token, and the target: notation infixl 65 \"⊕\" => hop makes a ⊕ b and hop(a, b) the same term. A soft type after for overloads the token, notation infixl 60 \"+\" => add for Nat, with operand types in order for a heterogeneous signature, \"^\" => realPow for Real, Nat; a via query takes the operation from the unique checked instance (see the classes section); numeral declares a literal, binder a sum ∑ k < n, uₖ, alias a second name for a function, and mixfix \"_ : _ → _\" => FunctionBetween a predicate written around its arguments. An operator may be a word, n choose k, and a postfix token a modifier letter, \"ᵀ\" => transpose making Mᵀ the transpose. Notation is elaborator metadata: it proves nothing, the raw names stay available, and unfold accepts the token. A structure that arrives as a hypothesis supplies its operations through the next entries.", example: "def hop (m n : Set) : Set := m + 2 * n\ndef dup (n : Set) : Set := n + n\nnotation infixl 65 \"⊕\" => hop for Nat\nnotation postfix 90 \"⁺\" => dup for Nat\n\ntheorem hop_dup (n : Nat)\n  shows n ⊕ n = n⁺ + n\nproof\n  unfold hop\n  unfold dup\n  ring" },
+      { syntax: "notation infixl 70 \"*\" => call2(G.mul, _, _) via hypothesis Group(G) for G.carrier", summary: "Supply an operator from a structure hypothesis in scope.", detail: "The target is a term over the pattern variables of the hypothesis with _ at the operands, and for names the carrier. Wherever a hypothesis of that shape is in scope, a section hypothesis, a requires, or a fact on the board, a * b is G.mul(a, b), and goals print it back. The operands decide between several structures and between the hypothesis form and the typed declarations of the same token, so n * m stays natural arithmetic inside a group section. The same clause declares a prefix or postfix operation (a⁻¹, ⨆ S, aᶜ), a constant (⊥, with no operands), an infix predicate (a ≤ b, a transparent guard), and, with for G naming the structure rather than a carrier, an infix whose left operand is the structure, G ⧸ N. A nested postfix prints with parentheses, (a⁻¹)⁻¹. Cumulus declares these for Group(G), Ring(R), CommRing(R), Ideal(R, I), Lattice(P), TopologicalSpace(X), MetricSpace(X), and the rest; with no supplying hypothesis the token is an error that names the shapes it accepts.", example: "notation infixl 70 \"*\" => call2(G.mul, _, _) via hypothesis Group(G) for G.carrier\nnotation postfix 90 \"⁻¹\" => apply(G.inv, _) via hypothesis Group(G) for G.carrier\n\nsection GroupLaws\nvariable (G : Set)\nhypothesis group : Group(G)\n\ntheorem inv_mul_cancel (a b : G)\n  shows a⁻¹ * (a * b) = b\nproof\n  rw [← mul_assoc, Group.inv_mul, one_mul]\nend GroupLaws" },
+      { syntax: "notation guard \"_ : _ →* _\" => GroupHom", summary: "Write a predicate as a typing judgment that opens to its definition.", detail: "A guard is a mixfix pattern whose predicate is transparent: a hypothesis f : G →* H is GroupHom(f, G, H), and it opens to Group(G), Group(H), the function, and the law wherever local evidence is consulted, so it supplies the notation of both groups and the binders (a : G). A pattern begins and ends with a placeholder, placeholders alternate with tokens, and the colon form also types a binder, (f : A → B). Under a hypothesis the fixed arguments come from it: notation mixfix \"_ : _ ⟶ _\" => Morphism(C, _, _, _) via hypothesis Category(C) for C.obj, C.mor makes (f : a ⟶ b) a morphism of C. Cumulus has f : A → B, f : G →* H, f : G ≃* H, f : R →+* S, f : R ≃+* S, F : C ⥤ D, η : F ⟹ G, f : X ⇒ Y for a continuous map, and f : a ⟶ b.", example: "section Homs\nvariable (f G H : Set)\nhypothesis hom : f : G →* H\n\ntheorem map_product (a b : G)\n  shows f(a * b) = f(a) * f(b)\nproof\n  exact GroupHom.map_mul with *\nend Homs" },
+      { syntax: "notation function \"ker(f)\" => ringKernel(f, R, S[0]) via hypothesis RingHom(f, R, S)", summary: "Name a function with an alphabetic token whose other arguments come from a hypothesis.", detail: "The parameters in the token are the written arguments; the target is a term over them and the pattern variables, which the hypothesis in scope supplies. A parameter that is a pattern variable is that argument of the hypothesis, so ker(f) is read off the hypothesis about f: the ring kernel under f : R →+* S and the group kernel under f : G →* H. A parameter that is not, as in \"d(x, y)\" => X.dist(x, y) via hypothesis MetricSpace(X) for X.carrier, is a free argument, the carrier choosing between several spaces. A template may use an earlier form, as inducedMap(f) uses ker(f). A declared function of the same name is read when no hypothesis supplies the form, and goals print the form back.", example: "section Kernels\nvariable (f R S : Set)\nhypothesis source : CommRing(R)\nhypothesis target : CommRing(S)\nhypothesis hom : f : R →+* S\n\ntheorem kernel_ideal\n  shows Ideal(R, ker(f))\nproof\n  exact ringKernel.ideal with *\nend Kernels" },
+      { syntax: "notation ring R := (A, add, zero, neg, mul, one)", summary: "Name six separate pieces as a ring for the rest of a section.", detail: "This is the engine beneath a ring given over separate pieces. Inside a theorem section the declaration binds +, *, -, 0, 1, and larger numerals to the operation graphs, and x ^ n with Group.Power imported; it adds no hypothesis, so functionhood, closure, and the ring laws stay proof obligations. Under the scope, IsCommRing(R), IsIdeal(R, J), IsRingHom(f, R, S), IsField(R), and the polynomial, ideal, and matrix constructions over pieces accept the scope name in place of the six, as their notation scoped declarations say, and R on its own is the carrier, p ∈ R. With Polynomial.Ring imported, notation ring P := R[I] names the polynomial ring, Q := P ⧸ J the quotient by an ideal candidate, and L := R ↾ T the operations restricted to T, each expanding to the constructed pieces and proving nothing. Several scopes may coexist: membership and function facts decide which one an operator means, and R[x * y] decides explicitly. A scope lives until its section ends and is not exported. CommRing(R) always means the bundled structure, whose pieces with * reaches through CommRing.parts.", example: "section Rings\nvariable (A add zero neg mul one : Set)\nhypothesis source : IsCommRing(A, add, zero, neg, mul, one)\nnotation ring R := (A, add, zero, neg, mul, one)\n\ntheorem simplify (x y : Set)\n  requires hx : x ∈ A\n  requires hy : y ∈ A\n  shows (x + y) * 1 - y + 0 = x\nproof\n  ring\n\ntheorem scope_names (J : Set)\n  requires ideal : IsIdeal(R, J)\n  shows IsIdeal(A, add, zero, neg, mul, J)\nproof\n  exact ideal\nend Rings" },
+      { syntax: "notation scoped IsIdeal(R, I) => IsIdeal(R.carrier, R.add, R.zero, R.neg, R.mul, I)", summary: "Let a predicate or function over separate pieces take a ring scope name.", detail: "Declared beside the predicate or function, the form says that under a notation ring scope the written parameters stand for the target's arguments: a parameter passed through is written as it is, and a piece of one, R.carrier, R.add, R.zero, R.neg, R.mul, or R.one, is read off the active scope the written argument names. A parameter used only as R.carrier also accepts a set. The target prints back in the written form, the declaration is visible wherever its module is imported, and a module declares scoped forms for its own predicates and functions the same way.", example: "predicate Closed (A add zero M : Set) := M ⊆ A ∧ zero ∈ M\nnotation scoped Closed(R, M) => Closed(R.carrier, R.add, R.zero, M)\n\nsection Rings\nvariable (A add zero neg mul one M : Set)\nnotation ring R := (A, add, zero, neg, mul, one)\n\ntheorem closed_form\n  requires h : Closed(R, M)\n  shows Closed(A, add, zero, M)\nproof\n  exact h\nend Rings" },
+      { syntax: "theorem name ... requires ... shows ...", summary: "State a result that can be proved and reused.", detail: "Parameters introduce the objects under discussion, requires lists the assumptions, and shows gives the claim to establish. The proof block begins below the statement. Once its proof term passes the kernel, the theorem becomes a checked fact that later proofs may exact, apply, specialize, or rewrite with.", example: "theorem equality.copy (x y : Set)\n  requires h : x = y\n  shows x = y\nproof\n  exact h" },
+      { syntax: "→  ↔  ∧  ∨  ¬  ∀  ∃  ∈", summary: "Write the mathematics as mathematics.", detail: "Type backslash commands followed by Space, Tab, or Enter: \\to, \\iff, \\and, \\or, \\not, \\forall, \\exists, and \\in. The number carriers are \\N, \\Z, \\Q, and \\R, also spelled \\nat, \\integers, \\rat (or \\q), and \\real, and \\mathbb{N} works too. The Symbols menu contains the full input table.", example: "theorem example (A : Set)\n  shows (∀ x, x ∈ A → x = x) ∧ A ⊆ A\nproof\n  constructor\n  . tauto\n  . unfold Subset\n    tauto" },
+    ],
+  },
+  {
+    id: "first-moves",
+    title: "The first moves",
+    intro: "Most proofs are a handful of moves. Read the goal, expose its outer shape, and take one small step.",
+    entries: [
+      { syntax: "intro h", summary: "Introduce an implication premise or quantified variable.", detail: "For a goal P → Q, intro h extends Γ with the named local hypothesis h : P and leaves Q to prove. For a goal ∀ x, P(x), intro x chooses a fresh arbitrary x and leaves P(x). Use intro x at h to specialize the leading ∀ in a local fact.", example: "-- goal: P → P\nintro h\n-- h : P, goal: P\nexact h" },
+      { syntax: "intros x hx y hy", summary: "Introduce several leading variables and premises in one move.", detail: "Names are consumed from left to right across leading ∀ binders and implications. Use spaces, commas, or both. A defined predicate goal such as A ⊆ B is introduced through its definition, so no unfold is needed first. If the goal runs out of binders or premises, the error names where it stopped. The proof term is the same as for several intro lines.", example: "-- goal: ∀ x, P(x) → ∀ y, Q(y) → R(x, y)\nintros x, hx y hy\n-- x and y are arbitrary; hx : P(x), hy : Q(y)" },
+      { syntax: "exact fact", summary: "Finish with a fact whose statement is exactly the current goal.", detail: "The fact may be a local hypothesis, a theorem, or a theorem applied to arguments and premises. Carrier guards such as Nat(n + m) between or after the supplied premises are discharged on their own, by soft typing or from the context. Write theorem at terms with premises to consume leading ∀ binders and implications immediately. Equivalences expose .forward and .backward directions. For source theorems the at list is optional: exact theorem, exact theorem with h1, h2, and exact theorem with * infer the arguments from the goal, from the named premises in any order, and from uniquely matching local facts, including generated Nat and dependent List(A) guards. A bare exact theorem then discharges every requirement from local facts. Matching is structural, with a 2048-match limit, no unfolding or backtracking; an ambiguous match asks for explicit arguments. A local or derived predicate fact such as subset : A ⊆ B takes arguments through its definition (subset with x, hx), and evidence standing where a binder is expected instantiates the leading binders from the premise it matches. exact ⟨a, b⟩ is refine with every component supplied.", example: "-- f : P → Q, hP : P, goal: Q\nexact f with hP\n-- remaining : y ∈ W, goal: y ∈ insert(x, W)\nexact insert.contains with remaining" },
+      { syntax: "show P := fact", summary: "State the conclusion and finish it with a fact.", detail: "P must be the focused goal, and the proof expression must establish it. Stating the conclusion makes a long proof readable, and the check catches a goal that has drifted.", example: "-- h : x = y, goal: x = y\nshow x = y := h" },
+      { syntax: "assumption", summary: "Finish from a matching local fact.", detail: "Use it when the fact's name does not matter. Only the local context is searched.", example: "-- hxy : x = y, goal: x = y\nassumption" },
+      { syntax: "rfl  /  reflexivity", summary: "Finish a definitionally reflexive equality.", detail: "Both sides must reduce to the same term. The proof is equality reflexivity. A rewrite that ends its branch closes a goal it makes reflexive, so no rfl is needed after it; a rfl written there still closes the goal.", example: "theorem self (x : Set)\n  shows x = x\nproof\n  rfl" },
+      { syntax: "apply fact", summary: "Use a theorem or local fact backwards from its conclusion.", detail: "For a declared theorem, bare apply infers parameters from the goal and uniquely matching local premises. Carrier guards it can discharge are discharged, and so are the section hypotheses in scope among the declared premises, as with * discharges them, so a section theorem applied under its own hypotheses opens only the goals they leave; the remaining premises become goals in their written order, from the first that is not a section hypothesis. The equivalence directions work the same way. A conclusion equal to the goal stays as it is, implication included. Ambiguous parameters need explicit at arguments, and anything supplied with with is checked first.", example: "-- goal: x ∈ {x}\napply singleton.membership.backward at x, x\nrfl" },
+      { syntax: "have h := fact with premises", summary: "Apply an available fact and give the result a local name.", detail: "The optional at list supplies mathematical terms. For source theorems, omit at and name local premises in any order: parameters are inferred by matching each premise against the requirement it fits, and in exact, show, and apply also by matching the conclusion against the goal. For example: have image := IsRingHom.image_comm_ring with source, target, hom. Matching is structural with no unfolding; a conflict or an undetermined parameter is an error asking for an at list. A trailing * fills the remaining premises after inference. Entries that are terms rather than local facts are read as quantified arguments. Omit with to keep an unspecialized fact.", example: "-- h : ∀ x, x ∈ A → P(x), hx : x ∈ A\nhave result := h with x, hx\n-- result : P(x)" },
+      { syntax: "fact with ⟨a, b⟩", summary: "Supply a conjunction or existential premise in place.", detail: "An anonymous constructor is a proof expression wherever its proposition is known: in a with list, after exact or show, in an annotated have, and as a refine component. Nested constructors go through predicate definitions. When a requirement is a conjunction and the with list supplies its conjuncts in order, as difference.membership.backward with inSpace, notInjective does for x ∈ A ∧ x ∉ B, the entries are combined as ⟨inSpace, notInjective⟩ would be; a genuine mismatch keeps its message. Parentheses group a multi-premise application inside refine ⟨…⟩, where commas separate components. A local fact that is a transparent predicate application, such as subset : A ⊆ B, applies to arguments through its definition without unfolding it first.", example: "-- ih : ∀ y, y ∈ H ∧ R(y, x) → P(y), hy : y ∈ H, earlier : R(y, x)\nobtain ⟨closed, increasing⟩ := ih with y, ⟨hy, earlier⟩" },
+      { syntax: "fact at terms with *", summary: "Infer routine premises already visible on the board.", detail: "Grace17 reconstructs soft-type facts such as Nat(n) from the local context when applying a typed theorem. For source theorems, with * consumes generated guards and declared requires clauses, stopping at shows even if the conclusion is an implication or negation. Equivalence directions also consume the selected side. A missing requirement is an error. A local proof value has no declared boundary, so * consumes its leading implication chain. Name the premises when the choice matters mathematically.", example: "-- aNat : Nat(a), bNat : Nat(b), h : a = b\nhave copied := equality.copy at a, b with *\n-- copied : a = b" },
+      { syntax: "fact at terms with *{n}", summary: "Fill exactly n premise arguments, preserving a partial application.", detail: "A counted star expands to n comma-separated assumption entries before proof-argument parsing. Counts range from 1 to 256. It can be mixed with named premises and used in specialize. A counted star does not stop at the declared conclusion. It consumes the written number of premises and fails if evidence is missing. Quantified terms still need explicit arguments.", example: "-- h needs three guards followed by a mathematical premise\nhave partial := h at a, b, c with *{3}\n-- The mathematical premise remains available as a goal when applying partial." },
+      { syntax: "have h : P := fact with *", summary: "Infer a local fact from its stated proposition.", detail: "The annotation guides the same bounded parameter inference as exact with *. Equivalence .forward and .backward applications infer from the selected conclusion and antecedent; the antecedent still needs evidence. The proof must establish P; the annotation is checked against it and supplies no evidence. A missing premise or an ambiguous carrier is an error. An unannotated have never uses the enclosing goal for inference.", example: "have diagonal : n = n := natural with *" },
+      { syntax: "have h : P", summary: "Prove a local lemma in an indented block.", detail: "When the block closes, the checked fact is available in the surrounding proof. Small lemmas keep the shape of the argument visible. A local proposition may continue on a more-indented line after an operator or a comma, ∧, ∨, →, ↔, ∈, ⊆, ∪ and the others, or on a more-indented line that begins with one; the block follows beneath the last line. The terms of exact, witness, refine, apply, and have h := also continue on a more-indented line.", example: "have diagonal : x = x\n  rfl\nexact diagonal" },
+      { syntax: "have h : P by tactic", summary: "Prove a local lemma with the tactics on the same line.", detail: "The tactics after by, separated by ;, run in order on P in a nested script, and h is then available in the surrounding proof. With nothing after by, the indented block on the following lines is the proof, as for have h : P. The proposition may begin on the next line, more indented than the have.", example: "have alternatives : y = x ∨ y ≠ x by tauto\nhave bounded : n < succ(n) by\n  arith" },
+      { syntax: "calc", summary: "Present an equality or inequality as a chain of steps.", detail: "Each indented line has the form left relation right := justification. Write _ for the preceding right-hand endpoint. Equality, homogeneous < and ≤, mixed strict and non-strict order, and equality steps within an inequality chain are supported for registered numeric orders. A justification may be a proof expression or a tactic sequence after by, as in by rw h; ring, which runs every tactic on the step. Direct proof expressions receive the step proposition for bounded with * parameter inference. The goal-state panel follows the residual relation after every line. The elaborator uses the named transitivity theorems, equality elimination, and Tau for typing premises, leaving the kernel unchanged.", example: "-- hab : a ≤ b, hbc : b < c, hcd : c = d\ncalc\n  a ≤ b := hab\n  _ < c := hbc\n  _ = d := hcd" },
+      { syntax: "specialize h with x, hx", summary: "Feed arguments and premises to a local theorem already on the board.", detail: "Grace17 consumes leading ∀ binders and implication premises in order, replacing h with the specialized result. Use with * to fill a local implication chain, or *{n} for exactly n premises. Local facts have no declared-requirement boundary. Use fact at terms with premises instead when you want to apply and name a fact in one line.", example: "-- h : ∀ x, x ∈ A → P(x), hx : x ∈ A\nspecialize h with x, hx\n-- h : P(x)" },
+    ],
+  },
+  {
+  "id": "definitions",
+  "kind": "language",
+  "title": "Defining mathematical objects",
+  "intro": "Pick the form by what you are defining: a named term, a proposition, a set, a function graph, a selected witness, or a recursive construction. A definition introduces an object; what is true of it is proved separately. See the definitions guide (docs/definitions.md) for complete checked examples and generated interfaces.",
+  "entries": [
+    {
+      "forms": [
+        "def.recursive",
+        "define"
+      ],
+      "syntax": "def f (n : Nat) → Set  | constructor => value",
+      "summary": "Define executable functions by checked structural recursion.",
+      "detail": "Constructor clauses must cover the supported patterns and pass the kernel checks for arity, linearity, and structural decrease. A recursive call must be on a recursive constructor field. Fixed parameters stay fixed. The older define spelling means the same thing. The equations support rewriting, induction, and compute. The return annotation is an obligation, as for def.",
+      "example": "def copies (x : Set, n : Nat) → Set\n  | x, zero => empty\n  | x, succ(k) => {x, copies(x, k)}"
+    },
+    {
+      "forms": [
+        "datatype"
+      ],
+      "syntax": "datatype Tree(A : Set)  | leaf(value : A)  | branch(left : self, right : self)",
+      "summary": "Introduce a set-encoded inductive datatype.",
+      "detail": "Constructors are sets with checked representations. self marks recursive fields; fields typed by A require membership in A. The declaration provides constructor closure, injectivity, disjointness, cases, and an induction interface. The kernel validates the declaration and derives these laws. Use structural def clauses to compute over the datatype. See the datatypes guide (docs/datatypes.md) for the precise supported forms.",
+      "example": "datatype Branches(A : Set)\n  | leaf(value : A)\n  | fork(left : self, right : self)"
+    },
+    {
+      "forms": [
+        "structure"
+      ],
+      "syntax": "structure Name  | carrier : Set  | one : carrier  where  law : …",
+      "summary": "Bundle a carrier, its operations, and their laws into one set with named fields.",
+      "detail": "A structure is a datatype with one constructor whose fields have names. Each | line types a group of fields as a theorem binder does: Set, a soft type, a guard such as carrier × carrier → carrier for FunctionBetween, or an earlier field, so one : carrier is the membership one ∈ carrier. The where block names the laws over the fields; a structure may take parameters, structure Functor (C D : Set), indexed after the value as Functor(F, C, D). The declaration produces the constructor Group.mk, the shape Group.Data(G), the projections, written G.carrier and applied as G.mul(a, b), with their equations Group.mk.mul and Group.eta, the predicate Group(G), which conjoins the shape, the field typings, and the laws in order, so obtain ⟨shape, mulF, oneIn, invF, assoc, …⟩ := group names them all, and Group.intro, which concludes the predicate from the fields, their typings, and the laws. A bundled structure keeps the plain noun, Group(G), CommRing(R), Ideal(R, I), RingHom(f, R, S), Lattice(P), TopologicalSpace(X), MetricSpace(X); a predicate over separate pieces carries Is, IsGroup(A, op, unit, inv), IsCommRing(A, add, …), and Group.parts and Group.of_parts bridge the two. Nothing new is trusted: the kernel sees one inductive definition, one structural recursion per projection, and theorems.",
+      "example": "structure Pointed\n  | carrier : Set\n  | point : carrier\n  | op : carrier × carrier → carrier\n  where\n    fixed : op(point, point) = point\n\ntheorem Pointed.fixed_point (P : Set)\n  requires pointed : Pointed(P)\n  shows P.op(P.point, P.point) = P.point\nproof\n  obtain ⟨shape, pointIn, opF, fixed⟩ := pointed\n  exact fixed\n\ntheorem Pointed.of_parts (A x m : Set)\n  requires xIn : x ∈ A\n  requires mF : m : A × A → A\n  requires fixed : m(x, x) = x\n  shows Pointed(Pointed.mk(A, x, m))\nproof\n  exact Pointed.intro with *"
+    },
+    {
+      "forms": [
+        "def.separation"
+      ],
+      "syntax": "def S (A : Set) : Set := {x ∈ A | P(x)}",
+      "summary": "Form a bounded subset by Separation.",
+      "detail": "The bound A is an existing set. The defining membership law says that x belongs to S exactly when x ∈ A and P(x). No unbounded set comprehension is admitted. The predicate need not be decidable. Compare class, which may describe a proper class.",
+      "example": "def fixedPoints (A f : Set) : Set := {x ∈ A | f(x) = x}"
+    },
+    {
+      "forms": [
+        "def.replacement"
+      ],
+      "syntax": "def S (A : Set) : Set := {value(x) | x ∈ A}",
+      "summary": "Form the image of a set by bounded Replacement.",
+      "detail": "Each input comes from the set A and the term gives one output. Grace17 constructs the functionality certificate from equality, and the kernel checks the Replacement definition and its membership law. The image contains the values. For a graph of pairs, with function and value laws, use defgraph.",
+      "example": "def singletons (A : Set) : Set := {{x} | x ∈ A}"
+    },
+    {
+      "forms": [
+        "transfinite"
+      ],
+      "syntax": "noncomputable transfinite def f (α : Ordinal) : Set",
+      "summary": "Define an ordinal-indexed construction by transfinite recursion.",
+      "detail": "Give zero, successor, and limit clauses in the supported recursion schema. The kernel validates recursion positions and fixed parameters and provides checked defining laws. The limit clause assembles predecessor values along the ordinal. This is recursion over sets and is not registered for ground evaluation. The definition and its laws are checked like any other.",
+      "example": "noncomputable transfinite def stages (α : Ordinal) : Set\n  | 0 => empty\n  | succ β => 𝒫(stages β)\n  | limit λ => ⋃ { stages β | β < λ }"
+    },
+    {
+      "forms": [
+        "foundation"
+      ],
+      "syntax": "noncomputable foundation def f (x : Set) : Set",
+      "summary": "Recurse through set membership using a checked history graph.",
+      "detail": "The clause | x using history => step receives the values at members of x through history; that is the only recursive access. Foundation justifies the recursion, and the definition exposes an equation and a history membership law. The last argument and the result are Set. Nothing executes; there is no traversal of an infinite set.",
+      "example": "noncomputable foundation def memberLayers (x : Set) : Set\n  | x using history => 𝒫(history)"
+    },
+    {
+      "forms": [
+        "well-founded"
+      ],
+      "syntax": "noncomputable well-founded def f (A x : Set) : Set",
+      "summary": "Recurse over a set along a certified well-founded relation.",
+      "detail": "Supply over A ordered by r and certified by a checked wellFoundedOn theorem, then a predecessor-history clause. The kernel checks the certificate and recursion definition. Generated laws include solution.existsUnique, history.membership, equation, and outside. The final argument and the result are Set. Nothing executes; structural recursion on constructor data is the executable form.",
+      "example": "noncomputable well-founded def rankOn (A x : Set) : Set\n  over A ordered by membershipOn(A)\n  certified by membershipOn.wellFounded\n  | x using history => 𝒫(history)"
+    }
+  ]
+},
+  {
+    id: "soft-types",
+    kind: "language",
+    title: "Soft typing and bounded quantifiers",
+    intro: "Grace17 is one-sorted set theory. A soft type is a predicate and a bounded quantifier is an abbreviation; both elaborate to proofs the kernel checks.",
+    entries: [
+      { syntax: "(q : Rational)", summary: "Use a proved unary predicate as a soft binder type.", detail: "The kernel quantifies q over all sets. In a theorem statement, q : Rational elaborates to a universal quantifier followed by the guard Rational(q): ∀ q, Rational(q) → …. In a definition it becomes a domain obligation. The predicate can be unfolded, passed to a theorem, reconstructed by Tau, and checked like any other proposition.", example: "theorem rational_self (q : Rational)\n  shows q = q\nproof\n  rfl\n\n-- Kernel proposition: ∀ q, Rational(q) → q = q" },
+      { syntax: "(a b : G)  /  x ∈ G  /  S ⊆ G", summary: "Bind elements of a bundled structure by its carrier.", detail: "Under a hypothesis that gives the variable G a carrier, Group(G), CommRing(R), Lattice(P), MetricSpace(X), a binder (a b : G) is a ∈ G.carrier and b ∈ G.carrier, (x : I) under Ideal(R, I) is x ∈ I, and (h : H) under Subgroup(H, G) is h ∈ H. Where a set of elements is meant, the structure variable stands for its carrier: x ∈ G, ∀ x ∈ G, S ⊆ G, Finite(G), and cardinality(G) are read at G.carrier and print back as written, while order(G) and Group(G) take the structure itself. A structure built by a constructor is supplied by an instance whose premises hold in scope, so under CommRing(R) the binder (p : polynomialRing(R, I)) is membership in that ring's carrier and p + q its addition. The guard is a membership, which with *, typecheck, cc, and the closure instances of the area (Group.mul_mem, Ring.add_mem, Ideal.mul_left_mem) see, so the carrier membership of a compound term is synthesized.", example: "section GroupLaws\nvariable (G : Set)\nhypothesis group : Group(G)\n\ntheorem product_mem (a b : G)\n  shows a * b * a⁻¹ ∈ G\nproof\n  synthesize\nend GroupLaws" },
+      { syntax: "(0:R)  /  (term:Real)", summary: "Select a numeric carrier for an expression and its notation.", detail: "R, N, and Q abbreviate Real, Nat, and Rational; the full names and ℝ, ℕ, ℚ are accepted too. A numeral annotation selects the visible numeral for that carrier, so (0:R) is realZero when the real numeral notation is imported. On another term, the annotation guides overloaded notation such as <; it does not prove membership or add a kernel typing judgment. A conflicting known type or unavailable typed numeral is an error. When a hypothesis in scope makes a variable R a structure, (x : R) is the carrier binder of the previous entry instead. Use an assumption or typecheck when a theorem needs evidence that the value belongs to its carrier.", example: "theorem real_zero_annotation\n  shows (0:R) = realZero\nproof\n  rfl\n\n-- In a partition: (p[i]:R) < (p[succ(i)]:R)" },
+      { syntax: "∃ q ∈ ℚ, P(q)", summary: "Quantify existentially over a set-sized carrier.", detail: "It elaborates to ∃ q, q ∈ ℚ ∧ P(q). The membership proof is visible after witness q and is part of the kernel proof. If a unary soft type is defined exactly by membership in the carrier, for example Rational(q) := q ∈ ℚ, the elaborator uses that to resolve notation inside P(q). The membership guard stays.", example: "theorem rationalLess.exists_below (q : Rational)\n  shows ∃ p ∈ ℚ, p < q\nproof\n  -- witness p leaves p ∈ ℚ and p < q\n  sorry" },
+      { syntax: "∀ q ∈ ℚ, P(q)", summary: "Quantify universally over a set-sized carrier.", detail: "It elaborates to ∀ q, q ∈ ℚ → P(q), so intros q qRational introduces the set q and its membership proof. The ASCII forms forall q in ℚ, P(q) and exists q in ℚ, P(q) mean the same.", example: "theorem rational_reflexive\n  shows ∀ q ∈ ℚ, q = q\nproof\n  intros q qRational\n  rfl" },
+      { syntax: "soft-type notation resolution", summary: "Use carrier evidence to select notation without changing logic.", detail: "Notation resolution consults binder refinements, checked local unary-predicate facts, typed function results, and exact carrier associations such as Rational(q) := q ∈ ℚ. Tau indexes the transparent definitional direction q ∈ ℚ → Rational(q), so typecheck and with * can construct that proof automatically. This is one predicate-index lookup plus checked equivalence elimination, not instance search or candidate enumeration. Zero or multiple compatible notation interpretations produce an error. The chosen raw term or predicate, for example relates(rationalLess, p, q), is what enters the kernel and exported proof.", example: "-- qInQ : q ∈ ℚ\nhave qRational : Rational(q)\n  typecheck\n-- q < r then selects rationalLess when r is rational too." },
+    ],
+  },
+  {
+    id: "classes",
+    kind: "language",
+    title: "Classes, refinements, and overloading",
+    intro: "Mathematical classes, soft refinements, and type-class instances are three different things, with separate registries and separate searches. None adds a judgment to the kernel.",
+    entries: [
+      { syntax: "class Natural (x : Set) := Nat(x)", summary: "Present a predicate as a mathematical class.", detail: "class is set-theoretic collection syntax, not a type-class declaration. Every quantified object is still a set in the kernel. A class gives binder and membership notation: x : Natural, Natural(x), and x ∈ Natural elaborate through the same checked predicate. The collection may be proper, so its name is not a set-valued term.", example: "class PositiveNatural (n : Set) :=\n  Nat(n) ∧ n ≠ 0\n\ntheorem positive.is_natural (n : PositiveNatural)\n  shows Nat(n)\nproof\n  unfold PositiveNatural at assumption\n  rcases assumption with ⟨nNat, nonzero⟩\n  exact nNat" },
+      { syntax: "requires qRational : Rational(q)", summary: "Put predicate evidence in the local context.", detail: "qRational is a checked proof of Rational(q), not a type-class instance. It may describe membership in a mathematical class, a soft type, or any other predicate. Tactics find and pass routine evidence, and the proof records which facts were used.", example: "theorem rational_cut_is_real (q : Set)\n  requires qRational : Rational(q)\n  shows Real(rationalCut(q))\nproof\n  exact rationalCut.real at q with qRational" },
+      { syntax: "notation infixl 60 \"+\" => call2 via AddOperation(ℚ, _) for Rational", summary: "Select notation from soft-type evidence and a checked instance output.", detail: "The for clause uses Tau evidence to identify rational operands. The separate via query asks the import-scoped type-class registry for the unique operation graph on ℚ. Thus x + y elaborates to call2(rationalAdd, x, y). Hover shows both the adapter and selected graph; missing or ambiguous evidence is an error. A structure that arrives as a hypothesis rather than an instance supplies its operations with via hypothesis instead; see the notation entries of the language section.", example: "-- xRational : Rational(x), yRational : Rational(y)\n-- x + y elaborates to call2(rationalAdd, x, y)\nhave sumRational : Rational(x + y)\n  typecheck" },
+      { syntax: "typecheck", summary: "Ask Tau for routine predicate evidence.", detail: "For a unary predicate goal, typecheck asks the Tau system to construct a soft-type proof from local facts and checked closure theorems. Tau also supports parameterized refinements, and the closure theorems of a bundled area are such rules, so (x + y) * -x ∈ R follows under CommRing(R) from (x y : R). For the zero and one of a ring over separate pieces, a bounded fallback reads 0 ∈ A and 1 ∈ A off a local IsRing or IsCommRing fact. It does not establish restricted-carrier closure and does not consult the instance registry; synthesize does. The result is a chain of theorem applications.", example: "-- aNat : Nat(a), bNat : Nat(b)\nhave productNat : Nat(a * b)\n  typecheck" },
+      { forms: ["instance"], syntax: "instance marked (x : Set) ...", summary: "Register a checked rule for type-class evidence.", detail: "An instance is a proved theorem whose conclusion is a predicate application and whose requirements are predicates. After kernel admission, its name enters a separate, untrusted registry scoped by module imports. Every theorem variable must occur in the instance conclusion; this range restriction keeps resolution indexed and first-order. The declaration is unrelated to the set-theoretic class keyword. An instance may stand in a section, taking its hypotheses as premises; the closure facts of a bundled area, Group.mul_mem, Ring.add_mem, Ideal.zero_mem, are declared this way, so synthesize and with * find the carrier membership of a compound term.", example: "instance inherited (x : Set)\n  requires source : Source(x)\n  shows Target(x)\nproof\n  exact source_to_target at x with source" },
+      { syntax: "synthesize  /  with *", summary: "Resolve registered instance evidence.", detail: "synthesize proves a predicate goal from exact local evidence and visible instance declarations. Search is indexed by conclusion predicate and rigid argument heads, memoized, cycle-checked, resource-bounded, and import-scoped; multiple successful global candidates are an error; load order never decides. For an omitted theorem premise, with * tries instance synthesis first and then Tau refinement reconstruction.", example: "-- source : Source(x), goal: Target(x)\nsynthesize" },
+    ],
+  },
+  {
+    id: "logic",
+    title: "Logic and witnesses",
+    intro: "The natural-deduction moves. Each name says what shape the proof takes.",
+    entries: [
+      { syntax: "constructor  /  split", summary: "Split a conjunction or equivalence goal.", detail: "A conjunction yields its two sides. An equivalence yields its forward and backward implications.", example: "-- goal: P ∧ Q\nconstructor\n. exact hP\n. exact hQ" },
+      { syntax: "refine ⟨a, ha, b, hb, _⟩", summary: "Build nested witnesses and conjunctions in one pattern.", detail: "Grace17 follows transparent predicate definitions, ∃, ∧, and ↔ recursively. Terms fill existential witnesses, checked facts fill proposition leaves, and _ leaves a focused goal. Nested patterns such as ⟨⟨h.right.left, ?_⟩, ?_⟩ preserve grouping; ?_ leaves a proposition as a focused goal, and at a conjunction with entries still to come it stands for the first conjunct, so ⟨a, ha, ?_, ?_, hc⟩ fills A ∧ B ∧ C. Local facts support checked .left/.right projections, including nested paths. A fact proving a whole nested conjunction may occupy one entry. Each proof component supplies its expected proposition for bounded with * inference. A final existential component can be a complete proof. The elaborator emits each introduction separately.", example: "-- goal: ∃ x, x ∈ A ∧ ∃ y, y ∈ B ∧ R(x, y)\nrefine ⟨a, ha, b, hb, _⟩\n-- goal: R(a, b)" },
+      { syntax: "left  /  right", summary: "Choose a side of a disjunction.", detail: "The selected proposition becomes the focused goal.", example: "-- h : P, goal: P ∨ Q\nleft\nexact h" },
+      { syntax: "witness t  /  use t", summary: "Supply an existential witness.", detail: "After choosing t, the existential body with t substituted is the new goal.", example: "-- goal: ∃ x, x = a\nwitness a\nrfl" },
+      { syntax: "rcases h with ⟨h₁, h₂, h₃⟩", summary: "Open nested conjunctions or existentials in one checked step.", detail: "The pattern follows the logical structure recursively. A flat pattern descends through right-associated ∧ and ∃, nested brackets group entries, and _ ignores one. Parentheses may replace angle brackets.", example: "-- h : P ∧ Q ∧ R\nrcases h with ⟨hP, hQ, hR⟩\n-- hP : P, hQ : Q, hR : R" },
+      { syntax: "obtain ⟨x, hx, rfl⟩ := fact", summary: "Open data and substitute an equality immediately.", detail: "An rfl pattern consumes an equality that identifies a discovered variable, rewrites the goal and local facts, and keeps the representative equation out of the rest of the proof. It is equality elimination, used for unpacking structured objects.", example: "-- packed : ∃ y, P(y) ∧ y = x\nobtain ⟨y, hy, rfl⟩ := packed\n-- hy is now available in the rewritten context" },
+      { syntax: "cases h with hp | hq", summary: "Reason by cases on a disjunction.", detail: "Grace17 creates one goal for each side, and each branch receives its own case fact.", example: "-- h : P ∨ Q, goal: Q ∨ P\ncases h with hP | hQ\n. right; exact hP\n. left; exact hQ" },
+      { syntax: "rcases h with hp | hq | hr", summary: "Flatten a finite disjunction into named branches.", detail: "Nested disjunctions associate in either direction. Grace17 gives each leaf its own branch and reconstructs the nested ∨ elimination proof, so trichotomy reads as one three-way split.", example: "-- comparison : a < b ∨ a = b ∨ b < a\nrcases comparison with less | equal | greater\n. exact lessCase with less\n. exact equalCase with equal\n. exact greaterCase with greater" },
+      { syntax: "obtain ⟨x, hx, y, hy⟩ := fact", summary: "Name all the witnesses and facts inside a packed result.", detail: "This is the expression form of recursive rcases. It opens alternating existentials and conjunctions from left to right and each ∃E freshness condition is checked.", example: "-- packed : ∃ x, P(x) ∧ ∃ y, Q(x, y)\nobtain ⟨x, hx, y, hxy⟩ := packed\n-- x y : Set, hx : P(x), hxy : Q(x, y)" },
+      { syntax: "exfalso", summary: "Reduce the goal to a contradiction.", detail: "Once ⊥ is proved, false elimination gives the original proposition.", example: "-- h : ⊥, goal: P\nexfalso\nexact h" },
+      { syntax: "by_contra h", summary: "Assume the negation of the goal as h and prove ⊥.", detail: "The negated goal becomes the local fact h, or this when no name is given. Grace17 reconstructs the result with checked classical double-negation elimination.", example: "-- goal: x ∈ Y\nby_contra absent\n-- absent : ¬x ∈ Y, goal: ⊥\nhave member : x ∈ X ∖ Y by simp [hx, absent]\nrw h at member\nsimp at member" },
+      { syntax: "by_cases h : P", summary: "Split the goal on a proposition and its negation.", detail: "Two goals follow, the first with h : P and the second with h : ¬P, each taking a bullet as after cases; the name defaults to h. The split is excluded middle for P, reconstructed by checked classical double-negation elimination, so by_cases h : P is the idiom have split : P ∨ ¬P by tauto followed by cases split with h | h in one step.", example: "-- goal: x = y ∨ x ≠ y\nby_cases h : x = y\n. left; exact h\n. right; exact h" },
+      { syntax: "contradiction", summary: "Finish from contradictory local facts.", detail: "A short search finds the clash and builds the proof.", example: "-- hP : P, hnP : ¬P\ncontradiction" },
+      { syntax: "tauto", summary: "Finish classical propositional reasoning.", detail: "Predicates, equalities, and quantified formulas are atoms. The proof is a case split on those atoms.", example: "-- goal: ((P → Q) → P) → P\ntauto" },
+    ],
+  },
+  {
+    id: "transform",
+    title: "Changing the view",
+    intro: "A proof often gets easy once the right definition is exposed or the goal is rewritten into the right shape.",
+    entries: [
+      { syntax: "symm  /  symm at h", summary: "Reverse an equality goal or a named equality fact.", detail: "The operation builds the kernel equality-symmetry proof. The at form updates only the named local fact; the goal form asks for the reversed equality as a new goal.", example: "-- h : x = y, goal: y = x\nsymm\nshow x = y := h" },
+      { syntax: "rw h  /  rewrite h  /  rw ← h", summary: "Rewrite forward or backward with an equality or an equivalence.", detail: "Add at localName to rewrite a local fact instead of the goal. rw moves with p, hp rewrites with the instance that application names, as have inst := moves with p, hp then rw inst would; a with list that does not apply is reported with the application rw read. A goal the rewrite makes reflexive is closed when the rewrite ends its branch, the script, a dedent, or a sibling bullet following it, as simp closes one; a step written after it in the same branch, rfl included, still finds the goal as written. A rule P ↔ Q, possibly under ∀ and premises, rewrites the subformula P of the goal or fact by Q, at every occurrence of the instance matched first, with the implications built from the connectives on the path; ← rewrites Q by P. A rule that selects nothing is reported with its sides and the goal or fact, printed with the notation in scope.", example: "-- hxy : x = y, goal: pair(x, x) = pair(y, y)\nrw hxy\n-- h : x ∈ A ↔ P(x), goal: x ∈ A ∨ Q\nrw h\n-- goal: P(x) ∨ Q" },
+      { syntax: "rw [h₁, h₂] / rwa h", summary: "Rewrite with several rules in turn, or rewrite and close from the context.", detail: "rw [a, b, ← c] performs the single rewrites in order, on the goal or at a fact; a rule that fails is reported by its own name and located at the rule in the list. rwa h is rw h followed by closing the rewritten goal from a matching local fact; rwa h at fact rewrites the fact and then uses it to close the goal.", example: "-- h1 : a = b, h2 : b = c, hc : Nat(c), goal: Nat(a)\nrwa [h1, h2]" },
+      { syntax: "rw under h at fact", summary: "Rewrite safely inside a quantified proposition.", detail: "The explicit under form crosses ∀ or ∃ only when the equality's source and replacement do not depend on that binder's variable. It works on a goal or named fact and accepts ← for reverse rewriting. Plain rw does not look under binders. The rewrite is equality elimination; an equality that mentions the bound variable is not rewritten beneath it.", example: "-- h : a = b, fact : ∃ x, R(a, x)\nrw under h at fact\n-- fact : ∃ x, R(b, x)" },
+      { syntax: "simp [rules]", summary: "Normalize, decide membership, and close with the logical search.", detail: "simp with rules is equivalent. It closes the goal when normalization, ground reasoning, or the logical search suffice; otherwise a checked proposition equivalence may replace the focused goal so simplification can continue incrementally. Membership in compound sets needs no rules: the visible membership characterizations and the Subset definition are instantiated where the goal's atoms match them, universal hypotheses are instantiated at the terms in play, and the result is decided by case analysis with congruence closure, so ext y then simp proves insert(x, V ∖ {x}) = V from x ∈ V. Other definitions are named, as in simp [pow]. Inside a logical goal the named equalities are applied to a bounded fixed point, so simp [fst.pair, snd.pair] reduces every layer of fst(fst(((a, b), c))) ∈ A and leaves a ∈ A for the next tactic. Add at h to simplify a proved proposition in place. Conditional rewrite hypotheses use context and soft typing by default; opt into recursive relief with simp (backchain := 2, work := 128) [rules]. Relief shares its work allowance and never splits cases. In a disjunction, the incremental pass may use negated sibling literals, discharging them in the reconstructed proof.", example: "-- goal: x ∈ {x, y}\nsimp [pair.membership]" },
+      { syntax: "simpa [rules] using fact", summary: "Normalize a fact and the goal, then use the checked result.", detail: "Normalizes both sides before logical search, including capture-safe rewriting of binder-independent terms beneath quantifiers. Normalization is cycle-checked and bounded, and the logical fallback has work and depth limits.", example: "-- shape : u = (a ↦ b), pairLess : R((a ↦ b), v)\nsimpa [shape] using pairLess" },
+      { syntax: "unfold name", summary: "Expose one definition.", detail: "A defined predicate is unfolded wherever the goal mentions it: at the head, under ∧, ∨, →, and ¬, and inside a ∀ or ∃ whose bound variable the instance mentions. Add at h for a local fact. Notation such as % may name its underlying definition directly. A name declared at two arities means the one the goal, or the fact named by at, mentions.", example: "-- goal mentions a % b\nunfold %\n-- the goal now contains remainder's defining body" },
+      { syntax: "ext x", summary: "Prove set equality one member at a time.", detail: "Grace17 introduces a fresh x and reduces A = B to x ∈ A ↔ x ∈ B using checked extensionality.", example: "-- goal: {a, a} = {a}\next x\nsimp" },
+      { syntax: "clear h", summary: "Remove a local fact from the visible board.", detail: "It only changes what you see.", example: "-- hUnused : P, h : Q, goal: Q\nclear hUnused\nexact h" },
+      { syntax: "rename h => betterName", summary: "Rename a local fact.", detail: "Only the name changes.", example: "rename this => memberOfA\nexact memberOfA" },
+      { syntax: "revert h", summary: "Move an assumption back into the goal.", detail: "This is especially useful before induction when h depends on the variable that will change.", example: "-- h : P(x), goal: Q(x)\nrevert h\n-- goal: P(x) → Q(x)" },
+    ],
+  },
+  {
+    id: "search",
+    title: "Search and automation",
+    intro: "Let Grace17 find the library fact or clear routine residue. Whatever search finds is checked like any other proof.",
+    entries: [
+      { syntax: "exact?", summary: "Find a checked fact that closes the goal.", detail: "The Workbench shows the suggestions and executes the first deterministic result.", example: "-- goal: ¬Finite(ω)\nexact?\n-- finds: exact omega.infinite" },
+      { syntax: "apply?", summary: "Find a theorem whose conclusion matches.", detail: "The selected theorem may leave its premises as new goals.", example: "-- goal: x ∈ {x}\napply?\n-- proposes a singleton membership direction" },
+      { syntax: "rw?", summary: "Find one checked rewrite that changes the goal.", detail: "Search includes local equalities and imported definition properties.", example: "-- hxy : x = y, goal: f(x) = f(y)\nrw?\nrfl" },
+      { syntax: "settle with rules", summary: "An older spelling of simp [rules].", detail: "settle and settle with rules mean simp and simp [rules]: the same normalization, the same ground reasoning with the automatic membership lemmas, and the same logical search. New proofs should write simp.", example: "-- goal: x ∈ insert(x, A)\nsimp" },
+      { syntax: "typecheck", summary: "Reconstruct a routine soft-type or closure fact.", detail: "Use this for goals such as Nat(a * b + c) when the required Nat facts are already local, or a * b ∈ G under Group(G) with (a b : G), the closure theorems of the area being refinement rules; the zero and one of a ring over separate pieces are read off a local IsRing or IsCommRing fact. The elaborator searches the registered refinement rules and builds a proof from them. A numeral literal of any length is typed at once, Nat(k) and k ∈ ℕ alike: above 64 it is typed by the closure rules of successor, addition, and multiplication, two steps per binary digit, and above 128 binary digits by splitting it in halves of its digits, each step closed by a computation certificate. A membership m ∈ n of literal naturals, 2 ∈ 4, is decided by the successor laws of the ordinals.", example: "-- aNat : Nat(a), bNat : Nat(b), cNat : Nat(c)\n-- goal: Nat(a * b + c)\ntypecheck" },
+      { syntax: "synthesize", summary: "Construct registered instance evidence.", detail: "Exact local evidence wins. Otherwise it searches the visible instance declarations, rejects ambiguity, and applies the instance theorem.", example: "-- source : Source(x), goal: Target(x)\nsynthesize" },
+      { syntax: "cc  /  congruence", summary: "Finish a ground equality or predicate congruence.", detail: "Congruence closure by union-find, then an equality proof assembled from the facts it used.", example: "-- h : x = y, goal: f(g(x)) = f(g(y))\ncc" },
+      { syntax: "decide", summary: "Decide a closed statement about finite sets.", detail: "For goals x ∈ A, x ∉ A, A ⊆ B, A = B, A ≠ B, and cardinality(A) = n whose terms are set literals, numerals, ∪, ∩, ∖, 𝒫, insert, and ∅, decide evaluates the statement and, when it holds, writes a proof from the Cumulus membership lemmas (pair.membership, union2.membership, insert.membership, intersection.membership, difference.membership, powerset.membership_iff, set.empty) and the counting lemmas, which the elaborator then checks step by step. Numerals are atoms: 2 ∈ 5 goes through the natural-number lemmas, but a numeral is never unfolded into the set of its predecessors, so {0} = 1 is outside the fragment, as is a powerset on the left of ⊆ or =. A false statement is reported as false rather than left open.", example: "theorem union_example\n  shows {1, 2} ∪ {2, 3} = {1, 2, 3}\nproof\n  decide" },
+      { syntax: "compute", summary: "Finish a supported closed computation.", detail: "The proof is a computation certificate: the equation and the list of definitions used. The kernel reruns the evaluation. A closed order goal over ℕ, a < b, a ≤ b, or a ≠ b, is accepted too: both sides are evaluated, the gap between them is the witness of the order's definition, and a ≠ b goes through Less.irreflexive; a false comparison is reported with the two values. Natural subtraction, predecessor, remainder, and quotient evaluate natively, like addition and multiplication, so 365 ^ 23 - (2 * fallingFactorial(365, 23) + 1) is one step.", example: "theorem factorial.five\n  shows 5! = 120\nproof\n  compute\n\ntheorem powers.apart\n  shows 2 ^ 10 < 3 ^ 7\nproof\n  compute" },
+    ],
+  },
+  {
+    id: "arithmetic",
+    title: "Arithmetic",
+    intro: "These tactics do the algebraic bookkeeping so the proof can stay about its idea.",
+    entries: [
+      { syntax: "ring", summary: "Prove Nat or commutative-ring polynomial identities.", detail: "For a registered CommRing or OrderedRing, ring builds checked certificates for signed sums, products, distributivity, cancellation, zero, and one. The carrier and operation graphs come from type-class evidence: under a bundled hypothesis CommRing(R) or Field(R), or a closed instance such as CommRing(integerRing), they are read off the projections through CommRing.parts, so (x : R) and R[2] need no further setup, and under a notation ring scope they are the scope's pieces. The registered quotient integers support signed arithmetic and subtraction directly. Checked .notation equations can connect value functions to the selected operation graphs; their carrier hypotheses must be proved. Nat has its own normalizer, in which numerals are coefficients: 2 * a and a + a share the normal form 2 * a, and coefficient arithmetic is a computation certificate. A power with a literal exponent, t ^ k for k ≤ 16, is expanded into its product over ℕ, ℤ, ℚ, ℝ, and bundled rings, with the certificate built from the power's defining equations, so (a + b) ^ 2 = a ^ 2 + 2 * a * b + b ^ 2 is ring alone; a larger exponent stays an atom. ring at h and ring_nf use the same certificates, and ring_nf closes an equality whose sides normalize to the same term. A quotient t / k is an atom, which ring says when the sides differ; use linarith for a linear goal, or rewrite with realDiv.eq_mul_inv or a named constant such as oneHalf.", example: "-- goal: succ(k) * n = k * n + n\nring" },
+      { syntax: "ring [h₁, h₂]", summary: "Close an equation using equations as rewrite rules, modulo the ring axioms.", detail: "Each named equation is normalized and its left side is used as a rewrite rule wherever a multiple of it fits inside the normal form of a side of the goal; the rules first reduce one another, so a law stated with (n + 1)! applies after the factorial law has been used inside it. The sides are then compared by ring. This is how a step law is applied several times at once: multiply both sides by what the laws need and finish with ring [s1, s2, s3, s4]. Natural-number goals for now.", example: "-- step : x * (c + 1) = y * (2 * c + 2), expand : y = c + 1\nring [step, expand]" },
+      { syntax: "ring_nf", summary: "Normalize polynomial expressions inside an equality or predicate.", detail: "On a goal, ring_nf rewrites every polynomial argument to canonical form and leaves the normalized goal open. The ring_nf at h form does the same to a local equality or predicate fact, including inequalities and ideal membership. In p ∈ I only p is normalized; I and any relation graph are left alone.", example: "-- h : (a + b) * c < d\nring_nf at h\n-- h : a * c + b * c < d" },
+      { syntax: "linear_combination 2 * h1 - h2", summary: "Combine checked polynomial equalities.", detail: "Expressions scale equalities, read as the goal is: a bare numeral coefficient is the ring's numeral, so 2 * h scales a real equation by the real two, and a coefficient the notation in scope cannot type is read in the ring the goal selects. A minus sign reverses that equality; if the normalized result has a common polynomial remainder, Grace17 removes it with checked natural-number cancellation.", example: "theorem combine (a b c d e : Nat)\n  requires h1 : a + c = b + c\n  requires h2 : d = e\n  shows a + e = b + d\nproof\n  linear_combination h1 - h2" },
+      { syntax: "arith", summary: "Finish supported natural equalities and affine order goals.", detail: "This includes cancellation, weakening, mixed strict and weak bounds, and checked Fourier-Motzkin elimination with integer tightening: exact eliminations are preferred, and a comparison whose coefficients share a factor is divided through with a rounded constant, each step a checked quotient lemma, so parity and divisibility contradictions close. On a ⊥ goal arith refutes the hypotheses; on a disequality it introduces the equation and refutes; on a conjunction it splits and settles each conjunct, so a list of index inequalities is one line; and when the goal itself is out of reach, contradictory bounds among the hypotheses close it.", example: "-- hx : x > 3, hy : y > 2\n-- goal: x + y > 4\narith\n-- goal: a ≠ a + 1 ∧ a + 1 ≠ 2 * a\narith" },
+      { syntax: "linarith", summary: "Decide linear inequalities over the reals and rationals, and Nat or ordered-ring affine goals.", detail: "Over the reals, linarith negates the goal, runs Fourier-Motzkin elimination over the atoms of the local comparisons, and emits a certificate from the checked order laws (realLe.add, realLess.add and their mixed forms) and one commutative-ring identity, closed by irreflexivity. Goals may be ≤, <, =, a negated comparison, or ⊥. Facts may be comparisons, real equalities, and conjunctions of them, and 0 < 1 is supplied whenever 1 occurs. Over the rationals the same elimination runs on the strict order: facts are rational comparisons s < t and equalities, goals may be <, =, ¬(s < t), or ⊥, and comparison or equality goals are settled by trichotomy with each remaining case refuted. Addition, subtraction, negation, scaling by a numeral, and division by a nonzero numeral are interpreted, the last through the identity t = k * (t / k) proved from the field laws, so 0 < x gives 0 < x / 2; every other term, including a product, is an atom, so state nonlinear facts such as 0 ≤ x * y first. Nat uses the same checked affine elimination as arith, and ordered-ring instances use their OrderedAdditiveGroup laws.", example: "-- ab : a ≤ b, bound : c ≤ a - b\n-- goal: c ≤ 0\nlinarith" },
+    ],
+  },
+  {
+    id: "workflow",
+    title: "Shaping a development",
+    intro: "These forms mark unfinished work and lay out finished work.",
+    entries: [
+      { syntax: "sorry", summary: "Admit the current goal.", detail: "The goal becomes a named axiom, with its source line recorded. The theorem shows amber, the admitted state.", example: "theorem future_result (x y : Set)\n  shows x = y\nproof\n  sorry" },
+      { syntax: ". tactic", summary: "Start the next focused subgoal branch.", detail: "Indent the following steps beneath the dot. Branches make the proof's shape visible. A step written in a branch whose goal an earlier step already closed, and that does not apply to the next goal, is reported as no goals remain in this case, naming the line that closed the branch.", example: "constructor\n. exact hP\n. exact hQ" },
+      { syntax: "tactic1; . tactic2", summary: "Sequence compact moves on one line.", detail: "Semicolons preserve the same focused-goal order as the multiline form.", example: "constructor; . assumption; . rfl" },
+      { forms: ["tactic"], syntax: "tactic solve(rule) := simp [$rule]", summary: "Declare a small module-scoped tactic macro.", detail: "A macro is shorthand. It expands, with bounded depth, to built-in tactics before checking. Cumulus declares its rewrite sets this way: group_simp, lattice_simp, topology_simp, metric_simp, category_simp, and functor_simp are simp with the laws of the area, each applied where its operands lie in the carrier.", example: "tactic finish(rule) := settle with $rule\n\nproof\n  finish(pair.membership)" },
+    ],
+  },
+  {
+    id: "induction",
+    title: "Induction",
+    intro: "Three forms of induction, one for each kind of structure that decreases: a datatype, set membership, or a well-founded relation.",
+    entries: [
+      { syntax: "induction n [generalizing s ...] [with]", illustrative: true, summary: "Follow the constructors of an inductive datatype and optionally strengthen the hypothesis.", detail: "The successor case of a natural number may be written | k + 1 using ih =>, and its goal is then stated with k + 1 rather than succ(k). Place this first in the proof block; recursive fields receive hypotheses named by using. Requirements depending on the induction variable are automatically moved into the motive, even without generalizing; introduce them in each branch, and supply them when using the recursive hypothesis. Generalized declared variables may occur before or after n. Their soft types, dependent binders, and dependent requirements move into the motive, so each recursive hypothesis works for every new value. The optional with changes nothing; an internal auxiliary theorem restores the public binder order.", example: "theorem walk (s : Set, es : List)\n  shows P(es, s)\nproof\n  induction es generalizing s with\n  | List.nil =>\n    intro s\n    exact base at s\n  | List.cons(x, xs) using ih =>\n    intro s\n    exact step at x, xs, s with ih" },
+      { syntax: "induction x using membership", summary: "Descend through the members of an arbitrary set.", detail: "Introduce the current set, then ih. The hypothesis proves the motive for every member of the current set. Revert assumptions that depend on x before starting.", example: "theorem membership.irreflexive (x : Set)\n  shows ¬x ∈ x\nproof\n  induction x using membership\n  intros current ih hSelf\n  have impossible := ih at current with hSelf, hSelf\n  exact impossible" },
+      { syntax: "induction x over A ordered by r certified by founded", summary: "Descend through any certified well-founded relation.", detail: "The goal must be ∀ x, x ∈ A → P(x), and founded must prove wellFoundedOn(r, A). The introduced ih maps a predecessor y with y ∈ A ∧ relates(r, y, x) to P(y).", example: "theorem relation_reflexive (A r : Set)\n  requires founded : wellFoundedOn(r, A)\n  shows ∀ x, x ∈ A → x = x\nproof\n  induction x over A ordered by r certified by founded\n  intros x hx ih\n  rfl" },
+    ],
+  },
+
+];
+
+export const documentedTacticFamilies = [
+  "exact?", "apply?", "rw?", "sorry", "ext", "simp", "simpa", "rewrite", "rw", "unfold",
+  "induction", "obtain", "have", "calc", "specialize", "apply", "exact", "intro", "intros", "left", "right",
+  "constructor", "split", "refine", "rcases", "cases", "clear", "rename", "revert", "exfalso",
+  "by_contra", "by_cases", "contradiction", "tauto", "cc", "congruence", "witness", "use", "assumption",
+  "reflexivity", "rfl", "compute", "decide", "linear_combination", "ring_nf", "ring", "arith", "linarith",
+  "settle", "typecheck", "synthesize", "tactic",
+];
+
+const rule = (premises, conclusion, label, side = "") => ({ premises, conclusion, label, side });
+const ruleSet = (...variants) => ({ variants });
+
+// These schemas teach; the kernel's rules are specified in kernel-format.md. The
+// Help header defines Γ as the current local context. A named fact belongs
+// inside that context; it never replaces the context to
+// the left of ⊢. Automation entries state the trust boundary: the tactic finds
+// a term, and the kernel checks that term against the conclusion.
+const helpInferenceRules = new Map([
+  ["intro h", ruleSet(
+    rule(["Γ, h : P ⊢ Q"], "Γ ⊢ P → Q", "→I", "discharges the local hypothesis h : P"),
+    rule(["Γ ⊢ P(a)"], "Γ ⊢ ∀ x, P(x)", "∀I", "a is fresh and does not occur free in Γ"),
+  )],
+  ["intros x hx y hy", rule(
+    ["Γ, x : Set, hx : P(x), y : Set, hy : Q(y) ⊢ R(x, y)"],
+    "Γ ⊢ ∀ x, P(x) → ∀ y, Q(y) → R(x, y)",
+    "∀I, →I",
+    "x and y are fresh; hx and hy are discharged",
+  )],
+  ["exact fact", rule(["fact establishes P"], "Γ ⊢ P", "exact")],
+  ["show P := fact", rule(["fact establishes P", "P is the focused goal"], "Γ ⊢ P", "exact", "the displayed statement must match the goal")],
+  ["assumption", rule(["h : P ∈ Γ"], "Γ ⊢ P", "hyp")],
+  ["rfl  /  reflexivity", rule([], "Γ ⊢ t = t", "=I")],
+  ["apply fact", rule(["Γ ⊢ P₁ → … → Pₙ → Q", "Γ ⊢ P₁    …    Γ ⊢ Pₙ"], "Γ ⊢ Q", "→E")],
+  ["have h := fact with premises", rule(["Γ ⊢ P", "Γ, h : P ⊢ Q"], "Γ ⊢ Q", "cut", "the at and with arguments first use ∀E and →E to obtain P")],
+  ["fact with ⟨a, b⟩", rule(["Γ ⊢ A", "Γ ⊢ B", "fact establishes (A ∧ B) → P"], "Γ ⊢ P", "∧I, →E", "the constructor is checked against the premise it fills")],
+  ["fact at terms with *", rule(["Γ contains checked evidence for every required premise"], "Γ ⊢ Q", "∀E, →E", "soft-type evidence and exact matching premises are reconstructed from Γ")],
+  ["fact at terms with *{n}", rule(["Γ ⊢ P₁ → … → Pₙ → R", "Γ ⊢ P₁    …    Γ ⊢ Pₙ"], "Γ ⊢ R", "repeated →E", "1 ≤ n ≤ 256; R may retain further premises; counted stars expand to explicit assumption arguments")],
+  ["have h : P := fact with *", rule(["Γ ⊢ P", "Γ, h : P ⊢ Q"], "Γ ⊢ Q", "cut", "P guides bounded inference and is checked against the resulting proof")],
+  ["have h : P", rule(["Γ ⊢ P", "Γ, h : P ⊢ Q"], "Γ ⊢ Q", "cut")],
+  ["have h : P by tactic", rule(["Γ ⊢ P", "Γ, h : P ⊢ Q"], "Γ ⊢ Q", "cut", "the tactic proves P")],
+  ["calc", rule(["Γ ⊢ a R b", "Γ ⊢ b S c", "checked transitivity: R ; S ⇒ T"], "Γ ⊢ a T c", "relation transitivity", "each displayed justification and the named composition theorem are kernel-checked")],
+  ["specialize h with x, hx", rule(["h : ∀ x, R(x) → P(x) ∈ Γ", "hx : R(t) ∈ Γ"], "Γ ⊢ P(t)", "∀E, →E")],
+
+  ["constructor  /  split", rule(["Γ ⊢ P", "Γ ⊢ Q"], "Γ ⊢ P ∧ Q", "∧I", "For P ↔ Q, the premises are Γ ⊢ P → Q and Γ ⊢ Q → P")],
+  ["refine ⟨a, ha, b, hb, _⟩", rule(["Γ ⊢ a ∈ A", "Γ ⊢ b ∈ B", "Γ ⊢ R(a, b)"], "Γ ⊢ ∃ x, x ∈ A ∧ ∃ y, y ∈ B ∧ R(x, y)", "∃I, ∧I", "_ leaves its corresponding premise as a goal")],
+  ["left  /  right", rule(["Γ ⊢ P"], "Γ ⊢ P ∨ Q", "∨I₁", "right uses the symmetric rule ∨I₂")],
+  ["witness t  /  use t", rule(["Γ ⊢ P(t)"], "Γ ⊢ ∃ x, P(x)", "∃I")],
+  ["rcases h with ⟨h₁, h₂, h₃⟩", rule(["Γ ⊢ P ∧ Q ∧ R"], "Γ, h₁ : P, h₂ : Q, h₃ : R", "∧E", "the recursive pattern abbreviates repeated conjunction elimination")],
+  ["obtain ⟨x, hx, rfl⟩ := fact", rule(["Γ ⊢ ∃ x, P(x) ∧ x = t", "Γ, hx : P(t) ⊢ Q"], "Γ ⊢ Q", "∃E, =E", "x is fresh; equality elimination substitutes t for x")],
+  ["cases h with hp | hq", rule(["Γ ⊢ P ∨ Q", "Γ, hp : P ⊢ R", "Γ, hq : Q ⊢ R"], "Γ ⊢ R", "∨E", "the branch hypotheses hp and hq are discharged")],
+  ["rcases h with hp | hq | hr", rule(["Γ ⊢ P ∨ Q ∨ R", "Γ, hp : P ⊢ S", "Γ, hq : Q ⊢ S", "Γ, hr : R ⊢ S"], "Γ ⊢ S", "∨E", "nested disjunction elimination discharges all three branch hypotheses")],
+  ["obtain ⟨x, hx, y, hy⟩ := fact", rule(["Γ ⊢ ∃ x, P(x) ∧ ∃ y, Q(x, y)", "Γ, a : Set, ha : P(a), b : Set, hab : Q(a, b) ⊢ R"], "Γ ⊢ R", "∃E, ∧E", "a and b are fresh; the recursive pattern abbreviates repeated eliminations")],
+  ["exfalso", rule(["Γ ⊢ ⊥"], "Γ ⊢ P", "⊥E")],
+  ["by_contra h", rule(["Γ, h : ¬P ⊢ ⊥"], "Γ ⊢ P", "classical", "discharges the local hypothesis h : ¬P")],
+  ["by_cases h : P", rule(["Γ, h : P ⊢ Q", "Γ, h : ¬P ⊢ Q"], "Γ ⊢ Q", "∨E", "on P ∨ ¬P by classical double-negation elimination; the branch hypotheses h are discharged")],
+  ["contradiction", rule(["h : P ∈ Γ", "hn : ¬P ∈ Γ"], "Γ ⊢ Q", "¬E, ⊥E", "search constructs the displayed natural-deduction steps")],
+  ["tauto", rule(["certificate : propositional derivation of P from Γ"], "Γ ⊢ P", "tauto", "the derivation is a case split on atoms")],
+
+  ["symm  /  symm at h", rule(["Γ ⊢ s = t"], "Γ ⊢ t = s", "=sym", "the at form stores the result as a local fact")],
+  ["rw h  /  rewrite h  /  rw ← h", rule(["Γ ⊢ s = t", "Γ ⊢ P(s)"], "Γ ⊢ P(t)", "=E", "the backward form exchanges s and t")],
+  ["rw [h₁, h₂] / rwa h", rule(["Γ ⊢ a = b", "Γ, P(b) ⊢ Q  or  P(b) ∈ Γ"], "Γ ⊢ P(a)  or  Γ ⊢ Q", "=E", "each rule rewrites in turn; rwa then closes by hypothesis")],
+  ["rw under h at fact", rule(["Γ ⊢ s = t", "Γ ⊢ ∃ x, P(s, x)"], "Γ ⊢ ∃ x, P(t, x)", "=E", "x occurs free in neither s nor t; ∀ and reverse rewriting are analogous")],
+  ["simp [rules]", rule(["checked equations reduce P to Q", "Γ ⊢ Q"], "Γ ⊢ P", "simp", "every reduction is justified by a named fact or definition")],
+  ["simpa [rules] using fact", rule(["Γ ⊢ P", "checked equations normalize P and Q to the same formula"], "Γ ⊢ Q", "simp, exact", "the normalized fact must match the normalized goal")],
+  ["unfold name", rule(["Γ ⊢ name(x) = body(x)", "Γ ⊢ P(body(x))"], "Γ ⊢ P(name(x))", "def")],
+  ["ext x", rule(["Γ, x : Set ⊢ x ∈ A ↔ x ∈ B"], "Γ ⊢ A = B", "ext")],
+  ["decide", rule(["evaluation finds the closed finite-set statement P true", "a generated script proves P from the membership lemmas"], "Γ ⊢ P", "decide", "every step of the generated script is checked")],
+  ["clear h", rule(["Γ ⊢ Q"], "Γ, h : P ⊢ Q", "weak")],
+  ["rename h => betterName", rule(["Γ, h : P ⊢ Q"], "Γ, betterName : P ⊢ Q", "α")],
+  ["revert h", rule(["Γ, h : P ⊢ Q"], "Γ ⊢ P → Q", "→I", "discharges the local hypothesis h : P")],
+
+  ["exact?", rule(["search finds an available fact establishing P"], "Γ ⊢ P", "exact?", "the kernel checks the chosen fact")],
+  ["apply?", rule(["search finds Γ ⊢ P₁ → … → Pₙ → Q", "Γ ⊢ P₁    …    Γ ⊢ Pₙ"], "Γ ⊢ Q", "apply?", "the kernel checks the chosen application")],
+  ["rw?", rule(["search finds Γ ⊢ s = t", "Γ ⊢ P(s)"], "Γ ⊢ P(t)", "rw?", "the kernel checks the chosen rewrite")],
+  ["settle with rules", rule(["bounded search constructs a derivation from Γ"], "Γ ⊢ P", "settle", "only named rules, local facts, and standard checked reductions are used")],
+  ["typecheck", rule(["registered refinement rules derive T(t) from Γ"], "Γ ⊢ T(t)", "typecheck", "each step applies a registered rule")],
+  ["synthesize", rule(["visible instance declarations derive C(args) from Γ"], "Γ ⊢ C(args)", "instance", "search is indexed, tabled, cycle-checked, and bounded")],
+  ["cc  /  congruence", rule(["equalities in Γ place s and t in one congruence class"], "Γ ⊢ s = t", "cc", "the equality explanation is checked")],
+  ["compute", rule(["evaluator emits a checked certificate"], "Γ ⊢ s = value", "compute", "the kernel reruns the evaluation")],
+
+  ["ring", rule(["normalization certificate from Γ"], "Γ ⊢ lhs = rhs", "ring", "each step is a semiring equality")],
+  ["ring [h₁, h₂]", rule(["h₁ : p₁ = q₁ ∈ Γ", "h₂ : p₂ = q₂ ∈ Γ", "normalization certificates from Γ"], "Γ ⊢ lhs = rhs", "ring", "each rule rewrites an exposed multiple of its normal form by equality elimination")],
+  ["ring_nf", rule(["checked polynomial equalities for each argument"], "Γ ⊢ P(normal forms)", "ring_nf", "equality elimination transports the original goal or fact")],
+  ["linear_combination 2 * h1 - h2", rule(["h₁ : p₁ = q₁ ∈ Γ", "h₂ : p₂ = q₂ ∈ Γ"], "Γ ⊢ 2p₁ + q₂ = 2q₁ + p₂", "lincomb")],
+  ["arith", rule(["affine facts in Γ", "Fourier–Motzkin certificate for P"], "Γ ⊢ P", "arith", "the certificate is built from the ordered-additive lemmas")],
+  ["linarith", rule(["linear facts in Γ", "linear certificate for P"], "Γ ⊢ P", "linarith", "the certificate is built from the carrier's order lemmas")],
+
+  ["sorry", rule([], "Γ ⊢ P", "sorry", "a synthetic axiom is introduced and recorded")],
+  [". tactic", rule(["each focused goal is solved under Γ"], "Γ ⊢ every goal produced by the parent command", "branches")],
+  ["tactic1; . tactic2", rule(["tactic1 produces focused goals", "tactic2 solves the next selected goal under Γ"], "Γ ⊢ the composed tactic result", ";")],
+  ["tactic solve(rule) := simp [$rule]", rule(["macro expands to built-in tactic commands", "expanded commands construct a derivation from Γ"], "Γ ⊢ P", "macro", "expansion happens before checking")],
+
+  ["induction n [generalizing s ...] [with]", rule(["Γ ⊢ P(zero)", "Γ, k : Nat, ih : ∀ s, P(k, s) ⊢ ∀ s, P(succ(k), s)"], "Γ, n : Nat ⊢ ∀ s, P(n, s)", "Nat-ind")],
+  ["induction x using membership", rule(["Γ, current : Set, ih : ∀ y, y ∈ current → P(y) ⊢ P(current)"], "Γ, x : Set ⊢ P(x)", "∈-ind", "well-foundedness comes from set-theoretic Foundation")],
+  ["induction x over A ordered by r certified by founded", rule(["Γ ⊢ wellFoundedOn(r, A)", "Γ, x : Set, hx : x ∈ A, ih : ∀ y, y ∈ A ∧ relates(r, y, x) → P(y) ⊢ P(x)"], "Γ ⊢ ∀ x, x ∈ A → P(x)", "WF-ind")],
+]);
+
+export function helpInferenceRule(syntax) {
+  return helpInferenceRules.get(syntax);
+}
+
+export function tacticHelpEntries(name) {
+  return tacticGuideSections.flatMap(section => section.entries).filter(entry =>
+    (entry.syntax.match(/[A-Za-z_][A-Za-z0-9_]*(?:\?)?/g) || []).includes(name));
+}
+
+const declarationWords = new Set([
+  "module", "import", "open", "def", "defgraph", "defchoose", "defunique", "predicate", "class", "theorem", "lemma", "instance",
+  "requires", "shows", "proof", "notation", "infix", "infixl", "infixr", "tactic",
+  "noncomputable", "transfinite", "foundation", "well-founded", "define", "datatype", "structure", "mixfix", "prefix", "postfix", "scoped", "guard", "binder", "namespace", "section", "variable", "hypothesis", "end", "where",
+]);
+const tacticWords = new Set([
+  "intro", "intros", "exact", "assumption", "rfl", "reflexivity", "apply", "have", "calc", "specialize",
+  "constructor", "split", "refine", "left", "right", "witness", "use", "rcases", "cases", "obtain",
+  "exfalso", "by_contra", "contradiction", "tauto", "rw", "rewrite", "simp", "unfold", "ext",
+  "clear", "rename", "revert", "settle", "cc", "congruence", "compute", "decide", "ring", "ring_nf",
+  "linear_combination", "arith", "linarith", "typecheck", "synthesize", "sorry", "induction",
+]);
+const typeWords = new Set(["Set", "Nat", "Ordinal", "Class", "Prop", "Real", "Rational", "R", "N", "Q"]);
+// The small words that join the parts of a proof step or a declaration:
+// `exact fact at terms with premises`, `have h : P by tactic`, `rw under`,
+// `notation … via hypothesis … for carrier`.
+const connectiveWords = new Set(["at", "with", "by", "via", "for", "under", "using", "as"]);
+
+function escapeHighlightText(text) {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+export function highlightGrace17(source) {
+  const token = /(--[^\n]*|"(?:\\.|[^"\\])*"|\b[A-Za-z_][A-Za-z0-9_]*(?:\?)?|\b\d+\b|:=|=>|←|→|↔|∧|∨|¬|∀|∃|∈|∉|⊆|≤|≥|≠|=|\+|\*|%|\||⟨|⟩|∅|⊥|𝒫|⋃|∫|∏|√|∪|∩|∖|×|⊎|≃|↦|⧸)/gu;
+  let html = "";
+  let at = 0;
+  for (const match of source.matchAll(token)) {
+    html += escapeHighlightText(source.slice(at, match.index));
+    const value = match[0];
+    let kind = "operator";
+    if (value.startsWith("--")) kind = "comment";
+    else if (value.startsWith('"')) kind = "string";
+    else if (/^\d+$/.test(value)) kind = "number";
+    // A word after a dot is a qualified name's segment (natural.induction,
+    // Zorn.theorem), never a keyword, tactic, or type.
+    else if (/^[A-Za-z_]/.test(value) && source[match.index - 1] === ".") kind = "name";
+    // On a module or import line every word after the keyword is a module
+    // name segment (import Nat names a module, not the type).
+    else if (/^[A-Za-z_]/.test(value) && /^\s*(?:module|import)\s/.test(source.slice(source.lastIndexOf("\n", match.index - 1) + 1, match.index))) kind = "name";
+    else if (connectiveWords.has(value)) kind = "connective";
+    else if (declarationWords.has(value)) kind = "keyword";
+    else if (tacticWords.has(value.replace(/\?$/, ""))) kind = "tactic";
+    else if (typeWords.has(value)) kind = "type";
+    if (kind === "name" || (/^[A-Za-z_]/.test(value) && kind === "operator")) {
+      html += escapeHighlightText(value);
+      at = match.index + value.length;
+      continue;
+    }
+    html += `<span class="g17-${kind}">${escapeHighlightText(value)}</span>`;
+    at = match.index + value.length;
+  }
+  return html + escapeHighlightText(source.slice(at));
+}
+
+// Contextual declaration hovers work even before a file successfully checks.
+// Restrict recognition to declaration headers, so comments, strings, names,
+// and other occurrences of these words keep their normal symbol hovers.
+export function declarationHelpAtTextOffset(source, offset) {
+  if (offset < 0 || offset >= source.length) return undefined;
+  const start = source.lastIndexOf("\n", offset - 1) + 1;
+  const end = source.indexOf("\n", offset);
+  const line = source.slice(start, end < 0 ? source.length : end);
+  const header = /^(\s*)((?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def)|(?:defgraph|defchoose|defunique|def|define|predicate|class|datatype|structure|notation|instance|tactic|section|variable|hypothesis))(?=\s+\S)/u.exec(line);
+  if (!header) return undefined;
+  const prefixStart = start + header[1].length;
+  const tokens = [...header[2].matchAll(/[a-z]+(?:-[a-z]+)?/g)];
+  const word = tokens.find(token => offset >= prefixStart + token.index && offset < prefixStart + token.index + token[0].length);
+  if (!word) return undefined;
+  let form = header[2].trim().split(/\s+/)[0];
+  if (form === "noncomputable") form = header[2].trim().split(/\s+/)[1];
+  if (form === "def") {
+    const following = source.slice(start).split(/\n(?=\s*(?:theorem|lemma|def|define|defgraph|defchoose|defunique|predicate|class|datatype|structure|namespace|section|variable|hypothesis|end)\b)/u)[0];
+    if (/(?:→|->)\s*\S+\s*$/.test(line) || /\n\s*\|/.test(following)) form = "def.recursive";
+    else if (/:=\s*\{\s*[\p{L}_][\p{L}\p{M}\p{N}_]*\s*(?:∈| in )/u.test(following)) form = "def.separation";
+    else if (/:=\s*\{[\s\S]*\|\s*[\p{L}_][\p{L}\p{M}\p{N}_]*\s*(?:∈| in )/u.test(following)) form = "def.replacement";
+  }
+  const entry = tacticGuideSections.flatMap(section => section.entries).find(entry => entry.forms?.includes(form));
+  if (!entry) return undefined;
+  return { entry, form, text: word[0], start: prefixStart + word.index, end: prefixStart + word.index + word[0].length };
+}

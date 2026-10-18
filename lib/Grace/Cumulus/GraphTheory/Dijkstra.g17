@@ -1,0 +1,252 @@
+-- Executable Dijkstra search on a finite nonnegative weighted digraph.
+-- An absent matrix entry is no edge; an absent distance is infinity.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Dijkstra
+import Complement
+import Nat.Mod
+import Core.List
+-- Nested executable containers use Set until their carrier sets are constructed.
+-- Constructor equations and mathematical correctness certificates remain checked.
+
+datatype Candidate(Index Weight : Set)
+  | value(vertex : Index, distance : Weight)
+
+datatype State(Distances Flags : Set)
+  | current(distances : Distances, settled : Flags)
+
+def less (a b : Nat) → Bool
+  | zero, b => BoolOps.not(isZero(b))
+  | succ(a), b => BoolOps.and(BoolOps.not(isZero(b)), less(a, predecessor(b)))
+  descends a
+
+def boolTail (flags : List(ℕ)) → List(ℕ)
+  | [] => List.nil
+  | flag :: rest => rest
+
+def boolHead (flags : List(ℕ)) → Nat
+  | [] => 1
+  | flag :: rest => flag
+
+def optionTail (row : Set) → Set
+  | [] => List.nil
+  | weight :: rest => rest
+
+def optionHead (row : Set) → Set
+  | [] => Option.none
+  | weight :: rest => weight
+
+def entry (row : Set, index : Nat) → Set
+  | row, zero => optionHead(row)
+  | row, succ(index) => entry(optionTail(row), index)
+  descends index
+
+def rowsHead (rows : Set) → Set
+  | [] => List.nil
+  | row :: rest => row
+
+def rowsTail (rows : Set) → Set
+  | [] => List.nil
+  | row :: rest => rest
+
+def rowAt (rows : Set, index : Nat) → Set
+  | rows, zero => rowsHead(rows)
+  | rows, succ(index) => rowAt(rowsTail(rows), index)
+  descends index
+
+def choose (pickLeft : Bool, left right : Set) → Set
+  | Bool.true, left, right => left
+  | Bool.false, left, right => right
+
+def candidateDistance (candidate : Candidate(ℕ,ℕ)) → Nat
+  | Candidate.value(i, d) => d
+
+def preferSome (left : Candidate(ℕ,ℕ), right : Set) → Set
+  | left, Option.none => Option.some(left)
+  | left, Option.some(candidate) =>
+    choose(less(candidateDistance(left), candidateDistance(candidate)),
+      Option.some(left), Option.some(candidate))
+  descends right
+
+def prefer (left right : Set) → Set
+  | Option.none, right => right
+  | Option.some(candidate), right => preferSome(candidate, right)
+  descends left
+
+def availableOpen (distance : Option(ℕ), index : Nat) → Set
+  | Option.none, index => Option.none
+  | Option.some(d), index => Option.some(Candidate.value(index, d))
+
+def available (visited : Bool, distance : Option(ℕ), index : Nat) → Set
+  | Bool.true, distance, index => Option.none
+  | Bool.false, distance, index => availableOpen(distance, index)
+
+-- Linear priority search.  The index advances with the list spine.
+def minimum (distances : Set, visited : List(ℕ), index : Nat) → Set
+  | List.nil, visited, index => Option.none
+  | List.cons(d, rest), visited, index =>
+    prefer(available(equalNat(boolHead(visited), 1), d, index),
+      minimum(rest, boolTail(visited), succ(index)))
+  descends distances
+
+def markHead (visited : List(ℕ)) → List(ℕ)
+  | [] => List.nil
+  | flag :: rest => List.cons(1, rest)
+
+def keepHead (visited rest : List(ℕ)) → List(ℕ)
+  | List.nil, rest => List.nil
+  | List.cons(flag, oldRest), rest => List.cons(flag, rest)
+
+def mark (visited : List(ℕ), index : Nat) → List(ℕ)
+  | visited, zero => markHead(visited)
+  | visited, succ(index) => keepHead(visited, mark(boolTail(visited), index))
+  descends index
+
+def chooseDistance (pickFirst : Bool, first second : Option(ℕ)) → Option(ℕ)
+  | Bool.true, first, second => first
+  | Bool.false, first, second => second
+
+def minSome (old : Nat, new : Option(ℕ)) → Option(ℕ)
+  | old, Option.none => Option.some(old)
+  | old, Option.some(e) =>
+    chooseDistance(less(e, old), Option.some(e), Option.some(old))
+  descends new
+
+def minOption (old new : Option(ℕ)) → Option(ℕ)
+  | Option.none, new => new
+  | Option.some(d), new => minSome(d, new)
+  descends old
+
+def extendSome (d : Nat, weight : Option(ℕ)) → Option(ℕ)
+  | d, Option.none => Option.none
+  | d, Option.some(w) => Option.some(Grace.Core.Nat.Rec.add(d, w))
+
+def extension (distance weight : Option(ℕ)) → Option(ℕ)
+  | Option.none, weight => Option.none
+  | Option.some(d), weight => extendSome(d, weight)
+  descends distance
+
+def relaxValue (old weight : Option(ℕ), settled : Bool, sourceDistance : Option(ℕ)) → Option(ℕ)
+  | old, weight, Bool.true, sourceDistance => old
+  | old, weight, Bool.false, sourceDistance => minOption(old, extension(sourceDistance, weight))
+
+def relax (weights distances : Set, visited : List(ℕ), sourceDistance : Option(ℕ)) → Set
+  | weights, List.nil, visited, sourceDistance => List.nil
+  | weights, List.cons(d, rest), visited, sourceDistance =>
+    List.cons(relaxValue(d, entry(weights, 0), equalNat(boolHead(visited), 1), sourceDistance),
+      relax(optionTail(weights), rest, boolTail(visited), sourceDistance))
+  descends distances
+
+def advanceChosen (rows : Set, distances : Set, visited : List(ℕ), chosen : Set) → Set
+  | rows, distances, visited, Option.none => State.current(distances, visited)
+  | rows, distances, visited, Option.some(Candidate.value(index, d)) =>
+    State.current(relax(rowAt(rows, index), distances, mark(visited, index), Option.some(d)),
+      mark(visited, index))
+
+def advance (rows : Set, state : Set) → Set
+  | rows, State.current(distances, visited) =>
+    advanceChosen(rows, distances, visited, minimum(distances, visited, 0))
+
+def iterate (fuel : Nat, rows : Set, state : Set) → Set
+  | zero, rows, state => state
+  | succ(fuel), rows, state => iterate(fuel, rows, advance(rows, state))
+
+def initialCell (index source : Nat) : Option(ℕ) :=
+  chooseDistance(equalNat(index, source), Option.some(0), Option.none)
+
+def initialDistances (count index source : Nat) → Set
+  | zero, index, source => List.nil
+  | succ(count), index, source =>
+    List.cons(initialCell(index, source), initialDistances(count, succ(index), source))
+
+def initialFlags (count : Nat) → List(ℕ)
+  | zero => List.nil
+  | succ(count) => List.cons(0, initialFlags(count))
+
+def solve (count source : Nat, rows : Set) : Set :=
+  iterate(count, rows, State.current(initialDistances(count, 0, source), initialFlags(count)))
+
+def distances (state : Set) → Set
+  | State.current(ds, visited) => ds
+
+def settled (state : Set) → Set
+  | State.current(ds, visited) => visited
+
+-- Local facts are valid for any input size, independently of a trace.
+theorem minOption.none_right (d : Option(ℕ))
+  shows minOption(d, Option.none) = d
+proof
+  induction d
+  | Option.none => settle with minOption
+  | Option.some(n) => settle with minOption, minSome
+
+theorem minOption.none_left (d : Option(ℕ))
+  shows minOption(Option.none, d) = d
+proof
+  unfold minOption
+  rfl
+
+theorem extension.absent_edge (d : Option(ℕ))
+  shows extension(d, Option.none) = Option.none
+proof
+  induction d
+  | Option.none => settle with extension
+  | Option.some(n) => settle with extension, extendSome
+
+theorem available.settled (d : Option(ℕ), index : Nat)
+  shows available(Bool.true, d, index) = Option.none
+proof
+  unfold available
+  rfl
+
+theorem relaxValue.settled (d weight source : Option(ℕ))
+  shows relaxValue(d, weight, Bool.true, source) = d
+proof
+  unfold relaxValue
+  rfl
+
+namespace DijkstraExamples
+
+-- Six vertices, including vertex 5 which is disconnected from source 0.
+def absent : Option(ℕ) := Option.none
+def weight (n : Nat) : Option(ℕ) := Option.some(n)
+
+def rows : Set :=
+  [[absent, weight(10), weight(3), absent, absent, absent],
+   [absent, absent, absent, weight(2), weight(1), absent],
+   [absent, weight(4), absent, weight(8), weight(2), absent],
+   [absent, absent, absent, absent, weight(7), absent],
+   [absent, absent, absent, weight(9), absent, absent],
+   [absent, absent, absent, absent, absent, absent]]
+
+def result : Set := Dijkstra.solve(6, 0, rows)
+
+theorem six_vertices
+  shows Dijkstra.distances(result) = [weight(0), weight(7), weight(3), weight(9), weight(5), absent]
+proof
+  compute
+
+theorem disconnected_is_unsettled
+  shows Dijkstra.entry(Dijkstra.distances(result), 5) = Option.none
+proof
+  compute
+
+-- Zero is an edge weight, distinct from Option.none.
+def zeroRows : Set :=
+  [[absent, weight(0), weight(5), absent],
+   [absent, absent, weight(0), absent],
+   [absent, absent, absent, weight(1)],
+   [absent, absent, absent, absent]]
+
+theorem zero_weight_route
+  shows Dijkstra.distances(Dijkstra.solve(4, 0, zeroRows)) =
+    [weight(0), weight(0), weight(0), weight(1)]
+proof
+  compute
+
+eval Dijkstra.distances(result)
+
+end DijkstraExamples

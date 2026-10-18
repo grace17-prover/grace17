@@ -1,0 +1,415 @@
+-- The fundamental theorem of arithmetic: prime factorizations exist and are unique
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.Factorization
+import Prime
+import Coprime
+import Core.List
+
+-- A factorization is a list of natural numbers; its value is their product,
+-- written ∏ xs.
+def listProduct (xs : List(ℕ)) → Nat
+  | [] => 1
+  | x :: rest => mul(x, listProduct(rest))
+
+notation prefix 80 "∏" => listProduct
+
+-- The number of times a natural number occurs in a list.  Two lists with the
+-- same multiplicities are the same multiset.
+def multiplicity (p : Nat, xs : List(ℕ)) → Nat
+  | p, [] => 0
+  | p, x :: rest => add(chooseNat(equalNat(p, x), 1, 0), multiplicity(p, rest))
+
+theorem listProduct.nil
+  shows ∏ [] = 1
+proof
+  simp
+
+theorem listProduct.cons (x : Nat) (rest : List(ℕ))
+  shows ∏ (x :: rest) = x * ∏ rest
+proof
+  unfold listProduct
+  rfl
+
+theorem multiplicity.nil (p : Nat)
+  shows multiplicity(p, []) = 0
+proof
+  unfold multiplicity
+  rfl
+
+theorem multiplicity.cons (p x : Nat) (rest : List(ℕ))
+  shows multiplicity(p, x :: rest) = chooseNat(equalNat(p, x), 1, 0) + multiplicity(p, rest)
+proof
+  unfold multiplicity
+  rfl
+
+theorem multiplicity.cons_self (p : Nat) (rest : List(ℕ))
+  shows multiplicity(p, p :: rest) = 1 + multiplicity(p, rest)
+proof
+  have same := equalNat.reflexive with *
+  unfold multiplicity
+  simp [chooseNat]
+
+theorem multiplicity.cons_other (p x : Nat) (rest : List(ℕ))
+  requires different : p ≠ x
+  shows multiplicity(p, x :: rest) = multiplicity(p, rest)
+proof
+  have test := equalNat.false_iff.backward with *
+  unfold multiplicity
+  simp [chooseNat, add]
+
+theorem multiplicity.positive_cons (p x : Nat) (rest : List(ℕ))
+  requires positive : 0 < multiplicity(p, rest)
+  shows 0 < multiplicity(p, x :: rest)
+proof
+  have equation := multiplicity.cons at p, x, rest with *
+  rw equation
+  arith
+
+-- A list of primes.  Membership is positive multiplicity, so two lists of
+-- primes with the same counts describe the same multiset of primes.
+predicate PrimeList (xs : List(ℕ)) :=
+  ∀ q, Nat(q) → 0 < multiplicity(q, xs) → Prime(q)
+
+theorem PrimeList.nil
+  shows PrimeList([])
+proof
+  intros q qNat positive
+  rw multiplicity.nil at positive
+  exfalso
+  exact Less.irreflexive at 0 with *, positive
+
+theorem PrimeList.cons (x : Nat) (rest : List(ℕ))
+  requires prime : Prime(x)
+  requires primes : PrimeList(rest)
+  shows PrimeList(x :: rest)
+proof
+  intros q qNat positive
+  have split : q = x ∨ ¬(q = x) by tauto
+  cases split with equal | different
+  . rw equal
+    exact prime
+  . have equation := multiplicity.cons_other with *
+    rw equation at positive
+    exact primes with q, qNat, positive
+
+theorem PrimeList.head (x : Nat) (rest : List(ℕ))
+  requires primes : PrimeList(x :: rest)
+  shows Prime(x)
+proof
+  have equation := multiplicity.cons_self with *
+  have positive : 0 < multiplicity(x, x :: rest)
+    rw equation
+    arith
+  exact primes with x, positive
+
+theorem PrimeList.tail (x : Nat) (rest : List(ℕ))
+  requires primes : PrimeList(x :: rest)
+  shows PrimeList(rest)
+proof
+  intros q qNat positive
+  have lifted := multiplicity.positive_cons at q, x, rest with *
+  exact primes with q, qNat, lifted
+
+theorem Prime.nonzero (p : Nat)
+  requires prime : Prime(p)
+  shows p ≠ 0
+proof
+  have above := Prime.greater_than_one with prime
+  intro zero
+  rw zero at above
+  have bad : 0 < 0 by arith
+  exact Less.irreflexive at 0 with *, bad
+
+theorem Prime.divides_prime (p q : Nat)
+  requires primeP : Prime(p)
+  requires primeQ : Prime(q)
+  requires divides : p ∣ q
+  shows p = q
+proof
+  have qNonzero := Prime.nonzero with primeQ
+  have bound := divides.le with *
+  have shape := Less.trichotomy at p, q with *
+  rcases shape with less | equal | greater
+  . exfalso
+    have member := membership.of_Less with *, less
+    have one := Prime.divisor with primeQ, member, divides
+    have above := Prime.greater_than_one with primeP
+    rw one at above
+    exact Less.irreflexive with *, above
+  . exact equal
+  . exfalso
+    have bad : p < p by arith
+    exact Less.irreflexive with *, bad
+
+-- A prime not dividing a is coprime to it: its only divisors are 1 and itself.
+theorem Prime.coprime_of_not_divides (p a : Nat)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ a)
+  shows IsGCD(p, a, 1)
+proof
+  have left := one.divides at p with *
+  have right := one.divides at a with *
+  have greatest : ∀ d, Nat(d) → d ∣ p → d ∣ a → d ∣ 1
+    intros d dNat dividesP dividesA
+    have pNonzero := Prime.nonzero with *
+    have bound := divides.le at d, p with *
+    have shape := Less.trichotomy at d, p with *
+    rcases shape with less | equal | greater
+    . have member := membership.of_Less with *, less
+      have one := Prime.divisor with prime, dNat, member, dividesP
+      rw one
+      exact divides.reflexive with *
+    . exfalso
+      rw equal at dividesA
+      exact notDivides with dividesA
+    . exfalso
+      have bad : p < p by arith
+      exact Less.irreflexive with *, bad
+  exact IsGCD.intro with *
+
+-- Euclid's lemma, through the integer Bézout identity.
+theorem Prime.divides_mul (p a b : Nat)
+  requires prime : Prime(p)
+  requires divides : p ∣ a * b
+  shows p ∣ a ∨ p ∣ b
+proof
+  have split : p ∣ a ∨ ¬(p ∣ a) by tauto
+  cases split with left | notLeft
+  . left
+    exact left
+  . right
+    have certificate := Prime.coprime_of_not_divides with *
+    have unit := gcd.unique with *
+    have ofNat := integerGCD.ofNat at p, a with *
+    have coprime : IntegerCoprime(integerOfNat(p), integerOfNat(a))
+      unfold IntegerCoprime
+      rwa ofNat
+    have absolute := integerNatAbs.ofNat at a * b with *
+    have magnitude : p ∣ integerNatAbs(integerOfNat(a * b)) by rwa absolute
+    have lifted := IntegerDivides.natural_left.backward with *
+    have product := integerOfNat.mul at a, b with *
+    rw product at lifted
+    have cancelled := IntegerCoprime.cancel with *
+    have back := IntegerDivides.natural_left.forward at p, integerOfNat(b) with *
+    have absoluteB := integerNatAbs.ofNat at b with *
+    rwa absoluteB at back
+
+theorem Prime.divides_listProduct (p : Nat) (xs : List(ℕ))
+  requires prime : Prime(p)
+  shows p ∣ ∏ xs → ∃ q, Nat(q) ∧ 0 < multiplicity(q, xs) ∧ p ∣ q
+proof
+  induction xs
+  | List.nil =>
+    intro divides
+    rw listProduct.nil at divides
+    exfalso
+    have one := divides.one_only with *
+    have above := Prime.greater_than_one with prime
+    rw one at above
+    exact Less.irreflexive at 1 with *, above
+  | List.cons(x, rest) using ih =>
+    intro divides
+    have xNat : Nat(x) by typecheck
+    have equation := listProduct.cons at x, rest with *
+    rw equation at divides
+    have split := Prime.divides_mul with *
+    cases split with head | tail
+    . have count := multiplicity.cons_self at x, rest with *
+      have positive : 0 < multiplicity(x, x :: rest)
+        rw count
+        arith
+      refine ⟨x, xNat, positive, head⟩
+    . obtain ⟨q, qNat, positive, dividesQ⟩ := ih with tail
+      have lifted := multiplicity.positive_cons at q, x, rest with *
+      refine ⟨q, qNat, lifted, dividesQ⟩
+
+-- Removing one occurrence of y from a list leaves a list with the same product
+-- after multiplying by y, and the same counts after putting y back.
+theorem multiplicity.remove (y : Nat) (ys : List(ℕ))
+  shows 0 < multiplicity(y, ys) →
+    ∃ zs, List(ℕ, zs) ∧ ∏ ys = ∏ (y :: zs) ∧
+      (∀ q, Nat(q) → multiplicity(q, ys) = multiplicity(q, y :: zs))
+proof
+  induction ys
+  | List.nil =>
+    intro positive
+    have empty := multiplicity.nil with *
+    rw empty at positive
+    exfalso
+    exact Less.irreflexive at 0 with *, positive
+  | List.cons(x, rest) using ih =>
+    intro positive
+    have split : y = x ∨ ¬(y = x) by tauto
+    cases split with equal | different
+    . refine ⟨rest, h_rest, _, _⟩
+      . rw equal
+        rfl
+      . intros q qNat
+        rw equal
+        rfl
+    . have restPositive : 0 < multiplicity(y, rest)
+        have equation := multiplicity.cons_other with different
+        rwa equation at positive
+      obtain ⟨zs, zsList, product, counts⟩ := ih with restPositive
+      have consList : List(ℕ, x :: zs) by typecheck
+      refine ⟨x :: zs, consList, _, _⟩
+      . have e1 := listProduct.cons at x, rest with *
+        have e2 := listProduct.cons at y, zs with *
+        have e3 := listProduct.cons at y, x :: zs with *
+        have e4 := listProduct.cons at x, zs with *
+        rw e2 at product
+        rw [e1, e3, e4, product]
+        ring
+      . intros q qNat
+        have c1 := multiplicity.cons at q, x, rest with *
+        have c2 := multiplicity.cons at q, y, x :: zs with *
+        have c3 := multiplicity.cons at q, x, zs with *
+        have c4 := multiplicity.cons at q, y, zs with *
+        have count := counts with q, qNat
+        rw c4 at count
+        rw [c1, c2, c3, count]
+        ring
+
+-- A list of primes with product one is empty.
+theorem listProduct.one (xs : List(ℕ))
+  requires primes : PrimeList(xs)
+  requires unit : ∏ xs = 1
+  shows ∀ q, Nat(q) → multiplicity(q, xs) = 0
+proof
+  have shape := List.cases with *
+  cases shape with nil | cons
+  . intros q qNat
+    rw nil
+    exact multiplicity.nil with *
+  . exfalso
+    obtain ⟨x, xMember, rest, restList, equal⟩ := cons
+    rw equal at unit
+    rw equal at primes
+    have equation := listProduct.cons at x, rest with *
+    rw equation at unit
+    have one := mul.left_factor_one with *, unit
+    have prime := PrimeList.head with *
+    have above := Prime.greater_than_one with prime
+    rw one at above
+    exact Less.irreflexive with *, above
+
+-- Uniqueness: two lists of primes with the same product have the same counts.
+theorem primeFactorization.unique (xs : List(ℕ))
+  shows ∀ ys, List(ℕ, ys) → PrimeList(xs) → PrimeList(ys) →
+    ∏ xs = ∏ ys →
+    ∀ q, Nat(q) → multiplicity(q, xs) = multiplicity(q, ys)
+proof
+  induction xs
+  | List.nil =>
+    intros ys ysList primesXs primesYs equal
+    rw listProduct.nil at equal
+    symm at equal
+    have zero := listProduct.one at ys with *
+    intros q qNat
+    have empty := multiplicity.nil at q with *
+    have count := zero with q, qNat
+    rw [empty, count]
+    rfl
+  | List.cons(x, rest) using ih =>
+    intros ys ysList primesXs primesYs equal
+    have primeX := PrimeList.head at x, rest with *
+    have primesRest := PrimeList.tail at x, rest with *
+    have e1 := listProduct.cons at x, rest with *
+    rw e1 at equal
+    have self := divides.reflexive at x with *
+    have dividesYs : x ∣ ∏ ys
+      rw ← equal
+      exact divides.multiply_right at x, x, ∏ rest with *
+    obtain ⟨y, yNat, yPositive, dividesY⟩ := Prime.divides_listProduct at x, ys with *, dividesYs
+    have primeY : Prime(y) by exact primesYs with y, yNat, yPositive
+    have same := Prime.divides_prime at x, y with *
+    rw ← same at yPositive
+    obtain ⟨zs, zsList, product, counts⟩ := multiplicity.remove at x, ys with *, yPositive
+    have e2 := listProduct.cons at x, zs with *
+    rw e2 at product
+    rw product at equal
+    have xNonzero := Prime.nonzero at x with *
+    have restEqual := mul.left_cancel_positive at ∏ rest, ∏ zs, x with *
+    have primesZs : PrimeList(zs)
+      intros q qNat positive
+      have count := counts with q, qNat
+      have lifted := multiplicity.positive_cons at q, x, zs with *
+      rw ← count at lifted
+      exact primesYs with q, qNat, lifted
+    have inner := ih with zs, zsList, primesRest, primesZs, restEqual
+    intros q qNat
+    have count := counts with q, qNat
+    have c1 := multiplicity.cons at q, x, rest with *
+    have c2 := multiplicity.cons at q, x, zs with *
+    have innerCount := inner with q, qNat
+    rw [count, c1, c2, innerCount]
+    rfl
+
+-- Existence, by strong induction: a prime divisor splits off a smaller cofactor.
+lemma primeFactorization.exists_membership (m : Set)
+  shows Nat(m) → m ≠ 0 → ∃ xs, List(ℕ, xs) ∧ PrimeList(xs) ∧ ∏ xs = m
+proof
+  induction m using membership
+  intros current ih currentNat nonzero
+  have shape := natural.zero_one_or_above_one with *
+  rcases shape with zero | one | above
+  . exfalso
+    exact nonzero with zero
+  . have nilList : List(ℕ, [])
+      typecheck
+    refine ⟨[], nilList, PrimeList.nil, ?_⟩
+    rw one
+    exact listProduct.nil
+  . have oneLess := Less.of_membership at 1, current with *, above
+    obtain ⟨p, primeP, dividesP⟩ := natural.exists_prime_divisor at current with *
+    obtain ⟨k, kNat, equation⟩ := dividesP
+    have kNonzero : k ≠ 0
+      intro kZero
+      rw kZero at equation
+      have annihilated := mul.right_zero at p with *
+      rw annihilated at equation
+      symm at equation
+      exact nonzero with equation
+    have aboveOne := Prime.greater_than_one with *
+    have smaller : k < current
+      have scaled := Less.mul_left at 1, p, k with *
+      have unit := mul.right_unit at k with *
+      have commuted := mul.commutative at p, k with *
+      rwa [unit, commuted, equation] at scaled
+    have member := membership.of_Less at k, current with *, smaller
+    obtain ⟨xs, xsList, primes, product⟩ := ih with k, member, kNat, kNonzero
+    have consList : List(ℕ, p :: xs) by typecheck
+    have consPrimes := PrimeList.cons with *
+    refine ⟨p :: xs, consList, consPrimes, ?_⟩
+    have e := listProduct.cons at p, xs with *
+    rwa [e, product]
+
+theorem primeFactorization.exists (n : Nat)
+  requires nonzero : n ≠ 0
+  shows ∃ xs, List(ℕ, xs) ∧ PrimeList(xs) ∧ ∏ xs = n
+proof
+  have natural : Nat(n) by assumption
+  exact primeFactorization.exists_membership with natural, nonzero
+
+-- The fundamental theorem of arithmetic: every positive natural number is a
+-- product of primes, and any two such products use each prime the same number
+-- of times.
+theorem primeFactorization.fundamental_theorem (n : Nat)
+  requires nonzero : n ≠ 0
+  shows (∃ xs, List(ℕ, xs) ∧ PrimeList(xs) ∧ ∏ xs = n) ∧
+    (∀ xs, List(ℕ, xs) → ∀ ys, List(ℕ, ys) → PrimeList(xs) → PrimeList(ys) →
+      ∏ xs = n → ∏ ys = n →
+      ∀ q, Nat(q) → multiplicity(q, xs) = multiplicity(q, ys))
+proof
+  constructor
+  . exact primeFactorization.exists with *
+  . intros xs xsList ys ysList primesXs primesYs productXs productYs
+    have equal : ∏ xs = ∏ ys
+      rw [productXs, productYs]
+      rfl
+    have unique := primeFactorization.unique at xs with *
+    exact unique with ys, ysList, primesXs, primesYs, equal

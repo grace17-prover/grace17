@@ -1,0 +1,162 @@
+-- Algebraic elements over a field satisfy monic relations and generate finite modules.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Field.Algebraic
+import IntegralAdjoin
+import Construction
+import Ring.FiniteSum
+
+-- Horner evaluation with explicit nonzero leading coefficient a. The list
+-- contains the lower coefficients in ascending order, so trailing zeros pose
+-- no ambiguity about which coefficient is asserted to be nonzero.
+def polynomialHorner {A : Set} (f plus times x a : Set) (cs : List(A)) : Set :=
+  monicValue{A}(f, plus, times, f(a), x, cs)
+
+predicate AlgebraicOver (f A zero B plus z times x : Set) :=
+  x ∈ B ∧ ∃ a ∈ A, a ≠ zero ∧ ∃ cs, List(A, cs) ∧ polynomialHorner{A}(f, plus, times, x, a, cs) = z
+
+notation scoped AlgebraicOver(f, R, S, x) => AlgebraicOver(f, R.carrier, R.zero, S.carrier, S.add, S.zero, S.mul, x)
+
+section Evaluation
+variable (A add zero neg mul one B plus z minus times unit f x : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+
+theorem hornerValue.closed (leading : Set) (cs : List(A))
+  requires coefficient : leading ∈ S
+  shows monicValue{A}(f, plus, times, leading, x, cs) ∈ S
+proof
+  induction cs
+  | List.nil =>
+    rwa monicValue
+  | List.cons(a, tail) using ih =>
+    have aIn : a ∈ A by assumption
+    have image := IsRingHom.closed with hom, aIn
+    have ordinary := IsCommRing.ring with target
+    have product := IsRing.mul_closed with ordinary, element, ih
+    rw monicValue
+    exact IsRing.add_closed with ordinary, product
+
+theorem hornerValue.scale (c leading : Set) (cs : List(A))
+  requires coefficient : c ∈ R
+  requires initial : leading ∈ S
+  shows monicValue{A}(f, plus, times, S[f(c) * leading], x, ringScale{A}(mul, c, cs)) = S[f(c) * monicValue{A}(f, plus, times, leading, x, cs)]
+proof
+  induction cs
+  | List.nil =>
+    rw [ringScale, monicValue, monicValue]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have aIn : a ∈ R by assumption
+    have ordinary := IsCommRing.ring with source
+    have scaleClosed : ∀ u ∈ A, R[c * u] ∈ A
+      intros u hu
+      exact IsRing.mul_closed with ordinary, coefficient, hu
+    have product := IsRing.mul_closed with ordinary, coefficient, aIn
+    have imageC := IsRingHom.closed with hom, coefficient
+    have imageA := IsRingHom.closed with hom, aIn
+    have mapped := IsRingHom.mul with hom, coefficient, aIn
+    have value := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, leading, tail with *
+    rw [ringScale, monicValue, monicValue, ih, mapped]
+    ring
+
+end Evaluation
+
+section Fields
+variable (A add zero neg mul one B plus z minus times unit f x : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis field : IsField(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+
+theorem IntegralOver.algebraic
+  requires integral : IntegralOver(f, R, S, x)
+  shows AlgebraicOver(f, R, S, x)
+proof
+  have source := IsField.comm_ring with field
+  have nontrivial := IsField.nontrivial with field
+  have distinct := Nontrivial.distinct with nontrivial
+  have ordinary := IsCommRing.ring with source
+  have monoid := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with monoid
+  have nonzero : one ≠ zero
+    intro equal
+    have impossible : zero = one by cc
+    exact distinct with impossible
+  have oneValue := IsRingHom.one with hom
+  obtain ⟨cs, list, relation⟩ := integral.right
+  have equation : polynomialHorner{A}(f, plus, times, x, one, cs) = S[0]
+    unfold polynomialHorner
+    rfl
+  unfold AlgebraicOver
+  refine ⟨integral.left, one, oneIn, nonzero, cs, list, equation⟩
+
+theorem AlgebraicOver.integral
+  requires algebraic : AlgebraicOver(f, R, S, x)
+  shows IntegralOver(f, R, S, x)
+proof
+  have source := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with source
+  unfold AlgebraicOver at algebraic
+  obtain ⟨a, aIn, nonzero, cs, list, relation⟩ := algebraic.right
+  obtain ⟨b, inverse⟩ := IsField.inverse_exists at A, add, zero, neg, mul, one, a with *
+  unfold IsInverse at inverse
+  have bIn := inverse.right.left
+  have cancels := inverse.right.right.right
+  have mapped := IsRingHom.mul with hom, bIn, aIn
+  have oneValue := IsRingHom.one with hom
+  have normalizedLeading : S[f(b) * f(a)] = S[1] by cc
+  have imageA := IsRingHom.closed with hom, aIn
+  have imageB := IsRingHom.closed with hom, bIn
+  have scaleClosed : ∀ u ∈ A, R[b * u] ∈ A
+    intros u hu
+    exact IsRing.mul_closed with ordinary, bIn, hu
+  have scaled := ringScale.closed with *
+  have identity := hornerValue.scale at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, b, f(a), cs with *
+  rw normalizedLeading at identity
+  unfold polynomialHorner at relation
+  rw relation at identity
+  have annihilate : S[f(b) * 0] = S[0] by ring
+  rw annihilate at identity
+  unfold IntegralOver
+  refine ⟨algebraic.left, ringScale{A}(mul, b, cs), scaled, identity⟩
+
+theorem AlgebraicOver.iff_integral
+  shows AlgebraicOver(f, R, S, x) ↔ IntegralOver(f, R, S, x)
+proof
+  constructor
+  . intro algebraic
+    exact AlgebraicOver.integral with field, target, hom, algebraic
+  . intro integral
+    exact IntegralOver.algebraic with field, target, hom, integral
+
+theorem AlgebraicOver.finite_adjoin
+  requires algebraic : AlgebraicOver(f, R, S, x)
+  shows ∃ G, Finite(G) ∧ G ⊆ algebraAdjoin(f, R, S, {x}) ∧ linearSpan(f, R, S, G) = algebraAdjoin(f, R, S, {x})
+proof
+  have source := IsField.comm_ring with field
+  have integral := AlgebraicOver.integral with field, target, hom, algebraic
+  have data := integral
+  unfold IntegralOver at data
+  exact IntegralOver.finite_adjoin with *
+
+theorem AlgebraicOver.finite_module_of_generates
+  requires algebraic : AlgebraicOver(f, R, S, x)
+  requires generates : algebraAdjoin(f, R, S, {x}) = S
+  shows FiniteAlgebraModule(f, R, S)
+proof
+  have source := IsField.comm_ring with field
+  have integral := AlgebraicOver.integral with field, target, hom, algebraic
+  have data := integral
+  unfold IntegralOver at data
+  exact IntegralOver.finite_module_of_generates with *
+
+end Fields

@@ -1,0 +1,943 @@
+-- Bundled topological spaces: a space as one structure of its carrier and
+-- its open sets, the open and closed sets, neighborhoods, interior,
+-- closure, density, and convergent sequences under their standard names,
+-- the closure instances, and the topology rewrite set
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Structure
+import Maps
+import Basis
+import Connected
+
+-- A topological space is a structure of its carrier and its family of open
+-- sets, built by TopologicalSpace.mk(A, T) and read back by the projections
+-- X.carrier and X.opens. TopologicalSpace(X) says that X is such a
+-- structure whose open sets are subsets of the carrier containing the
+-- carrier and closed under arbitrary unions and binary intersections; the
+-- empty set is the union of the empty family. IsTopology(A, T) remains the
+-- form over separate pieces, bridged below.
+structure TopologicalSpace
+  | carrier : Set
+  | opens : Set
+  where
+    opens_subsets : opens ⊆ 𝒫(carrier)
+    carrier_open : carrier ∈ opens
+    union_open : ∀ S, S ⊆ opens → ⋃(S) ∈ opens
+    inter_open : ∀ U V ∈ opens, U ∩ V ∈ opens
+
+-- The projection laws of a constructed space as one rewrite set.
+tactic topology_projections := simp [TopologicalSpace.mk.carrier, TopologicalSpace.mk.opens]
+
+-- Bridges between the structure and the form over separate pieces. The
+-- bundled-to-unbundled direction is an instance, so `with *` reads the
+-- topology off a space hypothesis.
+instance TopologicalSpace.parts (X : Set)
+  requires space : TopologicalSpace(X)
+  shows IsTopology(X.carrier, X.opens)
+proof
+  obtain ⟨shape, subsets, whole, unions, intersections⟩ := space
+  unfold IsTopology
+  exact ⟨subsets, whole, unions, intersections⟩
+
+theorem TopologicalSpace.of_parts (A T : Set)
+  requires topology : IsTopology(A, T)
+  shows TopologicalSpace(TopologicalSpace.mk(A, T))
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  apply TopologicalSpace.intro
+  . exact subsets
+  . exact whole
+  . exact unions
+  . exact intersections
+
+theorem TopologicalSpace.of_projections (X : Set)
+  requires shape : TopologicalSpace.Data(X)
+  requires topology : IsTopology(X.carrier, X.opens)
+  shows TopologicalSpace(X)
+proof
+  obtain ⟨subsets, whole, unions, intersections⟩ := topology
+  unfold TopologicalSpace
+  exact ⟨shape, subsets, whole, unions, intersections⟩
+
+-- A space is the constructor applied to its projections.
+theorem TopologicalSpace.eta_of_space (X : Set)
+  requires space : TopologicalSpace(X)
+  shows X = TopologicalSpace.mk(X.carrier, X.opens)
+proof
+  obtain ⟨shape, rest⟩ := space
+  exact TopologicalSpace.eta with shape
+
+-- Under a hypothesis TopologicalSpace(X): Open(X, U) says U is open, that
+-- is, U ∈ X.opens; Closed(X, C) that C is a subset of the carrier whose
+-- complement is open; Neighborhood(X, N, x) that N contains an open set
+-- around x; Dense(X, A) that A meets every nonempty open set; Compact(X, A)
+-- that every open cover of A has a finite subcover; ConnectedSubset(X, A)
+-- that A has no separation by open sets; and Converges(X, u, x), written
+-- u ⇝ x, that the sequence u in X is eventually inside every open set
+-- around x. IsClosed(A, T, C), IsDense(A, T, C), IsCompact(A, T, C), and
+-- IsConnectedSubset(A, T, C) remain the forms over separate pieces.
+section Definitions
+variable (X : Set)
+hypothesis space : TopologicalSpace(X)
+
+predicate Open (U : Set) := U ∈ X.opens
+predicate Closed (C : Set) := IsClosed(X.carrier, X.opens, C)
+predicate Neighborhood (N x : Set) :=
+  N ⊆ X.carrier ∧ (∃ U ∈ X.opens, x ∈ U ∧ U ⊆ N)
+predicate Dense (A : Set) := IsDense(X.carrier, X.opens, A)
+predicate Compact (A : Set) := IsCompact(X.carrier, X.opens, A)
+predicate ConnectedSubset (A : Set) := IsConnectedSubset(X.carrier, X.opens, A)
+predicate Converges (u x : Set) :=
+  (u : ℕ → X.carrier) ∧ x ∈ X.carrier ∧
+  (∀ U ∈ X.opens, x ∈ U →
+    ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n → u(n) ∈ U)
+
+end Definitions
+
+-- The properties of the space itself: Compact(X) says the carrier is a
+-- compact subset, the one-place form beside Compact(X, A) resolved by its
+-- arity, Hausdorff(X) that distinct points have disjoint open
+-- neighborhoods, T1Space(X) that each point is closed, and Connected(X)
+-- that the carrier is not the union of two disjoint nonempty open sets.
+-- IsCompact(A, T, A), IsHausdorff(A, T), IsT1Space(A, T), and IsConnected(A, T)
+-- remain the forms over separate pieces.
+predicate Compact (X : Set) :=
+  IsCompact(TopologicalSpace.carrier(X), TopologicalSpace.opens(X),
+    TopologicalSpace.carrier(X))
+predicate Hausdorff (X : Set) :=
+  IsHausdorff(TopologicalSpace.carrier(X), TopologicalSpace.opens(X))
+predicate T1Space (X : Set) :=
+  IsT1Space(TopologicalSpace.carrier(X), TopologicalSpace.opens(X))
+predicate Connected (X : Set) :=
+  IsConnected(TopologicalSpace.carrier(X), TopologicalSpace.opens(X))
+
+-- A sequence converging to a point is written u ⇝ x wherever a hypothesis
+-- in scope supplies the space. Under the same hypothesis a binder (x : X)
+-- is a set variable with x ∈ X.carrier, and x ∈ X, U ⊆ X, and ∀ x ∈ X
+-- are read at the carrier.
+notation infix 50 "⇝" => Converges(X, _, _) via hypothesis TopologicalSpace(X) for X.carrier
+
+-- The interior of A is the largest open set inside A, its closure the
+-- smallest closed set around it, and its boundary the closure minus the
+-- interior. interiorIn(T, A), closure(A, T, S), and boundary(A, T, S)
+-- remain the forms over separate pieces.
+def interior (X A : Set) : Set := interiorIn(TopologicalSpace.opens(X), A)
+def closure (X A : Set) : Set :=
+  closure(TopologicalSpace.carrier(X), TopologicalSpace.opens(X), A)
+def boundary (X A : Set) : Set :=
+  boundary(TopologicalSpace.carrier(X), TopologicalSpace.opens(X), A)
+
+theorem interior.parts (X A : Set)
+  shows interior(X, A) = interiorIn(TopologicalSpace.opens(X), A)
+proof
+  simp [interior]
+
+theorem closure.parts (X A : Set)
+  shows closure(X, A) =
+    closure(TopologicalSpace.carrier(X), TopologicalSpace.opens(X), A)
+proof
+  simp [closure]
+
+theorem boundary.parts (X A : Set)
+  shows boundary(X, A) =
+    boundary(TopologicalSpace.carrier(X), TopologicalSpace.opens(X), A)
+proof
+  simp [boundary]
+
+section OpenLaws
+variable (X : Set)
+hypothesis space : TopologicalSpace(X)
+
+-- Open(X, U) and U ∈ X.opens are the same fact; the forward direction is
+-- an instance, so an engine requirement U ∈ X.opens is read off Open(X, U).
+instance Open.mem (U : Set)
+  requires open : Open(X, U)
+  shows U ∈ X.opens
+proof
+  unfold Open at open
+  exact open
+
+theorem Open.of_mem (U : Set)
+  requires member : U ∈ X.opens
+  shows Open(X, U)
+proof
+  unfold Open
+  exact member
+
+theorem Open.subset (U : Set)
+  requires open : Open(X, U)
+  shows U ⊆ X
+proof
+  have member := Open.mem with open
+  exact IsTopology.subset with *
+
+theorem Open.point (U x : Set)
+  requires open : Open(X, U)
+  requires hx : x ∈ U
+  shows x ∈ X
+proof
+  have inside := Open.subset with open
+  exact inside with x, hx
+
+-- Closure: the carrier, the empty set, binary intersections, and unions of
+-- open sets are open. These are instances, so openness of a compound set is
+-- synthesized.
+instance Open.carrier
+  shows Open(X, X.carrier)
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Open
+  exact IsTopology.whole with *
+
+instance Open.empty_set
+  shows Open(X, ∅)
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Open
+  exact IsTopology.empty with *
+
+instance Open.inter (U V : Set)
+  requires openU : Open(X, U)
+  requires openV : Open(X, V)
+  shows Open(X, U ∩ V)
+proof
+  have parts := TopologicalSpace.parts with space
+  have memberU := Open.mem with openU
+  have memberV := Open.mem with openV
+  unfold Open
+  exact IsTopology.intersection2 with *
+
+instance Open.union (U V : Set)
+  requires openU : Open(X, U)
+  requires openV : Open(X, V)
+  shows Open(X, U ∪ V)
+proof
+  have parts := TopologicalSpace.parts with space
+  have memberU := Open.mem with openU
+  have memberV := Open.mem with openV
+  unfold Open
+  exact IsTopology.union2 with *
+
+theorem Open.family_union (S : Set)
+  requires opens : ∀ U ∈ S, Open(X, U)
+  shows Open(X, ⋃(S))
+proof
+  have parts := TopologicalSpace.parts with space
+  have inside : S ⊆ X.opens
+    intros U hU
+    exact Open.mem with (opens with U, hU)
+  unfold Open
+  exact IsTopology.union with *
+
+theorem Open.finite_inter (S : Set)
+  requires finite : Finite(S)
+  requires nonempty : Nonempty(S)
+  requires opens : ∀ U ∈ S, Open(X, U)
+  shows Open(X, ⋂(S))
+proof
+  have parts := TopologicalSpace.parts with space
+  have inside : S ⊆ X.opens
+    intros U hU
+    exact Open.mem with (opens with U, hU)
+  unfold Open
+  exact IsTopology.finite_intersection with *
+
+-- Closed sets.
+instance Closed.parts (C : Set)
+  requires closed : Closed(X, C)
+  shows IsClosed(X.carrier, X.opens, C)
+proof
+  unfold Closed at closed
+  exact closed
+
+theorem Closed.of_parts (C : Set)
+  requires closed : IsClosed(X.carrier, X.opens, C)
+  shows Closed(X, C)
+proof
+  unfold Closed
+  exact closed
+
+theorem Closed.subset (C : Set)
+  requires closed : Closed(X, C)
+  shows C ⊆ X
+proof
+  have parts := Closed.parts with closed
+  exact parts.left
+
+theorem Closed.compl_open (C : Set)
+  requires closed : Closed(X, C)
+  shows Open(X, complement(X.carrier, C))
+proof
+  have parts := Closed.parts with closed
+  unfold Open
+  exact parts.right
+
+theorem Open.compl_closed (U : Set)
+  requires open : Open(X, U)
+  shows Closed(X, complement(X.carrier, U))
+proof
+  have member := Open.mem with open
+  unfold Closed
+  exact Space.Open.complement_closed with *
+
+instance Closed.carrier
+  shows Closed(X, X.carrier)
+proof
+  unfold Closed
+  exact Space.IsClosed.whole with *
+
+instance Closed.empty_set
+  shows Closed(X, ∅)
+proof
+  unfold Closed
+  exact Space.IsClosed.empty with *
+
+instance Closed.union (C D : Set)
+  requires closedC : Closed(X, C)
+  requires closedD : Closed(X, D)
+  shows Closed(X, C ∪ D)
+proof
+  have partsC := Closed.parts with closedC
+  have partsD := Closed.parts with closedD
+  unfold Closed
+  exact IsClosed.union2 with *
+
+instance Closed.inter (C D : Set)
+  requires closedC : Closed(X, C)
+  requires closedD : Closed(X, D)
+  shows Closed(X, C ∩ D)
+proof
+  have partsC := Closed.parts with closedC
+  have partsD := Closed.parts with closedD
+  unfold Closed
+  exact IsClosed.intersection2 with *
+
+theorem Closed.family_inter (S : Set)
+  requires nonempty : Nonempty(S)
+  requires closed : ∀ C ∈ S, Closed(X, C)
+  shows Closed(X, ⋂(S))
+proof
+  have pieces : ∀ C ∈ S, IsClosed(X.carrier, X.opens, C)
+    intros C hC
+    exact Closed.parts with (closed with C, hC)
+  unfold Closed
+  exact IsClosed.family_intersection with *
+
+-- The textbook law: a set is open exactly when it is a neighborhood of each
+-- of its points.
+theorem Neighborhood.of_open (U x : Set)
+  requires open : Open(X, U)
+  requires hx : x ∈ U
+  shows Neighborhood(X, U, x)
+proof
+  have member := Open.mem with open
+  have inside := Open.subset with open
+  unfold Neighborhood
+  exact ⟨inside, U, member, hx, (Subset.reflexive at U)⟩
+
+theorem Neighborhood.point (N x : Set)
+  requires neighborhood : Neighborhood(X, N, x)
+  shows x ∈ N
+proof
+  obtain ⟨inside, U, hU, hxU, hUN⟩ := neighborhood
+  exact hUN with x, hxU
+
+theorem Neighborhood.superset (N M x : Set)
+  requires neighborhood : Neighborhood(X, N, x)
+  requires hNM : N ⊆ M
+  requires hM : M ⊆ X
+  shows Neighborhood(X, M, x)
+proof
+  obtain ⟨inside, U, hU, hxU, hUN⟩ := neighborhood
+  unfold Neighborhood
+  exact ⟨hM, U, hU, hxU, (Subset.transitive with hUN, hNM)⟩
+
+theorem Neighborhood.inter (N M x : Set)
+  requires first : Neighborhood(X, N, x)
+  requires second : Neighborhood(X, M, x)
+  shows Neighborhood(X, N ∩ M, x)
+proof
+  have parts := TopologicalSpace.parts with space
+  obtain ⟨insideN, U, hU, hxU, hUN⟩ := first
+  obtain ⟨insideM, V, hV, hxV, hVM⟩ := second
+  have both : U ∩ V ∈ X.opens := IsTopology.intersection2 with *
+  have point : x ∈ U ∩ V
+    exact intersection.membership.backward with ⟨hxU, hxV⟩
+  have below := intersection.subset_left at N, M
+  have inside : N ∩ M ⊆ X.carrier := Subset.transitive with below, insideN
+  unfold Neighborhood
+  refine ⟨inside, U ∩ V, both, point, ?_⟩
+  exact intersection.monotone with hUN, hVM
+
+theorem Open.iff_neighborhoods (U : Set)
+  requires hU : U ⊆ X
+  shows Open(X, U) ↔ ∀ x ∈ U, Neighborhood(X, U, x)
+proof
+  have parts := TopologicalSpace.parts with space
+  constructor
+  . intros open x hx
+    exact Neighborhood.of_open with *
+  . intro around
+    have cover : U = ⋃(openSubsets(X.opens, U))
+      apply Subset.antisymmetric
+      . intros x hx
+        obtain ⟨inside, V, hV, hxV, hVU⟩ := around with x, hx
+        have member : V ∈ openSubsets(X.opens, U)
+          exact openSubsets.membership.backward with ⟨hV, hVU⟩
+        exact union.contains with member, hxV
+      . apply union.subset
+        intros V hV
+        have pieces := openSubsets.membership.forward with hV
+        exact pieces.right
+    have inside : openSubsets(X.opens, U) ⊆ X.opens
+      intros V hV
+      have pieces := openSubsets.membership.forward with hV
+      exact pieces.left
+    rw cover
+    exact Open.of_mem with (IsTopology.union with *)
+
+end OpenLaws
+
+section InteriorClosureLaws
+variable (X : Set)
+hypothesis space : TopologicalSpace(X)
+
+-- The interior laws, under their standard names.
+instance interior_open (A : Set)
+  shows Open(X, interior(X, A))
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Open
+  rw interior.parts
+  exact interiorIn.open with *
+
+theorem interior_subset (A : Set)
+  shows interior(X, A) ⊆ A
+proof
+  rw interior.parts
+  exact interiorIn.subset at X.opens, A
+
+theorem interior_maximal (A U : Set)
+  requires open : Open(X, U)
+  requires inside : U ⊆ A
+  shows U ⊆ interior(X, A)
+proof
+  have member := Open.mem with open
+  rw interior.parts
+  exact interiorIn.greatest with *
+
+theorem interior_eq_of_open (U : Set)
+  requires open : Open(X, U)
+  shows interior(X, U) = U
+proof
+  have member := Open.mem with open
+  rw interior.parts
+  exact interiorIn.of_open with *
+
+theorem interior_eq_iff_open (U : Set)
+  shows interior(X, U) = U ↔ Open(X, U)
+proof
+  constructor
+  . intro equal
+    rw ← equal
+    exact interior_open with *
+  . intro open
+    exact interior_eq_of_open with *
+
+theorem mem_interior (A x : Set)
+  shows x ∈ interior(X, A) ↔ ∃ U, Open(X, U) ∧ x ∈ U ∧ U ⊆ A
+proof
+  rw interior.parts
+  have characterization := interiorIn.membership at X.opens, A, x
+  constructor
+  . intro hx
+    obtain ⟨U, hU, hxU, hUA⟩ := characterization.forward with hx
+    exact ⟨U, (Open.of_mem with hU), hxU, hUA⟩
+  . intro inside
+    obtain ⟨U, open, hxU, hUA⟩ := inside
+    have member := Open.mem with open
+    exact characterization.backward with ⟨U, member, hxU, hUA⟩
+
+theorem interior_mono (A B : Set)
+  requires hAB : A ⊆ B
+  shows interior(X, A) ⊆ interior(X, B)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, interior.parts]
+  exact interiorIn.monotone with *
+
+theorem interior_interior (A : Set)
+  shows interior(X, interior(X, A)) = interior(X, A)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, interior.parts]
+  exact interiorIn.idempotent with *
+
+theorem interior_inter (A B : Set)
+  shows interior(X, A ∩ B) = interior(X, A) ∩ interior(X, B)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, interior.parts, interior.parts]
+  exact interiorIn.intersection2 with *
+
+theorem interior_whole
+  shows interior(X, X.carrier) = X.carrier
+proof
+  have parts := TopologicalSpace.parts with space
+  rw interior.parts
+  exact interiorIn.whole with *
+
+theorem interior_empty
+  shows interior(X, ∅) = ∅
+proof
+  have parts := TopologicalSpace.parts with space
+  rw interior.parts
+  exact interiorIn.empty with *
+
+-- The closure laws.
+instance closure_closed (A : Set)
+  requires hA : A ⊆ X
+  shows Closed(X, closure(X, A))
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Closed
+  rw closure.parts
+  exact Space.closure.closed with *
+
+theorem subset_closure (A : Set)
+  requires hA : A ⊆ X
+  shows A ⊆ closure(X, A)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw closure.parts
+  exact Space.closure.contains with *
+
+theorem closure_minimal (A C : Set)
+  requires closed : Closed(X, C)
+  requires hAC : A ⊆ C
+  shows closure(X, A) ⊆ C
+proof
+  have parts := TopologicalSpace.parts with space
+  have pieces := Closed.parts with closed
+  rw closure.parts
+  exact closure.least with *
+
+theorem closure_subset (A : Set)
+  requires hA : A ⊆ X
+  shows closure(X, A) ⊆ X
+proof
+  have parts := TopologicalSpace.parts with space
+  rw closure.parts
+  exact Space.closure.subset with *
+
+theorem closure_eq_of_closed (C : Set)
+  requires closed : Closed(X, C)
+  shows closure(X, C) = C
+proof
+  have parts := TopologicalSpace.parts with space
+  have pieces := Closed.parts with closed
+  rw closure.parts
+  exact closure.of_closed with *
+
+theorem closure_eq_iff_closed (C : Set)
+  requires hC : C ⊆ X
+  shows closure(X, C) = C ↔ Closed(X, C)
+proof
+  constructor
+  . intro equal
+    rw ← equal
+    exact closure_closed with *
+  . intro closed
+    exact closure_eq_of_closed with *
+
+theorem closure_mono (A B : Set)
+  requires hB : B ⊆ X
+  requires hAB : A ⊆ B
+  shows closure(X, A) ⊆ closure(X, B)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [closure.parts, closure.parts]
+  exact closure.monotone with *
+
+theorem closure_closure (A : Set)
+  requires hA : A ⊆ X
+  shows closure(X, closure(X, A)) = closure(X, A)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [closure.parts, closure.parts]
+  exact closure.idempotent with *
+
+theorem closure_union (A B : Set)
+  requires hA : A ⊆ X
+  requires hB : B ⊆ X
+  shows closure(X, A ∪ B) = closure(X, A) ∪ closure(X, B)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [closure.parts, closure.parts, closure.parts]
+  exact closure.union2 with *
+
+theorem closure_whole
+  shows closure(X, X.carrier) = X.carrier
+proof
+  have parts := TopologicalSpace.parts with space
+  rw closure.parts
+  exact closure.whole with *
+
+theorem closure_empty
+  shows closure(X, ∅) = ∅
+proof
+  have parts := TopologicalSpace.parts with space
+  rw closure.parts
+  exact closure.empty with *
+
+-- A point lies in the closure of A exactly when every open set around it
+-- meets A.
+theorem mem_closure (A x : Set)
+  requires hA : A ⊆ X
+  shows x ∈ closure(X, A) ↔
+    x ∈ X ∧ (∀ U, Open(X, U) → x ∈ U → Nonempty(U ∩ A))
+proof
+  have parts := TopologicalSpace.parts with space
+  rw closure.parts
+  have criterion := closure.membership at X.carrier, X.opens, A, x with parts, hA
+  constructor
+  . intro hx
+    obtain ⟨inX, meets⟩ := criterion.forward with hx
+    refine ⟨inX, ?_⟩
+    intros U open hxU
+    have member := Open.mem with open
+    exact meets with U, member, hxU
+  . intro meets
+    obtain ⟨inX, touches⟩ := meets
+    apply criterion.backward
+    refine ⟨inX, ?_⟩
+    intros U hU hxU
+    exact touches with U, (Open.of_mem with hU), hxU
+
+theorem interior_subset_closure (A : Set)
+  requires hA : A ⊆ X
+  shows interior(X, A) ⊆ closure(X, A)
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, closure.parts]
+  exact interiorIn.subset_closure with *
+
+theorem closure_complement (A : Set)
+  requires hA : A ⊆ X
+  shows closure(X, complement(X.carrier, A)) =
+    complement(X.carrier, interior(X, A))
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, closure.parts]
+  exact closure.complement with *
+
+theorem interior_complement (A : Set)
+  requires hA : A ⊆ X
+  shows interior(X, complement(X.carrier, A)) =
+    complement(X.carrier, closure(X, A))
+proof
+  have parts := TopologicalSpace.parts with space
+  rw [interior.parts, closure.parts]
+  exact interiorIn.complement with *
+
+-- The boundary.
+theorem mem_boundary (A x : Set)
+  shows x ∈ boundary(X, A) ↔ x ∈ closure(X, A) ∧ ¬x ∈ interior(X, A)
+proof
+  rw [boundary.parts, closure.parts, interior.parts]
+  exact boundary.membership at X.carrier, X.opens, A, x
+
+instance boundary_closed (A : Set)
+  requires hA : A ⊆ X
+  shows Closed(X, boundary(X, A))
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Closed
+  rw boundary.parts
+  exact ClosureLaws.boundary.closed with *
+
+-- Dense sets.
+instance Dense.parts (A : Set)
+  requires dense : Dense(X, A)
+  shows IsDense(X.carrier, X.opens, A)
+proof
+  unfold Dense at dense
+  exact dense
+
+theorem Dense.of_parts (A : Set)
+  requires dense : IsDense(X.carrier, X.opens, A)
+  shows Dense(X, A)
+proof
+  unfold Dense
+  exact dense
+
+theorem Dense.closure (A : Set)
+  requires dense : Dense(X, A)
+  shows closure(X, A) = X.carrier
+proof
+  have parts := Dense.parts with dense
+  rw closure.parts
+  unfold IsDense at parts
+  exact parts
+
+theorem Dense.carrier
+  shows Dense(X, X.carrier)
+proof
+  have parts := TopologicalSpace.parts with space
+  unfold Dense
+  exact ClosureLaws.IsDense.whole with *
+
+theorem Dense.iff_meets (A : Set)
+  requires hA : A ⊆ X
+  shows Dense(X, A) ↔ ∀ U, Open(X, U) → Nonempty(U) → Nonempty(U ∩ A)
+proof
+  have parts := TopologicalSpace.parts with space
+  have characterization := ClosureLaws.IsDense.iff_meets_open with *
+  constructor
+  . intros dense U open inhabited
+    have pieces := Dense.parts with dense
+    have member := Open.mem with open
+    exact characterization.forward with pieces, U, member, inhabited
+  . intro meets
+    have pieces : ∀ U ∈ X.opens, Nonempty(U) → Nonempty(U ∩ A)
+      intros U hU inhabited
+      exact meets with U, (Open.of_mem with hU), inhabited
+    exact Dense.of_parts with (characterization.backward with pieces)
+
+end InteriorClosureLaws
+
+-- The topology rewrite set: the idempotent and distributive laws of
+-- interior and closure, their values on the carrier and the empty set, and
+-- their values on open and closed sets.
+tactic topology_simp := simp [interior_interior, closure_closure, interior_inter, closure_union, interior_whole, interior_empty, closure_whole, closure_empty, interior_eq_of_open, closure_eq_of_closed]
+
+section ConvergenceLaws
+variable (X : Set)
+hypothesis space : TopologicalSpace(X)
+
+theorem Converges.sequence (u x : Set)
+  requires converges : u ⇝ x
+  shows u : ℕ → X.carrier
+proof
+  obtain ⟨sequence, point, eventually⟩ := converges
+  exact sequence
+
+theorem Converges.limit_mem (u x : Set)
+  requires converges : u ⇝ x
+  shows x ∈ X
+proof
+  obtain ⟨sequence, point, eventually⟩ := converges
+  exact point
+
+theorem Converges.eventually (u x U : Set)
+  requires converges : u ⇝ x
+  requires open : Open(X, U)
+  requires hx : x ∈ U
+  shows ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n → u(n) ∈ U
+proof
+  obtain ⟨sequence, point, eventually⟩ := converges
+  have member := Open.mem with open
+  exact eventually with U, member, hx
+
+theorem Converges.of_eventually (u x : Set)
+  requires sequence : u : ℕ → X.carrier
+  requires point : x ∈ X
+  requires eventually : ∀ U, Open(X, U) → x ∈ U →
+    ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n → u(n) ∈ U
+  shows u ⇝ x
+proof
+  unfold Converges
+  refine ⟨sequence, point, ?_⟩
+  intros U hU hxU
+  exact eventually with U, (Open.of_mem with hU), hxU
+
+-- A constant sequence converges to its value.
+theorem Converges.constant (x : Set)
+  requires point : x ∈ X
+  shows constantFunction(ℕ, X.carrier, x) ⇝ x
+proof
+  have sequence := constantFunction.function at ℕ, X.carrier, x with point
+  have eventually : ∀ U, Open(X, U) → x ∈ U →
+      ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n →
+        apply(constantFunction(ℕ, X.carrier, x), n) ∈ U
+    intros U open hxU
+    have zeroIn : (0:N) ∈ ℕ by typecheck
+    witness (0:N)
+    refine ⟨zeroIn, ?_⟩
+    intros n hn order
+    have value := constantFunction.apply at ℕ, X.carrier, n, x with hn, point
+    rw value
+    exact hxU
+  exact Converges.of_eventually with *
+
+end ConvergenceLaws
+
+-- Bridges for the remaining properties: each bundled-to-unbundled
+-- direction is an instance, so `with *` reads the form over separate pieces
+-- off the bundled hypothesis.
+section PropertyBridges
+variable (X : Set)
+hypothesis space : TopologicalSpace(X)
+
+instance Compact.parts (A : Set)
+  requires compact : Compact(X, A)
+  shows IsCompact(X.carrier, X.opens, A)
+proof
+  unfold Compact at compact
+  exact compact
+
+theorem Compact.of_parts (A : Set)
+  requires compact : IsCompact(X.carrier, X.opens, A)
+  shows Compact(X, A)
+proof
+  unfold Compact
+  exact compact
+
+instance ConnectedSubset.parts (A : Set)
+  requires connected : ConnectedSubset(X, A)
+  shows IsConnectedSubset(X.carrier, X.opens, A)
+proof
+  unfold ConnectedSubset at connected
+  exact connected
+
+theorem ConnectedSubset.of_parts (A : Set)
+  requires connected : IsConnectedSubset(X.carrier, X.opens, A)
+  shows ConnectedSubset(X, A)
+proof
+  unfold ConnectedSubset
+  exact connected
+
+end PropertyBridges
+
+instance Compact.space_parts (X : Set)
+  requires compact : Compact(X)
+  shows IsCompact(X.carrier, X.opens, X.carrier)
+proof
+  unfold Compact at compact
+  exact compact
+
+theorem Compact.of_space_parts (X : Set)
+  requires compact : IsCompact(X.carrier, X.opens, X.carrier)
+  shows Compact(X)
+proof
+  unfold Compact
+  exact compact
+
+instance Hausdorff.parts (X : Set)
+  requires hausdorff : Hausdorff(X)
+  shows IsHausdorff(X.carrier, X.opens)
+proof
+  unfold Hausdorff at hausdorff
+  exact hausdorff
+
+theorem Hausdorff.of_parts (X : Set)
+  requires hausdorff : IsHausdorff(X.carrier, X.opens)
+  shows Hausdorff(X)
+proof
+  unfold Hausdorff
+  exact hausdorff
+
+instance T1Space.parts (X : Set)
+  requires t1 : T1Space(X)
+  shows IsT1Space(X.carrier, X.opens)
+proof
+  unfold T1Space at t1
+  exact t1
+
+theorem T1Space.of_parts (X : Set)
+  requires t1 : IsT1Space(X.carrier, X.opens)
+  shows T1Space(X)
+proof
+  unfold T1Space
+  exact t1
+
+instance Connected.parts (X : Set)
+  requires connected : Connected(X)
+  shows IsConnected(X.carrier, X.opens)
+proof
+  unfold Connected at connected
+  exact connected
+
+theorem Connected.of_parts (X : Set)
+  requires connected : IsConnected(X.carrier, X.opens)
+  shows Connected(X)
+proof
+  unfold Connected
+  exact connected
+
+-- The same bridges for a constructed space: a fact over the pieces (A, T)
+-- is the bundled fact at TopologicalSpace.mk(A, T).
+theorem Open.of_mk (A T U : Set)
+  requires topology : IsTopology(A, T)
+  requires member : U ∈ T
+  shows Open(TopologicalSpace.mk(A, T), U)
+proof
+  have space := TopologicalSpace.of_parts with topology
+  have shifted : U ∈ TopologicalSpace.opens(TopologicalSpace.mk(A, T))
+    topology_projections
+  exact Open.of_mem with space, shifted
+
+theorem Closed.of_mk (A T C : Set)
+  requires topology : IsTopology(A, T)
+  requires closed : IsClosed(A, T, C)
+  shows Closed(TopologicalSpace.mk(A, T), C)
+proof
+  have space := TopologicalSpace.of_parts with topology
+  have shifted : IsClosed(TopologicalSpace.carrier(TopologicalSpace.mk(A, T)),
+      TopologicalSpace.opens(TopologicalSpace.mk(A, T)), C)
+    topology_projections
+  exact Closed.of_parts with space, shifted
+
+theorem Compact.of_mk (A T S : Set)
+  requires topology : IsTopology(A, T)
+  requires compact : IsCompact(A, T, S)
+  shows Compact(TopologicalSpace.mk(A, T), S)
+proof
+  have space := TopologicalSpace.of_parts with topology
+  have shifted : IsCompact(TopologicalSpace.carrier(TopologicalSpace.mk(A, T)),
+      TopologicalSpace.opens(TopologicalSpace.mk(A, T)), S)
+    topology_projections
+  exact Compact.of_parts with space, shifted
+
+theorem ConnectedSubset.of_mk (A T S : Set)
+  requires topology : IsTopology(A, T)
+  requires connected : IsConnectedSubset(A, T, S)
+  shows ConnectedSubset(TopologicalSpace.mk(A, T), S)
+proof
+  have space := TopologicalSpace.of_parts with topology
+  have shifted : IsConnectedSubset(
+      TopologicalSpace.carrier(TopologicalSpace.mk(A, T)),
+      TopologicalSpace.opens(TopologicalSpace.mk(A, T)), S)
+    topology_projections
+  exact ConnectedSubset.of_parts with space, shifted
+
+theorem Hausdorff.of_mk (A T : Set)
+  requires hausdorff : IsHausdorff(A, T)
+  shows Hausdorff(TopologicalSpace.mk(A, T))
+proof
+  unfold Hausdorff
+  topology_projections
+
+theorem T1Space.of_mk (A T : Set)
+  requires t1 : IsT1Space(A, T)
+  shows T1Space(TopologicalSpace.mk(A, T))
+proof
+  unfold T1Space
+  topology_projections
+
+theorem Connected.of_mk (A T : Set)
+  requires connected : IsConnected(A, T)
+  shows Connected(TopologicalSpace.mk(A, T))
+proof
+  unfold Connected
+  topology_projections
+
+theorem Compact.of_space_mk (A T : Set)
+  requires compact : IsCompact(A, T, A)
+  shows Compact(TopologicalSpace.mk(A, T))
+proof
+  unfold Compact
+  topology_projections

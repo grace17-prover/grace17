@@ -1,0 +1,106 @@
+-- Equilibria as a predicate, and the deviation reading of Nash's condition:
+-- when the payoffs of a player's pure strategies do not depend on that
+-- player's own mixture, no change of their mixture improves their expected
+-- payoff at an equilibrium
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GameTheory.NashDeviation
+import NashEquilibrium
+
+-- A profile in the product where no pure strategy beats its owner's
+-- expected payoff.
+predicate Equilibrium (n m blk V x : Set) :=
+  x ∈ simplexProduct(n, m, blk) ∧ ∀ i ∈ n, (V(i)(x):R) ≤ (expectedPayoff(n, blk, V, blk(i))(x):R)
+
+theorem Equilibrium.profile (n m blk V x : Set)
+  requires equilibrium : Equilibrium(n, m, blk, V, x)
+  shows x ∈ simplexProduct(n, m, blk)
+proof
+  exact equilibrium.left
+
+theorem Equilibrium.pure (n m blk V x i : Set)
+  requires equilibrium : Equilibrium(n, m, blk, V, x)
+  requires hi : i ∈ n
+  shows (V(i)(x):R) ≤ (expectedPayoff(n, blk, V, blk(i))(x):R)
+proof
+  exact equilibrium.right with hi
+
+theorem nash.exists_equilibrium (n : Nat) (m blk V a : Set)
+  requires blkFunction : blk : n → m
+  requires ha : a ∈ simplexProduct(n, m, blk)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∃ x, Equilibrium(n, m, blk, V, x)
+proof
+  obtain ⟨x, hx, pure⟩ := nash.equilibrium with blkFunction, ha, family
+  witness x
+  exact ⟨hx, pure⟩
+
+-- If z agrees with the equilibrium x except on player p's block, and the
+-- payoffs of p's pure strategies are the same at z and at x, then p's
+-- expected payoff at z is at most their expected payoff at x.
+theorem nash.no_deviation (n : Nat) (m blk V x z p : Set)
+  requires blkFunction : blk : n → m
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires equilibrium : Equilibrium(n, m, blk, V, x)
+  requires hz : z ∈ simplexProduct(n, m, blk)
+  requires hp : p ∈ m
+  requires independent : ∀ i ∈ n, blk(i) = p → V(i)(z) = V(i)(x)
+  shows (expectedPayoff(n, blk, V, p)(z):R) ≤ (expectedPayoff(n, blk, V, p)(x):R)
+proof
+  have hx := Equilibrium.profile with equilibrium
+  have xCube := simplexProduct.cube with hx
+  have zCube := simplexProduct.cube with hz
+  have zFunction := unitCube.point with zCube
+  have functions := payoffFamily.functions with family
+  have payoffs := assembledPoint.function with functions, zCube
+  have maskedP := maskedPoint.sequence at n, blockSet(n, blk, p), assembledPoint(n, payoffFamily(n, V), z) with payoffs
+  have maskedZ := maskedPoint.sequence at n, blockSet(n, blk, p), z with zFunction
+  have payoffReal := expectedPayoff.real at n, blk, V, p, x with family, xCube
+  have constantU := constantSequence.sequence at expectedPayoff(n, blk, V, p)(x)
+  have scaledZ := mulSequence.sequence with constantU, maskedZ
+  have bounded : ∀ k ∈ ℕ, k < n → (maskedPoint(n, blockSet(n, blk, p), assembledPoint(n, payoffFamily(n, V), z))(k):R) ≤ (mulSequence(constantSequence(expectedPayoff(n, blk, V, p)(x)), maskedPoint(n, blockSet(n, blk, p), z))(k):R)
+    intros k hk hkn
+    have kNat : Nat(k) by typecheck
+    have hkIn : k ∈ n by exact membership.of_Less with hkn
+    have zReal := RealSequence.value at maskedPoint(n, blockSet(n, blk, p), z), k with maskedZ
+    have uReal := RealSequence.value at constantSequence(expectedPayoff(n, blk, V, p)(x)), k with constantU
+    have uValue := constantSequence.value at expectedPayoff(n, blk, V, p)(x), k
+    have scaledValue := mulSequence.value with constantU, maskedZ, uReal, zReal
+    rw [scaledValue, uValue]
+    have alternatives : k ∈ blockSet(n, blk, p) ∨ ¬k ∈ blockSet(n, blk, p) by tauto
+    cases alternatives with inBlock | outside
+    . have parts := blockSet.membership.forward with inBlock
+      have block := parts.right
+      have pSame := maskedPoint.on_block with payoffs, hkIn, inBlock
+      have zSame := maskedPoint.on_block with zFunction, hkIn, inBlock
+      have pValue := assembledPoint.value with functions, zCube, hkIn
+      have term := payoffFamily.term with family, zCube, hkIn
+      have same := independent with hkIn, block
+      have pure := Equilibrium.pure with equilibrium, hkIn
+      rw block at pure
+      have zInterval := unitCube.coordinate with zCube, hkIn
+      obtain ⟨zkReal, zLower, zUpper⟩ := closedInterval.membership.forward with zInterval
+      have vReal := CubeFunction.value with (CubeFunctionContinuous.function with (family with hkIn)), xCube
+      have step := realLe.mul_left_of_nonnegative with pure, zLower
+      have commute := realMulValue.commutative at z(k), expectedPayoff(n, blk, V, p)(x)
+      rw commute at step
+      rwa [pSame, zSame, pValue, term, same]
+    . have pSame := maskedPoint.off_block with payoffs, hkIn, outside
+      have zSame := maskedPoint.off_block with zFunction, hkIn, outside
+      have zero := realMulValue.zero_right at expectedPayoff(n, blk, V, p)(x)
+      rw [pSame, zSame, zero]
+      exact realLe.reflexive
+  have monotone := realPartialSum.monotone_prefix with maskedP, scaledZ, bounded
+  have scale := realPartialSum.scale at maskedPoint(n, blockSet(n, blk, p), z), n, expectedPayoff(n, blk, V, p)(x) with maskedZ
+  have zValue := expectedPayoff.value at n, blk, V, p, z with family, zCube
+  have sumOne := simplexProduct.block_sum with hz, hp
+  have blockValue := blockSum.definition at n, blk, p
+  have cubeValue := sumCube.value at n, blockSet(n, blk, p), z with zCube
+  rw blockValue at cubeValue
+  rw cubeValue at sumOne
+  have one := realMulValue.one_right at expectedPayoff(n, blk, V, p)(x)
+  rw [scale, sumOne, one] at monotone
+  rwa zValue

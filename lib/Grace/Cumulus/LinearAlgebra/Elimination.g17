@@ -1,0 +1,816 @@
+-- Executable exact Gaussian elimination on finite rational arrays.
+-- A cell (a,b,d) denotes (a-b)/d; inputs use d > 0.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.LinearAlgebra.Elimination
+import Matrix
+import Rat.Computable
+-- Nested executable containers use Set until their carrier sets are constructed.
+-- Constructor equations and mathematical correctness certificates remain checked.
+
+namespace RationalMatrixOps
+
+-- A missing coordinate reads as zero; inputs for elimination are rectangular.
+def head (row : Set) → Set
+  | List.nil => RationalCellOps.zero
+  | List.cons(x, xs) => x
+
+def drop (row : Set) → Set
+  | List.nil => List.nil
+  | List.cons(x, xs) => xs
+
+def entry (row : Set, column : Nat) → Set
+  | row, zero => head(row)
+  | row, succ(column) => entry(drop(row), column)
+
+def scale (row : Set, factor : RationalCell(ℕ)) → Set
+  | List.nil, factor => List.nil
+  | List.cons(x, xs), factor =>
+    List.cons(RationalCellOps.cellMul(factor, x), scale(xs, factor))
+
+def addScaled (target : Set, source : Set, factor : RationalCell(ℕ)) → Set
+  | List.nil, source, factor => List.nil
+  | List.cons(x, xs), source, factor =>
+    List.cons(RationalCellOps.cellAdd(x, RationalCellOps.cellMul(factor, head(source))),
+      addScaled(xs, drop(source), factor))
+
+def firstRow (rows : Set) → Set
+  | List.nil => List.nil
+  | List.cons(row, rest) => row
+
+def restRows (rows : Set) → Set
+  | List.nil => List.nil
+  | List.cons(row, rest) => rest
+
+def insertSecond (row : Set, result : Set) → Set
+  | row, Option.none => Option.none
+  | row, Option.some(picked) =>
+    Option.some(List.cons(firstRow(picked), List.cons(row, restRows(picked))))
+
+def selectPivot (zero : Bool, row : Set, rest : Set, candidate : Set) → Set
+  | Bool.false, row, rest, candidate => Option.some(List.cons(row, rest))
+  | Bool.true, row, rest, candidate => insertSecond(row, candidate)
+
+-- Search is structural recursion on rows, preserving their relative order.
+def promote (rows : Set, column : Nat) → Set
+  | List.nil, column => Option.none
+  | List.cons(row, rest), column =>
+    selectPivot(RationalCellOps.isZero(entry(row, column)), row, rest, promote(rest, column))
+
+def clearBelow (rows : Set, pivot : Set, column : Nat) → Set
+  | List.nil, pivot, column => List.nil
+  | List.cons(row, rest), pivot, column =>
+    List.cons(addScaled(row, pivot, RationalCellOps.cellNeg(entry(row, column))),
+      clearBelow(rest, pivot, column))
+
+def normalizedPivot (candidate : Set, column : Nat) → Set
+  | Option.none, column => Option.none
+  | Option.some(picked), column =>
+    Option.some(scale(firstRow(picked), RationalCellOps.inverse(entry(firstRow(picked), column))))
+
+def remaining (candidate : Set, original : Set, column : Nat) → Set
+  | Option.none, original, column => original
+  | Option.some(picked), original, column =>
+    clearBelow(restRows(picked),
+      scale(firstRow(picked), RationalCellOps.inverse(entry(firstRow(picked), column))), column)
+
+def attach (pivot : Set, rest : Set) → Set
+  | Option.none, rest => rest
+  | Option.some(row), rest => List.cons(row, rest)
+
+-- Structural recursion on remaining columns. A pivot consumes one row;
+-- an empty pivot column advances without changing the row list.
+def forward (columns column : Nat, rows : Set) → Set
+  | zero, column, rows => rows
+  | succ(columns), column, rows =>
+    attach(normalizedPivot(promote(rows, column), column),
+      forward(columns, succ(column), remaining(promote(rows, column), rows, column)))
+
+-- Back substitution uses each normalized lower pivot row to clear its
+-- column in the rows above. The search ignores the augmented right side.
+def choosePivotIndex (zero : Bool, current : Nat, later : Option(ℕ)) → Option(ℕ)
+  | Bool.false, current, later => Option.some(current)
+  | Bool.true, current, later => later
+
+def pivotIndex (row : Set, columns current : Nat) → Set
+  | row, zero, current => Option.none
+  | row, succ(columns), current =>
+    choosePivotIndex(RationalCellOps.isZero(entry(row, current)), current,
+      pivotIndex(row, columns, succ(current)))
+
+def clearAt (pivot : Option(ℕ), target source : Set) → Set
+  | Option.none, target, source => target
+  | Option.some(column), target, source =>
+    addScaled(target, source, RationalCellOps.cellNeg(entry(target, column)))
+
+def clearUsing (pivots : Set, target : Set, columns : Nat) → Set
+  | List.nil, target, columns => target
+  | List.cons(pivot, rest), target, columns =>
+    clearUsing(rest, clearAt(pivotIndex(pivot, columns, 0), target, pivot), columns)
+
+def prependReduced (row : Set, tail : Set, columns : Nat) : Set :=
+  List.cons(clearUsing(tail, row, columns), tail)
+
+def backward (rows : Set, columns : Nat) → Set
+  | List.nil, columns => List.nil
+  | List.cons(row, rest), columns => prependReduced(row, backward(rest, columns), columns)
+
+def reducedEchelon (columns : Nat, rows : Set) : Set :=
+  backward(forward(columns, 0, rows), columns)
+
+-- Reject malformed fraction data before executing a pivot. This check is
+-- computational; the proof side uses the corresponding denominator premises.
+def validRow (row : Set) → Set
+  | List.nil => Bool.true
+  | List.cons(x, xs) => BoolOps.and(RationalCellOps.valid(x), validRow(xs))
+
+def validRows (rows : Set) → Set
+  | List.nil => Bool.true
+  | List.cons(row, rest) => BoolOps.and(validRow(row), validRows(rest))
+
+def guardForward (valid : Bool, columns column : Nat, rows : Set) → Set
+  | Bool.false, columns, column, rows => Option.none
+  | Bool.true, columns, column, rows => Option.some(forward(columns, column, rows))
+
+def forwardChecked (columns column : Nat, rows : Set) : Set :=
+  guardForward(validRows(rows), columns, column, rows)
+
+def guardReduced (valid : Bool, columns : Nat, rows : Set) → Set
+  | Bool.false, columns, rows => Option.none
+  | Bool.true, columns, rows => Option.some(reducedEchelon(columns, rows))
+
+def reducedEchelonChecked (columns : Nat, rows : Set) : Set :=
+  guardReduced(validRows(rows), columns, rows)
+
+end RationalMatrixOps
+
+namespace RationalEliminationExamples
+
+def rowOne : Set :=
+  List.cons(RationalCell.fraction(1, 0, 1),
+    List.cons(RationalCell.fraction(1, 0, 1),
+      List.cons(RationalCell.fraction(3, 0, 1), List.nil)))
+def rowTwo : Set :=
+  List.cons(RationalCell.fraction(1, 0, 1),
+    List.cons(RationalCell.fraction(0, 1, 1),
+      List.cons(RationalCell.fraction(1, 0, 1), List.nil)))
+def system : Set := List.cons(rowOne, List.cons(rowTwo, List.nil))
+
+def reduced : Set := RationalMatrixOps.forward(2, 0, system)
+
+theorem pivot_exists
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalMatrixOps.firstRow(reduced), 0)) = Bool.false
+proof
+  compute
+
+theorem eliminated_below
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalMatrixOps.firstRow(RationalMatrixOps.restRows(reduced)), 0)) = Bool.true
+proof
+  compute
+
+theorem second_pivot_exists
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalMatrixOps.firstRow(RationalMatrixOps.restRows(reduced)), 1)) = Bool.false
+proof
+  compute
+
+-- A missing leading pivot is swapped in; a negative leading coefficient is
+-- inverted with the correct sign. These are executable regression proofs.
+def swapped : Set := List.cons(
+  List.cons(RationalCell.fraction(0, 0, 1), List.cons(RationalCell.fraction(1, 0, 1), List.nil)),
+  List.cons(List.cons(RationalCell.fraction(0, 1, 1), List.cons(RationalCell.fraction(1, 0, 1), List.nil)), List.nil))
+
+theorem swapped_pivot_is_one
+  shows RationalMatrixOps.entry(RationalMatrixOps.firstRow(RationalMatrixOps.forward(1, 0, swapped)), 0) =
+    RationalCell.fraction(1, 0, 1)
+proof
+  compute
+
+theorem skipped_column
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalMatrixOps.firstRow(
+    RationalMatrixOps.forward(2, 0, List.cons(
+      List.cons(RationalCellOps.zero, List.cons(RationalCellOps.one, List.nil)), List.nil))), 1)) = Bool.false
+proof
+  compute
+
+theorem malformed_denominator_rejected
+  shows RationalMatrixOps.forwardChecked(1, 0,
+    List.cons(List.cons(RationalCell.fraction(1, 0, 0), List.nil), List.nil)) = Option.none
+proof
+  compute
+
+theorem example_is_accepted
+  shows RationalMatrixOps.forwardChecked(2, 0, system) = Option.some(reduced)
+proof
+  compute
+
+def completelyReduced : Set :=
+  RationalMatrixOps.reducedEchelon(2, system)
+
+theorem cleared_above_second_pivot
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(
+    RationalMatrixOps.firstRow(completelyReduced), 1)) = Bool.true
+proof
+  compute
+
+theorem left_pivot_remains
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(
+    RationalMatrixOps.firstRow(completelyReduced), 0)) = Bool.false
+proof
+  compute
+
+theorem reduced_system_is_accepted
+  shows RationalMatrixOps.reducedEchelonChecked(2, system) = Option.some(completelyReduced)
+proof
+  compute
+
+theorem solution_x_is_two
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(
+    RationalMatrixOps.firstRow(completelyReduced), 2),
+      RationalCell.fraction(2, 0, 1)) = Bool.true
+proof
+  compute
+
+theorem solved_second_coordinate
+  shows RationalMatrixOps.entry(RationalMatrixOps.firstRow(RationalMatrixOps.restRows(reduced)), 2) =
+    RationalCell.fraction(3, 1, 2)
+proof
+  compute
+
+eval RationalCellOps.isZero(RationalMatrixOps.entry(RationalMatrixOps.firstRow(RationalMatrixOps.restRows(reduced)), 0))
+
+end RationalEliminationExamples
+
+eval RationalEliminationExamples.reduced
+
+eval RationalEliminationExamples.completelyReduced
+
+-- Finite row-operation certificates. Their constructors are computational
+-- data; replay is structural recursion over the certificate list.
+datatype RationalRowOperation(Index : Set)
+  | swap(first second : Index)
+  | scale(row : Index, factor : Set)
+  | addMultiple(target source : Index, factor : Set)
+
+namespace RationalRowCertificates
+
+def replaceHead (rows : Set, value : Set) → Set
+  | List.nil, value => List.nil
+  | List.cons(row, rest), value => List.cons(value, rest)
+
+def replaceTail (rows rest : Set) → Set
+  | List.nil, rest => List.nil
+  | List.cons(row, tail), rest => List.cons(row, rest)
+
+def rowAt (rows : Set, index : Nat) → Set
+  | rows, zero => RationalMatrixOps.firstRow(rows)
+  | rows, succ(index) => rowAt(RationalMatrixOps.restRows(rows), index)
+
+def replaceRow (rows : Set, index : Nat, value : Set) → Set
+  | rows, zero, value => replaceHead(rows, value)
+  | rows, succ(index), value =>
+    replaceTail(rows, replaceRow(RationalMatrixOps.restRows(rows), index, value))
+
+def swapRows (rows : Set, first second : Nat) : Set :=
+  replaceRow(replaceRow(rows, first, rowAt(rows, second)), second, rowAt(rows, first))
+
+def scaleRow (rows : Set, row : Nat, factor : RationalCell(ℕ)) : Set :=
+  replaceRow(rows, row, RationalMatrixOps.scale(rowAt(rows, row), factor))
+
+def addRow (rows : Set, target source : Nat, factor : RationalCell(ℕ)) : Set :=
+  replaceRow(rows, target,
+    RationalMatrixOps.addScaled(rowAt(rows, target), rowAt(rows, source), factor))
+
+def execute (rows : Set, operation : RationalRowOperation(ℕ)) → Set
+  | rows, RationalRowOperation.swap(first, second) => swapRows(rows, first, second)
+  | rows, RationalRowOperation.scale(row, factor) => scaleRow(rows, row, factor)
+  | rows, RationalRowOperation.addMultiple(target, source, factor) =>
+    addRow(rows, target, source, factor)
+
+def replay (operations : Set, rows : Set) → Set
+  | List.nil, rows => rows
+  | List.cons(step, rest), rows => replay(rest, execute(rows, step))
+
+-- The factor fields are sets so the datatype can store a mix of swaps and
+-- rational operations. Validate their rational representation before replay.
+def validStep (operation : RationalRowOperation(ℕ)) → Set
+  | RationalRowOperation.swap(first, second) => Bool.true
+  | RationalRowOperation.scale(row, factor) =>
+    BoolOps.and(RationalCellOps.valid(factor), BoolOps.not(RationalCellOps.isZero(factor)))
+  | RationalRowOperation.addMultiple(target, source, factor) => RationalCellOps.valid(factor)
+
+def validTrace (operations : Set) → Set
+  | List.nil => Bool.true
+  | List.cons(step, rest) => BoolOps.and(validStep(step), validTrace(rest))
+
+def inBounds (operation : RationalRowOperation(ℕ), count : Nat) → Bool
+  | RationalRowOperation.swap(first, second), count =>
+    BoolOps.and(RationalCellOps.less(first, count), RationalCellOps.less(second, count))
+  | RationalRowOperation.scale(row, factor), count => RationalCellOps.less(row, count)
+  | RationalRowOperation.addMultiple(target, source, factor), count =>
+    BoolOps.and(RationalCellOps.less(target, count), RationalCellOps.less(source, count))
+
+def boundedTrace (operations : Set, count : Nat) → Set
+  | List.nil, count => Bool.true
+  | List.cons(step, rest), count =>
+    BoolOps.and(inBounds(step, count), boundedTrace(rest, count))
+
+def rowWidth (row : Set) → Set
+  | List.nil => 0
+  | List.cons(cell, rest) => succ(rowWidth(rest))
+
+def rowCount (rows : Set) → Set
+  | List.nil => 0
+  | List.cons(row, rest) => succ(rowCount(rest))
+
+def rectangular (rows : Set, width : Nat) → Set
+  | List.nil, width => Bool.true
+  | List.cons(row, rest), width =>
+    BoolOps.and(equalNat(rowWidth(row), width), rectangular(rest, width))
+
+def guardReplay (accepted : Bool, operations : Set, rows : Set) → Set
+  | Bool.false, operations, rows => Option.none
+  | Bool.true, operations, rows => Option.some(replay(operations, rows))
+
+def replayChecked (operations : Set, rows : Set) : Set :=
+  guardReplay(BoolOps.and(RationalMatrixOps.validRows(rows),
+    BoolOps.and(rectangular(rows, rowWidth(RationalMatrixOps.firstRow(rows))),
+      BoolOps.and(validTrace(operations), boundedTrace(operations, rowCount(rows))))),
+    operations, rows)
+
+end RationalRowCertificates
+
+namespace RationalRowSolutions
+
+-- Adding a multiple of an established equation is reversible: subtracting
+-- that same multiple recovers the original equation in quotient ℚ.
+theorem addMultiple.equation_iff (p q r s t : Rational)
+  requires first : p = q
+  shows (r = s) ↔ (r + t * p = s + t * q)
+proof
+  constructor
+  . intro second
+    rw [first, second]
+    rfl
+  . intro changed
+    rw first at changed
+    have leftCancel := rationalAddValue.add_sub_cancel_right at r, t * q
+    have rightCancel := rationalAddValue.add_sub_cancel_right at s, t * q
+    have cancel : (r + t * q) - t * q = (s + t * q) - t * q
+      rw changed
+      rfl
+    rwa [leftCancel, rightCancel] at cancel
+
+theorem addMultiple.two_variable_solutions (a b c d e f t x y : Rational)
+  requires first : a * x + b * y = c
+  shows (d * x + e * y = f) ↔
+    ((d + t * a) * x + (e + t * b) * y = f + t * c)
+proof
+  have shape : (d + t * a) * x + (e + t * b) * y =
+    (d * x + e * y) + t * (a * x + b * y)
+    ring
+  rw shape
+  exact addMultiple.equation_iff with first
+
+end RationalRowSolutions
+
+namespace GeneralRowSolutions
+
+-- A row is a real sequence. The finite dot product is already defined by
+-- recursion on its width; its add and scale laws were proved by induction.
+def addMultipleRow (target source : Set, C : Real) : Set :=
+  addSequence(target, mulSequence(constantSequence(C), source))
+
+theorem addMultipleRow.sequence (target source : Set, C : Real)
+  requires targetSequence : RealSequence(target)
+  requires sourceSequence : RealSequence(source)
+  shows RealSequence(addMultipleRow(target, source, C))
+proof
+  have constant := constantSequence.sequence at C
+  have scaled := mulSequence.sequence with constant, sourceSequence
+  unfold addMultipleRow
+  exact addSequence.sequence with targetSequence, scaled
+
+theorem addMultipleRow.dot (target source vector : Set, C : Real, n : Nat)
+  requires targetSequence : RealSequence(target)
+  requires sourceSequence : RealSequence(source)
+  requires vectorSequence : RealSequence(vector)
+  shows dotProduct(addMultipleRow(target, source, C), vector, n) =
+    (dotProduct(target, vector, n):R) + C * (dotProduct(source, vector, n):R)
+proof
+  have constant := constantSequence.sequence at C
+  have scaled := mulSequence.sequence with constant, sourceSequence
+  have added := dotProduct.add_left with targetSequence, scaled, vectorSequence
+  have product := dotProduct.scale_left with sourceSequence, vectorSequence
+  unfold addMultipleRow
+  simp [added, product]
+
+theorem addMultipleRow.solution_iff (target source vector : Set, C sourceValue targetValue : Real, n : Nat)
+  requires targetSequence : RealSequence(target)
+  requires sourceSequence : RealSequence(source)
+  requires vectorSequence : RealSequence(vector)
+  requires first : dotProduct(source, vector, n) = sourceValue
+  shows (dotProduct(target, vector, n) = targetValue) ↔
+    (dotProduct(addMultipleRow(target, source, C), vector, n) =
+      targetValue + C * sourceValue)
+proof
+  have shape := addMultipleRow.dot at target, source, vector, C, n with
+    targetSequence, sourceSequence, vectorSequence
+  have targetReal := dotProduct.real with targetSequence, vectorSequence
+  have productReal := realMulValue.real at C, sourceValue with
+    *{2}
+  constructor
+  . intro second
+    rw [shape, first, second]
+    rfl
+  . intro changed
+    rw [shape, first] at changed
+    have leftCancel := realSubValue.add_cancel_right with targetReal, productReal
+    have rightCancel := realSubValue.add_cancel_right at
+      targetValue, C * sourceValue with assumption, productReal
+    have cancel : ((dotProduct(target, vector, n):R) + C * sourceValue) - C * sourceValue =
+      (targetValue + C * sourceValue) - C * sourceValue
+      rw changed
+      rfl
+    rwa [leftCancel, rightCancel] at cancel
+
+predicate SolvesMatrix (M b u : Set, m n : Nat) :=
+  ∀ i ∈ ℕ, i < m → dotProduct(matrixRow(M, i), u, n) = b[i]
+
+-- This theorem is independent of the number of rows and columns. A matrix
+-- update is specified by its changed row and its unchanged entries; the
+-- executable update can discharge those equations separately.
+theorem addMultiple.matrix_solutions (M N b c u : Set, m n source target : Nat, C : Real)
+  requires matrixM : RealMatrix(M)
+  requires matrixN : RealMatrix(N)
+  requires vector : RealSequence(u)
+  requires rhsB : RealSequence(b)
+  requires rhsC : RealSequence(c)
+  requires sourceBound : source < m
+  requires targetBound : target < m
+  requires different : source ≠ target
+  requires changedRow : matrixRow(N, target) =
+    addMultipleRow(matrixRow(M, target), matrixRow(M, source), C)
+  requires changedValue : c[target] = (b[target]:R) + C * (b[source]:R)
+  requires otherRows : ∀ i ∈ ℕ, i < m → i ≠ target →
+    matrixRow(N, i) = matrixRow(M, i) ∧ c[i] = b[i]
+  shows SolvesMatrix(M, b, u, m, n) ↔ SolvesMatrix(N, c, u, m, n)
+proof
+  have sourceSequence := matrixRow.sequence at M, source with matrixM
+  have targetSequence := matrixRow.sequence at M, target with matrixM
+  have sourceNat := nat.omega.forward at source with assumption
+  have targetNat := nat.omega.forward at target with assumption
+  have differentSource : source ≠ target by exact different
+  obtain ⟨sourceRow, sourceValue⟩ := otherRows with source, sourceNat, sourceBound, differentSource
+  have preserve := addMultipleRow.solution_iff at
+    matrixRow(M, target), matrixRow(M, source), u, C,
+    b[source], b[target], n with
+    targetSequence, sourceSequence, vector
+  constructor
+  . intro old
+    intros i naturalI within
+    have alternatives : i = target ∨ i ≠ target by tauto
+    cases alternatives with equal | apart
+    . rw equal
+      have sourceEquation := old with source, sourceNat, sourceBound
+      have targetEquation := old with target, targetNat, targetBound
+      have transformed := preserve with sourceEquation
+      have result := transformed.forward with targetEquation
+      rw [changedRow, changedValue]
+      exact result
+    . have unchanged := otherRows with i, naturalI, within, apart
+      rcases unchanged with ⟨rowEqual, valueEqual⟩
+      rw [rowEqual, valueEqual]
+      exact old with i, naturalI, within
+  . intro new
+    intros i naturalI within
+    have alternatives : i = target ∨ i ≠ target by tauto
+    cases alternatives with equal | apart
+    . rw equal
+      have sourceEquation := new with source, sourceNat, sourceBound
+      rw [sourceRow, sourceValue] at sourceEquation
+      have targetEquation := new with target, targetNat, targetBound
+      rw [changedRow, changedValue] at targetEquation
+      have transformed := preserve with sourceEquation
+      exact transformed.backward with targetEquation
+    . have unchanged := otherRows with i, naturalI, within, apart
+      rcases unchanged with ⟨rowEqual, valueEqual⟩
+      have equation := new with i, naturalI, within
+      rw [rowEqual, valueEqual] at equation
+      exact equation
+
+end GeneralRowSolutions
+
+namespace RationalRowTraceExamples
+
+def cell (n : Nat) : RationalCell(ℕ) := RationalCell.fraction(n, 0, 1)
+def minusOne : RationalCell(ℕ) := RationalCell.fraction(0, 1, 1)
+
+-- y+z=5, x+y+z=6, x+2y+3z=14. The first pivot needs a swap.
+def threeRows : Set :=
+  List.cons(List.cons(cell(0), List.cons(cell(1), List.cons(cell(1), List.cons(cell(5), List.nil)))),
+  List.cons(List.cons(cell(1), List.cons(cell(1), List.cons(cell(1), List.cons(cell(6), List.nil)))),
+  List.cons(List.cons(cell(1), List.cons(cell(2), List.cons(cell(3), List.cons(cell(14), List.nil)))), List.nil)))
+
+def threeTrace : Set :=
+  List.cons(RationalRowOperation.swap(0, 1),
+  List.cons(RationalRowOperation.addMultiple(2, 0, minusOne),
+  List.cons(RationalRowOperation.addMultiple(2, 1, minusOne),
+  List.cons(RationalRowOperation.addMultiple(1, 2, minusOne),
+  List.cons(RationalRowOperation.addMultiple(0, 2, minusOne),
+  List.cons(RationalRowOperation.addMultiple(0, 1, minusOne), List.nil))))))
+
+def threeResult : Set := RationalRowCertificates.replay(threeTrace, threeRows)
+
+def hasFourValues (row : Set, a b c d : RationalCell(ℕ)) : Set :=
+  BoolOps.and(RationalCellOps.sameValue(RationalMatrixOps.entry(row, 0), a),
+    BoolOps.and(RationalCellOps.sameValue(RationalMatrixOps.entry(row, 1), b),
+      BoolOps.and(RationalCellOps.sameValue(RationalMatrixOps.entry(row, 2), c),
+        RationalCellOps.sameValue(RationalMatrixOps.entry(row, 3), d))))
+
+theorem threeTrace.checked
+  shows RationalRowCertificates.replayChecked(threeTrace, threeRows) = Option.some(threeResult)
+proof
+  compute
+
+theorem threeTrace.reducedIdentity
+  shows BoolOps.and(hasFourValues(RationalRowCertificates.rowAt(threeResult, 0), cell(1), cell(0), cell(0), cell(1)),
+    BoolOps.and(hasFourValues(RationalRowCertificates.rowAt(threeResult, 1), cell(0), cell(1), cell(0), cell(2)),
+      hasFourValues(RationalRowCertificates.rowAt(threeResult, 2), cell(0), cell(0), cell(1), cell(3)))) = Bool.true
+proof
+  compute
+
+theorem threeTrace.x
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 0), 3), cell(1)) = Bool.true
+proof
+  compute
+
+theorem threeTrace.y
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 1), 3), cell(2)) = Bool.true
+proof
+  compute
+
+theorem threeTrace.z
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 2), 3), cell(3)) = Bool.true
+proof
+  compute
+
+-- The reduced right-hand side is an equality in the set-theoretic rationals;
+-- the executable fraction comparison is lifted to that meaning.
+theorem threeTrace.quotient_x
+  shows RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalRowCertificates.rowAt(threeResult, 0), 3)) = rationalClass(1, 0, 1)
+proof
+  have evaluated : RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 0), 3) =
+    RationalCell.fraction(31, 30, 1)
+    compute
+  rw evaluated
+  unfold RationalCellOps.meaning
+  compute
+
+theorem threeTrace.quotient_y
+  shows RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalRowCertificates.rowAt(threeResult, 1), 3)) = rationalClass(2, 0, 1)
+proof
+  have evaluated : RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 1), 3) =
+    RationalCell.fraction(16, 14, 1)
+    compute
+  rw evaluated
+  unfold RationalCellOps.meaning
+  compute
+
+theorem threeTrace.quotient_z
+  shows RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalRowCertificates.rowAt(threeResult, 2), 3)) = rationalClass(3, 0, 1)
+proof
+  have evaluated : RationalMatrixOps.entry(RationalRowCertificates.rowAt(threeResult, 2), 3) =
+    RationalCell.fraction(14, 11, 1)
+    compute
+  rw evaluated
+  unfold RationalCellOps.meaning
+  compute
+
+-- Equal left sides with unequal constants expose 0 = 1.
+def inconsistentRows : Set :=
+  List.cons(List.cons(cell(1), List.cons(cell(1), List.cons(cell(2), List.nil))),
+    List.cons(List.cons(cell(1), List.cons(cell(1), List.cons(cell(3), List.nil))), List.nil))
+def inconsistentTrace : Set :=
+  List.cons(RationalRowOperation.addMultiple(1, 0, minusOne), List.nil)
+def inconsistentResult : Set :=
+  RationalRowCertificates.replay(inconsistentTrace, inconsistentRows)
+
+theorem inconsistentTrace.checked
+  shows RationalRowCertificates.replayChecked(inconsistentTrace, inconsistentRows) = Option.some(inconsistentResult)
+proof
+  compute
+
+theorem inconsistentTrace.zeroLeft
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(inconsistentResult, 1), 0)) = Bool.true ∧
+    RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(inconsistentResult, 1), 1)) = Bool.true
+proof
+  constructor
+  . compute
+  . compute
+
+theorem inconsistentTrace.nonzeroRight
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(inconsistentResult, 1), 2)) = Bool.false
+proof
+  compute
+
+-- A dependent equation reduces to a zero row, leaving one free variable.
+def dependentRows : Set :=
+  List.cons(List.cons(cell(1), List.cons(cell(1), List.cons(cell(2), List.nil))),
+    List.cons(List.cons(cell(2), List.cons(cell(2), List.cons(cell(4), List.nil))), List.nil))
+def dependentTrace : Set :=
+  List.cons(RationalRowOperation.addMultiple(1, 0, RationalCell.fraction(0, 2, 1)), List.nil)
+def dependentResult : Set :=
+  RationalRowCertificates.replay(dependentTrace, dependentRows)
+
+theorem dependentTrace.checked
+  shows RationalRowCertificates.replayChecked(dependentTrace, dependentRows) = Option.some(dependentResult)
+proof
+  compute
+
+theorem dependentTrace.zeroRow
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(dependentResult, 1), 0)) = Bool.true ∧
+    RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(dependentResult, 1), 1)) = Bool.true ∧
+    RationalCellOps.isZero(RationalMatrixOps.entry(RationalRowCertificates.rowAt(dependentResult, 1), 2)) = Bool.true
+proof
+  constructor
+  . compute
+  . constructor
+    . compute
+    . compute
+
+end RationalRowTraceExamples
+
+namespace RationalRowCertificates
+
+-- The executable row operations commute with quotient interpretation at an
+-- entry. The tails are arbitrary, so these facts apply inside longer rows.
+theorem scale.tail (x xs factor : Set)
+  shows RationalMatrixOps.drop(RationalMatrixOps.scale(List.cons(x, xs), factor)) =
+    RationalMatrixOps.scale(xs, factor)
+proof
+  simp [RationalMatrixOps.drop, RationalMatrixOps.scale]
+
+theorem addScaled.tail (x xs source factor : Set)
+  shows RationalMatrixOps.drop(RationalMatrixOps.addScaled(List.cons(x, xs), source, factor)) =
+    RationalMatrixOps.addScaled(xs, RationalMatrixOps.drop(source), factor)
+proof
+  simp [RationalMatrixOps.drop, RationalMatrixOps.addScaled]
+
+theorem scale.first_meaning (a b m c d n : Nat, rest : Set)
+  requires factorNonzero : m ≠ 0
+  requires entryNonzero : n ≠ 0
+  shows RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalMatrixOps.scale(List.cons(RationalCell.fraction(c, d, n), rest),
+      RationalCell.fraction(a, b, m)), 0)) =
+    rationalMulValue(rationalClass(a, b, m), rationalClass(c, d, n))
+proof
+  have sound := RationalCellOps.mul.sound at a, b, m, c, d, n with
+    factorNonzero, entryNonzero
+  simpa [RationalMatrixOps.entry, RationalMatrixOps.head,
+    RationalMatrixOps.scale] using sound
+
+theorem addScaled.first_meaning (a b m c d n e f k : Nat, targetTail sourceTail : Set)
+  requires targetNonzero : m ≠ 0
+  requires factorNonzero : n ≠ 0
+  requires sourceNonzero : k ≠ 0
+  shows RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalMatrixOps.addScaled(List.cons(RationalCell.fraction(a, b, m), targetTail),
+      List.cons(RationalCell.fraction(e, f, k), sourceTail),
+      RationalCell.fraction(c, d, n)), 0)) =
+    rationalAddValue(rationalClass(a, b, m),
+      rationalMulValue(rationalClass(c, d, n), rationalClass(e, f, k)))
+proof
+  have product := RationalCellOps.mul.sound at c, d, n, e, f, k with
+    factorNonzero, sourceNonzero
+  have denominator : n * k ≠ 0 by exact mul.nonzero at n, k with factorNonzero, sourceNonzero
+  have sum := RationalCellOps.add.sound at a, b, m,
+    c * e + d * f, c * f + d * e, n * k with targetNonzero, denominator
+  have intermediate : RationalCellOps.meaning(RationalMatrixOps.entry(
+    RationalMatrixOps.addScaled(List.cons(RationalCell.fraction(a, b, m), targetTail),
+      List.cons(RationalCell.fraction(e, f, k), sourceTail),
+      RationalCell.fraction(c, d, n)), 0)) =
+    rationalAddValue(rationalClass(a, b, m),
+      RationalCellOps.meaning(RationalCellOps.cellMul(RationalCell.fraction(c, d, n),
+        RationalCell.fraction(e, f, k))))
+    simpa [RationalMatrixOps.entry, RationalMatrixOps.head,
+      RationalMatrixOps.addScaled, RationalCellOps.cellMul,
+      RationalCellOps.multiplyBy, RationalCellOps.meaning] using sum
+  rwa product at intermediate
+
+theorem replay.empty (rows : Set)
+  shows replay(List.nil, rows) = rows
+proof
+  simp [replay]
+
+theorem replay.cons (step rest rows : Set)
+  shows replay(List.cons(step, rest), rows) = replay(rest, execute(rows, step))
+proof
+  simp [replay]
+
+theorem swapRows.two (a b : Set)
+  shows swapRows(List.cons(a, List.cons(b, List.nil)), 0, 1) =
+    List.cons(b, List.cons(a, List.nil))
+proof
+  settle with swapRows, replaceRow, replaceHead, replaceTail, rowAt,
+    RationalMatrixOps.firstRow, RationalMatrixOps.restRows
+
+theorem swapRows.two_involutive (a b : Set)
+  shows swapRows(swapRows(List.cons(a, List.cons(b, List.nil)), 0, 1), 0, 1) =
+    List.cons(a, List.cons(b, List.nil))
+proof
+  have first := swapRows.two with a, b
+  rw first
+  exact swapRows.two with b, a
+
+-- A replayable witness for the two-equation augmented system above.
+-- r₂ ← r₂ − r₁; r₂ ← −r₂/2; r₁ ← r₁ − r₂.
+def twoEquationTrace : Set :=
+  List.cons(RationalRowOperation.addMultiple(1, 0, RationalCell.fraction(0, 1, 1)),
+    List.cons(RationalRowOperation.scale(1, RationalCell.fraction(0, 1, 2)),
+      List.cons(RationalRowOperation.addMultiple(0, 1, RationalCell.fraction(0, 1, 1)), List.nil)))
+
+def twoEquationResult : Set :=
+  replay(twoEquationTrace, RationalEliminationExamples.system)
+
+theorem twoEquationTrace.valid
+  shows validTrace(twoEquationTrace) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.checked
+  shows replayChecked(twoEquationTrace, RationalEliminationExamples.system) =
+    Option.some(twoEquationResult)
+proof
+  compute
+
+theorem invalidScale.rejected
+  shows replayChecked(List.cons(RationalRowOperation.scale(0, RationalCellOps.zero), List.nil),
+    RationalEliminationExamples.system) = Option.none
+proof
+  compute
+
+theorem invalidIndex.rejected
+  shows replayChecked(List.cons(RationalRowOperation.swap(0, 2), List.nil),
+    RationalEliminationExamples.system) = Option.none
+proof
+  compute
+
+theorem malformedFactor.rejected
+  shows replayChecked(List.cons(RationalRowOperation.addMultiple(0, 1,
+    RationalCell.fraction(1, 0, 0)), List.nil), RationalEliminationExamples.system) = Option.none
+proof
+  compute
+
+theorem raggedRows.rejected
+  shows replayChecked(List.nil, List.cons(RationalEliminationExamples.rowOne,
+    List.cons(List.cons(RationalCellOps.one, List.nil), List.nil))) = Option.none
+proof
+  compute
+
+theorem malformedInput.rejected
+  shows replayChecked(List.nil,
+    List.cons(List.cons(RationalCell.fraction(1, 0, 0), List.nil), List.nil)) = Option.none
+proof
+  compute
+
+theorem twoEquationTrace.firstPivot
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(rowAt(twoEquationResult, 0), 0),
+    RationalCellOps.one) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.clearedAbove
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(rowAt(twoEquationResult, 0), 1)) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.clearedBelow
+  shows RationalCellOps.isZero(RationalMatrixOps.entry(rowAt(twoEquationResult, 1), 0)) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.secondPivot
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(rowAt(twoEquationResult, 1), 1),
+    RationalCellOps.one) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.solutionX
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(rowAt(twoEquationResult, 0), 2),
+    RationalCell.fraction(2, 0, 1)) = Bool.true
+proof
+  compute
+
+theorem twoEquationTrace.solutionY
+  shows RationalCellOps.sameValue(RationalMatrixOps.entry(rowAt(twoEquationResult, 1), 2),
+    RationalCellOps.one) = Bool.true
+proof
+  compute
+
+end RationalRowCertificates

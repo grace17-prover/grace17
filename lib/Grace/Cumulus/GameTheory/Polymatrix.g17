@@ -1,0 +1,188 @@
+-- Polymatrix games: the payoff to the owner of pure strategy i is the sum,
+-- over the pure strategies j of the other players, of the opponent's
+-- probability of j times a table entry T(i)(j). Two-player bimatrix games are
+-- the case of two blocks. Every polymatrix game has a Nash equilibrium
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GameTheory.Polymatrix
+import NashDeviation
+import PureProfile
+
+-- The terms a(j)·x(j) of a row of the table, as a family of cube functions.
+defgraph rowFamily (n a : Set) (j ∈ n) : functionSpace(unitCube(n), ℝ) := mulCube(n, constantFunction(unitCube(n), ℝ, a(j)), coordinateCube(n, j))
+requires nNat : Nat(n)
+requires aFunction : a : n → ℝ
+proof
+  have aj := FunctionBetween.apply_closed with aFunction, member
+  have constant := constantCube.continuous at n, a(j) with aj
+  have coordinate := coordinateCube.continuous at n, j with member
+  have continuous := mulCube.continuous with constant, coordinate
+  have function := CubeFunctionContinuous.function with continuous
+  have between : mulCube(n, constantFunction(unitCube(n), ℝ, a(j)), coordinateCube(n, j)) : unitCube(n) → ℝ
+    exact CubeFunction.function with function
+  exact functionSpace.membership.backward with between
+
+theorem rowFamily.continuous (n : Nat) (a : Set)
+  requires aFunction : a : n → ℝ
+  shows ∀ j ∈ n, CubeFunctionContinuous(rowFamily(n, a)(j), n)
+proof
+  intros j hj
+  have same := rowFamily.value at n, a, j with *
+  have aj := FunctionBetween.apply_closed with aFunction, hj
+  have constant := constantCube.continuous with aj
+  have coordinate := coordinateCube.continuous with hj
+  rw same
+  exact mulCube.continuous with constant, coordinate
+
+theorem rowFamily.functions (n : Nat) (a : Set)
+  requires aFunction : a : n → ℝ
+  shows ∀ j ∈ n, CubeFunction(rowFamily(n, a)(j), n)
+proof
+  intros j hj
+  have continuous := rowFamily.continuous with aFunction
+  exact CubeFunctionContinuous.function with (continuous with hj)
+
+theorem rowFamily.term (n : Nat) (a x j : Set)
+  requires aFunction : a : n → ℝ
+  requires hx : x ∈ unitCube(n)
+  requires hj : j ∈ n
+  shows rowFamily(n, a)(j)(x) = (a(j):R) * (x(j):R)
+proof
+  have same := rowFamily.value at n, a, j with *
+  have aj := FunctionBetween.apply_closed with aFunction, hj
+  have constant := constantCube.continuous with aj
+  have coordinate := coordinateCube.continuous with hj
+  have constantFunction2 := CubeFunctionContinuous.function with constant
+  have coordinateFunction := CubeFunctionContinuous.function with coordinate
+  have product := mulCube.value with constantFunction2, coordinateFunction, hx
+  have constantValue := constantFunction.apply with hx, aj
+  have coordinateValue := coordinateCube.value with hj, hx
+  rw [same, product, constantValue, coordinateValue]
+  rfl
+
+-- The payoff to the owner of i against the other players' mixtures.
+def polymatrixPayoff (n blk T i : Set) : Set :=
+  weightedSum(n, n ∖ blockSet(n, blk, blk(i)), rowFamily(n, T(i)))
+
+theorem polymatrixPayoff.definition (n blk T i : Set)
+  shows polymatrixPayoff(n, blk, T, i) = weightedSum(n, n ∖ blockSet(n, blk, blk(i)), rowFamily(n, T(i)))
+proof
+  unfold polymatrixPayoff
+  rfl
+
+theorem polymatrixPayoff.row (n T i : Set)
+  requires table : T : n → functionSpace(n, ℝ)
+  requires hi : i ∈ n
+  shows T(i) : n → ℝ
+proof
+  have inSpace := FunctionBetween.apply_closed with table, hi
+  exact functionSpace.membership.forward with inSpace
+
+theorem polymatrixPayoff.continuous (n : Nat) (blk T i : Set)
+  requires table : T : n → functionSpace(n, ℝ)
+  requires hi : i ∈ n
+  shows CubeFunctionContinuous(polymatrixPayoff(n, blk, T, i), n)
+proof
+  have row := polymatrixPayoff.row with table, hi
+  have terms := rowFamily.continuous with row
+  have same := polymatrixPayoff.definition at n, blk, T, i
+  rw same
+  exact weightedSum.continuous with terms
+
+-- The payoff of i only depends on the coordinates outside i's own block.
+theorem polymatrixPayoff.independent (n : Nat) (blk T i x z : Set)
+  requires table : T : n → functionSpace(n, ℝ)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  requires hz : z ∈ unitCube(n)
+  requires agree : ∀ j ∈ n, blk(j) ≠ blk(i) → z(j) = x(j)
+  shows polymatrixPayoff(n, blk, T, i)(z) = polymatrixPayoff(n, blk, T, i)(x)
+proof
+  have row := polymatrixPayoff.row with table, hi
+  have functions := rowFamily.functions with row
+  have same := polymatrixPayoff.definition at n, blk, T, i
+  have zValue := weightedSum.value at n, n ∖ blockSet(n, blk, blk(i)), rowFamily(n, T(i)), z with functions, hz
+  have xValue := weightedSum.value at n, n ∖ blockSet(n, blk, blk(i)), rowFamily(n, T(i)), x with functions, hx
+  have zPoints := assembledPoint.function with functions, hz
+  have xPoints := assembledPoint.function with functions, hx
+  have maskedZ := maskedPoint.sequence at n, n ∖ blockSet(n, blk, blk(i)), assembledPoint(n, rowFamily(n, T(i)), z) with zPoints
+  have maskedX := maskedPoint.sequence at n, n ∖ blockSet(n, blk, blk(i)), assembledPoint(n, rowFamily(n, T(i)), x) with xPoints
+  have termsAgree : ∀ k ∈ ℕ, k < n → maskedPoint(n, n ∖ blockSet(n, blk, blk(i)), assembledPoint(n, rowFamily(n, T(i)), z))(k) = maskedPoint(n, n ∖ blockSet(n, blk, blk(i)), assembledPoint(n, rowFamily(n, T(i)), x))(k)
+    intros k hk hkn
+    have hkIn : k ∈ n by exact membership.of_Less with hkn
+    have alternatives : k ∈ n ∖ blockSet(n, blk, blk(i)) ∨ ¬k ∈ n ∖ blockSet(n, blk, blk(i)) by tauto
+    cases alternatives with outsideBlock | insideBlock
+    . have zSame := maskedPoint.on_block with zPoints, hkIn, outsideBlock
+      have xSame := maskedPoint.on_block with xPoints, hkIn, outsideBlock
+      have zPoint := assembledPoint.value with functions, hz, hkIn
+      have xPoint := assembledPoint.value with functions, hx, hkIn
+      have zTerm := rowFamily.term with row, hz, hkIn
+      have xTerm := rowFamily.term with row, hx, hkIn
+      have parts := difference.membership.forward with outsideBlock
+      have notOwn : blk(k) ≠ blk(i)
+        intro own
+        apply parts.right
+        apply blockSet.membership.backward
+        exact ⟨hkIn, own⟩
+      have coordinate := agree with hkIn, notOwn
+      rw [zSame, xSame, zPoint, xPoint, zTerm, xTerm, coordinate]
+      rfl
+    . have zSame := maskedPoint.off_block with zPoints, hkIn, insideBlock
+      have xSame := maskedPoint.off_block with xPoints, hkIn, insideBlock
+      rw [zSame, xSame]
+      rfl
+  have equal := realPartialSum.eq_prefix with maskedZ, maskedX, termsAgree
+  rwa [same, zValue, xValue]
+
+-- The family of all payoff functions of the game.
+defgraph polymatrixPayoffs (n blk T : Set) (i ∈ n) : functionSpace(unitCube(n), ℝ) := polymatrixPayoff(n, blk, T, i)
+requires nNat : Nat(n)
+requires table : T : n → functionSpace(n, ℝ)
+proof
+  have continuous := polymatrixPayoff.continuous at n, blk, T, i with table, member
+  have function := CubeFunctionContinuous.function with continuous
+  have between : polymatrixPayoff(n, blk, T, i) : unitCube(n) → ℝ
+    exact CubeFunction.function with function
+  exact functionSpace.membership.backward with between
+
+theorem polymatrixPayoffs.continuous (n : Nat) (blk T : Set)
+  requires table : T : n → functionSpace(n, ℝ)
+  shows ∀ i ∈ n, CubeFunctionContinuous(polymatrixPayoffs(n, blk, T)(i), n)
+proof
+  intros i hi
+  have same := polymatrixPayoffs.value at n, blk, T, i with *
+  rw same
+  exact polymatrixPayoff.continuous with table, hi
+
+-- Every polymatrix game has a Nash equilibrium: a profile x such that no
+-- player improves their expected payoff by changing their own mixture.
+theorem polymatrix.equilibrium (n : Nat) (m blk T rep : Set)
+  requires blkFunction : blk : n → m
+  requires repFunction : rep : m → n
+  requires section : ∀ q ∈ m, blk(rep(q)) = q
+  requires table : T : n → functionSpace(n, ℝ)
+  shows ∃ x ∈ simplexProduct(n, m, blk), ∀ p ∈ m, ∀ z ∈ simplexProduct(n, m, blk), (∀ j ∈ n, blk(j) ≠ p → z(j) = x(j)) → (expectedPayoff(n, blk, polymatrixPayoffs(n, blk, T), p)(z):R) ≤ (expectedPayoff(n, blk, polymatrixPayoffs(n, blk, T), p)(x):R)
+proof
+  have anchor := pureProfile.in_product with blkFunction, repFunction, section
+  have family := polymatrixPayoffs.continuous at n, blk, T with table
+  obtain ⟨x, equilibrium⟩ := nash.exists_equilibrium with blkFunction, anchor, family
+  have hx := Equilibrium.profile with equilibrium
+  have xCube := simplexProduct.cube with hx
+  witness x
+  constructor
+  . exact hx
+  . intros p hp z hz agree
+    have zCube := simplexProduct.cube with hz
+    have independent : ∀ i ∈ n, blk(i) = p → polymatrixPayoffs(n, blk, T)(i)(z) = polymatrixPayoffs(n, blk, T)(i)(x)
+      intros i hi own
+      have same := polymatrixPayoffs.value at n, blk, T, i with *
+      have agreeI : ∀ j ∈ n, blk(j) ≠ blk(i) → z(j) = x(j)
+        intros j hj notOwn
+        rw own at notOwn
+        exact agree with hj, notOwn
+      rw same
+      exact polymatrixPayoff.independent with table, hi, xCube, zCube, agreeI
+    exact nash.no_deviation with blkFunction, family, equilibrium, hz, hp, independent

@@ -1,0 +1,186 @@
+-- Explicit squared-modulus bounds for complex Horner evaluation, in ZF.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Complex.PolynomialBounds
+import PolynomialMinimum
+
+def complexBoundStep (c : Euclidean.Point) (radius bound : Real) : Real :=
+  (2:R) * (complexNormSquared(c) + radius * bound)
+
+-- The radius bounds squared modulus, so no square-root construction is needed.
+def complexHornerBound (leading radius : Set) (cs : List(complexCarrier)) → Set
+  | leading, radius, List.nil => complexNormSquared(leading)
+  | leading, radius, List.cons(c, tail) => complexBoundStep(c, radius, complexHornerBound(leading, radius, tail))
+  descends cs
+
+theorem realLe.double_bound (a b : Real)
+  requires bound : a ≤ b
+  shows ((2:R) * a) ≤ ((2:R) * b)
+proof
+  have doubled := realLe.add with *
+  have left : (a + a) = ((2:R) * a) by ring
+  have right : (b + b) = ((2:R) * b) by ring
+  rwa [left, right] at doubled
+
+theorem realLe.two_sum_nonnegative (a b : Real)
+  requires first : realZero ≤ a
+  requires second : realZero ≤ b
+  shows realZero ≤ ((2:R) * (a + b))
+proof
+  have sum := realLe.add at realZero, a, realZero, b with *
+  rw realAddValue.zero_left at sum
+  have doubled := realLe.double_bound at realZero, (a + b) with *
+  rwa realMulValue.zero_right at doubled
+
+section Estimates
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+
+theorem complexHornerBound.data (leading : Set) (radius : Real) (cs : List(complexCarrier))
+  requires initial : leading ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  shows Real(complexHornerBound(leading, radius, cs)) ∧ realZero ≤ complexHornerBound(leading, radius, cs)
+proof
+  induction cs
+  | List.nil =>
+    rw complexHornerBound
+    have real := complexNormSquared.real with *
+    have nonnegative := complexNormSquared.nonnegative with *
+    refine ⟨real, nonnegative⟩
+  | List.cons(c, tail) using ih =>
+    have member : c ∈ ℂ by assumption
+    have nonnegative := complexNormSquared.nonnegative with member
+    have product := realMulValue.nonnegative at radius, complexHornerBound(leading, radius, tail) with *
+    rw complexHornerBound
+    constructor
+    . unfold complexBoundStep
+      typecheck
+    . unfold complexBoundStep
+      exact realLe.two_sum_nonnegative at complexNormSquared(c), R[radius * complexHornerBound(leading, radius, tail)] with *
+
+theorem complexNormSquared.mul_bound (z w : Set) (radius bound : Real)
+  requires first : z ∈ ℂ
+  requires second : w ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  requires zBound : complexNormSquared(z) ≤ radius
+  requires wBound : complexNormSquared(w) ≤ bound
+  shows complexNormSquared(ℂ[z * w]) ≤ R[radius * bound]
+proof
+  have wNonnegative := complexNormSquared.nonnegative at w with *
+  have firstBound := realLe.mul_right_of_nonnegative at complexNormSquared(z), radius, complexNormSquared(w) with *
+  have secondBound := realLe.mul_left_of_nonnegative at complexNormSquared(w), bound, radius with *
+  rw complexNormSquared.mul
+  exact realLe.transitive with *
+
+theorem complexNormSquared.horner_step_bound (c z w : Set) (radius bound : Real)
+  requires coefficient : c ∈ ℂ
+  requires first : z ∈ ℂ
+  requires second : w ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  requires zBound : complexNormSquared(z) ≤ radius
+  requires wBound : complexNormSquared(w) ≤ bound
+  shows complexNormSquared(ℂ[c + z * w]) ≤ R[2 * (complexNormSquared(c) + radius * bound)]
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have product := IsRing.mul_closed with ordinary, first, second
+  have sum := IsRing.add_closed with ordinary, coefficient, product
+  have estimate := complexNormSquared.mul_bound at z, w, radius, bound with *
+  have addition := complexNormSquared.add_bound at c, ℂ[z * w] with *
+  have translated := realLe.add_left at complexNormSquared(ℂ[z * w]), R[radius * bound], complexNormSquared(c) with *
+  have doubled := realLe.double_bound at R[complexNormSquared(c) + complexNormSquared(ℂ[z * w])], R[complexNormSquared(c) + radius * bound] with *
+  exact realLe.transitive with *
+
+theorem complexHornerBound.bounds (leading z : Set) (radius : Real) (cs : List(complexCarrier))
+  requires initial : leading ∈ ℂ
+  requires element : z ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  requires within : complexNormSquared(z) ≤ radius
+  shows complexNormSquared(hornerAt{complexCarrier}(complexAdd, complexMul, leading, z, cs)) ≤ complexHornerBound(leading, radius, cs)
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  induction cs
+  | List.nil =>
+    rw [hornerAt.nil, complexHornerBound]
+    exact realLe.reflexive with *
+  | List.cons(c, tail) using ih =>
+    have coefficient : c ∈ ℂ by assumption
+    have value := hornerAt.closed at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, leading, z, tail with *
+    have data := complexHornerBound.data at leading, radius, tail with *
+    have bound := complexNormSquared.horner_step_bound at c, z, hornerAt{complexCarrier}(complexAdd, complexMul, leading, z, tail), radius, complexHornerBound(leading, radius, tail) with *
+    rw [hornerAt.cons, complexHornerBound]
+    unfold complexBoundStep
+    exact bound
+
+theorem complexPolynomial.bounded_on_disk (radius : Real) (cs : List(complexCarrier))
+  requires radiusNonnegative : realZero ≤ radius
+  shows ∃ bound ∈ ℝ, realZero ≤ bound ∧ (∀ z ∈ ℂ, complexNormSquared(z) ≤ radius → complexNormSquared(complexPolynomial(cs)(z)) ≤ bound)
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have data := complexHornerBound.data at complexOne, radius, cs with *
+  have boundIn : complexHornerBound(complexOne, radius, cs) ∈ ℝ by typecheck
+  refine ⟨complexHornerBound(complexOne, radius, cs), boundIn, data.right, ?_⟩
+  intros z member within
+  have estimate := complexHornerBound.bounds at complexOne, z, radius, cs with *
+  have value := complexPolynomial.value at cs, z with *
+  rw value
+  unfold hornerAt at estimate
+  exact estimate
+
+-- Synthetic division turns the disk bound into a quantitative continuity estimate.
+theorem complexHornerBound.difference (leading a x c : Set) (radius : Real) (cs : List(complexCarrier))
+  requires initial : leading ∈ ℂ
+  requires center : a ∈ ℂ
+  requires element : x ∈ ℂ
+  requires coefficient : c ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  requires within : complexNormSquared(x) ≤ radius
+  shows complexNormSquared(ℂ[hornerAt{complexCarrier}(complexAdd, complexMul, leading, x, c :: cs) - hornerAt{complexCarrier}(complexAdd, complexMul, leading, a, c :: cs)]) ≤ R[complexNormSquared(ℂ[x - a]) * complexHornerBound(leading, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, leading, a, cs))]
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have quotient := hornerQuotient.closed at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, leading, a, cs with *
+  have aValue := hornerAt.closed at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, leading, a, c :: cs with *
+  have qValue := hornerAt.closed at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, leading, x, hornerQuotient{complexCarrier}(complexAdd, complexMul, leading, a, cs) with *
+  have negated := IsRing.neg_closed with ordinary, center
+  have displacement := IsRing.add_closed with ordinary, element, negated
+  have displacementNonnegative := complexNormSquared.nonnegative with displacement
+  have reflexive := realLe.reflexive with *
+  have data := complexHornerBound.data at leading, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, leading, a, cs) with *
+  have bounded := complexHornerBound.bounds at leading, x, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, leading, a, cs) with *
+  have division := hornerAt.synthetic_division at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, leading, a, x, c, cs with *
+  have factorization : ℂ[hornerAt{complexCarrier}(complexAdd, complexMul, leading, x, c :: cs) - hornerAt{complexCarrier}(complexAdd, complexMul, leading, a, c :: cs)] = ℂ[(x - a) * hornerAt{complexCarrier}(complexAdd, complexMul, leading, x, hornerQuotient{complexCarrier}(complexAdd, complexMul, leading, a, cs))]
+    rw division
+    ring
+  rw factorization
+  exact complexNormSquared.mul_bound with *
+
+theorem complexPolynomial.difference_bound_on_disk (a c : Set) (radius : Real) (cs : List(complexCarrier))
+  requires center : a ∈ ℂ
+  requires coefficient : c ∈ ℂ
+  requires radiusNonnegative : realZero ≤ radius
+  shows ∃ bound ∈ ℝ, realZero ≤ bound ∧ (∀ x ∈ ℂ, complexNormSquared(x) ≤ radius → complexNormSquared(ℂ[complexPolynomial(c :: cs)(x) - complexPolynomial(c :: cs)(a)]) ≤ R[complexNormSquared(ℂ[x - a]) * bound])
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have quotient := hornerQuotient.closed at complexCarrier, complexAdd, complexZero, complexNeg, complexMul, complexOne, complexOne, a, cs with *
+  have data := complexHornerBound.data at complexOne, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, complexOne, a, cs) with *
+  have boundIn : complexHornerBound(complexOne, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, complexOne, a, cs)) ∈ ℝ
+    typecheck
+  refine ⟨complexHornerBound(complexOne, radius, hornerQuotient{complexCarrier}(complexAdd, complexMul, complexOne, a, cs)), boundIn, data.right, ?_⟩
+  intros x member within
+  have estimate := complexHornerBound.difference at complexOne, a, x, c, radius, cs with *
+  have xValue := complexPolynomial.value at c :: cs, x with *
+  have aValue := complexPolynomial.value at c :: cs, a with *
+  rw [xValue, aValue]
+  simpa [hornerAt] using estimate
+
+end Estimates

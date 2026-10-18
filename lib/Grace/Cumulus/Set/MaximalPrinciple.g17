@@ -1,0 +1,159 @@
+-- Maximal extensions in families closed under nonempty chain unions.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Set.MaximalPrinciple
+import Zorn
+
+def extensions (F I : Set) : Set := {J ∈ F | I ⊆ J}
+
+theorem extensions.membership (J F I : Set)
+  shows J ∈ extensions(F, I) ↔ J ∈ F ∧ I ⊆ J
+proof
+  simp
+
+theorem inclusionChain.nested (F S : Set)
+  requires chain : Chain(F, inclusionOrder(F), S)
+  shows ∀ C ∈ S, ∀ D ∈ S, C ⊆ D ∨ D ⊆ C
+proof
+  rcases chain with ⟨bounded, comparable⟩
+  intros C hC D hD
+  have memberC := bounded with C, hC
+  have memberD := bounded with D, hD
+  have directions := comparable with C, hC, D, hD
+  have forward := inclusionOrder.relates at F, C, D with *
+  have backward := inclusionOrder.relates at F, D, C with *
+  cases directions with cd | dc
+  . left
+    exact forward.forward with cd
+  . right
+    exact backward.forward with dc
+
+-- Only nonempty unions are required; I supplies the empty-chain bound.
+theorem maximal_extension (F I : Set)
+  requires seed : I ∈ F
+  requires closed : ∀ S, Nonempty(S) → S ⊆ F →
+    (∀ C ∈ S, ∀ D ∈ S, C ⊆ D ∨ D ⊆ C) → ⋃(S) ∈ F
+  shows ∃ M ∈ F, I ⊆ M ∧ (∀ J ∈ F, M ⊆ J → J = M)
+proof
+  have self := Subset.reflexive at I
+  have seedMember : I ∈ extensions(F, I) := extensions.membership.backward with ⟨seed, self⟩
+  have condition : ZornCondition(extensions(F, I), inclusionOrder(extensions(F, I)))
+    constructor
+    . exact inclusionOrder.partial at extensions(F, I)
+    . intros S chain
+      have subset := Chain.subset with chain
+      have nested := inclusionChain.nested with chain
+      have alternatives : Nonempty(S) ∨ ¬Nonempty(S) by tauto
+      cases alternatives with inhabited | absent
+      . have subsetF : S ⊆ F
+          intros J hJ
+          have member := subset with J, hJ
+          obtain ⟨inFamily, extendsJ⟩ := extensions.membership.forward with member
+          exact inFamily
+        have unionF := closed with S, inhabited, subsetF, nested
+        have extends : I ⊆ ⋃(S)
+          obtain ⟨seedChain, hJ⟩ := inhabited
+          have member := subset with seedChain, hJ
+          obtain ⟨inFamily, contains⟩ := extensions.membership.forward with member
+          intros x hx
+          have inJ := contains with x, hx
+          exact set.union.backward with ⟨seedChain, hJ, inJ⟩
+        have unionMember : ⋃(S) ∈ extensions(F, I) := extensions.membership.backward with ⟨unionF, extends⟩
+        witness ⋃(S)
+        refine ⟨unionMember, subset, ?_⟩
+        intros J hJ
+        have member := subset with J, hJ
+        apply inclusionOrder.relates.backward with member, unionMember
+        intros x hx
+        exact set.union.backward with ⟨J, hJ, hx⟩
+      . witness I
+        refine ⟨seedMember, subset, ?_⟩
+        intros J hJ
+        exfalso
+        exact absent with ⟨J, hJ⟩
+  obtain ⟨M, memberM, greatest⟩ := Zorn.theorem with condition
+  obtain ⟨inF, extends⟩ := extensions.membership.forward with memberM
+  refine ⟨M, inF, extends, ?_⟩
+  intros J hJ contains
+  have extendsJ := Subset.transitive with extends, contains
+  have memberJ : J ∈ extensions(F, I) := extensions.membership.backward with ⟨hJ, extendsJ⟩
+  have edge := inclusionOrder.relates.backward with memberM, memberJ, contains
+  exact greatest with J, memberJ, edge
+
+theorem Chain.extends_maximal (A r I : Set)
+  requires initial : Chain(A, r, I)
+  shows ∃ M, Chain(A, r, M) ∧ I ⊆ M ∧
+    (∀ J, Chain(A, r, J) → M ⊆ J → J = M)
+proof
+  have seed := chains.contains with initial
+  have closed : ∀ S, Nonempty(S) → S ⊆ chains(A, r) →
+    (∀ C ∈ S, ∀ D ∈ S, C ⊆ D ∨ D ⊆ C) → ⋃(S) ∈ chains(A, r)
+    intros S inhabited subset nested
+    have family : ChainOfChains(A, r, S)
+      constructor
+      . intros C hC
+        have member := subset with C, hC
+        obtain ⟨boundedC, chainC⟩ := chains.membership.forward with member
+        exact chainC
+      . exact nested
+    have unionChain := Chain.union with family
+    exact chains.contains with unionChain
+  obtain ⟨M, member, extends, maximal⟩ := maximal_extension with seed, closed
+  obtain ⟨boundedM, chainM⟩ := chains.membership.forward with member
+  witness M
+  constructor
+  . exact chainM
+  . constructor
+    . exact extends
+    . intros J chainJ contains
+      have memberJ := chains.contains with chainJ
+      exact maximal with J, memberJ, contains
+
+theorem Zorn.above (A r a : Set)
+  requires condition : ZornCondition(A, r)
+  requires start : a ∈ A
+  shows ∃ m, Maximal(A, r, m) ∧ relates(r, a, m)
+proof
+  have order := ZornCondition.order with condition
+  have singletonChain := Chain.singleton with order, start
+  obtain ⟨C, chain, extends, maximalChain⟩ := Chain.extends_maximal with singletonChain
+  rcases condition with ⟨partial, bounds⟩
+  obtain ⟨m, bound⟩ := bounds with C, chain
+  have extended := Chain.adjoin_upper with order, chain, bound
+  have subset := union2.subset_left at C, {m}
+  have equal := maximalChain with C ∪ {m}, extended, subset
+  have mIn : m ∈ C
+    have self := singleton.self at m
+    have member := union2.right at m, C, {m} with self
+    rwa equal at member
+  rcases bound with ⟨mInA, subsetC, upper⟩
+  have aIn : a ∈ C by exact extends with a, singleton.self at a
+  have above := upper with a, aIn
+  have maximal : Maximal(A, r, m)
+    constructor
+    . exact mInA
+    . intros x hx mx
+      have transitive := IsPartialOrder.transitive with order
+      have boundX : UpperBound(A, r, C, x)
+        constructor
+        . exact hx
+        . constructor
+          . exact subsetC
+          . intros y hy
+            have ym := upper with y, hy
+            have yInA : y ∈ A by exact subsetC with y, hy
+            exact transitive with y, yInA, m, mInA, x, hx, ym, mx
+      have chainX := Chain.adjoin_upper with order, chain, boundX
+      have subsetX := union2.subset_left at C, {x}
+      have equalX := maximalChain with C ∪ {x}, chainX, subsetX
+      have xIn : x ∈ C
+        have self := singleton.self at x
+        have member := union2.right at x, C, {x} with self
+        rwa equalX at member
+      have xm := upper with x, xIn
+      have antisymmetric := IsPartialOrder.antisymmetric with order
+      exact antisymmetric with x, hx, m, mInA, xm, mx
+  refine ⟨m, maximal, above⟩

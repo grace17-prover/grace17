@@ -1,0 +1,164 @@
+-- List linear combinations as sums over their finite ordinal of positions (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.IndexedCombinations
+import SpanCoefficients
+import IndexedLists
+import Ring.FiniteSetSum
+
+section Sums
+variable (A add zero neg mul one w v f g : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+hypothesis first : w(f(∅)) ∈ R
+
+theorem indexedRingSum.head_tail (n : Nat)
+  shows WeightedValues(w, f, A, succ(n)) → WeightedValues(v, g, A, n) →
+    (∀ i ∈ n, w(f(succ(i))) = v(g(i))) →
+    indexedRingSum(w, f, add, zero, succ(n)) = R[w(f(∅)) + indexedRingSum(v, g, add, zero, n)]
+proof
+  induction n
+  | zero =>
+    intros valuesW valuesV entries
+    have headIn : w(f(∅)) ∈ A by exact first
+    rw [indexedRingSum, indexedRingSum, indexedRingSum, nat.zero]
+    ring
+  | succ(k) using ih =>
+    intros valuesW valuesV entries
+    have prefixW := WeightedValues.prefix at w, f, A, succ(k) with *
+    have prefixV := WeightedValues.prefix at v, g, A, k with *
+    have lastW := WeightedValues.last at w, f, A, succ(k) with *
+    have lastV := WeightedValues.last at v, g, A, k with *
+    have prefix : ∀ i ∈ k, w(f(succ(i))) = v(g(i))
+      intros i hi
+      have included := membership.into_successor at i, k with *
+      exact entries with i, included
+    have previous := ih with prefixW, prefixV, prefix
+    have last := entries with k, membership.self_successor at k with *
+    have closed := indexedRingSum.closed at A, add, zero, neg, mul, one, v, g, k with *
+    have sumIn := closed with prefixV
+    rw [indexedRingSum, previous, indexedRingSum, last]
+    ring
+
+end Sums
+
+
+defgraph combinationWeights (A a0 B b0 times f xs cs : Set) (i ∈ length{B}(xs)) : B := times(f(listCoefficient{A}(a0, cs, i)), listCoefficient{B}(b0, xs, i))
+requires listX : List(B, xs)
+requires listC : List(A, cs)
+requires zeroA : a0 ∈ A
+requires zeroB : b0 ∈ B
+requires function : f : A → B
+requires closed : ClosedBinary(B, times)
+proof
+  have size : Nat(length{B}(xs))
+    typecheck
+  have positions := natural.member at length{B}(xs) with size
+  have index := positions with i, assumption
+  have coefficient := listCoefficient.closed at A, a0, cs, i with *
+  have generator := listCoefficient.closed at B, b0, xs, i with *
+  have image := FunctionBetween.apply_closed with function, coefficient
+  exact ClosedBinary.mem with closed, image, generator
+
+section Algebras
+variable (A add zero neg mul one B plus z minus times unit f : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+
+theorem linearCombination.indexed_sum (xs : List(B)) (cs : List(A))
+  shows linearCombination(R, S, f, xs, cs) = indexedRingSum(combinationWeights(A, zero, B, z, times, f, xs, cs), identity(length{B}(xs)), plus, z, length{B}(xs))
+proof
+  induction xs generalizing cs
+  | List.nil =>
+    intros cs coefficients
+    rw [linearCombination, length.nil, indexedRingSum]
+    rfl
+  | List.cons(a, tail) using ih =>
+    intros cs coefficients
+    have element : a ∈ B by assumption
+    have ordinaryR := IsCommRing.ring with source
+    have ordinaryS := IsCommRing.ring with target
+    have zeroR := IsRing.zero_in_carrier with ordinaryR
+    have zeroS := IsRing.zero_in_carrier with ordinaryS
+    have function := IsRingHom.function with hom
+    have closed : ClosedBinary(B, times)
+      intros u hu v hv
+      exact IsRing.mul_closed with ordinaryS, hu, hv
+    have restList := listTail.closed at A, cs with *
+    have nNat : Nat(length{B}(tail)) by typecheck
+    have size : length{B}(a :: tail) = succ(length{B}(tail))
+      rw length.cons
+      rfl
+    have weights := combinationWeights.function at A, zero, B, z, times, f, a :: tail, cs with *
+    have tails := combinationWeights.function at A, zero, B, z, times, f, tail, listTail{A}(cs) with *
+    have enum := identity.function at length{B}(a :: tail)
+    have tailEnum := identity.function at length{B}(tail)
+    have values := WeightedValues.of_functions with weights, enum
+    have restValues := WeightedValues.of_functions with tails, tailEnum
+    have firstIndex : ∅ ∈ length{B}(a :: tail)
+      rw size
+      have positive : 0 < succ(length{B}(tail)) by arith
+      have included := membership.of_Less with Naturals.constructor.zero, positive
+      rwa nat.zero at included
+    have firstEnum := identity.apply with firstIndex
+    have firstValue := combinationWeights.value at A, zero, B, z, times, f, a :: tail, cs, ∅ with *
+    have firstIn : combinationWeights(A, zero, B, z, times, f, a :: tail, cs)(identity(length{B}(a :: tail))(∅)) ∈ B
+      rw firstEnum
+      exact FunctionBetween.apply_closed with weights, firstIndex
+    have entries : ∀ i ∈ length{B}(tail), combinationWeights(A, zero, B, z, times, f, a :: tail, cs)(identity(length{B}(a :: tail))(succ(i))) = combinationWeights(A, zero, B, z, times, f, tail, listTail{A}(cs))(identity(length{B}(tail))(i))
+      intros i hi
+      have positions := natural.member with nNat
+      have index := positions with i, hi
+      have boundRule := Less.of_membership at i, length{B}(tail) with *
+      have bound := boundRule with hi
+      have nextBound : succ(i) < succ(length{B}(tail)) by arith
+      have included : succ(i) ∈ length{B}(a :: tail)
+        rw size
+        exact membership.of_Less with nextBound
+      have leftEnum := identity.apply with included
+      have rightEnum := identity.apply with hi
+      have left := combinationWeights.value at A, zero, B, z, times, f, a :: tail, cs, succ(i) with *
+      have right := combinationWeights.value at A, zero, B, z, times, f, tail, listTail{A}(cs), i with *
+      rw [leftEnum, rightEnum, left, right, listCoefficient.succ, listCoefficient]
+      rfl
+    have valuesNext : WeightedValues(combinationWeights(A, zero, B, z, times, f, a :: tail, cs), identity(length{B}(a :: tail)), B, succ(length{B}(tail)))
+      rwa ← size
+    have shiftRule := indexedRingSum.head_tail at B, plus, z, minus, times, unit, combinationWeights(A, zero, B, z, times, f, a :: tail, cs), combinationWeights(A, zero, B, z, times, f, tail, listTail{A}(cs)), identity(length{B}(a :: tail)), identity(length{B}(tail)), length{B}(tail) with *
+    have shift := shiftRule with valuesNext, restValues, entries
+    have previous := ih with listTail{A}(cs)
+    rw [firstEnum, firstValue, ← nat.zero, listCoefficient.zero, listCoefficient, ← size] at shift
+    rw [shift, ← previous, linearCombination]
+    rfl
+
+theorem linearCombination.finite_sum (xs : List(B)) (cs : List(A)) (w : Set)
+  requires weights : w : length{B}(xs) → B
+  requires entries : ∀ i ∈ length{B}(xs), w(i) = S[f(listCoefficient{A}(zero, cs, i)) * listCoefficient{B}(z, xs, i)]
+  shows linearCombination(R, S, f, xs, cs) = finiteRingSum(length{B}(xs), S, w)
+proof
+  have ordinaryR := IsCommRing.ring with source
+  have ordinaryS := IsCommRing.ring with target
+  have zeroR := IsRing.zero_in_carrier with ordinaryR
+  have zeroS := IsRing.zero_in_carrier with ordinaryS
+  have function := IsRingHom.function with hom
+  have closed : ClosedBinary(B, times)
+    intros u hu v hv
+    exact IsRing.mul_closed with ordinaryS, hu, hv
+  have canonical := combinationWeights.function at A, zero, B, z, times, f, xs, cs with *
+  have enumeration := identity.bijective at length{B}(xs)
+  have same : ∀ i ∈ length{B}(xs), combinationWeights(A, zero, B, z, times, f, xs, cs)(i) = w(i)
+    intros i hi
+    have value := combinationWeights.value at A, zero, B, z, times, f, xs, cs, i with *
+    have specified := entries with i, hi
+    cc
+  have sums := finiteRingSum.congr with *
+  have enumerated := finiteRingSum.enumeration at length{B}(xs), B, plus, z, minus, times, unit, combinationWeights(A, zero, B, z, times, f, xs, cs), identity(length{B}(xs)), length{B}(xs) with *
+  have indexed := linearCombination.indexed_sum with *
+  cc
+
+end Algebras

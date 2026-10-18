@@ -1,0 +1,159 @@
+-- Continuous maps between topological spaces: preimages of open sets are
+-- open. Identity and composition, the closed-set characterisation, the
+-- closure inclusion, and homeomorphisms
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Continuity
+import Space
+
+predicate ContinuousMap (f X T Y S : Set) :=
+  FunctionBetween(f, X, Y) ∧ (∀ V ∈ S, functionPreimage(f, X, V) ∈ T)
+
+predicate IsHomeomorphism (f X T Y S : Set) :=
+  BijectiveBetween(f, X, Y) ∧ ContinuousMap(f, X, T, Y, S) ∧
+  ContinuousMap(converse(f, X, Y), Y, S, X, T)
+
+theorem ContinuousMap.function (f X T Y S : Set)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  shows f : X → Y
+proof
+  exact continuous.left
+
+theorem ContinuousMap.preimage (f X T Y S V : Set)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires hV : V ∈ S
+  shows functionPreimage(f, X, V) ∈ T
+proof
+  exact continuous.right with V, hV
+
+theorem ContinuousMap.identity (X T : Set)
+  requires topology : IsTopology(X, T)
+  shows ContinuousMap(identity(X), X, T, X, T)
+proof
+  have function := identity.function at X
+  constructor
+  . exact function
+  . intros V hV
+    have inside := IsTopology.subset with topology, hV
+    have same : functionPreimage(identity(X), X, V) = V
+      ext x
+      constructor
+      . intro hx
+        have parts := functionPreimage.membership.forward with hx
+        have fixed := identity.apply with parts.left
+        rw fixed at parts
+        exact parts.right
+      . intro hx
+        have hxX := inside with x, hx
+        have fixed := identity.apply with hxX
+        apply functionPreimage.membership.backward
+        rw fixed
+        exact ⟨hxX, hx⟩
+    rwa same
+
+theorem ContinuousMap.compose (g f X T Y S Z R : Set)
+  requires first : ContinuousMap(f, X, T, Y, S)
+  requires second : ContinuousMap(g, Y, S, Z, R)
+  shows ContinuousMap(compose(g, f, X, Y, Z), X, T, Z, R)
+proof
+  have fFunction := first.left
+  have gFunction := second.left
+  constructor
+  . exact compose.function with fFunction, gFunction
+  . intros W hW
+    have step := functionPreimage.compose at g, f, X, Y, Z, W with fFunction, gFunction
+    rw step
+    have inner := second.right with W, hW
+    exact first.right with functionPreimage(g, Y, W), inner
+
+theorem ContinuousMap.closed_preimage (f X T Y S C : Set)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires closed : IsClosed(Y, S, C)
+  shows IsClosed(X, T, functionPreimage(f, X, C))
+proof
+  have function := continuous.left
+  constructor
+  . exact functionPreimage.subset at f, X, C
+  . have isOpen := continuous.right with complement(Y, C), closed.right
+    have swap := functionPreimage.complement at f, X, Y, C with function
+    unfold complement at isOpen
+    rw swap at isOpen
+    unfold complement
+    exact isOpen
+
+theorem ContinuousMap.of_closed_preimages (f X T Y S : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires function : f : X → Y
+  requires closed : ∀ C, IsClosed(Y, S, C) → IsClosed(X, T, functionPreimage(f, X, C))
+  shows ContinuousMap(f, X, T, Y, S)
+proof
+  constructor
+  . exact function
+  . intros V hV
+    have closedV := Open.complement_closed with topologyY, hV
+    have closedPreimage := closed with complement(Y, V), closedV
+    have swap := functionPreimage.complement at f, X, Y, V with function
+    unfold complement at closedPreimage
+    rw swap at closedPreimage
+    have inside := functionPreimage.subset at f, X, V
+    have double := complement.complement with inside
+    have isOpen := closedPreimage.right
+    have fold : complement(X, functionPreimage(f, X, V)) = X ∖ functionPreimage(f, X, V)
+      unfold complement
+      rfl
+    rwa [← fold, double] at isOpen
+
+-- A continuous map sends the closure of A into the closure of its image.
+theorem ContinuousMap.image_closure (f X T Y S A : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires hA : A ⊆ X
+  shows functionImage(f, closure(X, T, A), Y) ⊆ closure(Y, S, functionImage(f, A, Y))
+proof
+  have function := continuous.left
+  have closureInside := closure.subset with topologyX, hA
+  have imageInside := functionImage.subset at f, A, Y
+  intros y hy
+  simp [functionImage.membership] at hy
+  obtain ⟨hyY, x, hx, shape⟩ := hy
+  apply closure.membership.backward with topologyY, imageInside
+  refine ⟨hyY, ?_⟩
+  intros V hV hyV
+  have hxX := closureInside with x, hx
+  have preimageOpen := continuous.right with V, hV
+  have hxPreimage : x ∈ functionPreimage(f, X, V)
+    apply functionPreimage.membership.backward
+    rw ← shape
+    exact ⟨hxX, hyV⟩
+  have touches := closure.membership.forward with topologyX, hA, hx
+  obtain ⟨a, ha⟩ := touches.right with functionPreimage(f, X, V), preimageOpen, hxPreimage
+  have parts := intersection.membership.forward with ha
+  have preimageParts := functionPreimage.membership.forward with parts.left
+  witness f(a)
+  apply intersection.membership.backward
+  constructor
+  . exact preimageParts.right
+  . have value := FunctionBetween.apply_closed with function, preimageParts.left
+    simp [functionImage.membership]
+    constructor
+    . exact value
+    . witness a
+      constructor
+      . exact parts.right
+      . rfl
+
+theorem IsHomeomorphism.inverse (f X T Y S : Set)
+  requires homeomorphism : IsHomeomorphism(f, X, T, Y, S)
+  shows IsHomeomorphism(converse(f, X, Y), Y, S, X, T)
+proof
+  obtain ⟨bijective, forward, backward⟩ := homeomorphism
+  have inverse := converse.bijective with bijective
+  refine ⟨inverse, backward, ?_⟩
+  have relation := FunctionBetween.relation with (Injective.function with (Bijective.injective with bijective))
+  have same := converse.converse with relation
+  rwa same

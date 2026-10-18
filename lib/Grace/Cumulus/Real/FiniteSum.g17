@@ -1,0 +1,636 @@
+-- Finite real sums
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Real.FiniteSum
+import Analysis.Sequences
+import Power
+
+-- FiniteSums
+def realPartialSum (u : Set) (n : Nat) → Set
+  | u, zero => realZero
+  | u, succ(k) => realAddValue(realPartialSum(u, k), uₖ)
+
+notation binder "∑" => realPartialSum for Real
+
+theorem realPartialSum.zero (u : Set)
+  shows realPartialSum(u, 0) = (0:R)
+proof
+  rw realPartialSum
+  rfl
+
+theorem realPartialSum.succ (u : Set, n : Nat)
+  shows ∑ i < succ(n), u(i) = realAddValue(∑ i < n, u(i), uₙ)
+proof
+  rw realPartialSum
+  rfl
+
+theorem realPartialSum.real (u : Set, n : Nat)
+  requires sequence : RealSequence(u)
+  shows Real(∑ i < n, u(i))
+proof
+  induction n
+  | zero =>
+    rw realPartialSum
+    exact realZero.real
+  | succ(k) using ih =>
+    rw realPartialSum
+    have termReal := RealSequence.value with sequence
+    have sumReal := realAddValue.real with ih, termReal
+    unfold call2 at sumReal
+    unfold realAddValue
+    exact sumReal
+
+-- Linearity makes finite sums usable independently of the integration proofs.
+theorem realPartialSum.add (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows ∑ i < n, addSequence(u, v)(i) =
+    (∑ i < n, u(i)) + ∑ i < n, v(i)
+proof
+  induction n
+  | zero =>
+    rw [realPartialSum.zero, realPartialSum.zero, realPartialSum.zero]
+    ring
+  | succ(k) using ih =>
+    have valueU := RealSequence.value with sequenceU
+    have valueV := RealSequence.value with sequenceV
+    have sumUV := addSequence.sequence with sequenceU, sequenceV
+    have value := addSequence.value with sequenceU, sequenceV, valueU, valueV
+    rw [realPartialSum.succ, realPartialSum.succ, realPartialSum.succ, ih, value]
+    ring
+
+-- Scalar multiplication commutes with a finite sum.
+theorem realPartialSum.scale (u : Set, n : Nat, C : Real)
+  requires sequence : RealSequence(u)
+  shows ∑ k < n, mulSequence(constantSequence(C), u)(k) =
+    C * (∑ i < n, u(i):R)
+proof
+  induction n
+  | zero =>
+    rw [realPartialSum.zero, realPartialSum.zero]
+    ring
+  | succ(k) using ih =>
+    have constants := constantSequence.sequence at C
+    have scaled := mulSequence.sequence with constants, sequence
+    have constantValue := RealSequence.value with constants
+    have valueU := RealSequence.value with sequence
+    have value := mulSequence.value with constants, sequence, constantValue, valueU
+    have constant := constantSequence.value at C, k with *
+    rw [realPartialSum.succ, realPartialSum.succ, ih, value, constant]
+    ring
+
+theorem realPartialSum.neg (u : Set, n : Nat)
+  requires sequence : RealSequence(u)
+  shows ∑ i < n, negSequence(u)(i) = -(∑ i < n, u(i):R)
+proof
+  induction n
+  | zero =>
+    rw [realPartialSum.zero, realPartialSum.zero]
+    ring
+  | succ(k) using ih =>
+    have valueU := RealSequence.value with sequence
+    have negated := negSequence.sequence with sequence
+    have value := negSequence.value with sequence, valueU
+    rw [realPartialSum.succ, realPartialSum.succ, ih, value]
+    ring
+
+theorem realPartialSum.sub (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows ∑ i < n, subSequence(u, v)(i) =
+    (∑ i < n, u(i):R) - (∑ i < n, v(i):R)
+proof
+  have negated := negSequence.sequence with sequenceV
+  unfold subSequence
+  rw [realPartialSum.add, realPartialSum.neg]
+  unfold realSubValue
+  rfl
+
+-- Pointwise bounds pass to half-open finite sums, including the empty sum.
+theorem realPartialSum.monotone (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires bounded : ∀ k ∈ ℕ, (u[k]:R) ≤ (v[k]:R)
+  shows (∑ i < n, u(i):R) ≤ (∑ i < n, v(i):R)
+proof
+  induction n
+  | zero =>
+    rw [realPartialSum.zero, realPartialSum.zero]
+    exact realLe.reflexive with realZero.real
+  | succ(k) using ih =>
+    rw [realPartialSum.succ, realPartialSum.succ]
+    have uk := RealSequence.value with sequenceU
+    have vk := RealSequence.value with sequenceV
+    have sumU := realPartialSum.real with sequenceU
+    have sumV := realPartialSum.real with sequenceV
+    have naturalK := nat.omega.forward at k with assumption
+    have bound := bounded with k, naturalK
+    unfold realAddValue
+    unfold realAddValue
+    have added := realLe.add with sumU, sumV, uk, vk, ih, bound
+    unfold call2 at added
+    unfold call2 at added
+    exact added
+
+-- Induct before introducing the bound, so it can be specialized to each
+-- smaller prefix of the current partition.
+theorem realPartialSum.monotone_prefix_aux (n : Nat)
+  shows ∀ u, ∀ v, RealSequence(u) → RealSequence(v) →
+    (∀ k ∈ ℕ, k < n → (u[k]:R) ≤ (v[k]:R)) →
+      (∑ i < n, u(i):R) ≤ (∑ i < n, v(i):R)
+proof
+  induction n
+  | zero =>
+    intros u v sequenceU sequenceV bounded
+    rw [realPartialSum.zero, realPartialSum.zero]
+    exact realLe.reflexive with realZero.real
+  | succ(k) using ih =>
+    intros u v sequenceU sequenceV bounded
+    have naturalK := nat.omega.forward at k with assumption
+    have before : k < succ(k)
+      unfold Less
+      exact LessEqual.reflexive at succ(k) with
+        Naturals.constructor.succ at k with assumption
+    have termBound := bounded with k, naturalK, before
+    have prefix : ∀ j ∈ ℕ, j < k → (u[j]:R) ≤ (v[j]:R)
+      intros j naturalJ smaller
+      have typedJ := nat.omega.backward with naturalJ
+      have below := Less.transitive_LessEqual at j, k, succ(k) with
+        typedJ, assumption, Naturals.constructor.succ at k with assumption,
+        smaller, LessEqual.successor at k with assumption
+      exact bounded with j, naturalJ, below
+    have sumBound := ih with u, v, sequenceU, sequenceV, prefix
+    rw [realPartialSum.succ, realPartialSum.succ]
+    have uk := RealSequence.value with sequenceU
+    have vk := RealSequence.value with sequenceV
+    have sumU := realPartialSum.real with sequenceU
+    have sumV := realPartialSum.real with sequenceV
+    unfold realAddValue
+    unfold realAddValue
+    have added := realLe.add with sumU, sumV, uk, vk, sumBound, termBound
+    unfold call2 at added
+    unfold call2 at added
+    exact added
+
+-- Only the first n terms need bounds; later values of the sequences do not
+-- affect a finite sum.
+theorem realPartialSum.monotone_prefix (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires bounded : ∀ k ∈ ℕ, k < n → (u[k]:R) ≤ (v[k]:R)
+  shows (∑ i < n, u(i):R) ≤ (∑ i < n, v(i):R)
+proof
+  exact realPartialSum.monotone_prefix_aux at n with
+    u, v, sequenceU, sequenceV, bounded
+
+-- A finite sum only observes its first n terms, even if its sequences differ
+-- at every later index.
+theorem realPartialSum.eq_prefix_aux (n : Nat)
+  shows ∀ u, ∀ v, RealSequence(u) → RealSequence(v) →
+    (∀ k ∈ ℕ, k < n → u[k] = v[k]) →
+      ∑ i < n, u(i) = ∑ i < n, v(i)
+proof
+  induction n
+  | zero =>
+    intros u v sequenceU sequenceV equal
+    rw [realPartialSum.zero, realPartialSum.zero]
+    rfl
+  | succ(k) using ih =>
+    intros u v sequenceU sequenceV equal
+    have naturalK := nat.omega.forward at k with assumption
+    have before : k < succ(k)
+      unfold Less
+      exact LessEqual.reflexive at succ(k) with
+        Naturals.constructor.succ at k with assumption
+    have termEqual := equal with k, naturalK, before
+    have prefix : ∀ j ∈ ℕ, j < k → u[j] = v[j]
+      intros j naturalJ smaller
+      have typedJ := nat.omega.backward with naturalJ
+      have below := Less.transitive_LessEqual at j, k, succ(k) with
+        typedJ, assumption, Naturals.constructor.succ at k with assumption,
+        smaller, LessEqual.successor at k with assumption
+      exact equal with j, naturalJ, below
+    have sumEqual := ih with u, v, sequenceU, sequenceV, prefix
+    rw [realPartialSum.succ, realPartialSum.succ, sumEqual, termEqual]
+    rfl
+
+theorem realPartialSum.eq_prefix (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires equal : ∀ k ∈ ℕ, k < n → u[k] = v[k]
+  shows ∑ i < n, u(i) = ∑ i < n, v(i)
+proof
+  exact realPartialSum.eq_prefix_aux at n with
+    u, v, sequenceU, sequenceV, equal
+
+-- ShiftedSums
+defgraph shiftedRealSequence (u : Set, k : Nat) (n ∈ ℕ) : ℝ := u[add(k, n)]
+requires sequence : RealSequence(u)
+proof
+  have typedN := nat.omega.backward with member
+  exact RealSequence.value at u, add(k, n) with sequence
+
+theorem shiftedRealSequence.sequence (u : Set, k : Nat)
+  requires sequence : RealSequence(u)
+  shows RealSequence(shiftedRealSequence(u, k))
+proof
+  unfold RealSequence
+  exact shiftedRealSequence.function with sequence
+
+-- Prefix and suffix sums agree on their shared boundary. This is the finite
+-- sum operation needed for concatenating local refinements.
+theorem realPartialSum.split_at (u : Set, n m : Nat)
+  requires sequence : RealSequence(u)
+  shows realPartialSum(u, add(n, m)) =
+    (∑ i < n, u(i)) + ∑ i < m, shiftedRealSequence(u, n)(i)
+proof
+  induction m
+  | zero =>
+    rw [add.right_unit, realPartialSum.zero]
+    have prefix := realPartialSum.real with sequence
+    have zero := realAddValue.zero_right with prefix
+    rw zero
+    rfl
+  | succ(k) using ih =>
+    have shifted := shiftedRealSequence.sequence at u, n with sequence
+    have step := realPartialSum.succ at u, add(n, k)
+    have suffixStep := realPartialSum.succ at shiftedRealSequence(u, n), k
+    have value := shiftedRealSequence.value at u, n, k with sequence
+    rw [add.succ_right, step, ih, suffixStep, value]
+    have term := RealSequence.value at u, add(n, k) with sequence
+    ring
+
+-- The geometric sequence is a set-theoretic function on naturals.
+defgraph geometricTerms (X : Real) (n ∈ ℕ) : ℝ := realPow(X, n)
+proof
+  have typedN := nat.omega.backward with member
+  exact realPow.real with typedN
+
+theorem geometricTerms.sequence (X : Real)
+  shows RealSequence(geometricTerms(X))
+proof
+  unfold RealSequence
+  exact geometricTerms.function with assumption
+
+theorem geometricTerms.shifted (X : Real, m k : Nat)
+  shows shiftedRealSequence(geometricTerms(X), m)[k] =
+    (X ^ m) * (geometricTerms(X)[k]:R)
+proof
+  have sequence := geometricTerms.sequence at X
+  have shifted := shiftedRealSequence.value at geometricTerms(X), m, k with sequence
+  have index := add.closed at k, m with *
+  have value := geometricTerms.value with assumption, index
+  have valueK := geometricTerms.value at X, k with *
+  have power := realPow.add at X, m, k with *
+  rwa [shifted, value, valueK]
+
+-- Concatenation of prefixes, with the second block rescaled by X^m.
+theorem realPartialSum.geometric_split (X : Real, m n : Nat)
+  shows realPartialSum(geometricTerms(X), add(m, n)) =
+    (∑ i < m, geometricTerms(X)(i):R) +
+      (X ^ m) * (∑ i < n, geometricTerms(X)(i):R)
+proof
+  have sequence := geometricTerms.sequence at X
+  have power := realPow.real at X, m with *
+  have constants := constantSequence.sequence with power
+  have scaled := mulSequence.sequence with constants, sequence
+  have shifted := shiftedRealSequence.sequence at geometricTerms(X), m with sequence
+  have equal : ∀ j ∈ ℕ, j < n →
+      shiftedRealSequence(geometricTerms(X), m)[j] =
+        mulSequence(constantSequence(X ^ m), geometricTerms(X))[j]
+    intros j naturalJ before
+    have typedJ := nat.omega.backward with naturalJ
+    have constant := constantSequence.value with power, typedJ
+    have term := RealSequence.value at geometricTerms(X), j with sequence
+    have constantTerm := RealSequence.value at constantSequence(X ^ m), j with constants
+    have product := mulSequence.value with constants, sequence, constantTerm, term
+    have shiftedTerm := geometricTerms.shifted at X, m, j with
+      *{2}, typedJ
+    rwa [product, constant]
+  have suffix := realPartialSum.eq_prefix with shifted, scaled, equal
+  have split := realPartialSum.split_at at geometricTerms(X), m, n with sequence
+  have scale := realPartialSum.scale at geometricTerms(X), n, X ^ m with sequence
+  calc
+    realPartialSum(geometricTerms(X), add(m, n)) =
+        (∑ i < m, geometricTerms(X)(i):R) +
+          ∑ k < n, shiftedRealSequence(geometricTerms(X), m)(k) := split
+    _ = (∑ i < m, geometricTerms(X)(i):R) +
+          ∑ k < n, mulSequence(constantSequence(X ^ m), geometricTerms(X))(k) := by cc
+    _ = (∑ i < m, geometricTerms(X)(i):R) +
+          (X ^ m) * (∑ i < n, geometricTerms(X)(i):R) := by cc
+
+-- Division-free geometric sum identity, valid also at X = 1.
+theorem realPartialSum.geometric (X : Real, n : Nat)
+  shows ((1:R) - X) * (∑ j < n, geometricTerms(X)(j):R) =
+    (1:R) - X ^ n
+proof
+  induction n
+  | zero =>
+    rw [realPartialSum.zero, realPow.zero]
+    ring
+  | succ(k) using ih =>
+    have sequence := geometricTerms.sequence at X
+    have value := geometricTerms.value at X, k with *
+    rw [realPartialSum.succ, value, realPow.succ]
+    calc
+      ((1:R) - X) * realAddValue(∑ j < k, geometricTerms(X)(j), X ^ k) =
+          ((1:R) - X) * (∑ j < k, geometricTerms(X)(j):R) +
+              ((1:R) - X) * X ^ k := by ring
+      _ = ((1:R) - X ^ k) + ((1:R) - X) * X ^ k := by cc
+      _ = (1:R) - X * X ^ k := by ring
+
+theorem realPartialSum.geometric_quotient (X : Real, n : Nat)
+  requires nonzero : ((1:R) - X) ≠ (0:R)
+  shows ∑ i < n, geometricTerms(X)(i) =
+    ((1:R) - X ^ n) / ((1:R) - X)
+proof
+  have denominator := realSubValue.real with realOne.real
+  have power := realPow.real at X, n with *
+  have numerator := realSubValue.real with realOne.real, power
+  have sequence := geometricTerms.sequence at X
+  have inverseReal := realInvValue.real with denominator
+  have inverse := realInvValue.mul_right with nonzero
+  have identity := realPartialSum.geometric at X, n
+  have division := realDiv.eq_mul_inv with numerator, denominator
+  have commute := realMulValue.commutative with inverseReal, numerator
+  calc
+    ∑ i < n, geometricTerms(X)(i) =
+        (1:R) * (∑ i < n, geometricTerms(X)(i):R) := by ring
+    _ = (((1:R) - X) * realInvValue((1:R) - X)) *
+          (∑ i < n, geometricTerms(X)(i):R) := by cc
+    _ = realInvValue((1:R) - X) *
+          (((1:R) - X) * (∑ i < n, geometricTerms(X)(i):R)) := by ring
+    _ = realInvValue((1:R) - X) * ((1:R) - X ^ n) := by simp [identity]
+    _ = ((1:R) - X ^ n) / ((1:R) - X) := by cc
+
+-- The generic forward difference sequence of a real sequence.
+defgraph adjacentDifferences (u : Set) (n ∈ ℕ) : ℝ :=
+  realSubValue(u[succ(n)], u[n])
+requires sequence : RealSequence(u)
+proof
+  have typedN := nat.omega.backward with member
+  have atN := RealSequence.value with sequence
+  have atNext := RealSequence.value at u, succ(n) with sequence
+  exact realSubValue.real with atNext, atN
+
+theorem adjacentDifferences.sequence (u : Set)
+  requires sequence : RealSequence(u)
+  shows RealSequence(adjacentDifferences(u))
+proof
+  unfold RealSequence
+  exact adjacentDifferences.function with sequence
+
+theorem realPartialSum.telescoping (u : Set, n : Nat)
+  requires sequence : RealSequence(u)
+  shows ∑ i < n, adjacentDifferences(u)(i) = (u[n]:R) - (u[0]:R)
+proof
+  induction n
+  | zero =>
+    rw realPartialSum.zero
+    have atZero := RealSequence.value at u, 0 with sequence
+    ring
+  | succ(k) using ih =>
+    have atZero := RealSequence.value with sequence
+    have atK := RealSequence.value with sequence
+    have atNext := RealSequence.value with sequence
+    have difference := adjacentDifferences.value with sequence
+    rw [realPartialSum.succ, difference, ih]
+    ring
+
+-- Discrete Leibniz rule. The first factor is sampled at the next index.
+theorem adjacentDifferences.product (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows adjacentDifferences(mulSequence(u, v))[n] =
+    (u[succ(n)]:R) * (adjacentDifferences(v)[n]:R) +
+      (v[n]:R) * (adjacentDifferences(u)[n]:R)
+proof
+  have productSequence := mulSequence.sequence with sequenceU, sequenceV
+  have un := RealSequence.value with sequenceU
+  have vn := RealSequence.value with sequenceV
+  have unext := RealSequence.value at u, succ(n) with sequenceU
+  have vnext := RealSequence.value at v, succ(n) with sequenceV
+  have productN := mulSequence.value with sequenceU, sequenceV, un, vn
+  have productNext := mulSequence.value with sequenceU, sequenceV, unext, vnext
+  have differenceProduct := adjacentDifferences.value with productSequence
+  have differenceU := adjacentDifferences.value with sequenceU
+  have differenceV := adjacentDifferences.value with sequenceV
+  rw [differenceProduct, productNext, productN, differenceU, differenceV]
+  ring
+
+-- The two terms in the discrete product rule are sequences in their own right.
+defgraph forwardProductIncrements (u v : Set) (n ∈ ℕ) : ℝ :=
+  realMulValue(u[succ(n)], realSubValue(v[succ(n)], v[n]))
+requires sequenceU : RealSequence(u)
+requires sequenceV : RealSequence(v)
+proof
+  have typedN := nat.omega.backward with member
+  have unext := RealSequence.value at u, succ(n) with sequenceU
+  have vn := RealSequence.value with sequenceV
+  have vnext := RealSequence.value at v, succ(n) with sequenceV
+  have difference := realSubValue.real with vnext, vn
+  have product := realMulValue.real with unext, difference
+  unfold realMulValue
+  unfold call2 at product
+  exact product
+
+defgraph backwardProductIncrements (u v : Set) (n ∈ ℕ) : ℝ :=
+  realMulValue(v[n], realSubValue(u[succ(n)], u[n]))
+requires sequenceU : RealSequence(u)
+requires sequenceV : RealSequence(v)
+proof
+  have typedN := nat.omega.backward with member
+  have un := RealSequence.value with sequenceU
+  have unext := RealSequence.value at u, succ(n) with sequenceU
+  have vn := RealSequence.value with sequenceV
+  have difference := realSubValue.real with unext, un
+  have product := realMulValue.real with vn, difference
+  unfold realMulValue
+  unfold call2 at product
+  exact product
+
+theorem forwardProductIncrements.sequence (u v : Set)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows RealSequence(forwardProductIncrements(u, v))
+proof
+  unfold RealSequence
+  exact forwardProductIncrements.function with sequenceU, sequenceV
+
+theorem backwardProductIncrements.sequence (u v : Set)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows RealSequence(backwardProductIncrements(u, v))
+proof
+  unfold RealSequence
+  exact backwardProductIncrements.function with sequenceU, sequenceV
+
+theorem adjacentDifferences.product_terms (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows adjacentDifferences(mulSequence(u, v))[n] =
+    addSequence(forwardProductIncrements(u, v), backwardProductIncrements(u, v))[n]
+proof
+  have forward := forwardProductIncrements.sequence with sequenceU, sequenceV
+  have backward := backwardProductIncrements.sequence with sequenceU, sequenceV
+  have forwardReal := RealSequence.value with forward
+  have backwardReal := RealSequence.value with backward
+  have added := addSequence.value with forward, backward, forwardReal, backwardReal
+  have forwardValue := forwardProductIncrements.value with sequenceU, sequenceV
+  have backwardValue := backwardProductIncrements.value with sequenceU, sequenceV
+  have product := adjacentDifferences.product with sequenceU, sequenceV
+  rw [added, forwardValue, backwardValue]
+  have differenceU := adjacentDifferences.value with sequenceU
+  have differenceV := adjacentDifferences.value with sequenceV
+  rw [differenceU, differenceV] at product
+  unfold realMulValue
+  unfold realMulValue
+  unfold call2
+  unfold call2
+  unfold call2
+  rfl
+
+-- Finite summation by parts, expressed without choosing an interval or grid.
+theorem realPartialSum.product_telescoping (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows (∑ i < n, forwardProductIncrements(u, v)(i):R) +
+      (∑ i < n, backwardProductIncrements(u, v)(i):R) =
+    (u[n]:R) * (v[n]:R) - (u[0]:R) * (v[0]:R)
+proof
+  have forward := forwardProductIncrements.sequence with sequenceU, sequenceV
+  have backward := backwardProductIncrements.sequence with sequenceU, sequenceV
+  have productSequence := mulSequence.sequence with sequenceU, sequenceV
+  have differences := adjacentDifferences.sequence with productSequence
+  have added := addSequence.sequence with forward, backward
+  have equal : ∀ k ∈ ℕ, k < n →
+      adjacentDifferences(mulSequence(u, v))[k] =
+        addSequence(forwardProductIncrements(u, v), backwardProductIncrements(u, v))[k]
+    intros k naturalK before
+    have typedK := nat.omega.backward with naturalK
+    exact adjacentDifferences.product_terms with sequenceU, sequenceV
+  have sameSum := realPartialSum.eq_prefix with differences, added, equal
+  have sumAdd := realPartialSum.add with forward, backward
+  have telescope := realPartialSum.telescoping with productSequence
+  have un := RealSequence.value with sequenceU
+  have vn := RealSequence.value with sequenceV
+  have u0 := RealSequence.value at u, 0 with sequenceU
+  have v0 := RealSequence.value at v, 0 with sequenceV
+  have productN := mulSequence.value with sequenceU, sequenceV, un, vn
+  have productZero := mulSequence.value with sequenceU, sequenceV, u0, v0
+  rw [productN, productZero] at telescope
+  calc
+    (∑ i < n, forwardProductIncrements(u, v)(i):R) +
+        (∑ i < n, backwardProductIncrements(u, v)(i):R) =
+      realPartialSum(addSequence(forwardProductIncrements(u, v),
+        backwardProductIncrements(u, v)), n) := by cc
+    _ = ∑ k < n, adjacentDifferences(mulSequence(u, v))(k) := by cc
+    _ = (u[n]:R) * (v[n]:R) - (u[0]:R) * (v[0]:R) := telescope
+
+theorem realPartialSum.summation_by_parts (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows ∑ i < n, forwardProductIncrements(u, v)(i) =
+    ((u[n]:R) * (v[n]:R) - (u[0]:R) * (v[0]:R)) -
+      (∑ i < n, backwardProductIncrements(u, v)(i):R)
+proof
+  have forward := forwardProductIncrements.sequence with sequenceU, sequenceV
+  have backward := backwardProductIncrements.sequence with sequenceU, sequenceV
+  have un := RealSequence.value with sequenceU
+  have vn := RealSequence.value with sequenceV
+  have u0 := RealSequence.value with sequenceU
+  have v0 := RealSequence.value with sequenceV
+  have identity := realPartialSum.product_telescoping with sequenceU, sequenceV
+  calc
+    ∑ i < n, forwardProductIncrements(u, v)(i) =
+      ((∑ i < n, forwardProductIncrements(u, v)(i):R) +
+        (∑ i < n, backwardProductIncrements(u, v)(i):R)) -
+          (∑ i < n, backwardProductIncrements(u, v)(i):R) := by ring
+    _ = ((u[n]:R) * (v[n]:R) - (u[0]:R) * (v[0]:R)) -
+      (∑ i < n, backwardProductIncrements(u, v)(i):R) := by cc
+
+-- Prefix sums themselves form a sequence; their adjacent difference is the
+-- original sequence. This is the discrete fundamental theorem of calculus.
+defgraph prefixSums (u : Set) (n ∈ ℕ) : ℝ := ∑ i < n, u(i)
+requires sequence : RealSequence(u)
+proof
+  have typedN := nat.omega.backward with member
+  exact realPartialSum.real with sequence
+
+theorem prefixSums.sequence (u : Set)
+  requires sequence : RealSequence(u)
+  shows RealSequence(prefixSums(u))
+proof
+  unfold RealSequence
+  exact prefixSums.function with sequence
+
+theorem prefixSums.zero (u : Set)
+  requires sequence : RealSequence(u)
+  shows prefixSums(u)[0] = (0:R)
+proof
+  have value := prefixSums.value at u, 0 with sequence
+  rwa realPartialSum.zero at value
+
+theorem prefixSums.difference (u : Set, n : Nat)
+  requires sequence : RealSequence(u)
+  shows adjacentDifferences(prefixSums(u))[n] = u[n]
+proof
+  have prefixes := prefixSums.sequence with sequence
+  have delta := adjacentDifferences.value with prefixes
+  have next := prefixSums.value at u, succ(n) with sequence
+  have current := prefixSums.value with sequence
+  have term := RealSequence.value with sequence
+  rw [delta, next, current, realPartialSum.succ]
+  ring
+
+-- Abel's finite summation formula: move the difference from prefix sums to v.
+theorem realPartialSum.abel (u v : Set, n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  shows ∑ i < n, mulSequence(u, v)(i) =
+    (∑ i < n, u(i):R) * (v[n]:R) -
+      (∑ k < n, forwardProductIncrements(prefixSums(u), v)(k):R)
+proof
+  have prefixes := prefixSums.sequence with sequenceU
+  have products := mulSequence.sequence with sequenceU, sequenceV
+  have backward := backwardProductIncrements.sequence with prefixes, sequenceV
+  have forward := forwardProductIncrements.sequence with prefixes, sequenceV
+  have equal : ∀ k ∈ ℕ, k < n →
+      backwardProductIncrements(prefixSums(u), v)[k] = mulSequence(u, v)[k]
+    intros k naturalK before
+    have typedK := nat.omega.backward with naturalK
+    have uk := RealSequence.value at u, k with sequenceU
+    have vk := RealSequence.value at v, k with sequenceV
+    have backwardValue := backwardProductIncrements.value at prefixSums(u), v, k with
+      prefixes, sequenceV
+    have productValue := mulSequence.value with sequenceU, sequenceV, uk, vk
+    have delta := adjacentDifferences.value at prefixSums(u), k with prefixes
+    have difference := prefixSums.difference at u, k with sequenceU
+    rw delta at difference
+    rw [backwardValue, difference, productValue]
+    have commute := realMulValue.commutative with vk, uk
+    unfold realMulValue
+    unfold call2
+    unfold call2 at commute
+    unfold call2 at commute
+    exact commute
+  have sameSum := realPartialSum.eq_prefix with backward, products, equal
+  have telescope := realPartialSum.product_telescoping with prefixes, sequenceV
+  have prefixN := prefixSums.value with sequenceU
+  have prefixZero := prefixSums.zero with sequenceU
+  rw [prefixN, prefixZero] at telescope
+  have vn := RealSequence.value with sequenceV
+  have v0 := RealSequence.value with sequenceV
+  calc
+    ∑ i < n, mulSequence(u, v)(i) =
+      ∑ k < n, backwardProductIncrements(prefixSums(u), v)(k) := by cc
+    _ = ((∑ k < n, forwardProductIncrements(prefixSums(u), v)(k):R) +
+        (∑ k < n, backwardProductIncrements(prefixSums(u), v)(k):R)) -
+          (∑ k < n, forwardProductIncrements(prefixSums(u), v)(k):R) := by ring
+    _ = ((∑ i < n, u(i):R) * (v[n]:R) - (0:R) * (v[0]:R)) -
+          (∑ k < n, forwardProductIncrements(prefixSums(u), v)(k):R) := by cc
+    _ = (∑ i < n, u(i):R) * (v[n]:R) -
+          (∑ k < n, forwardProductIncrements(prefixSums(u), v)(k):R) := by ring

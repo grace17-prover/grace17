@@ -1,0 +1,316 @@
+-- Ring homomorphisms f : R →+* S between bundled rings: maps preserving
+-- the operations and constants, the bridges to the form over separate
+-- pieces, the preservation laws, identity and composite homomorphisms, the
+-- kernel ideal, and isomorphisms f : R ≃+* S; everything here is ZF
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.Homomorphism
+import HomomorphismCore
+import Quotient
+
+-- f : R →+* S: a function between the carriers preserving zero, one,
+-- negation, addition, and multiplication. The form is a transparent
+-- guard, so a hypothesis f : R →+* S also supplies the rings R and S, their
+-- operations, and the binders (a : R) and (b : S). IsRingHom(f, A, add,
+-- …, B, plus, …) remains the form over separate pieces, bridged below.
+predicate RingHom (f R S : Set) :=
+  Ring(R) ∧ Ring(S) ∧ (f : R.carrier → S.carrier) ∧
+  f(R[0]) = S[0] ∧ f(R[1]) = S[1] ∧ (∀ x ∈ R, f(-x) = -f(x)) ∧
+  (∀ x y ∈ R, f(x + y) = f(x) + f(y)) ∧
+  (∀ x y ∈ R, f(x * y) = f(x) * f(y))
+predicate RingIso (f R S : Set) :=
+  RingHom(f, R, S) ∧ BijectiveBetween(f, R.carrier, S.carrier)
+
+notation guard "_ : _ →+* _" => RingHom
+notation guard "_ : _ ≃+* _" => RingIso
+
+-- The kernel of f : R →+* S is written ker(f) wherever a hypothesis in
+-- scope supplies the homomorphism, and is the set ringKernel(f, R.carrier,
+-- S.zero) of the elements sent to zero.
+notation function "ker(f)" => ringKernel(f, R, S[0]) via hypothesis RingHom(f, R, S)
+
+-- Bridges between the bundled homomorphism and the form over separate
+-- pieces: the bundled-to-unbundled direction is an instance.
+instance RingHom.parts (f R S : Set)
+  requires hom : f : R →+* S
+  shows IsRingHom(f, R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+    S.carrier, S.add, S.zero, S.neg, S.mul, S.one)
+proof
+  obtain ⟨source, target, function, zero, one, neg, add, mul⟩ := hom
+  unfold IsRingHom
+  exact ⟨function, zero, one, neg, add, mul⟩
+
+theorem RingHom.of_projections (f R S : Set)
+  requires source : Ring(R)
+  requires target : Ring(S)
+  requires hom : IsRingHom(f, R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+    S.carrier, S.add, S.zero, S.neg, S.mul, S.one)
+  shows f : R →+* S
+proof
+  obtain ⟨function, zero, one, neg, add, mul⟩ := hom
+  unfold Homomorphism.RingHom
+  exact ⟨source, target, function, zero, one, neg, add, mul⟩
+
+theorem RingHom.of_parts (f A add zero neg mul one B plus z minus times unit : Set)
+  requires source : IsRing(A, add, zero, neg, mul, one)
+  requires target : IsRing(B, plus, z, minus, times, unit)
+  requires hom : IsRingHom(f, A, add, zero, neg, mul, one, B, plus, z, minus, times, unit)
+  shows f : Ring.mk(A, add, zero, neg, mul, one) →+* Ring.mk(B, plus, z, minus, times, unit)
+proof
+  have bundledSource := Ring.of_parts with source
+  have bundledTarget := Ring.of_parts with target
+  have shifted : IsRingHom(f, Ring.carrier(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.add(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.zero(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.neg(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.mul(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.one(Ring.mk(A, add, zero, neg, mul, one)),
+      Ring.carrier(Ring.mk(B, plus, z, minus, times, unit)),
+      Ring.add(Ring.mk(B, plus, z, minus, times, unit)),
+      Ring.zero(Ring.mk(B, plus, z, minus, times, unit)),
+      Ring.neg(Ring.mk(B, plus, z, minus, times, unit)),
+      Ring.mul(Ring.mk(B, plus, z, minus, times, unit)),
+      Ring.one(Ring.mk(B, plus, z, minus, times, unit)))
+    ring_projections
+  exact RingHom.of_projections with bundledSource, bundledTarget, shifted
+
+instance RingIso.parts (f R S : Set)
+  requires iso : f : R ≃+* S
+  shows IsRingIso(f, R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+    S.carrier, S.add, S.zero, S.neg, S.mul, S.one)
+proof
+  obtain ⟨hom, bijective⟩ := iso
+  have parts := RingHom.parts with hom
+  unfold IsRingIso
+  exact ⟨parts, bijective⟩
+
+theorem RingIso.of_projections (f R S : Set)
+  requires source : Ring(R)
+  requires target : Ring(S)
+  requires iso : IsRingIso(f, R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+    S.carrier, S.add, S.zero, S.neg, S.mul, S.one)
+  shows f : R ≃+* S
+proof
+  obtain ⟨hom, bijective⟩ := iso
+  have bundled := RingHom.of_projections with source, target, hom
+  unfold Homomorphism.RingIso
+  exact ⟨bundled, bijective⟩
+
+-- The constructor: between commutative rings the three usual laws suffice,
+-- zero and negation being preserved as a consequence.
+theorem RingHom.mk (f R S : Set)
+  requires source : CommRing(R)
+  requires target : CommRing(S)
+  requires function : f : R.carrier → S.carrier
+  requires additive : ∀ x y ∈ R, f(x + y) = f(x) + f(y)
+  requires multiplicative : ∀ x y ∈ R, f(x * y) = f(x) * f(y)
+  requires unital : f(R[1]) = S[1]
+  shows f : R →+* S
+proof
+  have sourceParts := CommRing.parts with source
+  have targetParts := CommRing.parts with target
+  have engine := IsRingHom.of_add_mul_one with sourceParts, targetParts,
+    function, additive, multiplicative, unital
+  exact RingHom.of_projections with (CommRing.to_ring with source),
+    (CommRing.to_ring with target), engine
+
+section HomLaws
+variable (f R S : Set)
+hypothesis hom : f : R →+* S
+
+theorem RingHom.source
+  shows Ring(R)
+proof
+  obtain ⟨source, rest⟩ := hom
+  exact source
+
+theorem RingHom.target
+  shows Ring(S)
+proof
+  obtain ⟨source, target, rest⟩ := hom
+  exact target
+
+-- The preservation laws, under their standard names.
+instance RingHom.map_mem (a : R)
+  shows f(a) ∈ S
+proof
+  obtain ⟨source, target, function, rest⟩ := hom
+  exact FunctionBetween.apply_closed with function, *
+
+theorem RingHom.map_zero
+  shows f(R[0]) = S[0]
+proof
+  obtain ⟨source, target, function, zero, rest⟩ := hom
+  exact zero
+
+theorem RingHom.map_one
+  shows f(R[1]) = S[1]
+proof
+  obtain ⟨source, target, function, zero, one, rest⟩ := hom
+  exact one
+
+theorem RingHom.map_neg (a : R)
+  shows f(-a) = -f(a)
+proof
+  obtain ⟨source, target, function, zero, one, neg, rest⟩ := hom
+  have aIn : a ∈ R by assumption
+  exact neg with a, aIn
+
+theorem RingHom.map_add (a b : R)
+  shows f(a + b) = f(a) + f(b)
+proof
+  obtain ⟨source, target, function, zero, one, neg, add, mul⟩ := hom
+  have aIn : a ∈ R by assumption
+  have bIn : b ∈ R by assumption
+  exact add with a, aIn, b, bIn
+
+theorem RingHom.map_mul (a b : R)
+  shows f(a * b) = f(a) * f(b)
+proof
+  obtain ⟨source, target, function, zero, one, neg, add, mul⟩ := hom
+  have aIn : a ∈ R by assumption
+  have bIn : b ∈ R by assumption
+  exact mul with a, aIn, b, bIn
+
+theorem RingHom.map_sub (a b : R)
+  shows f(a - b) = f(a) - f(b)
+proof
+  have source := RingHom.source with hom
+  have target := RingHom.target with hom
+  have fa : f(a) ∈ S := RingHom.map_mem with *
+  have fb : f(b) ∈ S := RingHom.map_mem with *
+  have negIn : -b ∈ R := Ring.neg_mem with *
+  rw [Ring.sub.value, Ring.sub.value, RingHom.map_add, RingHom.map_neg]
+  rfl
+
+-- The kernel: the elements sent to zero, an ideal of the source when the
+-- rings are commutative, and the measure of equal images.
+theorem RingHom.mem_kernel_iff (x : R)
+  shows x ∈ ker(f) ↔ f(x) = S[0]
+proof
+  have xIn : x ∈ R by assumption
+  constructor
+  . intro member
+    have data := ringKernel.membership.forward with member
+    exact data.right
+  . intro vanishes
+    exact ringKernel.membership.backward with ⟨xIn, vanishes⟩
+
+theorem RingHom.kernel_subset
+  shows ker(f) ⊆ R
+proof
+  intros x hx
+  have data := ringKernel.membership.forward with hx
+  exact data.left
+
+theorem RingHom.zero_mem_kernel
+  shows R[0] ∈ ker(f)
+proof
+  have source := RingHom.source with hom
+  have zeroIn : R[0] ∈ R := Ring.zero_mem with *
+  have vanishes := RingHom.map_zero with hom
+  exact ringKernel.membership.backward with ⟨zeroIn, vanishes⟩
+
+theorem RingHom.ext (g : Set)
+  requires hom2 : g : R →+* S
+  requires same : ∀ x ∈ R, f(x) = g(x)
+  shows f = g
+proof
+  obtain ⟨source, target, function, rest⟩ := hom
+  obtain ⟨source2, target2, function2, rest2⟩ := hom2
+  exact FunctionBetween.ext with function, function2, same
+
+end HomLaws
+
+section CommutativeHomLaws
+variable (f R S : Set)
+hypothesis source : CommRing(R)
+hypothesis target : CommRing(S)
+hypothesis hom : f : R →+* S
+
+theorem ringKernel.ideal
+  shows Ideal(R, ker(f))
+proof
+  have sourceParts := CommRing.parts with source
+  have targetParts := CommRing.parts with target
+  have parts := RingHom.parts with hom
+  have engine := IsRingHom.kernel_ideal with sourceParts, targetParts, parts
+  exact Ideal.of_projections with engine
+
+theorem RingHom.apply_eq_iff (x y : R)
+  shows f(x) = f(y) ↔ x - y ∈ ker(f)
+proof
+  have sourceParts := CommRing.parts with source
+  have targetParts := CommRing.parts with target
+  have parts := RingHom.parts with hom
+  have xIn : x ∈ R by assumption
+  have yIn : y ∈ R by assumption
+  have criterion := IsRingHom.kernel_congruent with sourceParts, targetParts,
+    parts, xIn, yIn
+  rw Ring.sub.value
+  constructor
+  . intro equal
+    have same := criterion.backward with equal
+    unfold Congruent at same
+    exact same
+  . intro member
+    have same : Congruent(R.add, R.neg, ringKernel(f, R.carrier, S.zero), x, y)
+      unfold Congruent
+      exact member
+    exact criterion.forward with same
+
+end CommutativeHomLaws
+
+-- Identity and composite homomorphisms.
+theorem RingHom.id (R : Set)
+  requires comm : CommRing(R)
+  shows identity(R.carrier) : R →+* R
+proof
+  have parts := CommRing.parts with comm
+  have engine := IsRingHom.identity with parts
+  exact RingHom.of_projections with (CommRing.to_ring with comm),
+    (CommRing.to_ring with comm), engine
+
+theorem RingHom.comp (f g R S T : Set)
+  requires comm : CommRing(R)
+  requires first : f : R →+* S
+  requires second : g : S →+* T
+  shows compose(g, f, R.carrier, S.carrier, T.carrier) : R →+* T
+proof
+  have parts := CommRing.parts with comm
+  have firstParts := RingHom.parts with first
+  have secondParts := RingHom.parts with second
+  have engine := IsRingHom.compose with parts, firstParts, secondParts
+  exact RingHom.of_projections with (RingHom.source with first),
+    (RingHom.target with second), engine
+
+-- An isomorphism is a homomorphism, and its inverse graph is one too.
+theorem RingIso.hom_of (f R S : Set)
+  requires iso : f : R ≃+* S
+  shows f : R →+* S
+proof
+  obtain ⟨hom, bijective⟩ := iso
+  exact hom
+
+theorem RingIso.bijective_of (f R S : Set)
+  requires iso : f : R ≃+* S
+  shows BijectiveBetween(f, R.carrier, S.carrier)
+proof
+  obtain ⟨hom, bijective⟩ := iso
+  exact bijective
+
+theorem RingIso.symm (f R S : Set)
+  requires source : CommRing(R)
+  requires target : CommRing(S)
+  requires iso : f : R ≃+* S
+  shows converse(f, R.carrier, S.carrier) : S ≃+* R
+proof
+  have sourceParts := CommRing.parts with source
+  have targetParts := CommRing.parts with target
+  have parts := RingIso.parts with iso
+  have engine := IsRingIso.inverse with sourceParts, targetParts, parts
+  exact RingIso.of_projections with (CommRing.to_ring with target),
+    (CommRing.to_ring with source), engine

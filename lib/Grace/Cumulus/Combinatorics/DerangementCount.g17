@@ -1,0 +1,1033 @@
+-- Counting derangements: the permutations of an n-element set without a
+-- fixed point number d(n). A derangement p of S sends a chosen point a to
+-- some b ≠ a; if p also sends b back to a, it is a derangement of the other
+-- points, and otherwise composing with the transposition (a b) and
+-- forgetting a leaves a derangement of S ∖ {a}. Both correspondences are
+-- bijections, which gives the recurrence d(n + 2) = (n + 1)(d(n + 1) + d(n)).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.DerangementCount
+import Partitions
+import DerangementFormula
+
+-- The permutations of I without a fixed point.
+def derangements (I : Set) : Set :=
+  { p ∈ permutations(I) | ∀ x ∈ I, p(x) ≠ x }
+
+theorem derangements.membership (I p : Set)
+  shows p ∈ derangements(I) ↔ p ∈ permutations(I) ∧ ∀ x ∈ I, p(x) ≠ x
+proof
+  simp [derangements]
+
+theorem derangements.permutation (I p : Set)
+  requires member : p ∈ derangements(I)
+  shows p ∈ permutations(I)
+proof
+  have parts := derangements.membership.forward with member
+  exact parts.left
+
+theorem derangements.moves (I p x : Set)
+  requires member : p ∈ derangements(I)
+  requires hx : x ∈ I
+  shows p(x) ≠ x
+proof
+  have parts := derangements.membership.forward with member
+  exact parts.right with x, hx
+
+theorem derangements.subset (I : Set)
+  shows derangements(I) ⊆ permutations(I)
+proof
+  intros p hp
+  exact derangements.permutation with hp
+
+theorem derangements.finite (I : Set)
+  requires finite : Finite(I)
+  shows Finite(derangements(I))
+proof
+  exact Finite.subset with (permutations.finite with finite),
+    (derangements.subset at I)
+
+-- On a finite set, an injective self-map without fixed points is a
+-- derangement.
+theorem derangements.of_injective (I p : Set)
+  requires finite : Finite(I)
+  requires injective : InjectiveBetween(p, I, I)
+  requires moves : ∀ x ∈ I, p(x) ≠ x
+  shows p ∈ derangements(I)
+proof
+  have permutation := permutations.of_injective with finite, injective
+  exact derangements.membership.backward with ⟨permutation, moves⟩
+
+theorem derangements.function (I p : Set)
+  requires member : p ∈ derangements(I)
+  shows p : I → I
+proof
+  exact permutations.function with (derangements.permutation with member)
+
+theorem derangements.apply_closed (I p x : Set)
+  requires member : p ∈ derangements(I)
+  requires hx : x ∈ I
+  shows p(x) ∈ I
+proof
+  exact permutations.apply_closed with
+    (derangements.permutation with member), hx
+
+theorem derangements.apply_cancel (I p x y : Set)
+  requires member : p ∈ derangements(I)
+  requires hx : x ∈ I
+  requires hy : y ∈ I
+  requires same : p(x) = p(y)
+  shows x = y
+proof
+  exact permutations.apply_cancel with
+    (derangements.permutation with member), hx, hy, same
+
+-- The empty set has one derangement, a singleton none.
+theorem derangements.empty
+  shows derangements(∅) = {∅}
+proof
+  ext p
+  constructor
+  . intro member
+    have permutation := derangements.permutation with member
+    rw permutations.empty at permutation
+    exact permutation
+  . intro member
+    have equal := singleton.membership.forward with member
+    rw equal
+    apply derangements.membership.backward
+    constructor
+    . rw permutations.empty
+      exact singleton.self at ∅
+    . intros x hx
+      exfalso
+      exact set.empty with hx
+
+theorem derangements.empty_count
+  shows cardinality(derangements(∅)) = 1
+proof
+  rw derangements.empty
+  exact cardinality.singleton at ∅
+
+theorem derangements.singleton (x : Set)
+  shows derangements({x}) = ∅
+proof
+  apply Subset.empty_iff.forward
+  intros p hp
+  have self := singleton.self at x
+  have value := derangements.apply_closed with hp, self
+  have same := singleton.membership.forward with value
+  exfalso
+  exact derangements.moves with hp, self, same
+
+theorem derangements.singleton_count (x : Set)
+  shows cardinality(derangements({x})) = 0
+proof
+  rw derangements.singleton
+  exact cardinality.empty
+
+-- The values of an extended map.
+theorem adjoinMap.apply_new (f A B a b : Set)
+  requires hf : f : A → B
+  requires ha : ¬a ∈ A
+  shows adjoinMap(f, a, b)(a) = b
+proof
+  have function := adjoinMap.function at f, A, B, a, b with hf, ha
+  exact FunctionBetween.apply_value with function, (insert.self at a, A),
+    (adjoinMap.relates_new at f, a, b)
+
+theorem adjoinMap.apply_old (f A B a b x : Set)
+  requires hf : f : A → B
+  requires ha : ¬a ∈ A
+  requires hx : x ∈ A
+  shows adjoinMap(f, a, b)(x) = f(x)
+proof
+  have function := adjoinMap.function at f, A, B, a, b with hf, ha
+  have related := adjoinMap.relates_old at f, a, b, x, f(x) with
+    (FunctionBetween.relates_apply with hf, hx)
+  exact FunctionBetween.apply_value with function, (insert.contains with hx),
+    related
+
+-- The derangements of S sending a to b, split by whether b returns to a.
+
+def swapFiber (S a b : Set) : Set :=
+  { p ∈ derangements(S) | p(a) = b ∧ p(b) = a }
+
+def throughFiber (S a b : Set) : Set :=
+  { p ∈ derangements(S) | p(a) = b ∧ p(b) ≠ a }
+
+theorem swapFiber.membership (S a b p : Set)
+  shows p ∈ swapFiber(S, a, b) ↔ p ∈ derangements(S) ∧ p(a) = b ∧ p(b) = a
+proof
+  simp [swapFiber]
+
+theorem throughFiber.membership (S a b p : Set)
+  shows p ∈ throughFiber(S, a, b) ↔ p ∈ derangements(S) ∧ p(a) = b ∧ p(b) ≠ a
+proof
+  simp [throughFiber]
+
+theorem swapFiber.subset (S a b : Set)
+  shows swapFiber(S, a, b) ⊆ derangements(S)
+proof
+  intros p hp
+  have parts := swapFiber.membership.forward with hp
+  exact parts.left
+
+theorem throughFiber.subset (S a b : Set)
+  shows throughFiber(S, a, b) ⊆ derangements(S)
+proof
+  intros p hp
+  have parts := throughFiber.membership.forward with hp
+  exact parts.left
+
+theorem swapFiber.disjoint (S a b : Set)
+  shows Disjoint(swapFiber(S, a, b), throughFiber(S, a, b))
+proof
+  apply Disjoint.iff.backward
+  intros p inSwap inThrough
+  have swap := swapFiber.membership.forward with inSwap
+  have through := throughFiber.membership.forward with inThrough
+  exact through.right.right with swap.right.right
+
+-- The value at a, as a map into S ∖ {a}.
+defgraph valueAt (S a : Set) (p ∈ derangements(S)) : S ∖ {a} := p(a)
+requires ha : a ∈ S
+proof
+  have inS := derangements.apply_closed with member, ha
+  have moved := derangements.moves with member, ha
+  exact difference.singleton_membership.backward with ⟨inS, moved⟩
+
+theorem valueAt.preimage (S a b : Set)
+  requires ha : a ∈ S
+  shows functionPreimage(valueAt(S, a), derangements(S), {b}) =
+    swapFiber(S, a, b) ∪ throughFiber(S, a, b)
+proof
+  ext p
+  constructor
+  . intro hp
+    obtain ⟨member, value⟩ := functionPreimage.point_membership.forward with hp
+    have shape := valueAt.value at S, a, p with ha, member
+    rw shape at value
+    have alternatives : p(b) = a ∨ p(b) ≠ a by tauto
+    cases alternatives with back | onward
+    . apply union2.left
+      exact swapFiber.membership.backward with ⟨member, value, back⟩
+    . apply union2.right
+      exact throughFiber.membership.backward with ⟨member, value, onward⟩
+  . intro hp
+    have split := union2.membership.forward with hp
+    apply functionPreimage.point_membership.backward
+    cases split with inSwap | inThrough
+    . obtain ⟨member, value, back⟩ := swapFiber.membership.forward with inSwap
+      have shape := valueAt.value at S, a, p with ha, member
+      rw shape
+      exact ⟨member, value⟩
+    . obtain ⟨member, value, onward⟩ :=
+        throughFiber.membership.forward with inThrough
+      have shape := valueAt.value at S, a, p with ha, member
+      rw shape
+      exact ⟨member, value⟩
+
+-- Derangements exchanging a and b are the derangements of the other points.
+
+theorem difference.pair_subset (S a b : Set)
+  shows (S ∖ {a}) ∖ {b} ⊆ S
+proof
+  exact Subset.transitive with (difference.subset_left at S ∖ {a}, {b}),
+    (difference.subset_left at S, {a})
+
+theorem difference.pair_membership (S a b x : Set)
+  shows x ∈ (S ∖ {a}) ∖ {b} ↔ x ∈ S ∧ x ≠ a ∧ x ≠ b
+proof
+  simp [difference.singleton_membership]
+
+defgraph swapRestrict (S a b : Set) (p ∈ swapFiber(S, a, b)) :
+    derangements((S ∖ {a}) ∖ {b}) :=
+  restrict(p, (S ∖ {a}) ∖ {b})
+requires finite : Finite(S)
+requires ha : a ∈ S
+requires hb : b ∈ S
+proof
+  obtain ⟨hp, pa, pb⟩ := swapFiber.membership.forward with member
+  have function := derangements.function with hp
+  have injective := Bijective.injective with
+    (permutations.bijective with (derangements.permutation with hp))
+  have subset := difference.pair_subset at S, a, b
+  have restricted := restrict.injective with injective, subset
+  have values : ∀ x ∈ (S ∖ {a}) ∖ {b},
+      restrict(p, (S ∖ {a}) ∖ {b})(x) ∈ (S ∖ {a}) ∖ {b}
+    intros x hx
+    have step := restrict.domain_apply with function, subset, hx
+    rw step
+    obtain ⟨xInS, xNotA, xNotB⟩ := difference.pair_membership.forward with hx
+    have pxIn := derangements.apply_closed with hp, xInS
+    apply difference.pair_membership.backward
+    refine ⟨pxIn, ?_, ?_⟩
+    . intro same
+      have equal : p(x) = p(b)
+        rw [same, pb]
+        rfl
+      exact xNotB with (derangements.apply_cancel with hp, xInS, hb, equal)
+    . intro same
+      have equal : p(x) = p(a)
+        rw [same, pa]
+        rfl
+      exact xNotA with (derangements.apply_cancel with hp, xInS, ha, equal)
+  have narrowed := FunctionBetween.codomain_of_values with
+    (Injective.function with restricted), values
+  have injectiveRest : InjectiveBetween(restrict(p, (S ∖ {a}) ∖ {b}),
+      (S ∖ {a}) ∖ {b}, (S ∖ {a}) ∖ {b})
+    apply Injective.of_pointwise with narrowed
+    intros x hx y hy same
+    exact Injective.apply_cancel with restricted, hx, hy, same
+  have moves : ∀ x ∈ (S ∖ {a}) ∖ {b}, restrict(p, (S ∖ {a}) ∖ {b})(x) ≠ x
+    intros x hx
+    have step := restrict.domain_apply with function, subset, hx
+    rw step
+    exact derangements.moves with hp, (subset with x, hx)
+  exact derangements.of_injective with (Finite.subset with finite, subset),
+    injectiveRest, moves
+
+theorem swapRestrict.injective (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  shows InjectiveBetween(swapRestrict(S, a, b), swapFiber(S, a, b),
+    derangements((S ∖ {a}) ∖ {b}))
+proof
+  have graph := swapRestrict.function at S, a, b with finite, ha, hb
+  have subset := difference.pair_subset at S, a, b
+  apply Injective.of_pointwise with graph
+  intros p hp q hq same
+  obtain ⟨pIn, pa, pb⟩ := swapFiber.membership.forward with hp
+  obtain ⟨qIn, qa, qb⟩ := swapFiber.membership.forward with hq
+  have pFunction := derangements.function with pIn
+  have qFunction := derangements.function with qIn
+  have valueP := swapRestrict.value at S, a, b, p with finite, ha, hb, hp
+  have valueQ := swapRestrict.value at S, a, b, q with finite, ha, hb, hq
+  rw [valueP, valueQ] at same
+  apply FunctionBetween.ext with pFunction, qFunction
+  intros x hx
+  have alternatives : x = a ∨ x = b ∨ (x ≠ a ∧ x ≠ b) by tauto
+  cases alternatives with isA | rest
+  . rw [isA, pa, qa]
+    rfl
+  . cases rest with isB | other
+    . rw [isB, pb, qb]
+      rfl
+    . have inRest : x ∈ (S ∖ {a}) ∖ {b} :=
+        difference.pair_membership.backward with ⟨hx, other.left, other.right⟩
+      have stepP := restrict.domain_apply with pFunction, subset, inRest
+      have stepQ := restrict.domain_apply with qFunction, subset, inRest
+      rw [← stepP, ← stepQ, same]
+      rfl
+
+-- Adjoining a ↦ b and b ↦ a to a derangement of the other points.
+
+def swapExtend (q a b : Set) : Set := adjoinMap(adjoinMap(q, a, b), b, a)
+
+section SwapExtension
+variable (S a b q : Set)
+hypothesis finite : Finite(S)
+hypothesis ha : a ∈ S
+hypothesis hb : b ∈ S
+hypothesis distinct : a ≠ b
+hypothesis hq : q ∈ derangements((S ∖ {a}) ∖ {b})
+
+theorem swapExtend.injective
+  shows InjectiveBetween(swapExtend(q, a, b), S, S)
+proof
+  have qInjective := Bijective.injective with
+    (permutations.bijective with (derangements.permutation with hq))
+  have aOut : ¬a ∈ (S ∖ {a}) ∖ {b}
+    intro inside
+    have parts := difference.pair_membership.forward with inside
+    apply parts.right.left
+    rfl
+  have bOut : ¬b ∈ (S ∖ {a}) ∖ {b}
+    intro inside
+    have parts := difference.pair_membership.forward with inside
+    apply parts.right.right
+    rfl
+  have first := adjoinMap.injective with qInjective, aOut, bOut
+  have bOutA : ¬b ∈ insert(a, (S ∖ {a}) ∖ {b})
+    intro inside
+    have split := insert.membership.forward with inside
+    cases split with same | inRest
+    . apply distinct
+      symm
+      exact same
+    . exact bOut with inRest
+  have aOutB : ¬a ∈ insert(b, (S ∖ {a}) ∖ {b})
+    intro inside
+    have split := insert.membership.forward with inside
+    cases split with same | inRest
+    . exact distinct with same
+    . exact aOut with inRest
+  have second := adjoinMap.injective with first, bOutA, aOutB
+  have domain : insert(b, insert(a, (S ∖ {a}) ∖ {b})) = S
+    ext x
+    simp [insert.membership, difference.pair_membership]
+  have codomain : insert(a, insert(b, (S ∖ {a}) ∖ {b})) = S
+    ext x
+    simp [insert.membership, difference.pair_membership]
+  rw [domain, codomain] at second
+  unfold swapExtend
+  exact second
+
+theorem swapExtend.apply_second
+  shows swapExtend(q, a, b)(b) = a
+proof
+  have qFunction := derangements.function with hq
+  have aOut : ¬a ∈ (S ∖ {a}) ∖ {b}
+    intro inside
+    have parts := difference.pair_membership.forward with inside
+    apply parts.right.left
+    rfl
+  have bOutA : ¬b ∈ insert(a, (S ∖ {a}) ∖ {b})
+    intro inside
+    have split := insert.membership.forward with inside
+    cases split with same | inRest
+    . apply distinct
+      symm
+      exact same
+    . have parts := difference.pair_membership.forward with inRest
+      apply parts.right.right
+      rfl
+  have firstFunction := adjoinMap.function at q, (S ∖ {a}) ∖ {b},
+    (S ∖ {a}) ∖ {b}, a, b with qFunction, aOut
+  unfold swapExtend
+  exact adjoinMap.apply_new at adjoinMap(q, a, b), insert(a, (S ∖ {a}) ∖ {b}),
+    insert(b, (S ∖ {a}) ∖ {b}), b, a with firstFunction, bOutA
+
+theorem swapExtend.apply_first
+  shows swapExtend(q, a, b)(a) = b
+proof
+  have qFunction := derangements.function with hq
+  have aOut : ¬a ∈ (S ∖ {a}) ∖ {b}
+    intro inside
+    have parts := difference.pair_membership.forward with inside
+    apply parts.right.left
+    rfl
+  have bOutA : ¬b ∈ insert(a, (S ∖ {a}) ∖ {b})
+    intro inside
+    have split := insert.membership.forward with inside
+    cases split with same | inRest
+    . apply distinct
+      symm
+      exact same
+    . have parts := difference.pair_membership.forward with inRest
+      apply parts.right.right
+      rfl
+  have firstFunction := adjoinMap.function at q, (S ∖ {a}) ∖ {b},
+    (S ∖ {a}) ∖ {b}, a, b with qFunction, aOut
+  have aIn : a ∈ insert(a, (S ∖ {a}) ∖ {b}) := insert.self at a, (S ∖ {a}) ∖ {b}
+  have outer : swapExtend(q, a, b)(a) = adjoinMap(q, a, b)(a)
+    unfold swapExtend
+    exact adjoinMap.apply_old at adjoinMap(q, a, b),
+      insert(a, (S ∖ {a}) ∖ {b}), insert(b, (S ∖ {a}) ∖ {b}), b, a, a with
+      firstFunction, bOutA, aIn
+  have inner := adjoinMap.apply_new at q, (S ∖ {a}) ∖ {b}, (S ∖ {a}) ∖ {b},
+    a, b with qFunction, aOut
+  rw [outer, inner]
+  rfl
+
+theorem swapExtend.apply_rest (x : Set)
+  requires hx : x ∈ (S ∖ {a}) ∖ {b}
+  shows swapExtend(q, a, b)(x) = q(x)
+proof
+  have qFunction := derangements.function with hq
+  have aOut : ¬a ∈ (S ∖ {a}) ∖ {b}
+    intro inside
+    have parts := difference.pair_membership.forward with inside
+    apply parts.right.left
+    rfl
+  have bOutA : ¬b ∈ insert(a, (S ∖ {a}) ∖ {b})
+    intro inside
+    have split := insert.membership.forward with inside
+    cases split with same | inRest
+    . apply distinct
+      symm
+      exact same
+    . have parts := difference.pair_membership.forward with inRest
+      apply parts.right.right
+      rfl
+  have firstFunction := adjoinMap.function at q, (S ∖ {a}) ∖ {b},
+    (S ∖ {a}) ∖ {b}, a, b with qFunction, aOut
+  have xIn : x ∈ insert(a, (S ∖ {a}) ∖ {b}) := insert.contains with hx
+  have outer : swapExtend(q, a, b)(x) = adjoinMap(q, a, b)(x)
+    unfold swapExtend
+    exact adjoinMap.apply_old at adjoinMap(q, a, b),
+      insert(a, (S ∖ {a}) ∖ {b}), insert(b, (S ∖ {a}) ∖ {b}), b, a, x with
+      firstFunction, bOutA, xIn
+  have inner := adjoinMap.apply_old at q, (S ∖ {a}) ∖ {b}, (S ∖ {a}) ∖ {b},
+    a, b, x with qFunction, aOut, hx
+  rw [outer, inner]
+  rfl
+
+theorem swapExtend.member
+  shows swapExtend(q, a, b) ∈ swapFiber(S, a, b)
+proof
+  have injective := swapExtend.injective at S, a, b, q with *
+  have atA := swapExtend.apply_first at S, a, b, q with *
+  have atB := swapExtend.apply_second at S, a, b, q with *
+  have moves : ∀ x ∈ S, swapExtend(q, a, b)(x) ≠ x
+    intros x hx
+    have alternatives : x = a ∨ x = b ∨ (x ≠ a ∧ x ≠ b) by tauto
+    cases alternatives with isA | rest
+    . rw [isA, atA]
+      intro same
+      apply distinct
+      symm
+      exact same
+    . cases rest with isB | other
+      . rw [isB, atB]
+        exact distinct
+      . have inRest : x ∈ (S ∖ {a}) ∖ {b} :=
+          difference.pair_membership.backward with ⟨hx, other.left, other.right⟩
+        have value := swapExtend.apply_rest at S, a, b, q, x with *
+        rw value
+        exact derangements.moves with hq, inRest
+  have deranged := derangements.of_injective with finite, injective, moves
+  exact swapFiber.membership.backward with ⟨deranged, atA, atB⟩
+
+end SwapExtension
+
+theorem swapRestrict.surjective (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires distinct : a ≠ b
+  shows SurjectiveBetween(swapRestrict(S, a, b), swapFiber(S, a, b),
+    derangements((S ∖ {a}) ∖ {b}))
+proof
+  have graph := swapRestrict.function at S, a, b with finite, ha, hb
+  have subset := difference.pair_subset at S, a, b
+  unfold SurjectiveBetween
+  refine ⟨graph, ?_⟩
+  intros q hq
+  have inFiber := swapExtend.member at S, a, b, q with *
+  refine ⟨swapExtend(q, a, b), inFiber, ?_⟩
+  have value := swapRestrict.value at S, a, b, swapExtend(q, a, b) with
+    finite, ha, hb, inFiber
+  have restored : restrict(swapExtend(q, a, b), (S ∖ {a}) ∖ {b}) = q
+    have pFunction := Injective.function with
+      (swapExtend.injective at S, a, b, q with *)
+    have inImage := swapRestrict.closed at S, a, b, swapExtend(q, a, b) with
+      finite, ha, hb, inFiber
+    have mapped := derangements.function at (S ∖ {a}) ∖ {b},
+      restrict(swapExtend(q, a, b), (S ∖ {a}) ∖ {b}) with inImage
+    have qFunction := derangements.function at (S ∖ {a}) ∖ {b}, q with hq
+    apply FunctionBetween.ext with mapped, qFunction
+    intros x hx
+    have step := restrict.domain_apply with pFunction, subset, hx
+    rw step
+    exact swapExtend.apply_rest at S, a, b, q, x with *
+  have related := FunctionBetween.relates_apply with graph, inFiber
+  rw [value, restored] at related
+  exact related
+
+
+theorem swapFiber.count (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires distinct : a ≠ b
+  shows cardinality(swapFiber(S, a, b)) =
+    cardinality(derangements((S ∖ {a}) ∖ {b}))
+proof
+  have injective := swapRestrict.injective with finite, ha, hb
+  have surjective := swapRestrict.surjective with finite, ha, hb, distinct
+  have finiteFiber := Finite.subset with (derangements.finite with finite),
+    (swapFiber.subset at S, a, b)
+  have bijective : BijectiveBetween(swapRestrict(S, a, b), swapFiber(S, a, b),
+    derangements((S ∖ {a}) ∖ {b})) := ⟨injective, surjective⟩
+  exact cardinality.bijective with finiteFiber, bijective
+
+-- Derangements sending a to b without return correspond to the derangements
+-- of S ∖ {a}: compose with the transposition (a b) and forget a.
+
+theorem transposition.apply_closed (S a b x : Set)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires hx : x ∈ S
+  shows transposition(S, a, b)(x) ∈ S
+proof
+  have function := transposition.function at S, a, b with ha, hb
+  exact FunctionBetween.apply_closed with function, hx
+
+theorem transposition.apply_cancel (S a b x y : Set)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires hx : x ∈ S
+  requires hy : y ∈ S
+  requires same : transposition(S, a, b)(x) = transposition(S, a, b)(y)
+  shows x = y
+proof
+  have bijective := transposition.bijective at S, a, b with ha, hb
+  exact Injective.apply_cancel with (Bijective.injective with bijective),
+    hx, hy, same
+
+-- The map x ↦ (a b)(p(x)) on S ∖ {a}.
+def throughMap (S a b p : Set) : Set :=
+  restrict(compose(transposition(S, a, b), p, S, S, S), S ∖ {a})
+
+theorem throughMap.apply (S a b p x : Set)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires function : p : S → S
+  requires hx : x ∈ S ∖ {a}
+  shows throughMap(S, a, b, p)(x) = transposition(S, a, b)(p(x))
+proof
+  have subset := difference.subset_left at S, {a}
+  have tauFunction := transposition.function at S, a, b with ha, hb
+  have composed := compose.function with function, tauFunction
+  have step := restrict.domain_apply with composed, subset, hx
+  have inner := compose.apply with function, tauFunction, (subset with x, hx)
+  unfold throughMap
+  rfl
+
+defgraph throughRestrict (S a b : Set) (p ∈ throughFiber(S, a, b)) :
+    derangements(S ∖ {a}) :=
+  throughMap(S, a, b, p)
+requires finite : Finite(S)
+requires ha : a ∈ S
+requires hb : b ∈ S
+proof
+  obtain ⟨hp, pa, pb⟩ := throughFiber.membership.forward with member
+  have function := derangements.function with hp
+  have permutation := derangements.permutation with hp
+  have tauPermutation := permutations.transposition at S, a, b with ha, hb
+  have composed := permutations.compose with permutation, tauPermutation
+  have subset := difference.subset_left at S, {a}
+  have restricted : InjectiveBetween(throughMap(S, a, b, p), S ∖ {a}, S)
+    unfold throughMap
+    exact restrict.injective with
+      (Bijective.injective with (permutations.bijective with composed)), subset
+  have tauB := transposition.second at S, a, b with ha, hb
+  have tauA := transposition.first at S, a, b with ha, hb
+  have values : ∀ x ∈ S ∖ {a}, throughMap(S, a, b, p)(x) ∈ S ∖ {a}
+    intros x hx
+    have rewrite := throughMap.apply with ha, hb, function, hx
+    rw rewrite
+    obtain ⟨xInS, xNotA⟩ := difference.singleton_membership.forward with hx
+    have pxIn := derangements.apply_closed with hp, xInS
+    have tauIn := transposition.apply_closed with ha, hb, pxIn
+    apply difference.singleton_membership.backward
+    refine ⟨tauIn, ?_⟩
+    intro same
+    have equal : transposition(S, a, b)(p(x)) = transposition(S, a, b)(b)
+      rw [same, tauB]
+      rfl
+    have pxB := transposition.apply_cancel with ha, hb, pxIn, hb, equal
+    have equalA : p(x) = p(a)
+      rw [pxB, pa]
+      rfl
+    exact xNotA with (derangements.apply_cancel with hp, xInS, ha, equalA)
+  have narrowed := FunctionBetween.codomain_of_values with
+    (Injective.function with restricted), values
+  have injectiveRest : InjectiveBetween(throughMap(S, a, b, p), S ∖ {a},
+      S ∖ {a})
+    apply Injective.of_pointwise with narrowed
+    intros x hx y hy same
+    exact Injective.apply_cancel with restricted, hx, hy, same
+  have moves : ∀ x ∈ S ∖ {a}, throughMap(S, a, b, p)(x) ≠ x
+    intros x hx
+    have rewrite := throughMap.apply with ha, hb, function, hx
+    rw rewrite
+    obtain ⟨xInS, xNotA⟩ := difference.singleton_membership.forward with hx
+    have pxIn := derangements.apply_closed with hp, xInS
+    intro same
+    have alternatives : p(x) = a ∨ p(x) = b ∨ (p(x) ≠ a ∧ p(x) ≠ b) by tauto
+    cases alternatives with isA | rest
+    . rw [isA, tauA] at same
+      apply pb
+      rw same
+      exact isA
+    . cases rest with isB | other
+      . have equal : p(x) = p(a)
+          rw [isB, pa]
+          rfl
+        exact xNotA with (derangements.apply_cancel with hp, xInS, ha, equal)
+      . have fixed := transposition.other at S, a, b, p(x) with
+          ha, hb, pxIn, other.left, other.right
+        rw fixed at same
+        exact derangements.moves with hp, xInS, same
+  exact derangements.of_injective with (Finite.subset with finite, subset),
+    injectiveRest, moves
+
+theorem throughRestrict.injective (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  shows InjectiveBetween(throughRestrict(S, a, b), throughFiber(S, a, b),
+    derangements(S ∖ {a}))
+proof
+  have graph := throughRestrict.function at S, a, b with finite, ha, hb
+  apply Injective.of_pointwise with graph
+  intros p hp q hq same
+  obtain ⟨pIn, pa, pb⟩ := throughFiber.membership.forward with hp
+  obtain ⟨qIn, qa, qb⟩ := throughFiber.membership.forward with hq
+  have pFunction := derangements.function with pIn
+  have qFunction := derangements.function with qIn
+  have valueP := throughRestrict.value at S, a, b, p with finite, ha, hb, hp
+  have valueQ := throughRestrict.value at S, a, b, q with finite, ha, hb, hq
+  rw [valueP, valueQ] at same
+  apply FunctionBetween.ext with pFunction, qFunction
+  intros x hx
+  have alternatives : x = a ∨ x ≠ a by tauto
+  cases alternatives with isA | notA
+  . rw [isA, pa, qa]
+    rfl
+  . have inRest : x ∈ S ∖ {a} :=
+      difference.singleton_membership.backward with ⟨hx, notA⟩
+    have stepP := throughMap.apply with ha, hb, pFunction, inRest
+    have stepQ := throughMap.apply with ha, hb, qFunction, inRest
+    rw same at stepP
+    have equal : transposition(S, a, b)(p(x)) = transposition(S, a, b)(q(x))
+      rw [← stepP, ← stepQ]
+      rfl
+    have pxIn := derangements.apply_closed with pIn, hx
+    have qxIn := derangements.apply_closed with qIn, hx
+    exact transposition.apply_cancel with ha, hb, pxIn, qxIn, equal
+
+-- Adjoining a ↦ b to x ↦ (a b)(r(x)) recovers a derangement of S that
+-- sends a to b and does not send b back.
+
+def throughLift (S a b r : Set) : Set :=
+  compose(restrict(transposition(S, a, b), S ∖ {a}), r, S ∖ {a}, S ∖ {a}, S)
+
+def throughExtend (S a b r : Set) : Set :=
+  adjoinMap(throughLift(S, a, b, r), a, b)
+
+section ThroughExtension
+variable (S a b r : Set)
+hypothesis finite : Finite(S)
+hypothesis ha : a ∈ S
+hypothesis hb : b ∈ S
+hypothesis distinct : a ≠ b
+hypothesis hr : r ∈ derangements(S ∖ {a})
+
+theorem throughLift.injective
+  shows InjectiveBetween(throughLift(S, a, b, r), S ∖ {a}, S)
+proof
+  have subset := difference.subset_left at S, {a}
+  have rInjective := Bijective.injective with
+    (permutations.bijective with (derangements.permutation with hr))
+  have tauInjective := Bijective.injective with
+    (transposition.bijective at S, a, b with ha, hb)
+  have tauRest := restrict.injective with tauInjective, subset
+  unfold throughLift
+  exact compose.injective with rInjective, tauRest
+
+theorem throughLift.apply (x : Set)
+  requires hx : x ∈ S ∖ {a}
+  shows throughLift(S, a, b, r)(x) = transposition(S, a, b)(r(x))
+proof
+  have subset := difference.subset_left at S, {a}
+  have rFunction := derangements.function with hr
+  have tauFunction := transposition.function at S, a, b with ha, hb
+  have tauRest := restrict.domain_function with tauFunction, subset
+  have rxIn := derangements.apply_closed with hr, hx
+  have step := compose.apply with rFunction, tauRest, hx
+  have inner := restrict.domain_apply with tauFunction, subset, rxIn
+  unfold throughLift
+  rfl
+
+theorem throughLift.avoids
+  shows InjectiveBetween(throughLift(S, a, b, r), S ∖ {a}, S ∖ {b})
+proof
+  have injective := throughLift.injective at S, a, b, r with *
+  have tauA := transposition.first at S, a, b with ha, hb
+  have absent : ¬b ∈ functionImage(throughLift(S, a, b, r), S ∖ {a}, S)
+    intro inside
+    obtain ⟨bIn, x, hx, shape⟩ := functionImage.membership.forward with inside
+    have value := throughLift.apply at S, a, b, r, x with *
+    rw value at shape
+    have rxIn := derangements.apply_closed with hr, hx
+    have parts := difference.singleton_membership.forward with rxIn
+    have equal : transposition(S, a, b)(r(x)) = transposition(S, a, b)(a)
+      rw [← shape, tauA]
+      rfl
+    have rxA := transposition.apply_cancel with ha, hb, parts.left, ha, equal
+    exact parts.right with rxA
+  exact Injective.avoid with injective, absent
+
+theorem throughExtend.injective
+  shows InjectiveBetween(throughExtend(S, a, b, r), S, S)
+proof
+  have narrowed := throughLift.avoids at S, a, b, r with *
+  have aOut : ¬a ∈ S ∖ {a} by simp [difference.membership, singleton.membership]
+  have bOut : ¬b ∈ S ∖ {b} by simp [difference.membership, singleton.membership]
+  have extended := adjoinMap.injective with narrowed, aOut, bOut
+  have domain := insert.restore with ha
+  have codomain := insert.restore with hb
+  rw [domain, codomain] at extended
+  unfold throughExtend
+  exact extended
+
+theorem throughExtend.apply_first
+  shows throughExtend(S, a, b, r)(a) = b
+proof
+  have liftFunction := Injective.function with
+    (throughLift.injective at S, a, b, r with *)
+  have aOut : ¬a ∈ S ∖ {a} by simp [difference.membership, singleton.membership]
+  unfold throughExtend
+  exact adjoinMap.apply_new at throughLift(S, a, b, r), S ∖ {a}, S, a, b with
+    liftFunction, aOut
+
+theorem throughExtend.apply_rest (x : Set)
+  requires hx : x ∈ S ∖ {a}
+  shows throughExtend(S, a, b, r)(x) = transposition(S, a, b)(r(x))
+proof
+  have liftFunction := Injective.function with
+    (throughLift.injective at S, a, b, r with *)
+  have aOut : ¬a ∈ S ∖ {a} by simp [difference.membership, singleton.membership]
+  have outer : throughExtend(S, a, b, r)(x) = throughLift(S, a, b, r)(x)
+    unfold throughExtend
+    exact adjoinMap.apply_old at throughLift(S, a, b, r), S ∖ {a}, S,
+      a, b, x with liftFunction, aOut, hx
+  have inner := throughLift.apply at S, a, b, r, x with *
+  rw [outer, inner]
+  rfl
+
+theorem throughExtend.member
+  shows throughExtend(S, a, b, r) ∈ throughFiber(S, a, b)
+proof
+  have injective := throughExtend.injective at S, a, b, r with *
+  have atA := throughExtend.apply_first at S, a, b, r with *
+  have tauB := transposition.second at S, a, b with ha, hb
+  have ba : b ≠ a
+    intro same
+    apply distinct
+    symm
+    exact same
+  have bInRest : b ∈ S ∖ {a} :=
+    difference.singleton_membership.backward with ⟨hb, ba⟩
+  have moves : ∀ x ∈ S, throughExtend(S, a, b, r)(x) ≠ x
+    intros x hx
+    have alternatives : x = a ∨ x ≠ a by tauto
+    cases alternatives with isA | notA
+    . rw [isA, atA]
+      exact ba
+    . have inRest : x ∈ S ∖ {a} :=
+        difference.singleton_membership.backward with ⟨hx, notA⟩
+      have value := throughExtend.apply_rest at S, a, b, r, x with *
+      rw value
+      have rxIn := derangements.apply_closed with hr, inRest
+      have rxParts := difference.singleton_membership.forward with rxIn
+      intro same
+      have split : r(x) = b ∨ r(x) ≠ b by tauto
+      cases split with isB | notB
+      . rw [isB, tauB] at same
+        apply notA
+        symm
+        exact same
+      . have fixed := transposition.other at S, a, b, r(x) with
+          ha, hb, rxParts.left, rxParts.right, notB
+        rw fixed at same
+        exact derangements.moves with hr, inRest, same
+  have deranged := derangements.of_injective with finite, injective, moves
+  have atB : throughExtend(S, a, b, r)(b) ≠ a
+    have value := throughExtend.apply_rest at S, a, b, r, b with *
+    rw value
+    intro same
+    have equal : transposition(S, a, b)(r(b)) = transposition(S, a, b)(b)
+      rw [same, tauB]
+      rfl
+    have rbIn := derangements.apply_closed with hr, bInRest
+    have rbParts := difference.singleton_membership.forward with rbIn
+    have rbB := transposition.apply_cancel with ha, hb, rbParts.left, hb, equal
+    exact derangements.moves with hr, bInRest, rbB
+  exact throughFiber.membership.backward with ⟨deranged, atA, atB⟩
+
+end ThroughExtension
+
+theorem throughRestrict.surjective (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires distinct : a ≠ b
+  shows SurjectiveBetween(throughRestrict(S, a, b), throughFiber(S, a, b),
+    derangements(S ∖ {a}))
+proof
+  have graph := throughRestrict.function at S, a, b with finite, ha, hb
+  have subset := difference.subset_left at S, {a}
+  have involution := transposition.involution at S, a, b with ha, hb
+  unfold SurjectiveBetween
+  refine ⟨graph, ?_⟩
+  intros r hr
+  have inFiber := throughExtend.member at S, a, b, r with *
+  refine ⟨throughExtend(S, a, b, r), inFiber, ?_⟩
+  have value := throughRestrict.value at S, a, b, throughExtend(S, a, b, r)
+    with finite, ha, hb, inFiber
+  have restored : throughMap(S, a, b, throughExtend(S, a, b, r)) = r
+    have pFunction := Injective.function with
+      (throughExtend.injective at S, a, b, r with *)
+    have inImage := throughRestrict.closed at S, a, b, throughExtend(S, a, b, r)
+      with finite, ha, hb, inFiber
+    have mapped := derangements.function at S ∖ {a},
+      throughMap(S, a, b, throughExtend(S, a, b, r)) with inImage
+    have rFunction := derangements.function at S ∖ {a}, r with hr
+    apply FunctionBetween.ext with mapped, rFunction
+    intros x hx
+    have step := throughMap.apply with ha, hb, pFunction, hx
+    have inner := throughExtend.apply_rest at S, a, b, r, x with *
+    rw [step, inner]
+    have rxIn := derangements.apply_closed with hr, hx
+    exact InvolutionOn.apply with involution, (subset with r(x), rxIn)
+  have related := FunctionBetween.relates_apply with graph, inFiber
+  rw [value, restored] at related
+  exact related
+
+theorem throughFiber.count (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires distinct : a ≠ b
+  shows cardinality(throughFiber(S, a, b)) = cardinality(derangements(S ∖ {a}))
+proof
+  have injective := throughRestrict.injective with finite, ha, hb
+  have surjective := throughRestrict.surjective with finite, ha, hb, distinct
+  have finiteFiber := Finite.subset with (derangements.finite with finite),
+    (throughFiber.subset at S, a, b)
+  have bijective : BijectiveBetween(throughRestrict(S, a, b),
+    throughFiber(S, a, b), derangements(S ∖ {a})) := ⟨injective, surjective⟩
+  exact cardinality.bijective with finiteFiber, bijective
+
+-- The derangements sending a to b number d(S ∖ {a, b}) + d(S ∖ {a}).
+theorem valueAt.fiber_count (S a b : Set)
+  requires finite : Finite(S)
+  requires ha : a ∈ S
+  requires hb : b ∈ S
+  requires distinct : a ≠ b
+  shows cardinality(functionPreimage(valueAt(S, a), derangements(S), {b})) =
+    cardinality(derangements((S ∖ {a}) ∖ {b})) +
+    cardinality(derangements(S ∖ {a}))
+proof
+  have preimage := valueAt.preimage at S, a, b with ha
+  have finiteAll := derangements.finite with finite
+  have finiteSwap := Finite.subset with finiteAll, (swapFiber.subset at S, a, b)
+  have finiteThrough := Finite.subset with finiteAll,
+    (throughFiber.subset at S, a, b)
+  have split := cardinality.union_disjoint with finiteSwap, finiteThrough,
+    (swapFiber.disjoint at S, a, b)
+  have swapCount := swapFiber.count with finite, ha, hb, distinct
+  have throughCount := throughFiber.count with finite, ha, hb, distinct
+  rw [preimage, split, swapCount, throughCount]
+  rfl
+
+-- The recurrence: with |S| = n + 2, every b ∈ S ∖ {a} receives a from
+-- d(n) + d(n + 1) derangements.
+theorem derangements.count_pair (n : Nat)
+  shows ∀ S,
+    (HasCardinality(S, n) → cardinality(derangements(S)) = derangement(n)) ∧
+    (HasCardinality(S, n + 1) →
+      cardinality(derangements(S)) = derangement(n + 1))
+proof
+  induction n
+  | zero =>
+    intro S
+    constructor
+    . intro counted
+      have empty := HasCardinality.empty_of_zero at S with counted
+      rw [empty, derangements.empty_count, derangement.zero]
+      rfl
+    . intro counted
+      have one : 0 + 1 = 1 by compute
+      rw one at counted
+      have finite := Finite.from_cardinality with counted
+      have size := cardinality.eq_of_has with counted
+      have iff := cardinality.one_iff with finite
+      obtain ⟨x, shape⟩ := iff.forward with size
+      rw [one, shape, derangements.singleton_count, derangement.one]
+      rfl
+  | k + 1 using ih =>
+    intro S
+    constructor
+    . intro counted
+      have parts := ih with S
+      exact parts.right with counted
+    . intro counted
+      have two : k + 1 + 1 = succ(succ(k)) by ring
+      rw two at counted
+      have finite := Finite.from_cardinality with counted
+      obtain ⟨a, ha⟩ := HasCardinality.exists_member with counted
+      have rest := HasCardinality.remove with counted, ha
+      have restFinite := Finite.from_cardinality with rest
+      have restSize := cardinality.eq_of_has with rest
+      have restSubset := difference.subset_left at S, {a}
+      have restParts := ih with S ∖ {a}
+      have one : k + 1 = succ(k) := add.right_one with *
+      have restPlus : HasCardinality(S ∖ {a}, k + 1)
+        rw one
+        exact rest
+      have restCount := restParts.right with restPlus
+      have finiteAll := derangements.finite with finite
+      have graph := valueAt.function at S, a with ha
+      have total := cardinality.sum_of_preimages with
+        graph, finiteAll, restFinite
+      have natK := derangement.natural at k
+      have natK1 := derangement.natural at k + 1
+      have agree : ∀ b ∈ S ∖ {a},
+          preimageSize(valueAt(S, a), derangements(S), S ∖ {a})(b) =
+          derangement(k) + derangement(k + 1)
+        intros b hb
+        obtain ⟨bInS, ba⟩ := difference.singleton_membership.forward with hb
+        have ab : a ≠ b
+          intro same
+          apply ba
+          symm
+          exact same
+        have value := preimageSize.value at
+          valueAt(S, a), derangements(S), S ∖ {a}, b with finiteAll, hb
+        have fiberCount := valueAt.fiber_count with finite, ha, bInS, ab
+        rw [value, fiberCount, restCount]
+        have smaller := HasCardinality.remove with rest, hb
+        have smallerParts := ih with (S ∖ {a}) ∖ {b}
+        have rewrite := smallerParts.left with smaller
+        rw rewrite
+        rfl
+      have sum := natSum.constant with restFinite, agree
+      rw [total, sum, restSize]
+      have shape : succ(k) * (derangement(k) + derangement(k + 1)) =
+          (k + 1) * (derangement(k + 1) + derangement(k))
+        rw ← one
+        ring
+      have twoPlus : k + 1 + 1 = k + 2 by ring
+      rw [shape, twoPlus, derangement.recurrence]
+      rfl
+
+theorem derangements.count (S : Set)
+  requires finite : Finite(S)
+  shows cardinality(derangements(S)) = derangement(cardinality(S))
+proof
+  have natS := cardinality.nat with finite
+  have parts := derangements.count_pair at cardinality(S) with S
+  exact parts.left with (cardinality.correct with finite)
+
+-- The number of derangements of n points.
+theorem derangements.natural_count (n : Nat)
+  shows cardinality(derangements(n)) = derangement(n)
+proof
+  have count := derangements.count with (Finite.natural at n)
+  rw [count, cardinality.natural]
+  rfl
+
+theorem derangements.recurrence (n : Nat)
+  shows cardinality(derangements(n + 2)) =
+    (n + 1) * (cardinality(derangements(n + 1)) + cardinality(derangements(n)))
+proof
+  rw [derangements.natural_count, derangements.natural_count,
+    derangements.natural_count]
+  exact derangement.recurrence at n
+
+-- The derangement formula for the count itself.
+theorem derangements.formula (n : Nat)
+  shows integerOfNat(cardinality(derangements(n))) = derangementSum(n, n + 1)
+proof
+  rw derangements.natural_count
+  exact derangement.closed_form at n

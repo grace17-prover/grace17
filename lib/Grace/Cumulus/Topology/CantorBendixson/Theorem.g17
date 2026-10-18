@@ -1,0 +1,229 @@
+-- The Cantor–Bendixson theorem: in a space with a countable base, a
+-- closed set is the disjoint union of its perfect kernel and a countable
+-- set of removed points, and its Cantor–Bendixson rank is countable
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.CantorBendixson.Theorem
+import Stabilise
+
+-- A perfect set is closed and equal to its derived set: closed with no
+-- isolated points.
+predicate Perfect (X T P : Set) := IsClosed(X, T, P) ∧ derivedSet(X, T, P) = P
+
+theorem Perfect.closed (X T P : Set)
+  requires perfect : Perfect(X, T, P)
+  shows IsClosed(X, T, P)
+proof
+  exact perfect.left
+
+theorem Perfect.no_isolated_point (X T P x : Set)
+  requires topology : IsTopology(X, T)
+  requires perfect : Perfect(X, T, P)
+  requires hx : x ∈ P
+  shows ¬IsolatedPoint(X, T, P, x)
+proof
+  obtain ⟨closed, fixed⟩ := perfect
+  intro isolated
+  have removed := derivedSet.removed_iff.backward with
+    topology, closed.left, isolated
+  have parts := difference.membership.forward with removed
+  apply parts.right
+  rw fixed
+  exact parts.left
+
+-- The perfect kernel is perfect: it is a stage, hence closed, and its
+-- derived set is the next stage, which is the same set.
+theorem cantorBendixson.kernel_perfect (X T B A : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  shows Perfect(X, T, perfectKernel(X, T, A))
+proof
+  have same : perfectKernel(X, T, A) =
+      derived(X, T, A, cantorBendixsonRank(X, T, A))
+    unfold perfectKernel
+    rfl
+  have hRank := cantorBendixsonRank.ordinal with
+    topology, basis, closed, countable
+  have fixed := cantorBendixsonRank.fixed with
+    topology, basis, closed, countable
+  rw derived.next at fixed
+  rw same at fixed
+  rw same
+  constructor
+  . exact derived.closed with topology, closed, hRank
+  . exact fixed
+
+theorem cantorBendixson.kernel_subset (X T B A : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  shows perfectKernel(X, T, A) ⊆ A
+proof
+  have hRank := cantorBendixsonRank.ordinal with
+    topology, basis, closed, countable
+  unfold perfectKernel
+  exact derived.subset with topology, closed, hRank
+
+-- The points removed below stage ρ, each related to the basic sets that
+-- witness its removal at the stage where it leaves.
+def pointDrops (X T A B ρ : Set) : Set :=
+  { p ∈ (A ∖ derived(X, T, A, ρ)) × B |
+    ∃ x ∈ A ∖ derived(X, T, A, ρ), ∃ W ∈ B, p = (x ↦ W) ∧
+      (∃ β ∈ ρ, W ∩ derived(X, T, A, β) = {x}) }
+
+theorem pointDrops.membership (p X T A B ρ : Set)
+  shows p ∈ pointDrops(X, T, A, B, ρ) ↔
+    p ∈ (A ∖ derived(X, T, A, ρ)) × B ∧
+      (∃ x ∈ A ∖ derived(X, T, A, ρ), ∃ W ∈ B, p = (x ↦ W) ∧
+        (∃ β ∈ ρ, W ∩ derived(X, T, A, β) = {x}))
+proof
+  simp [pointDrops]
+
+theorem pointDrops.relates (X T A B ρ x W : Set)
+  shows relates(pointDrops(X, T, A, B, ρ), x, W) ↔
+    x ∈ A ∖ derived(X, T, A, ρ) ∧ W ∈ B ∧
+      (∃ β ∈ ρ, W ∩ derived(X, T, A, β) = {x})
+proof
+  constructor
+  . intro edge
+    unfold relates at edge
+    have parts := pointDrops.membership.forward with edge
+    obtain ⟨x2, hx2, W2, hW2, shape, witnessed⟩ := parts.right
+    obtain ⟨rfl, rfl⟩ := orderedPair.injective with shape
+    exact ⟨hx2, hW2, witnessed⟩
+  . intro h
+    obtain ⟨hx, hW, witnessed⟩ := h
+    unfold relates
+    apply pointDrops.membership.backward
+    constructor
+    . exact product.pair with hx, hW
+    . exact ⟨x, hx, W, hW, rfl, witnessed⟩
+
+-- Every removed point has a witness: it leaves at a successor stage below
+-- ρ, where a basic set isolates it.
+theorem pointDrops.offered (X T A B ρ : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires hRho : ρ ∈ Ordinal
+  shows ∀ x ∈ A ∖ derived(X, T, A, ρ), ∃ W ∈ B,
+    relates(pointDrops(X, T, A, B, ρ), x, W)
+proof
+  intros x hx
+  have parts := difference.membership.forward with hx
+  obtain ⟨β, hβ, inBeta, away⟩ := derived.removed_stage with
+    topology, closed, hRho, parts.left, parts.right
+  have hBeta := Ordinal.member with hRho, hβ
+  obtain ⟨W, hW, trace⟩ := derived.removed_witness with
+    topology, basis, closed, hBeta, inBeta, away
+  witness W
+  constructor
+  . exact hW
+  . apply pointDrops.relates.backward
+    exact ⟨hx, hW, β, hβ, trace⟩
+
+-- A basic set witnesses the removal of at most one point.
+theorem pointDrops.separated (X T A B ρ : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires hRho : ρ ∈ Ordinal
+  shows ∀ x ∈ A ∖ derived(X, T, A, ρ), ∀ y ∈ A ∖ derived(X, T, A, ρ),
+    ∀ W ∈ B, relates(pointDrops(X, T, A, B, ρ), x, W) →
+      relates(pointDrops(X, T, A, B, ρ), y, W) → x = y
+proof
+  intros x hx y hy W hW first second
+  obtain ⟨hx2, hW2, β, hβ, traceX⟩ := pointDrops.relates.forward with
+    first
+  obtain ⟨hy2, hW3, δ, hδ, traceY⟩ := pointDrops.relates.forward with
+    second
+  have hBeta := Ordinal.member with hRho, hβ
+  have hDelta := Ordinal.member with hRho, hδ
+  have both := derived.witness_injective with
+    topology, basis, closed, hBeta, hDelta, hW, traceX, traceY
+  exact both.right
+
+-- The points removed below any stage are countable: each selects the
+-- witness of least code, injectively into the base.
+theorem derived.removed_countable (X T A B ρ : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  requires hRho : ρ ∈ Ordinal
+  shows Countable(A ∖ derived(X, T, A, ρ))
+proof
+  obtain ⟨g, code⟩ := countable
+  have offered := pointDrops.offered with topology, basis, closed, hRho
+  have separated := pointDrops.separated with topology, basis, closed, hRho
+  exact leastCoded.countable with code, offered, separated
+
+theorem cantorBendixson.scattered_countable (X T B A : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  shows Countable(A ∖ perfectKernel(X, T, A))
+proof
+  have hRank := cantorBendixsonRank.ordinal with
+    topology, basis, closed, countable
+  unfold perfectKernel
+  exact derived.removed_countable with
+    topology, basis, closed, countable, hRank
+
+-- The rank is countable: every stage below it drops, so the stages below
+-- the rank select witnesses injectively into the base.
+theorem cantorBendixson.rank_countable (X T B A : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  shows Countable(cantorBendixsonRank(X, T, A))
+proof
+  obtain ⟨g, code⟩ := countable
+  have countableB : Countable(B) := ⟨g, code⟩
+  have hRank := cantorBendixsonRank.ordinal with
+    topology, basis, closed, countableB
+  have ordinals : ∀ γ ∈ cantorBendixsonRank(X, T, A), γ ∈ Ordinal
+    intros γ hγ
+    exact Ordinal.member with hRank, hγ
+  have offered : ∀ γ ∈ cantorBendixsonRank(X, T, A), ∃ W ∈ B,
+      relates(stageDrops(X, T, A, B, cantorBendixsonRank(X, T, A)), γ, W)
+    intros γ hγ
+    have hGamma := ordinals with γ, hγ
+    have strict : derived(X, T, A, next(γ)) ≠ derived(X, T, A, γ)
+      intro stable
+      have below := cantorBendixsonRank.least with
+        topology, basis, closed, countableB, hGamma, stable
+      exact Ordinal.not_member_of_subset with below, hγ
+    obtain ⟨W, hW, x, trace⟩ := stageDrops.offered with
+      topology, basis, closed, hGamma, strict
+    witness W
+    constructor
+    . exact hW
+    . apply stageDrops.relates.backward
+      exact ⟨hγ, hW, x, trace⟩
+  have separated := stageDrops.separated with topology, basis, closed, ordinals
+  exact leastCoded.countable with code, offered, separated
+
+-- Cantor–Bendixson: a closed set in a space with a countable base is the
+-- disjoint union of its perfect kernel and a countable set.
+theorem cantorBendixson (X T B A : Set)
+  requires topology : IsTopology(X, T)
+  requires basis : Basis(X, T, B)
+  requires closed : IsClosed(X, T, A)
+  requires countable : Countable(B)
+  shows Perfect(X, T, perfectKernel(X, T, A)) ∧
+    perfectKernel(X, T, A) ⊆ A ∧ Countable(A ∖ perfectKernel(X, T, A))
+proof
+  refine ⟨?_, ?_, ?_⟩
+  . exact cantorBendixson.kernel_perfect with topology, basis, closed, countable
+  . exact cantorBendixson.kernel_subset with topology, basis, closed, countable
+  . exact cantorBendixson.scattered_countable with
+      topology, basis, closed, countable

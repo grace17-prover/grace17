@@ -1,0 +1,610 @@
+-- Wilson's theorem: (p − 1)! ≡ −1 (mod p) for a prime p. The residues
+-- 2, …, p − 2 pair off with their inverses, so their product is 1 mod p, and
+-- the remaining factors 1 and p − 1 give −1
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.Wilson
+import InverseInvolution
+import Nat.Subtraction
+
+-- Removing one occurrence of y keeps the product (after restoring y), keeps
+-- every count (after restoring y), and drops the length by one.
+predicate OneShorter (zs ys : Set) := length{ℕ}(ys) = succ(length{ℕ}(zs))
+
+predicate ShortList (xs k : Set) := length{ℕ}(xs) ≤ k
+
+theorem multiplicity.remove_length (y : Nat) (ys : List(ℕ))
+  shows 0 < multiplicity(y, ys) →
+    ∃ zs, List(ℕ, zs) ∧ ∏ ys = ∏ (y :: zs) ∧ OneShorter(zs, ys) ∧
+      (∀ q, Nat(q) → multiplicity(q, ys) = multiplicity(q, y :: zs))
+proof
+  induction ys
+  | List.nil =>
+    intro positive
+    have empty := multiplicity.nil at y
+    rw empty at positive
+    exfalso
+    exact Less.irreflexive at 0 with *, positive
+  | List.cons(x, rest) using ih =>
+    intro positive
+    have split : y = x ∨ ¬(y = x) by tauto
+    cases split with equal | different
+    . refine ⟨rest, h_rest, _, _, _⟩
+      . rw equal
+        rfl
+      . unfold OneShorter
+        exact length.cons with *
+      . intros q qNat
+        rw equal
+        rfl
+    . have restPositive : 0 < multiplicity(y, rest)
+        have equation := multiplicity.cons_other with different
+        rwa equation at positive
+      obtain ⟨zs, zsList, product, lengths, counts⟩ := ih with restPositive
+      have consList : List(ℕ, x :: zs) by typecheck
+      refine ⟨x :: zs, consList, _, _, _⟩
+      . have e1 := listProduct.cons at x, rest with *
+        have e2 := listProduct.cons at y, zs with *
+        have e3 := listProduct.cons at y, x :: zs with *
+        have e4 := listProduct.cons at x, zs with *
+        have zsProduct : Nat(∏ zs) by typecheck
+        rw e2 at product
+        rw [e1, e3, e4, product]
+        ring
+      . unfold OneShorter
+        unfold OneShorter at lengths
+        have l1 := length.cons at ℕ, x, rest with *
+        have l2 := length.cons at ℕ, x, zs with *
+        rw [l1, lengths, l2]
+        rfl
+      . intros q qNat
+        have c1 := multiplicity.cons at q, x, rest with *
+        have c2 := multiplicity.cons at q, y, x :: zs with *
+        have c3 := multiplicity.cons at q, x, zs with *
+        have c4 := multiplicity.cons at q, y, zs with *
+        have count := counts with q, qNat
+        rw c4 at count
+        rw [c1, c2, c3, count]
+        ring
+
+-- A list of distinct units mod p in which every entry's inverse is another
+-- entry.
+predicate Paired (p xs : Set) :=
+  ∀ x, Nat(x) → 0 < multiplicity(x, xs) →
+    (multiplicity(x, xs) = 1 ∧ 0 < x ∧ x < p ∧ modInverse(p, x) ≠ x ∧ 0 < multiplicity(modInverse(p, x), xs))
+
+-- The product of a paired list is 1 mod p.
+theorem Paired.product (p k : Nat)
+  requires prime : Prime(p)
+  shows ∀ xs, List(ℕ, xs) → ShortList(xs, k) → Paired(p, xs) → (∏ xs) % p = 1
+proof
+  induction k
+  | zero =>
+    intros xs xsList bound paired
+    have aboveOne := Prime.greater_than_one with prime
+    have shape := List.cases with xsList
+    cases shape with nil | cons
+    . rw [nil, listProduct.nil]
+      exact mod.of_less with aboveOne
+    . exfalso
+      obtain ⟨x, xIn, rest, restList, equal⟩ := cons
+      unfold ShortList at bound
+      rw equal at bound
+      have expand := length.cons at ℕ, x, rest with *
+      rw expand at bound
+      have lengthNat : Nat(length{ℕ}(rest)) by typecheck
+      have impossible : ¬succ(length{ℕ}(rest)) ≤ 0 by arith
+      exact impossible with bound
+  | j + 1 using ih =>
+    intros xs xsList bound paired
+    have aboveOne := Prime.greater_than_one with prime
+    have nonzero := Prime.nonzero with prime
+    have shape := List.cases with xsList
+    cases shape with nil | cons
+    . rw [nil, listProduct.nil]
+      exact mod.of_less with aboveOne
+    . obtain ⟨x, xIn, rest, restList, equal⟩ := cons
+      have xNat : Nat(x) by typecheck
+      unfold ShortList at bound
+      rw equal at bound
+      rw equal at paired
+      rw equal
+      unfold Paired at paired
+      have xPositive : 0 < multiplicity(x, x :: rest)
+        have self := multiplicity.cons_self at x, rest with *
+        rw self
+        arith
+      obtain ⟨once, xPos, xBelow, notFixed, inverseIn⟩ := paired with x, xNat, xPositive
+      have unit := prime.coprime_below with prime, xPos, xBelow
+      have yNat := modInverse.natural with prime, unit
+      have yBelow := modInverse.below with prime, unit
+      have yPos := modInverse.positive with prime, unit
+      have yUnit := modInverse.unit with prime, unit
+      have product := modInverse.product with prime, unit
+      have involution := modInverse.involution with prime, unit, xBelow
+      have restZero : multiplicity(x, rest) = 0
+        have self := multiplicity.cons_self at x, rest with *
+        rw self at once
+        have shifted : 1 + multiplicity(x, rest) = 1 + 0
+          have zeroForm : 1 + 0 = (1:N) by ring
+          rwa zeroForm
+        have cancel := add.left_cancel at multiplicity(x, rest), 0, 1
+        exact cancel with shifted
+      have yInRest : 0 < multiplicity(modInverse(p, x), rest)
+        have other := multiplicity.cons_other at modInverse(p, x), x, rest with notFixed
+        rwa other at inverseIn
+      have remove := multiplicity.remove_length at modInverse(p, x), rest with *
+      obtain ⟨zs, zsList, productRest, lengthRest, counts⟩ := remove with yInRest
+      have lengthZs : ShortList(zs, j)
+        unfold ShortList
+        unfold OneShorter at lengthRest
+        have expand := length.cons at ℕ, x, rest with *
+        rw [expand, lengthRest] at bound
+        have zsLengthNat : Nat(length{ℕ}(zs)) by typecheck
+        arith
+      have yOnce : multiplicity(modInverse(p, x), x :: rest) = 1
+        have propsY := paired with modInverse(p, x), inverseIn
+        exact propsY.left
+      have yZero : multiplicity(modInverse(p, x), zs) = 0
+        have other := multiplicity.cons_other at modInverse(p, x), x, rest with notFixed
+        have count := counts with modInverse(p, x)
+        have self := multiplicity.cons_self at modInverse(p, x), zs with *
+        rw [other, count, self] at yOnce
+        have shifted : 1 + multiplicity(modInverse(p, x), zs) = 1 + 0
+          have zeroForm : 1 + 0 = (1:N) by ring
+          rwa zeroForm
+        have cancel := add.left_cancel at multiplicity(modInverse(p, x), zs), 0, 1
+        exact cancel with shifted
+      have pairedZs : Paired(p, zs)
+        unfold Paired
+        intros q qNat qPositive
+        have countQ := counts with q, qNat
+        have consQ := multiplicity.cons at q, modInverse(p, x), zs with *
+        have weightNat := chooseNat.natural at equalNat(q, modInverse(p, x)), 1, 0
+        have qInRest : 0 < multiplicity(q, rest)
+          rw [countQ, consQ]
+          arith
+        have qInXs := multiplicity.positive_cons at q, x, rest with qInRest
+        obtain ⟨onceQ, qPos, qBelow, qNotFixed, qInverseIn⟩ := paired with q, qNat, qInXs
+        have qUnit := prime.coprime_below with prime, qPos, qBelow
+        have rNat := modInverse.natural with prime, qUnit
+        have qInvolution := modInverse.involution with prime, qUnit, qBelow
+        have qNotX : q ≠ x
+          intro same
+          rw [same, restZero] at qInRest
+          exact Less.irreflexive with *, qInRest
+        have qNotY : q ≠ modInverse(p, x)
+          intro same
+          rw [same, yZero] at qPositive
+          exact Less.irreflexive with *, qPositive
+        constructor
+        . have consX := multiplicity.cons_other at q, x, rest with qNotX
+          rw consX at onceQ
+          rw [countQ, consQ] at onceQ
+          have otherY := equalNat.false_iff.backward with qNotY
+          rw otherY at onceQ
+          have weightZero : chooseNat(Bool.false, 1, 0) = 0 by compute
+          rw weightZero at onceQ
+          have zeroForm : 0 + multiplicity(q, zs) = multiplicity(q, zs) by ring
+          rwa zeroForm at onceQ
+        . constructor
+          . exact qPos
+          . constructor
+            . exact qBelow
+            . constructor
+              . exact qNotFixed
+              . have rNotX : modInverse(p, q) ≠ x
+                  intro same
+                  apply qNotY
+                  rw [← qInvolution, same]
+                  rfl
+                have rNotY : modInverse(p, q) ≠ modInverse(p, x)
+                  intro same
+                  apply qNotX
+                  rw ← qInvolution
+                  rw [same, involution]
+                  rfl
+                have countR := counts with modInverse(p, q)
+                have consRX := multiplicity.cons_other at modInverse(p, q), x, rest with rNotX
+                have consRY := multiplicity.cons_other at modInverse(p, q), modInverse(p, x), zs with rNotY
+                rw consRX at qInverseIn
+                rwa [countR, consRY] at qInverseIn
+      have previous := ih with zs, zsList, lengthZs, pairedZs
+      have expandXs := listProduct.cons at x, rest with *
+      have expandRest := listProduct.cons at modInverse(p, x), zs with *
+      have zsProduct : Nat(∏ zs) by typecheck
+      rw expandRest at productRest
+      have rearrange := mul.associative_reverse at modInverse(p, x), ∏ zs, x with *
+      have split := mod.mul at p, x * modInverse(p, x), ∏ zs with nonzero
+      have oneSelf := mod.of_less with aboveOne
+      have oneOne : (1:N) * 1 = 1 by ring
+      rwa [expandXs, productRest, rearrange, split, product, previous, oneOne]
+
+-- The list p − 1, …, 1 and its product.
+def factorialList (m : Nat) → List(ℕ)
+  | zero => []
+  | succ(k) => succ(k) :: factorialList(k)
+
+theorem factorialList.zero
+  shows factorialList(0) = []
+proof
+  compute
+
+theorem factorialList.succ (k : Nat)
+  shows factorialList(succ(k)) = succ(k) :: factorialList(k)
+proof
+  simp [factorialList]
+
+theorem factorialList.list (m : Nat)
+  shows List(ℕ, factorialList(m))
+proof
+  induction m
+  | zero =>
+    rw factorialList.zero
+    typecheck
+  | succ(k) using ih =>
+    rw factorialList.succ
+    typecheck
+
+theorem factorialList.product (m : Nat)
+  shows ∏ factorialList(m) = m!
+proof
+  induction m
+  | zero =>
+    rw [factorialList.zero, listProduct.nil]
+    compute
+  | succ(k) using ih =>
+    have restList := factorialList.list at k
+    have expand := listProduct.cons at succ(k), factorialList(k) with *
+    have step : succ(k)! = succ(k) * k!
+      simp [factorial]
+    rw [factorialList.succ, expand, ih, step]
+    rfl
+
+-- The list k + 1, …, 2, the residues strictly between 1 and p − 1 when
+-- p = k + 3.
+def middleList (k : Nat) → List(ℕ)
+  | zero => []
+  | succ(j) => succ(succ(j)) :: middleList(j)
+
+theorem middleList.zero
+  shows middleList(0) = []
+proof
+  compute
+
+theorem middleList.succ (j : Nat)
+  shows middleList(succ(j)) = succ(succ(j)) :: middleList(j)
+proof
+  simp [middleList]
+
+theorem middleList.list (k : Nat)
+  shows List(ℕ, middleList(k))
+proof
+  induction k
+  | zero =>
+    rw middleList.zero
+    typecheck
+  | succ(j) using ih =>
+    rw middleList.succ
+    typecheck
+
+theorem middleList.product (k : Nat)
+  shows ∏ factorialList(succ(k)) = ∏ middleList(k)
+proof
+  induction k
+  | zero =>
+    have expand := listProduct.cons at succ(0), factorialList(0) with *
+    rw [factorialList.succ, expand, factorialList.zero, listProduct.nil, middleList.zero, listProduct.nil]
+    compute
+  | succ(j) using ih =>
+    have restList := factorialList.list at succ(j)
+    have middleRest := middleList.list at j
+    have expandFactorial := listProduct.cons at succ(succ(j)), factorialList(succ(j)) with *
+    have expandMiddle := listProduct.cons at succ(succ(j)), middleList(j) with *
+    rw [factorialList.succ, expandFactorial, ih, middleList.succ, expandMiddle]
+    rfl
+
+theorem middleList.multiplicity_out (k x : Nat)
+  requires outside : ¬(2 ≤ x ∧ x ≤ succ(k))
+  shows multiplicity(x, middleList(k)) = 0
+proof
+  induction k
+  | zero =>
+    intro outside
+    rw middleList.zero
+    exact multiplicity.nil at x
+  | succ(j) using ih =>
+    intro outside
+    have middleRest := middleList.list at j
+    have different : x ≠ succ(succ(j))
+      intro same
+      apply outside
+      rw same
+      constructor
+      . arith
+      . arith
+    have smaller : ¬(2 ≤ x ∧ x ≤ succ(j))
+      intro both
+      obtain ⟨lower, upper⟩ := both
+      apply outside
+      constructor
+      . exact lower
+      . arith
+    have previous := ih with smaller
+    have other := multiplicity.cons_other at x, succ(succ(j)), middleList(j) with different
+    rw [middleList.succ, other]
+    exact previous
+
+theorem middleList.multiplicity_in (k x : Nat)
+  requires lower : 2 ≤ x
+  requires upper : x ≤ succ(k)
+  shows multiplicity(x, middleList(k)) = 1
+proof
+  induction k
+  | zero =>
+    intro upper
+    exfalso
+    have impossible : ¬x ≤ succ(0) by arith
+    exact impossible with upper
+  | succ(j) using ih =>
+    intro upper
+    have middleRest := middleList.list at j
+    have trichotomy := Less.trichotomy at x, succ(succ(j))
+    rcases trichotomy with below | same | above
+    . have smaller : x ≤ succ(j) by arith
+      have previous := ih with smaller
+      have different : x ≠ succ(succ(j))
+        intro equal
+        rw equal at below
+        exact Less.irreflexive at succ(succ(j)) with *, below
+      have other := multiplicity.cons_other at x, succ(succ(j)), middleList(j) with different
+      rw [middleList.succ, other]
+      exact previous
+    . have outside : ¬(2 ≤ x ∧ x ≤ succ(j))
+        intro both
+        obtain ⟨lowerX, upperX⟩ := both
+        rw same at upperX
+        have impossible : ¬succ(succ(j)) ≤ succ(j) by arith
+        exact impossible with upperX
+      have zero := middleList.multiplicity_out at j, x with outside
+      rw middleList.succ
+      rw same
+      have self := multiplicity.cons_self at succ(succ(j)), middleList(j) with *
+      rw self
+      rw same at zero
+      rw zero
+      ring
+    . exfalso
+      have impossible : ¬succ(succ(j)) < x by arith
+      exact impossible with above
+
+theorem middleList.member (k x : Nat)
+  requires positive : 0 < multiplicity(x, middleList(k))
+  shows 2 ≤ x ∧ x ≤ succ(k)
+proof
+  by_contra none
+  have zero := middleList.multiplicity_out with none
+  rw zero at positive
+  exact Less.irreflexive with *, positive
+
+-- p − 1 is its own inverse.
+theorem modInverse.top (k : Nat)
+  requires prime : Prime(succ(succ(succ(k))))
+  shows modInverse(succ(succ(succ(k))), succ(succ(k))) = succ(succ(k))
+proof
+  have nonzero := Prime.nonzero at succ(succ(succ(k))) with prime
+  have positive : 0 < succ(succ(k)) by arith
+  have below : succ(succ(k)) < succ(succ(succ(k))) by arith
+  have unit := prime.coprime_below at succ(succ(succ(k))), succ(succ(k)) with prime, positive, below
+  have square : succ(succ(k)) * succ(succ(k)) = succ(succ(succ(k))) * succ(k) + 1 by ring
+  have oneBelow : 1 < succ(succ(succ(k))) by arith
+  have product : (succ(succ(k)) * succ(succ(k))) % succ(succ(succ(k))) = 1
+    rw square
+    have shifted := mod.add_multiple at succ(succ(succ(k))), 1, succ(k) with nonzero
+    have commute : succ(succ(succ(k))) * succ(k) + 1 = 1 + succ(succ(succ(k))) * succ(k) by ring
+    rw [commute, shifted]
+    exact mod.of_less at succ(succ(succ(k))), 1 with oneBelow
+  have same := modInverse.unique_below at succ(succ(succ(k))), succ(succ(k)), succ(succ(k)) with prime, unit, below, product
+  symm at same
+  exact same
+
+theorem middleList.paired (k : Nat)
+  requires prime : Prime(succ(succ(succ(k))))
+  shows Paired(succ(succ(succ(k))), middleList(k))
+proof
+  unfold Paired
+  intros x xNat positive
+  obtain ⟨lower, upper⟩ := middleList.member at k, x with positive
+  have xPos : 0 < x by arith
+  have xBelow : x < succ(succ(succ(k))) by arith
+  have unit := prime.coprime_below with prime, xPos, xBelow
+  have yNat := modInverse.natural with prime, unit
+  have yPos := modInverse.positive with prime, unit
+  have yBelow := modInverse.below with prime, unit
+  have product := modInverse.product with prime, unit
+  have involution := modInverse.involution with prime, unit, xBelow
+  have nonzero := Prime.nonzero with prime
+  have notFixed : modInverse(succ(succ(succ(k))), x) ≠ x
+    intro fixed
+    have cases := modInverse.fixed with prime, xPos, xBelow, fixed
+    cases cases with one | top
+    . rw one at lower
+      have impossible : ¬(2:N) ≤ 1 by arith
+      exact impossible with lower
+    . have impossible : succ(x) ≠ succ(succ(succ(k))) by arith
+      exact impossible with top
+  have yNotOne : modInverse(succ(succ(succ(k))), x) ≠ 1
+    intro one
+    rw one at product
+    have same : mul(x, 1) = x by ring
+    rw same at product
+    have self := mod.of_less with xBelow
+    rw self at product
+    rw product at lower
+    have impossible : ¬(2:N) ≤ 1 by arith
+    exact impossible with lower
+  have yNotTop : modInverse(succ(succ(succ(k))), x) ≠ succ(succ(k))
+    intro top
+    have topInverse := modInverse.top with prime
+    have same : x = succ(succ(k))
+      rw ← involution
+      rw [top, topInverse]
+      rfl
+    rw same at upper
+    have impossible : ¬succ(succ(k)) ≤ succ(k) by arith
+    exact impossible with upper
+  have yLower : 2 ≤ modInverse(succ(succ(succ(k))), x)
+    have trichotomy := Less.trichotomy at modInverse(succ(succ(succ(k))), x), 2
+    rcases trichotomy with below | same | above
+    . exfalso
+      have atMostOne : modInverse(succ(succ(succ(k))), x) ≤ 1 by arith
+      have oneLe : 1 ≤ modInverse(succ(succ(succ(k))), x) by arith
+      have equal := LessEqual.antisymmetric with atMostOne, oneLe
+      exact yNotOne with equal
+    . rw same
+      arith
+    . arith
+  have yUpper : modInverse(succ(succ(succ(k))), x) ≤ succ(k)
+    have atMost : modInverse(succ(succ(succ(k))), x) ≤ succ(succ(k)) by arith
+    have trichotomy := Less.trichotomy at modInverse(succ(succ(succ(k))), x), succ(succ(k))
+    rcases trichotomy with below | same | above
+    . arith
+    . exfalso
+      exact yNotTop with same
+    . exfalso
+      have impossible : ¬succ(succ(k)) < modInverse(succ(succ(succ(k))), x) by arith
+      exact impossible with above
+  have once := middleList.multiplicity_in with lower, upper
+  have yIn := middleList.multiplicity_in with yLower, yUpper
+  constructor
+  . exact once
+  . constructor
+    . exact xPos
+    . constructor
+      . exact xBelow
+      . constructor
+        . exact notFixed
+        . rw yIn
+          arith
+
+-- Wilson's theorem.
+theorem wilson.theorem (p : Nat)
+  requires prime : Prime(p)
+  shows ((p - 1)! + 1) % p = 0
+proof
+  have aboveOne := Prime.greater_than_one with prime
+  have nonzero := Prime.nonzero with prime
+  have shape := natural.zero_or_successor at p
+  cases shape with zero | successor
+  . exfalso
+    exact nonzero with zero
+  . obtain ⟨q, qNat, form⟩ := successor
+    have qShape := natural.zero_or_successor at q
+    cases qShape with qZero | qSuccessor
+    . exfalso
+      rw [form, qZero] at aboveOne
+      exact Less.irreflexive with *, aboveOne
+    . obtain ⟨r, rNat, qForm⟩ := qSuccessor
+      have rShape := natural.zero_or_successor at r
+      cases rShape with rZero | rSuccessor
+      . rw [form, qForm, rZero]
+        compute
+      . obtain ⟨k, kNat, rForm⟩ := rSuccessor
+        have pForm : p = succ(succ(succ(k)))
+          rw [form, qForm, rForm]
+          rfl
+        rw pForm
+        rw pForm at prime
+        have predecessorValue : succ(succ(succ(k))) - 1 = succ(succ(k)) by simp [sub, predecessor]
+        rw predecessorValue
+        have factorialValue := factorialList.product at succ(succ(k))
+        have middleList2 := middleList.list at k
+        have factorialRest := factorialList.list at succ(k)
+        have expand := listProduct.cons at succ(succ(k)), factorialList(succ(k)) with *
+        have middle := middleList.product at k
+        have paired := middleList.paired with prime
+        have products := Paired.product at succ(succ(succ(k))), length{ℕ}(middleList(k)) with prime
+        have lengthNat : Nat(length{ℕ}(middleList(k))) by typecheck
+        have reflexive : ShortList(middleList(k), length{ℕ}(middleList(k)))
+          unfold ShortList
+          witness 0
+          ring
+        have middleProduct := products with middleList(k), middleList2, reflexive, paired
+        have middleNat : Nat(∏ middleList(k)) by typecheck
+        have pNonzero : succ(succ(succ(k))) ≠ 0 by arith
+        have factorialForm : succ(succ(k))! = succ(succ(k)) * ∏ middleList(k)
+          rw [← factorialValue, factorialList.succ, expand, middle]
+          rfl
+        rw factorialForm
+        have addMod := mod.add at succ(succ(succ(k))), succ(succ(k)) * ∏ middleList(k), 1 with pNonzero
+        have mulMod := mod.mul_right at succ(succ(succ(k))), succ(succ(k)), ∏ middleList(k) with pNonzero
+        have topBelow : succ(succ(k)) < succ(succ(succ(k))) by arith
+        have oneBelow : 1 < succ(succ(succ(k))) by arith
+        have topSelf := mod.of_less with topBelow
+        have oneSelf := mod.of_less with oneBelow
+        have topOne : succ(succ(k)) * 1 = succ(succ(k)) by ring
+        rw [addMod, ← mulMod, middleProduct, topOne, topSelf, oneSelf]
+        have full : succ(succ(k)) + 1 = succ(succ(succ(k))) * 1 + 0 by ring
+        rw full
+        have zeroBelow : 0 < succ(succ(succ(k))) by arith
+        have equation : succ(succ(succ(k))) * 1 + 0 = succ(succ(succ(k))) * 1 + 0 by rfl
+        exact mod.unique with pNonzero, equation, zeroBelow
+
+-- The converse: a natural number above one that divides (n - 1)! + 1 is
+-- prime, since any proper divisor d of n also divides (n - 1)! and hence 1.
+theorem wilson.converse (n : Nat)
+  requires aboveOne : 1 < n
+  requires congruence : ((n - 1)! + 1) % n = 0
+  shows Prime(n)
+proof
+  have nonzero : n ≠ 0 by arith
+  have dividesSum : n ∣ (n - 1)! + 1
+    have characterization := mod.zero_iff at n, (n - 1)! + 1 with nonzero
+    exact characterization.forward with congruence
+  have shape := natural.zero_or_successor at n
+  cases shape with zero | successor
+  . exfalso
+    exact nonzero with zero
+  obtain ⟨k, kNat, form⟩ := successor
+  have predecessorForm : n - 1 = k
+    rw [form, sub.one, predecessor.succ]
+    rfl
+  rw predecessorForm at dividesSum
+  unfold Prime
+  constructor
+  . have oneMember := membership.of_Less at 1, n with *
+    exact oneMember with aboveOne
+  . intros d dNat dBelow dDivides
+    have dNonzero : d ≠ 0
+      intro dZero
+      rw dZero at dDivides
+      have nZero := zero.divides_only_zero at n with dDivides
+      exact nonzero with nZero
+    have dShape := natural.zero_or_successor at d with dNat
+    cases dShape with dZero | dSuccessor
+    . exfalso
+      exact dNonzero with dZero
+    obtain ⟨j, jNat, dForm⟩ := dSuccessor
+    have dPositiveLess : 0 < d
+      rw dForm
+      arith
+    have dPositive := membership.of_Less at 0, d with *, *, dPositiveLess
+    rw form at dBelow
+    have through := factorial.divisible_through at d, k with dNat
+    have dividesFactorial := through with dPositive, dBelow
+    have dividesPlus := divides.transitive at d, n, k! + 1 with dDivides, dividesSum
+    have dividesOne := divides.add_cancel_left at d, k!, 1 with dividesFactorial, dividesPlus
+    exact divides.one_only at d with dNat, dividesOne
+
+theorem wilson.characterization (n : Nat)
+  requires aboveOne : 1 < n
+  shows Prime(n) ↔ ((n - 1)! + 1) % n = 0
+proof
+  constructor
+  . intro prime
+    exact wilson.theorem with prime
+  . intro congruence
+    exact wilson.converse with aboveOne, congruence

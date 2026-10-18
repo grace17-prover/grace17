@@ -1,0 +1,301 @@
+-- A product of sums expands as a sum of products over the function space:
+-- by induction on the index set, the product over m of the row sums of w
+-- is the sum over the functions f : m → E of the products of the picked
+-- entries w(i, f(i))
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.ProductExpansion
+import ProductSetSum
+import FiniteLinearity
+import Combinatorics.Functions
+
+-- The entries w(i, f(i)) picked by a function f, and their product.
+defgraph pickedWeights (D E A w f : Set) (i ∈ D) : A := w((i, f(i)))
+requires matrix : w : D × E → A
+requires function : f : D → E
+proof
+  have image := FunctionBetween.apply_closed with function, assumption
+  have pair := product.pair at i, f(i), D, E with assumption, image
+  exact FunctionBetween.apply_closed with matrix, pair
+
+defgraph functionProducts (D E A add zero neg mul one w : Set) (f ∈ functionSpace(D, E)) : A :=
+  finiteRingProduct(D, A, add, zero, neg, mul, one, pickedWeights(D, E, A, w, f))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires finite : Finite(D)
+requires matrix : w : D × E → A
+proof
+  have function := functionSpace.membership.forward with assumption
+  have weights := pickedWeights.function at D, E, A, w, f with matrix, function
+  exact finiteRingProduct.closed at D, A, add, zero, neg, mul, one,
+    pickedWeights(D, E, A, w, f) with ring, finite, weights
+
+-- The weights on functionSpace(D, E) × E pairing a product over D with
+-- one more entry from the row a.
+defgraph expansionWeights (D E A add zero neg mul one w a : Set)
+    (q ∈ functionSpace(D, E) × E) : A :=
+  call2(mul, functionProducts(D, E, A, add, zero, neg, mul, one, restrict(w, D × E))(fst(q)),
+    w((a, snd(q))))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires finite : Finite(D)
+requires matrix : w : insert(a, D) × E → A
+proof
+  obtain ⟨bound, g, hg, y, hy, shape⟩ := product.membership.forward with assumption
+  have subset : D × E ⊆ insert(a, D) × E
+    intros p hp
+    obtain ⟨boundP, i, hi, z, hz, shapeP⟩ := product.membership.forward with hp
+    rw shapeP
+    exact product.pair with (insert.contains with hi), hz
+  have restricted := restrict.domain_function at w, insert(a, D) × E, A, D × E with matrix, subset
+  have products := functionProducts.function at D, E, A, add, zero, neg, mul, one,
+    restrict(w, D × E) with ring, finite, restricted
+  have selfA := insert.self at a, D
+  have pair := product.pair at a, y, insert(a, D), E with selfA, hy
+  have entry := FunctionBetween.apply_closed with matrix, pair
+  have first : fst(q) = g
+    rw shape
+    exact fst.pair at g, y
+  have second : snd(q) = y
+    rw shape
+    exact snd.pair at g, y
+  rw [first, second]
+  have product := FunctionBetween.apply_closed with products, hg
+  have ordinary := IsCommRing.ring with ring
+  exact IsRing.mul_closed with ordinary, product, entry
+
+-- The product over m of the row sums of w is the sum over the functions
+-- m → E of the products of the picked entries w(i, f(i)).
+theorem finiteRingProduct.row_sums (E A add zero neg mul one : Set) (m : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires finiteE : Finite(E)
+  shows ∀ w, (w : m × E → A) →
+    finiteRingProduct(m, A, add, zero, neg, mul, one,
+      finiteRowSums(m, E, A, add, zero, neg, mul, one, w)) =
+    finiteRingSum(functionSpace(m, E), A, add, zero, neg, mul, one,
+      functionProducts(m, E, A, add, zero, neg, mul, one, w))
+proof
+  induction m
+  | zero =>
+    intros w matrix
+    rw nat.zero at matrix
+    rw nat.zero
+    have rows := finiteRowSums.function at ∅, E, A, add, zero, neg, mul, one, w
+      with ring, finiteE, matrix
+    have productEmpty := finiteRingProduct.empty at A, add, zero, neg, mul, one,
+      finiteRowSums(∅, E, A, add, zero, neg, mul, one, w) with ring, rows
+    have spaceEmpty := functionSpace.empty_domain at E
+    have finiteEmpty := Finite.empty
+    have products := functionProducts.function at ∅, E, A, add, zero, neg, mul, one, w
+      with ring, finiteEmpty, matrix
+    have emptyIn : ∅ ∈ functionSpace(∅, E)
+      rw spaceEmpty
+      exact singleton.self at ∅
+    have value := functionProducts.value at ∅, E, A, add, zero, neg, mul, one, w, ∅
+      with ring, finiteEmpty, matrix, emptyIn
+    have emptyFunction := functionSpace.membership.forward with emptyIn
+    have pairedEmpty := pickedWeights.function at ∅, E, A, w, ∅ with matrix, emptyFunction
+    have productPaired := finiteRingProduct.empty at A, add, zero, neg, mul, one,
+      pickedWeights(∅, E, A, w, ∅) with ring, pairedEmpty
+    rw spaceEmpty at products
+    have single := finiteRingSum.singleton at A, add, zero, neg, mul, one,
+      functionProducts(∅, E, A, add, zero, neg, mul, one, w), ∅ with ring, products
+    rw [productEmpty, spaceEmpty, single, value, productPaired]
+    rfl
+  | succ(k) using ih =>
+    intros w matrix
+    have step : succ(k) = insert(k, k) := natural.successor_as_insert at k
+    have fresh := membership.irreflexive at k
+    have finiteK := Finite.natural at k
+    have selfK := insert.self at k, k
+    rw step at matrix
+    rw step
+    have subset : k × E ⊆ insert(k, k) × E
+      intros p hp
+      obtain ⟨bound, i, hi, z, hz, shape⟩ := product.membership.forward with hp
+      rw shape
+      exact product.pair with (insert.contains with hi), hz
+    have subsetK : k ⊆ insert(k, k)
+      intros x hx
+      exact insert.contains with hx
+    have restricted := restrict.domain_function at w, insert(k, k) × E, A, k × E
+      with matrix, subset
+    have inner := ih with restrict(w, k × E), restricted
+    have rows := finiteRowSums.function at insert(k, k), E, A, add, zero, neg, mul, one, w
+      with ring, finiteE, matrix
+    have rowsK := finiteRowSums.function at k, E, A, add, zero, neg, mul, one,
+      restrict(w, k × E) with ring, finiteE, restricted
+    have splitProduct := finiteRingProduct.insert at k, A, add, zero, neg, mul, one,
+      finiteRowSums(insert(k, k), E, A, add, zero, neg, mul, one, w), k
+      with ring, finiteK, rows, fresh
+    have restrictedRows := restrict.domain_function at
+      finiteRowSums(insert(k, k), E, A, add, zero, neg, mul, one, w), insert(k, k), A, k
+      with rows, subsetK
+    have sameRows : ∀ i ∈ k,
+        restrict(finiteRowSums(insert(k, k), E, A, add, zero, neg, mul, one, w), k)(i) =
+        finiteRowSums(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))(i)
+      intros i hi
+      have iIn := subsetK with i, hi
+      have restrictedValue := restrict.domain_apply at
+        finiteRowSums(insert(k, k), E, A, add, zero, neg, mul, one, w), insert(k, k), A, k, i
+        with rows, subsetK, hi
+      have rowValue := finiteRowSums.value at insert(k, k), E, A, add, zero, neg, mul, one, w, i
+        with ring, finiteE, matrix, iIn
+      have rowValueK := finiteRowSums.value at k, E, A, add, zero, neg, mul, one,
+        restrict(w, k × E), i with ring, finiteE, restricted, hi
+      have weightsI := finiteRowWeights.function at insert(k, k), E, A, w, i with matrix, iIn
+      have weightsIK := finiteRowWeights.function at k, E, A, restrict(w, k × E), i
+        with restricted, hi
+      have entries : ∀ y ∈ E, finiteRowWeights(insert(k, k), E, A, w, i)(y) =
+          finiteRowWeights(k, E, A, restrict(w, k × E), i)(y)
+        intros y hy
+        have left := finiteRowWeights.value at insert(k, k), E, A, w, i, y with matrix, iIn, hy
+        have right := finiteRowWeights.value at k, E, A, restrict(w, k × E), i, y
+          with restricted, hi, hy
+        have pair := product.pair at i, y, k, E with hi, hy
+        have restrictedEntry := restrict.domain_apply at w, insert(k, k) × E, A, k × E, (i, y)
+          with matrix, subset, pair
+        rw [left, right, restrictedEntry]
+        rfl
+      have congruent := finiteRingSum.congr at E, A, add, zero, neg, mul, one,
+        finiteRowWeights(insert(k, k), E, A, w, i), finiteRowWeights(k, E, A, restrict(w, k × E), i)
+        with ring, finiteE, weightsI, weightsIK, entries
+      rw [restrictedValue, rowValue, rowValueK, congruent]
+      rfl
+    have productCongr := finiteRingProduct.congr at k, A, add, zero, neg, mul, one,
+      restrict(finiteRowSums(insert(k, k), E, A, add, zero, neg, mul, one, w), k),
+      finiteRowSums(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))
+      with ring, finiteK, restrictedRows, rowsK, sameRows
+    have rowK := finiteRowSums.value at insert(k, k), E, A, add, zero, neg, mul, one, w, k
+      with ring, finiteE, matrix, selfK
+    have finiteInsert := Finite.insert at k, k with finiteK
+    have products := functionProducts.function at insert(k, k), E, A, add, zero, neg, mul, one, w
+      with ring, finiteInsert, matrix
+    have split := functionSplit.bijective at k, E, k with fresh
+    have splitFunction := functionSplit.function at k, E, k
+    have weightsQ := expansionWeights.function at k, E, A, add, zero, neg, mul, one, w, k
+      with ring, finiteK, matrix
+    have productsK := functionProducts.function at k, E, A, add, zero, neg, mul, one,
+      restrict(w, k × E) with ring, finiteK, restricted
+    have termValues : ∀ F ∈ functionSpace(insert(k, k), E),
+        functionProducts(insert(k, k), E, A, add, zero, neg, mul, one, w)(F) =
+        expansionWeights(k, E, A, add, zero, neg, mul, one, w, k)(functionSplit(k, E, k)(F))
+      intros F hF
+      have fFunction := functionSpace.membership.forward with hF
+      have valueF := functionProducts.value at insert(k, k), E, A, add, zero, neg, mul, one, w, F
+        with ring, finiteInsert, matrix, hF
+      have splitValue := functionSplit.value at k, E, k, F with hF
+      have splitIn := FunctionBetween.apply_closed with splitFunction, hF
+      have qValue := expansionWeights.value at k, E, A, add, zero, neg, mul, one, w, k,
+        functionSplit(k, E, k)(F) with ring, finiteK, matrix, splitIn
+      have pairedF := pickedWeights.function at insert(k, k), E, A, w, F with matrix, fFunction
+      have splitPaired := finiteRingProduct.insert at k, A, add, zero, neg, mul, one,
+        pickedWeights(insert(k, k), E, A, w, F), k with ring, finiteK, pairedF, fresh
+      have restrictedF := restrict.domain_function at F, insert(k, k), E, k with fFunction, subsetK
+      have restrictedFIn : restrict(F, k) ∈ functionSpace(k, E) :=
+        functionSpace.membership.backward with restrictedF
+      have innerValue := functionProducts.value at k, E, A, add, zero, neg, mul, one,
+        restrict(w, k × E), restrict(F, k) with ring, finiteK, restricted, restrictedFIn
+      have pairedRestricted := restrict.domain_function at
+        pickedWeights(insert(k, k), E, A, w, F), insert(k, k), A, k with pairedF, subsetK
+      have pairedK := pickedWeights.function at k, E, A, restrict(w, k × E), restrict(F, k)
+        with restricted, restrictedF
+      have samePaired : ∀ i ∈ k, restrict(pickedWeights(insert(k, k), E, A, w, F), k)(i) =
+          pickedWeights(k, E, A, restrict(w, k × E), restrict(F, k))(i)
+        intros i hi
+        have iIn := subsetK with i, hi
+        have left := restrict.domain_apply at pickedWeights(insert(k, k), E, A, w, F),
+          insert(k, k), A, k, i with pairedF, subsetK, hi
+        have leftValue := pickedWeights.value at insert(k, k), E, A, w, F, i
+          with matrix, fFunction, iIn
+        have rightValue := pickedWeights.value at k, E, A, restrict(w, k × E), restrict(F, k), i
+          with restricted, restrictedF, hi
+        have fValue := restrict.domain_apply at F, insert(k, k), E, k, i with fFunction, subsetK, hi
+        have imageIn := FunctionBetween.apply_closed with fFunction, iIn
+        have pair := product.pair at i, F(i), k, E with hi, imageIn
+        have wValue := restrict.domain_apply at w, insert(k, k) × E, A, k × E, (i, F(i))
+          with matrix, subset, pair
+        rw [left, leftValue, rightValue, fValue, wValue]
+        rfl
+      have productCongrF := finiteRingProduct.congr at k, A, add, zero, neg, mul, one,
+        restrict(pickedWeights(insert(k, k), E, A, w, F), k),
+        pickedWeights(k, E, A, restrict(w, k × E), restrict(F, k))
+        with ring, finiteK, pairedRestricted, pairedK, samePaired
+      have lastValue := pickedWeights.value at insert(k, k), E, A, w, F, k
+        with matrix, fFunction, selfK
+      rw [valueF, qValue, splitValue, fst.pair, snd.pair, splitPaired, productCongrF,
+        innerValue, lastValue]
+      rfl
+    have finiteSpace := functionSpace.finite at insert(k, k), E with finiteInsert, finiteE
+    have finiteSpaceK := functionSpace.finite at k, E with finiteK, finiteE
+    have reindexed := finiteRingSum.reindex at functionSpace(insert(k, k), E),
+      functionSpace(k, E) × E, A, add, zero, neg, mul, one,
+      functionProducts(insert(k, k), E, A, add, zero, neg, mul, one, w),
+      expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), functionSplit(k, E, k)
+      with ring, finiteSpace, products, weightsQ, split, termValues
+    have doubled := finiteRingSum.product_set at functionSpace(k, E), E, A, add, zero, neg, mul,
+      one, expansionWeights(k, E, A, add, zero, neg, mul, one, w, k)
+      with ring, finiteSpaceK, finiteE, weightsQ
+    have rowSumsQ := finiteRowSums.function at functionSpace(k, E), E, A, add, zero, neg, mul, one,
+      expansionWeights(k, E, A, add, zero, neg, mul, one, w, k) with ring, finiteE, weightsQ
+    have rowWeightsK := finiteRowWeights.function at insert(k, k), E, A, w, k with matrix, selfK
+    have totalIn := finiteRingSum.closed at E, A, add, zero, neg, mul, one,
+      finiteRowWeights(insert(k, k), E, A, w, k) with ring, finiteE, rowWeightsK
+    have commutative := IsCommRing.commutative with ring
+    unfold Commutative at commutative
+    have innerRows : ∀ g ∈ functionSpace(k, E),
+        finiteRowSums(functionSpace(k, E), E, A, add, zero, neg, mul, one,
+          expansionWeights(k, E, A, add, zero, neg, mul, one, w, k))(g) =
+        call2(mul, finiteRingSum(E, A, add, zero, neg, mul, one,
+          finiteRowWeights(insert(k, k), E, A, w, k)),
+          functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))(g))
+      intros g hg
+      have rowValueQ := finiteRowSums.value at functionSpace(k, E), E, A, add, zero, neg, mul,
+        one, expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), g
+        with ring, finiteE, weightsQ, hg
+      have weightsG := finiteRowWeights.function at functionSpace(k, E), E, A,
+        expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), g with weightsQ, hg
+      have pg := FunctionBetween.apply_closed with productsK, hg
+      have scaledValues : ∀ y ∈ E, finiteRowWeights(functionSpace(k, E), E, A,
+          expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), g)(y) =
+          call2(mul, functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))(g),
+            finiteRowWeights(insert(k, k), E, A, w, k)(y))
+        intros y hy
+        have left := finiteRowWeights.value at functionSpace(k, E), E, A,
+          expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), g, y with weightsQ, hg, hy
+        have pair := product.pair at g, y, functionSpace(k, E), E with hg, hy
+        have qValue := expansionWeights.value at k, E, A, add, zero, neg, mul, one, w, k, (g, y)
+          with ring, finiteK, matrix, pair
+        have right := finiteRowWeights.value at insert(k, k), E, A, w, k, y with matrix, selfK, hy
+        rw [left, qValue, fst.pair, snd.pair, right]
+        rfl
+      have scaled := finiteRingSum.scale_eq at E, A, add, zero, neg, mul, one,
+        finiteRowWeights(insert(k, k), E, A, w, k),
+        finiteRowWeights(functionSpace(k, E), E, A,
+          expansionWeights(k, E, A, add, zero, neg, mul, one, w, k), g),
+        functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))(g)
+        with ring, finiteE, rowWeightsK, weightsG, pg, scaledValues
+      have swap := commutative with
+        functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))(g), pg,
+        finiteRingSum(E, A, add, zero, neg, mul, one, finiteRowWeights(insert(k, k), E, A, w, k)),
+        totalIn
+      rw [rowValueQ, scaled, swap]
+      rfl
+    have outer := finiteRingSum.scale_eq at functionSpace(k, E), A, add, zero, neg, mul, one,
+      functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E)),
+      finiteRowSums(functionSpace(k, E), E, A, add, zero, neg, mul, one,
+        expansionWeights(k, E, A, add, zero, neg, mul, one, w, k)),
+      finiteRingSum(E, A, add, zero, neg, mul, one, finiteRowWeights(insert(k, k), E, A, w, k))
+      with ring, finiteSpaceK, productsK, rowSumsQ, totalIn, innerRows
+    have sumIn := finiteRingSum.closed at functionSpace(k, E), A, add, zero, neg, mul, one,
+      functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))
+      with ring, finiteSpaceK, productsK
+    have swapOuter := commutative with
+      finiteRingSum(functionSpace(k, E), A, add, zero, neg, mul, one,
+        functionProducts(k, E, A, add, zero, neg, mul, one, restrict(w, k × E))), sumIn,
+      finiteRingSum(E, A, add, zero, neg, mul, one, finiteRowWeights(insert(k, k), E, A, w, k)),
+      totalIn
+    unfold finiteDoubleSum at doubled
+    rw [splitProduct, productCongr, inner, rowK, reindexed, doubled, outer, swapOuter]
+    rfl

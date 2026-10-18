@@ -1,0 +1,273 @@
+-- Finite windows of coefficient functions and their indexed list values (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.CoefficientLists
+import Coefficients
+import Nat.Order
+
+def listHeadOr {A : Set} (z : Set) (xs : List(A)) → Set
+  | z, List.nil => z
+  | z, List.cons(a, tail) => a
+
+def listTail {A : Set} (xs : List(A)) → Set
+  | List.nil => []
+  | List.cons(a, tail) => tail
+
+def listCoefficient {A : Set} (z : Set) (xs : List(A)) (n : Nat) → Set
+  | z, xs, zero => listHeadOr{A}(z, xs)
+  | z, xs, succ(k) => listCoefficient{A}(z, listTail{A}(xs), k)
+  descends n
+
+def coefficientWindow (f : Set, start n : Nat) → Set
+  | f, start, zero => []
+  | f, start, succ(k) => f(start) :: coefficientWindow(f, succ(start), k)
+  descends n
+
+def listMap {A : Set} (f : Set) (xs : List(A)) → Set
+  | f, List.nil => []
+  | f, List.cons(a, tail) => f(a) :: listMap(f, tail)
+  descends xs
+
+theorem listTail.closed (A : Set) (xs : List(A))
+  shows List(A, listTail{A}(xs))
+proof
+  induction xs
+  | List.nil =>
+    rw listTail
+    typecheck
+  | List.cons(a, tail) using ih =>
+    rwa listTail
+
+theorem listCoefficient.nil (A z : Set, n : Nat)
+  shows listCoefficient{A}(z, [], n) = z
+proof
+  induction n
+  | zero =>
+    rw [listCoefficient, listHeadOr]
+    rfl
+  | succ(k) using ih =>
+    rw [listCoefficient, listTail]
+    exact ih
+
+theorem listCoefficient.zero (A z a : Set) (xs : List(A))
+  requires element : a ∈ A
+  shows listCoefficient{A}(z, a :: xs, 0) = a
+proof
+  rw [listCoefficient, listHeadOr]
+  rfl
+
+theorem listCoefficient.succ (A z a : Set) (xs : List(A)) (n : Nat)
+  requires element : a ∈ A
+  shows listCoefficient{A}(z, a :: xs, succ(n)) = listCoefficient{A}(z, xs, n)
+proof
+  rw [listCoefficient, listTail]
+  rfl
+
+theorem listMap.closed (A B f : Set) (xs : List(A))
+  requires function : f : A → B
+  shows List(B, listMap{A}(f, xs))
+proof
+  induction xs
+  | List.nil =>
+    rw listMap
+    typecheck
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have image := FunctionBetween.apply_closed with function, element
+    rw listMap
+    typecheck
+
+theorem listMap.compose (A B C f g : Set) (xs : List(A))
+  requires first : f : A → B
+  requires second : g : B → C
+  shows listMap{B}(g, listMap{A}(f, xs)) = listMap{A}(compose(g, f, A, B, C), xs)
+proof
+  induction xs
+  | List.nil => simp [listMap]
+  | List.cons(a, tail) using ih =>
+    have member : a ∈ A by assumption
+    have image := FunctionBetween.apply_closed with first, member
+    have value := compose.apply at g, f, A, B, C, a with *
+    simp [listMap, ih, value]
+
+theorem listMap.length (A B f : Set) (xs : List(A))
+  requires function : f : A → B
+  shows length{B}(listMap{A}(f, xs)) = length{A}(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw [listMap, length.nil, length.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have image := FunctionBetween.apply_closed with function, element
+    have mapped := listMap.closed with *
+    rw [listMap, length.cons, length.cons, ih]
+    rfl
+
+theorem listCoefficient.map (A B f z : Set) (xs : List(A)) (n : Nat)
+  requires function : f : A → B
+  requires default : z ∈ A
+  shows listCoefficient{B}(f(z), listMap{A}(f, xs), n) = f(listCoefficient{A}(z, xs, n))
+proof
+  induction xs generalizing n
+  | List.nil =>
+    intros n natural
+    rw [listMap, listCoefficient.nil, listCoefficient.nil]
+    rfl
+  | List.cons(a, tail) using ih =>
+    intros n natural
+    have element : a ∈ A by assumption
+    have mapped := FunctionBetween.apply_closed with function, element
+    have tailList := listMap.closed with *
+    have shape := natural.zero_or_successor with *
+    cases shape with zero | successor
+    . rw [zero, listMap, listCoefficient.zero, listCoefficient.zero]
+      rfl
+    . obtain ⟨k, kNat, equal⟩ := successor
+      rw [equal, listMap, listCoefficient.succ, listCoefficient.succ]
+      exact ih with k, kNat
+
+theorem listMap.congr_coefficients (A z f g : Set) (xs : List(A))
+  requires agreement : ∀ n, Nat(n) → f(listCoefficient{A}(z, xs, n)) = g(listCoefficient{A}(z, xs, n))
+  shows listMap{A}(f, xs) = listMap{A}(g, xs)
+proof
+  induction xs
+  | List.nil =>
+    intro agreement
+    rw [listMap, listMap]
+    rfl
+  | List.cons(a, tail) using ih =>
+    intro agreement
+    have element : a ∈ A by assumption
+    have head := agreement with 0, Naturals.constructor.zero
+    rw listCoefficient.zero at head
+    have rest : ∀ n, Nat(n) → f(listCoefficient{A}(z, tail, n)) = g(listCoefficient{A}(z, tail, n))
+      intros n natural
+      have value := agreement with succ(n)
+      rwa listCoefficient.succ at value
+    have equal := ih with rest
+    rw [listMap, listMap]
+    cc
+
+theorem coefficientWindow.closed (A f : Set, start n : Nat)
+  requires function : f : ℕ → A
+  shows List(A, coefficientWindow(f, start, n))
+proof
+  induction n generalizing start
+  | zero =>
+    intros start startNat
+    rw coefficientWindow
+    typecheck
+  | succ(k) using ih =>
+    intros start startNat
+    have startIn := nat.omega.forward at start with *
+    have head := FunctionBetween.apply_closed with function, startIn
+    have tail := ih with succ(start)
+    rw coefficientWindow
+    typecheck
+
+theorem coefficientWindow.length (A f : Set, start n : Nat)
+  requires function : f : ℕ → A
+  shows length{A}(coefficientWindow(f, start, n)) = n
+proof
+  induction n generalizing start
+  | zero =>
+    intros start startNat
+    rw [coefficientWindow, length.nil]
+    rfl
+  | succ(k) using ih =>
+    intros start startNat
+    have startIn := nat.omega.forward at start with *
+    have head := FunctionBetween.apply_closed with function, startIn
+    have tail := coefficientWindow.closed at A, f, succ(start), k with *
+    have length := ih with succ(start)
+    rw [coefficientWindow, length.cons, length]
+    rfl
+
+theorem coefficientWindow.coefficient (A z f : Set, start n k : Nat)
+  requires function : f : ℕ → A
+  requires bound : k < n
+  shows listCoefficient{A}(z, coefficientWindow(f, start, n), k) = f(start + k)
+proof
+  induction n generalizing start k
+  | zero =>
+    intros start k startNat kNat bound
+    have impossible : 0 < 0 by arith
+    exfalso
+    have irreflexive := Less.irreflexive with Naturals.constructor.zero
+    exact irreflexive with impossible
+  | succ(t) using ih =>
+    intros start k startNat kNat bound
+    have startIn := nat.omega.forward at start with *
+    have head := FunctionBetween.apply_closed with function, startIn
+    have tail := coefficientWindow.closed at A, f, succ(start), t with *
+    have shape := natural.zero_or_successor at k with *
+    cases shape with zero | successor
+    . rw [zero, coefficientWindow, listCoefficient.zero, add.right_unit]
+      rfl
+    . obtain ⟨r, rNat, equal⟩ := successor
+      have smaller : r < t by arith
+      have result := ih with succ(start), r, rNat, smaller
+      have shift : succ(start) + r = start + succ(r) by simp [add, add.succ_right]
+      rw [equal, coefficientWindow, listCoefficient.succ, result, shift]
+      rfl
+
+theorem listCoefficient.outside (A z : Set) (xs : List(A)) (n : Nat)
+  requires bound : length{A}(xs) ≤ n
+  shows listCoefficient{A}(z, xs, n) = z
+proof
+  induction xs generalizing n
+  | List.nil =>
+    intros n nNat bound
+    exact listCoefficient.nil with *
+  | List.cons(a, tail) using ih =>
+    intros n nNat bound
+    have element : a ∈ A by assumption
+    rw length.cons at bound
+    have shape := natural.zero_or_successor with *
+    cases shape with zero | successor
+    . have impossible : 0 < 0
+        arith
+      exfalso
+      have irreflexive := Less.irreflexive with Naturals.constructor.zero
+      exact irreflexive with impossible
+    . obtain ⟨r, rNat, equal⟩ := successor
+      have smaller : length{A}(tail) ≤ r by arith
+      have result := ih with r, rNat, smaller
+      rwa [equal, listCoefficient.succ]
+
+-- Every finitely supported natural-indexed function is represented by a finite list.
+theorem CoefficientMap.list_representation (A z f : Set)
+  requires map : CoefficientMap(f, ℕ, A, z)
+  shows ∃ cs, List(A, cs) ∧ (∀ k, Nat(k) → listCoefficient{A}(z, cs, k) = f(k))
+proof
+  have function := CoefficientMap.function with map
+  have finite := CoefficientMap.finite_support with map
+  have domain := functionSupport.subset at f, ℕ, z
+  obtain ⟨b, bNat, bound⟩ := Finite.naturals_bounded with domain, finite
+  have list := coefficientWindow.closed at A, f, 0, succ(b) with *
+  refine ⟨coefficientWindow(f, 0, succ(b)), list, ?_⟩
+  intros k kNat
+  have alternatives : k < succ(b) ∨ ¬(k < succ(b)) by tauto
+  cases alternatives with inside | outside
+  . have value := coefficientWindow.coefficient at A, z, f, 0, succ(b), k with *
+    have equal := add.left_unit at k with *
+    rwa equal at value
+  . have absent : ¬(k ∈ functionSupport(f, ℕ, z))
+      intro supported
+      have member := bound with k, supported
+      have smaller := Less.of_membership at k, succ(b) with *
+      have less := smaller with member
+      exact outside with less
+    have kIn := nat.omega.forward at k with *
+    have vanishes := functionSupport.outside at f, ℕ, z, k with *
+    have length := coefficientWindow.length at A, f, 0, succ(b) with *
+    have enough : length{A}(coefficientWindow(f, 0, succ(b))) ≤ k
+      rw length
+      exact LessEqual.of_not_Less with *
+    have value := listCoefficient.outside at A, z, coefficientWindow(f, 0, succ(b)), k with *
+    cc

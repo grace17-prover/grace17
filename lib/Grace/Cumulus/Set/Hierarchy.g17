@@ -1,0 +1,395 @@
+-- The cumulative hierarchy
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Set.Hierarchy
+import Ordinal
+import Cumulus.Relation
+
+-- Executable finite stages: V_0 = empty and V_(n+1) = P(V_n).
+def finite (n : Nat) → Set
+  | zero => ∅
+  | succ(n) => 𝒫(finite(n))
+
+class FiniteStage (n : Nat) := { x : Set | x ∈ finite(n) }
+
+theorem finite.zero
+  shows finite(0) = ∅
+proof
+  simp
+
+theorem finite.next (n : Nat)
+  shows finite(succ(n)) = 𝒫(finite(n))
+proof
+  simp [finite]
+
+theorem finite.next_membership (x : Set, n : Nat)
+  shows x ∈ finite(succ(n)) ↔ (x ⊆ finite(n))
+proof
+  simp [finite, set.powerset, Subset]
+
+theorem FiniteStage.membership (x : Set, n : Nat)
+  shows x ∈ FiniteStage(n) ↔ x ∈ finite(n)
+proof
+  simp [FiniteStage]
+
+-- The full hierarchy is one noncomputable class-sized recursion.  At a limit,
+-- the comprehension denotes the Replacement set of all earlier values.
+noncomputable transfinite def V (α : Ordinal) : Set
+  | 0 => ∅
+  | succ β => 𝒫(V β)
+  | limit λ => ⋃ { V β | β < λ }
+
+theorem V.zero
+  shows V(0) = ∅
+proof
+  simp [V, nat.zero]
+
+theorem V.next (α : Ordinal)
+  shows V(next(α)) = 𝒫(V(α))
+proof
+  simp [V.equation.successor]
+
+theorem V.limit (λ : Set)
+  requires h : Limit(λ)
+  shows V(λ) = ⋃(Relation.range(V.history(λ)))
+proof
+  simp [V.equation.limit]
+
+theorem V.history.contains (β λ : Set)
+  requires hBeta : β ∈ λ
+  shows (β ↦ V(β)) ∈ V.history(λ)
+proof
+  simp [V.history.membership]
+
+theorem V.limit_membership (x λ : Set)
+  requires hLimit : Limit(λ)
+  shows x ∈ V(λ) ↔ ∃ earlier ∈ λ, x ∈ V(earlier)
+proof
+  constructor
+  . intro hx
+    have hEquation := V.limit with hLimit
+    rw hEquation at hx
+    simp [set.union] at hx
+    obtain ⟨stage, hStageRange, hxStage⟩ := hx
+    simp [Relation.range] at hStageRange
+    obtain ⟨hStageBound, index, hPair⟩ := hStageRange
+    simp [V.history.membership] at hPair
+    obtain ⟨β, hBeta, hEquality⟩ := hPair
+    obtain ⟨hIndex, hValue⟩ := Relation.orderedPair.injective with hEquality
+    refine ⟨β, hBeta, ?_⟩
+    rwa hValue at hxStage
+  . intro hEarlier
+    obtain ⟨source, hSource, hxSource⟩ := hEarlier
+    have hHistory := V.history.contains with hSource
+    have hRange := Relation.range.contains with hHistory
+    have hEquation := V.limit with hLimit
+    rw hEquation
+    exact set.union.backward with ⟨V(source), hRange, hxSource⟩
+
+-- A Foundation-recursive height for every set. The history at x is the
+-- Replacement graph of the already-defined heights of exactly the members of
+-- x. Taking one successor above their supremum is sufficient for ranking.
+noncomputable foundation def rank (x : Set) : Set
+  | x using history => next(⋃(Relation.range(history)))
+
+theorem rank.unfold (x : Set)
+  shows rank(x) = next(⋃(Relation.range(rank.history(x))))
+proof
+  simp [rank.equation]
+
+theorem rank.history_characterization (p x : Set)
+  shows p ∈ rank.history(x) ↔ ∃ y ∈ x, p = (y ↦ rank(y))
+proof
+  simp [rank.history.membership]
+
+theorem rank.history.contains (y x : Set)
+  requires hy : y ∈ x
+  shows (y ↦ rank(y)) ∈ rank.history(x)
+proof
+  simp [rank.history_characterization]
+
+theorem rank.ordinal (x : Set)
+  shows rank(x) ∈ Ordinal
+proof
+  induction x using membership
+  intros current ih
+  rw rank.unfold
+  apply Grace.Cumulus.Set.Ordinal.Ordinal.next
+  apply Ordinal.union
+  intros α hAlpha
+  simp [Relation.range] at hAlpha
+  cases hAlpha with hBound ∧ hWitness
+  obtain ⟨member, hPair⟩ := hWitness
+  simp [rank.history_characterization] at hPair
+  obtain ⟨source, hSourcePair⟩ := hPair
+  cases hSourcePair with hSource ∧ hEquality
+  have injective := Relation.orderedPair.injective with hEquality
+  cases injective with hMember ∧ hValue
+  have hRank := ih with hSource
+  rwa hValue
+
+theorem rank.supremum_ordinal (x : Set)
+  shows ⋃(Relation.range(rank.history(x))) ∈ Ordinal
+proof
+  apply Ordinal.union
+  intros α hAlpha
+  simp [Relation.range] at hAlpha
+  cases hAlpha with hBound ∧ hWitness
+  obtain ⟨member, hPair⟩ := hWitness
+  simp [rank.history_characterization] at hPair
+  obtain ⟨source, hSourcePair⟩ := hPair
+  cases hSourcePair with hSource ∧ hEquality
+  have injective := Relation.orderedPair.injective with hEquality
+  cases injective with hMember ∧ hValue
+  rw hValue
+  exact rank.ordinal
+
+theorem rank.member_subset_supremum (y x : Set)
+  requires hy : y ∈ x
+  shows (rank(y) ⊆ ⋃(Relation.range(rank.history(x))))
+proof
+  intros z hz
+  apply set.union.backward
+  witness rank(y)
+  constructor
+  have hHistory := rank.history.contains with hy
+  exact Relation.range.contains with hHistory
+  exact hz
+
+theorem rank.member_bound (y x : Set)
+  requires hy : y ∈ x
+  shows rank(y) ∈ next(⋃(Relation.range(rank.history(x))))
+proof
+  simp [rank.member_subset_supremum, Ordinal.subset_bound]
+
+-- Membership strictly lowers rank. This is the fundamental usable interface
+-- to the Foundation-recursive definition above.
+theorem rank.member (y x : Set)
+  requires hy : y ∈ x
+  shows rank(y) ∈ rank(x)
+proof
+  simp [rank.member_bound, rank.unfold]
+
+theorem rank.history_empty
+  shows rank.history(∅) = ∅
+proof
+  ext y
+  simp [rank.history_characterization, set.empty]
+
+theorem rank.empty
+  shows rank(∅) = next(∅)
+proof
+  rw [rank.unfold, rank.history_empty, Relation.range.empty, union.empty]
+  rfl
+
+theorem rank.history_singleton (x : Set)
+  shows rank.history({x}) = {(x ↦ rank(x))}
+proof
+  ext y
+  simp [set.extensionality, rank.history_characterization, singleton.membership]
+
+theorem rank.singleton (x : Set)
+  shows rank({x}) = next(rank(x))
+proof
+  rw [rank.unfold, rank.history_singleton, Relation.range.singleton_pair, union.singleton]
+  rfl
+
+theorem rank.history_pair (x y : Set)
+  shows rank.history({x, y}) = {(x ↦ rank(x)), (y ↦ rank(y))}
+proof
+  ext p
+  constructor
+  . intro hp
+    obtain ⟨member, hMember, hValue⟩ := rank.history_characterization.forward with hp
+    simp [pair.membership] at hMember
+    cases hMember with hMemberX | hMemberY
+    . rw hMemberX at hValue
+      apply pair.membership.backward
+      left
+      exact hValue
+    . rw hMemberY at hValue
+      apply pair.membership.backward
+      right
+      exact hValue
+  . intro hp
+    simp [pair.membership] at hp
+    cases hp with hFirst | hSecond
+    . exact rank.history_characterization.backward with ⟨x, pair.left, hFirst⟩
+    . exact rank.history_characterization.backward with ⟨y, pair.right, hSecond⟩
+
+theorem rank.pair (x y : Set)
+  shows rank({x, y}) = next(rank(x) ∪ rank(y))
+proof
+  rw [rank.unfold, rank.history_pair, Relation.range.pair_of_pairs]
+  unfold union2
+  rfl
+
+-- Powersets preserve transitivity: an element of an element of P(A) is
+-- already an element of A when A is transitive.
+theorem Transitive.powerset (A : Set)
+  requires h : Transitive(A)
+  shows Transitive(𝒫(A))
+proof
+  simp [Transitive, Subset, set.powerset]
+
+theorem V.subset_next (α : Set)
+  requires hOrdinal : α ∈ Ordinal
+  requires hTransitive : Transitive(V(α))
+  shows (V(α) ⊆ V(next(α)))
+proof
+  have hEquation := V.next with hOrdinal
+  rw hEquation
+  intros x hx
+  apply set.powerset.backward
+  exact hTransitive with x, hx
+
+-- Transitivity and monotonicity mutually support one another at successor
+-- stages, so derive them in a single Foundation induction on the ordinal.
+theorem V.transitive_and_monotone (β : Set)
+  shows β ∈ Ordinal → (Transitive(V(β)) ∧ (∀ α, α ∈ Ordinal → α ∈ next(β) → (V(α) ⊆ V(β))))
+proof
+  induction β using membership
+  intros current ih hCurrentOrdinal
+  have hCases := Ordinal.cases with hCurrentOrdinal
+  cases hCases with hZero | hNonzero
+  . rw hZero
+    constructor
+    . rw [← nat.zero, V.zero]
+      exact Transitive.empty
+    . intros α hAlphaOrdinal hAlphaBound
+      simp [next.membership] at hAlphaBound
+      cases hAlphaBound with hAlphaEmpty | hAlphaEqual
+      . exfalso
+        rw hZero at hAlphaEmpty
+        exact set.empty with hAlphaEmpty
+      . rw hAlphaEqual
+        exact Subset.reflexive
+  . cases hNonzero with hSuccessor | hLimit
+    . obtain ⟨γ, hGammaCurrent, hNextCurrent⟩ := hSuccessor
+      have hGammaOrdinal := Ordinal.member with hCurrentOrdinal, hGammaCurrent
+      obtain ⟨hGammaTransitive, hGammaMonotone⟩ := ih with hGammaCurrent, hGammaOrdinal
+      rw ← hNextCurrent
+      constructor
+      . have hNextEquation := V.next with hGammaOrdinal
+        rw hNextEquation
+        exact Transitive.powerset with hGammaTransitive
+      . intros α hAlphaOrdinal hAlphaBound
+        simp [next.membership] at hAlphaBound
+        cases hAlphaBound with hAlphaEarlier | hAlphaEqual
+        . rw ← hNextCurrent at hAlphaEarlier
+          have hAlphaGammaSubset := hGammaMonotone with hAlphaOrdinal, hAlphaEarlier
+          have hGammaNextSubset := V.subset_next with hGammaOrdinal, hGammaTransitive
+          rw hNextCurrent at hGammaNextSubset
+          intros x hx
+          exact hGammaNextSubset with x, (hAlphaGammaSubset with x, hx)
+        . rw hAlphaEqual
+          exact Subset.reflexive
+    . constructor
+        intros x hx
+        have hMembershipAtX := V.limit_membership at x, current with hLimit
+        simp [hMembershipAtX] at hx
+        obtain ⟨stage, hStageCurrent, hxStage⟩ := hx
+        have hStageOrdinal := Ordinal.member with hCurrentOrdinal, hStageCurrent
+        obtain ⟨hStageTransitive, hStageMonotone⟩ := ih with hStageCurrent, hStageOrdinal
+        intros y hy
+        have hxSubset := hStageTransitive with x, hxStage
+        have hyStage := hxSubset with y, hy
+        have hMembershipAtY := V.limit_membership at y, current with hLimit
+        simp [hMembershipAtY]
+      . intros α hAlphaOrdinal hAlphaBound
+        simp [next.membership] at hAlphaBound
+        cases hAlphaBound with hAlphaCurrent | hAlphaEqual
+          intros x hx
+          have hLimitContainment := V.limit_membership at x, current with hLimit
+          simp [hLimitContainment]
+        . rw hAlphaEqual
+          exact Subset.reflexive
+
+theorem V.transitive (α : Set)
+  requires hOrdinal : α ∈ Ordinal
+  shows Transitive(V(α))
+proof
+  simp [V.transitive_and_monotone]
+
+theorem V.monotone (α β : Set)
+  requires hAlpha : α ∈ Ordinal
+  requires hBeta : β ∈ Ordinal
+  requires hBound : α ∈ next(β)
+  shows (V(α) ⊆ V(β))
+proof
+  simp [V.transitive_and_monotone, Subset]
+
+theorem rank.membership (x : Set)
+  shows x ∈ V(rank(x))
+proof
+  induction x using membership
+  intros current ih
+  rw rank.unfold
+  have hSupremumOrdinal := rank.supremum_ordinal at current
+  have hSuccessorEquation := V.next with hSupremumOrdinal
+  rw hSuccessorEquation
+  apply set.powerset.backward
+  intros member hMember
+  have hMemberRanked := ih with hMember
+  have hMemberBound := rank.member_bound with hMember
+  have hMonotone := V.monotone at rank(member), ⋃(Relation.range(rank.history(current))) with rank.ordinal at member, hSupremumOrdinal, hMemberBound
+  exact hMonotone with member, hMemberRanked
+
+theorem rank.exists (x : Set)
+  shows ∃ α, α ∈ Ordinal ∧ x ∈ V(α)
+proof
+  refine ⟨rank(x), rank.ordinal at x, rank.membership at x⟩
+
+theorem finite.transitive (n : Nat)
+  shows Transitive(finite(n))
+proof
+  induction n
+  | zero => settle with finite, Transitive.empty
+  | succ(k) using ih => settle with finite, Transitive.powerset
+
+-- Hence every finite stage embeds into its successor stage.
+theorem finite.subset_next (n : Nat)
+  shows (finite(n) ⊆ finite(succ(n)))
+proof
+  simp [Subset, finite, set.powerset, finite.transitive, Transitive]
+
+-- A first-order graph presentation of transfinite hierarchy approximations.
+predicate Value (f i x : Set) := (i ↦ x) ∈ f ∧ (∀ y, (i ↦ y) ∈ f → y = x)
+predicate DomainThrough (f α : Set) := ∀ β, β ∈ next(α) ↔ ∃ x, (β ↦ x) ∈ f
+def earlierValues (f β : Set) : Set := { x ∈ ⋃(⋃(f)) | ∃ γ ∈ β, (γ ↦ x) ∈ f }
+predicate StageClause (f β x : Set) := (β = ∅ ∧ x = ∅) ∨ (∃ γ, γ ∈ Ordinal ∧ β = next(γ) ∧ ∃ y, Value(f, γ, y) ∧ x = 𝒫(y)) ∨ (Limit(β) ∧ x = ⋃(earlierValues(f, β)))
+predicate Approximation (f α : Set) := DomainThrough(f, α) ∧ (∀ β ∈ next(α), ∃ x, Value(f, β, x) ∧ StageClause(f, β, x))
+predicate Stage (α X : Set) := α ∈ Ordinal ∧ ∃ f, Approximation(f, α) ∧ Value(f, α, X)
+predicate StageExists (α : Set) := ∃ X, Stage(α, X)
+predicate StageUnique (α : Set) := ∀ X, Stage(α, X) → ∀ Y, Stage(α, Y) → X = Y
+predicate HierarchyResolvedThrough (α : Set) := ∀ β ∈ next(α), (StageExists(β) ∧ StageUnique(β))
+
+class CumulativeUniverse (x : Set) := { x | ∃ α, α ∈ Ordinal ∧ x ∈ V(α) }
+class Ranked (x : Set) := { x | ∃ α, α ∈ Ordinal ∧ x ∈ V(α) }
+
+theorem earlierValues.membership (x f β : Set)
+  shows x ∈ earlierValues(f, β) ↔ (x ∈ ⋃(⋃(f)) ∧ ∃ γ ∈ β, (γ ↦ x) ∈ f)
+proof
+  simp
+
+theorem CumulativeUniverse.membership (x : Set)
+  shows x ∈ CumulativeUniverse ↔ ∃ α, α ∈ Ordinal ∧ x ∈ V(α)
+proof
+  simp [CumulativeUniverse]
+
+theorem CumulativeUniverse.eq_Universe_of_rank
+  requires ranks : ∀ x, ∃ α, α ∈ Ordinal ∧ x ∈ V(α)
+  shows CumulativeUniverse = Universe
+proof
+  simp
+
+theorem CumulativeUniverse.eq_Universe
+  shows CumulativeUniverse = Universe
+proof
+  apply CumulativeUniverse.eq_Universe_of_rank
+  intro x
+  exact rank.exists
+

@@ -1,0 +1,1194 @@
+-- Real analysis: CommonRefinementComparison
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Real.Analysis.Integration.CommonRefinementComparison
+import RiemannSums
+import HeineCantor
+import Sequences
+import ExtremeValue
+
+-- Section: SplitCellEstimate
+theorem dist.le_interval_width (A B C : Real)
+  requires lower : A ≤ B
+  requires upper : B ≤ C
+  shows dist(A, B) ≤ C - A
+proof
+  have nonnegative : (0:R) ≤ B - A by linarith
+  have absolute := abs.of_nonnegative with nonnegative
+  have distanceShape : dist(B, A) = B - A
+    unfold dist
+    rfl
+  have symmetry := dist.symmetric at A, B with *
+  have differenceLe : B - A ≤ C - A by linarith
+  rwa [symmetry, distanceShape]
+
+-- A tag stays within one cell width of the left endpoint.
+theorem TaggedPartition.tag_left_distance_le_width (p t : Set) (A B : Real, N i : Nat)
+  requires tagged : TaggedPartition(p, t, A, B, N)
+  requires beforeEnd : i < N
+  shows dist(p[i], t[i]) ≤ (p[succ(i)]:R) - (p[i]:R)
+proof
+  obtain ⟨lower, upper⟩ := TaggedPartition.tag_bounds with tagged, beforeEnd
+  rcases tagged with ⟨partition, tagSequence, cells⟩
+  rcases partition with ⟨points, left, right, increasing⟩
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  have tagI := RealSequence.value at t, i with tagSequence
+  exact dist.le_interval_width with pointI, tagI, pointNext, lower, upper
+
+-- A fine cell keeps its tag within the same strict mesh bound.
+theorem FinePartition.tag_left_distance (p t : Set) (A B : Real, N i : Nat, D : Real)
+  requires tagged : TaggedPartition(p, t, A, B, N)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires beforeEnd : i < N
+  shows dist(p[i], t[i]) < D
+proof
+  have near := TaggedPartition.tag_left_distance_le_width with tagged, beforeEnd
+  have width := FinePartition.cell_width with fine, beforeEnd
+  rcases tagged with ⟨partition, tags, cells⟩
+  rcases partition with ⟨points, left, right, increasing⟩
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  have tagI := RealSequence.value at t, i with tags
+  exact realLe.transitive_less with near, width
+
+-- FineCellDistance
+theorem FinePartition.cell_points_distance (p : Set) (A B X Y : Real, N i : Nat, D : Real)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires before : i < N
+  requires xCell : X ∈ closedInterval(p[i], p[succ(i)])
+  requires yCell : Y ∈ closedInterval(p[i], p[succ(i)])
+  shows dist(X, Y) < D + D
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, left, right, increasing⟩
+    exact points
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  have xBounds := closedInterval.membership.forward with pointI, pointNext, xCell
+  have yBounds := closedInterval.membership.forward with pointI, pointNext, yCell
+  rcases xBounds with ⟨realX, lowerX, upperX⟩
+  rcases yBounds with ⟨realY, lowerY, upperY⟩
+  have typedX : Real(X) by exact realX
+  have typedY : Real(Y) by exact realY
+  have width := FinePartition.cell_width with fine, before
+  have nearX := dist.le_interval_width with pointI, typedX, pointNext, lowerX, upperX
+  have nearY := dist.le_interval_width with pointI, typedY, pointNext, lowerY, upperY
+  have triangle := dist.triangle with typedX, pointI, typedY
+  have symmetryX := dist.symmetric with pointI, typedX
+  rw symmetryX at nearX
+  have distanceXReal := dist.real with typedX, pointI
+  have distanceYReal := dist.real with pointI, typedY
+  have widthReal := realSubValue.real with pointNext, pointI
+  have sumLe := realLe.add with nearX, nearY
+  have sumLess := realLess.add at
+    p[succ(i)] - p[i], D, p[succ(i)] - p[i], D with
+      widthReal, assumption, widthReal, assumption, width, width
+  have chain := realLe.transitive with triangle, sumLe
+  exact realLe.transitive_less with chain, sumLess
+
+-- FineCellOscillation
+predicate FineCellOscillation (f : Set) (A B D E : Real) :=
+  ∀ p, ∀ N ∈ ℕ, ∀ i ∈ ℕ, ∀ X ∈ ℝ, ∀ Y ∈ ℝ,
+    FinePartition(p, A, B, N, D) → i < N →
+    X ∈ closedInterval(p[i], p[succ(i)]) →
+    Y ∈ closedInterval(p[i], p[succ(i)]) →
+    X ∈ closedInterval(A, B) → Y ∈ closedInterval(A, B) →
+    f(X) ∈ openBall(f(Y), E)
+
+theorem UniformContinuousOn.fine_cell_oscillation (f : Set) (A B E : Real)
+  requires uniform : UniformContinuousOn(f, closedInterval(A, B))
+  requires positive : 0 < E
+  shows ∃ D ∈ ℝ, 0 < D ∧ FineCellOscillation(f, A, B, D, E)
+proof
+  rcases uniform with ⟨function, subset, control⟩
+  obtain ⟨R, realR, positiveR, maps⟩ := control with E, positive
+  have typedR : Real(R) by exact realR
+  have halfReal := half.real with typedR
+  have halfPositive := half.positive with positiveR
+  have halfMember : half(R) ∈ ℝ by exact halfReal
+  witness half(R)
+  constructor
+  . exact halfMember
+  . constructor
+    . exact halfPositive
+      intros p N naturalN i naturalI X realX Y realY fine before xCell yCell xGlobal yGlobal
+      have typedN := nat.omega.backward with naturalN
+      have typedI := nat.omega.backward with naturalI
+      have near := FinePartition.cell_points_distance with fine, before, xCell, yCell
+      have double := half.add_self with typedR
+      rw double at near
+      have data : X ∈ ℝ ∧ dist(X, Y) < R by refine ⟨realX, near⟩
+      have ball := openBall.membership.backward with data
+      exact maps with X, realX, xGlobal, Y, realY, yGlobal, ball
+
+theorem ContinuousOn.fine_cell_oscillation (f : Set) (A B E : Real)
+  requires continuous : ContinuousOn(f, closedInterval(A, B))
+  requires positive : 0 < E
+  shows ∃ D ∈ ℝ, 0 < D ∧ FineCellOscillation(f, A, B, D, E)
+proof
+  have uniform := closedInterval.heine_cantor with continuous
+  exact UniformContinuousOn.fine_cell_oscillation with uniform, positive
+
+-- Interval endpoints are enough to supply the global membership required by
+-- the uniform modulus; callers need not repeat it for each pair of tags.
+theorem FineCellOscillation.of_cell_endpoints (f p : Set) (A B D E X Y : Real, N i : Nat)
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires before : i < N
+  requires left : A ≤ (p[i]:R)
+  requires right : (p[succ(i)]:R) ≤ B
+  requires xCell : X ∈ closedInterval(p[i], p[succ(i)])
+  requires yCell : Y ∈ closedInterval(p[i], p[succ(i)])
+  shows f(X) ∈ openBall(f(Y), E)
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, increasing⟩
+    exact points
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  have nested := closedInterval.nested with pointI, pointNext, left, right
+  have xGlobal := nested with X, xCell
+  have yGlobal := nested with Y, yCell
+  have xData := closedInterval.membership.forward with pointI, pointNext, xCell
+  have yData := closedInterval.membership.forward with pointI, pointNext, yCell
+  rcases xData with ⟨realX, lowerX, upperX⟩
+  rcases yData with ⟨realY, lowerY, upperY⟩
+  have naturalN : N ∈ ℕ by simp [Nat]
+  have naturalI : i ∈ ℕ by simp [Nat]
+  exact oscillation with p, N, naturalN, i, naturalI,
+    X, realX, Y, realY, fine, before, xCell, yCell, xGlobal, yGlobal
+
+theorem FineCellOscillation.on_cell (f p : Set) (A B D E X Y : Real, N i : Nat)
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires before : i < N
+  requires xCell : X ∈ closedInterval(p[i], p[succ(i)])
+  requires yCell : Y ∈ closedInterval(p[i], p[succ(i)])
+  shows f(X) ∈ openBall(f(Y), E)
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have indexLe := Less.implies_LessEqual with before
+  have successorLe : succ(i) ≤ N by exact before
+  have leftBounds := IntervalPartition.point_bounds with partition, indexLe
+  have rightBounds := IntervalPartition.point_bounds with partition, successorLe
+  rcases leftBounds with ⟨left, upperLeft⟩
+  rcases rightBounds with ⟨lowerRight, right⟩
+  exact FineCellOscillation.of_cell_endpoints with oscillation, fine, before, left, right, xCell, yCell
+
+-- FineCellTermBound
+theorem FineCellOscillation.weighted_tags (f p t s : Set) (A B D E : Real, N i : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires taggedT : TaggedPartition(p, t, A, B, N)
+  requires taggedS : TaggedPartition(p, s, A, B, N)
+  requires before : i < N
+  shows (f(t[i]):R) * ((p[succ(i)]:R) - (p[i]:R)) <
+    (f(s[i]):R) * ((p[succ(i)]:R) - (p[i]:R)) + E * ((p[succ(i)]:R) - (p[i]:R))
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, increasing⟩
+    exact points
+  have tagsT : RealSequence(t)
+    rcases taggedT with ⟨partitionT, tags, cells⟩
+    exact tags
+  have tagsS : RealSequence(s)
+    rcases taggedS with ⟨partitionS, tags, cells⟩
+    exact tags
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  have tagT := RealSequence.value at t, i with tagsT
+  have tagS := RealSequence.value at s, i with tagsS
+  have memberT := TaggedPartition.cell with taggedT, before
+  have memberS := TaggedPartition.cell with taggedS, before
+  have near := FineCellOscillation.on_cell with oscillation, fine, before, memberT, memberS
+  have tagTMember : t[i] ∈ ℝ by exact tagT
+  have tagSMember : s[i] ∈ ℝ by exact tagS
+  have fT := FunctionBetween.apply_closed with function, tagTMember
+  have fS := FunctionBetween.apply_closed with function, tagSMember
+  obtain ⟨lower, upper⟩ := openBall.order_characterization.forward with near
+  have width := IntervalPartition.positive_width with partition, before
+  have scaled := realLess.mul_right_of_positive with upper, width
+  have distribute : (f(s[i]) + E) * (p[succ(i)] - p[i]) =
+      f(s[i]) * (p[succ(i)] - p[i]) + E * (p[succ(i)] - p[i])
+    ring
+  rwa distribute at scaled
+
+-- SplitCellEstimate
+theorem real.weighted_split_upper (V W Z X C Y E : Real)
+  requires left : X ≤ C
+  requires right : C ≤ Y
+  requires nearLeft : V ≤ W + E
+  requires nearRight : V ≤ Z + E
+  shows V * (Y - X) ≤ W * (C - X) + Z * (Y - C) + E * (Y - X)
+proof
+  have leftWidth : 0 ≤ C - X by linarith
+  have rightWidth : 0 ≤ Y - C by linarith
+  have leftScaled := realLe.mul_right_of_nonnegative with nearLeft, leftWidth
+  have rightScaled := realLe.mul_right_of_nonnegative with nearRight, rightWidth
+  have added := realLe.add with leftScaled, rightScaled
+  have algebra : V * (C - X) + V * (Y - C) = V * (Y - X) by ring
+  have other : (W + E) * (C - X) + (Z + E) * (Y - C) =
+      W * (C - X) + Z * (Y - C) + E * (Y - X)
+    ring
+  rwa [algebra, other] at added
+
+-- Sampling each half of a fine cell changes its contribution by at most
+-- epsilon times the original width. The new sample points need only lie in
+-- the old cell, which refinement preserves.
+theorem FineCellOscillation.split_upper (f p : Set) (A B D E T S R C : Real, N i : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires before : i < N
+  requires tCell : T ∈ closedInterval(p[i], p[succ(i)])
+  requires sCell : S ∈ closedInterval(p[i], p[succ(i)])
+  requires rCell : R ∈ closedInterval(p[i], p[succ(i)])
+  requires cCell : C ∈ closedInterval(p[i], p[succ(i)])
+  shows f(T) * ((p[succ(i)]:R) - (p[i]:R)) ≤
+    f(S) * (C - (p[i]:R)) +
+      f(R) * ((p[succ(i)]:R) - C) +
+        E * ((p[succ(i)]:R) - (p[i]:R))
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, steps⟩
+    exact points
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  obtain ⟨realC, lower, upper⟩ := closedInterval.membership.forward with pointI, pointNext, cCell
+  have tBounds := closedInterval.membership.forward with pointI, pointNext, tCell
+  have sBounds := closedInterval.membership.forward with pointI, pointNext, sCell
+  have rBounds := closedInterval.membership.forward with pointI, pointNext, rCell
+  rcases tBounds with ⟨realTMember, lowerT, upperT⟩
+  rcases sBounds with ⟨realSMember, cellLowerS, cellUpperS⟩
+  rcases rBounds with ⟨realRMember, cellLowerR, cellUpperR⟩
+  have nearS := FineCellOscillation.on_cell with oscillation, fine, before, tCell, sCell
+  have nearR := FineCellOscillation.on_cell with oscillation, fine, before, tCell, rCell
+  have boundsS := openBall.order_characterization.forward with nearS
+  have boundsR := openBall.order_characterization.forward with nearR
+  rcases boundsS with ⟨lowerS, upperS⟩
+  rcases boundsR with ⟨lowerR, upperR⟩
+  have weakS := realLess.implies_le with upperS
+  have weakR := realLess.implies_le with upperR
+  have tValue := FunctionBetween.apply_closed with function, realTMember
+  have sValue := FunctionBetween.apply_closed with function, realSMember
+  have rValue := FunctionBetween.apply_closed with function, realRMember
+  exact real.weighted_split_upper with lower, upper, weakS, weakR
+
+-- A finite tagged subdivision of a fine cell stays close to any sample of
+-- that original cell. This formulation does not require an insertion order.
+theorem FineCellOscillation.subdivision_bounds (f p q s : Set) (A B D E T : Real, N i M : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires before : i < N
+  requires sample : T ∈ closedInterval(p[i], p[succ(i)])
+  requires subdivided : TaggedPartition(q, s, p[i], p[succ(i)], M)
+  shows (f(T):R) * ((p[succ(i)]:R) - (p[i]:R)) ≤
+      (riemannSum(f, q, s, M):R) + E * ((p[succ(i)]:R) - (p[i]:R)) ∧
+    (riemannSum(f, q, s, M):R) ≤
+      (f(T):R) * ((p[succ(i)]:R) - (p[i]:R)) +
+        E * ((p[succ(i)]:R) - (p[i]:R))
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, steps⟩
+    exact points
+  have pointI := RealSequence.value at p, i with points
+  have pointNext := RealSequence.value at p, succ(i) with points
+  obtain ⟨realTMember, lowerT, upperT⟩ := closedInterval.membership.forward with pointI, pointNext, sample
+  have valueMember := FunctionBetween.apply_closed with function, realTMember
+  have valueReal : Real(f(T)) by exact valueMember
+  have lower : ∀ j ∈ ℕ, j < M →
+      f(T) - E ≤ (f(s[j]):R)
+    intros j naturalJ lessJ
+    have qPartition : IntervalPartition(q, p[i], p[succ(i)], M)
+      rcases subdivided with ⟨qPartition, tags, cells⟩
+      exact qPartition
+    have inSubcell := TaggedPartition.cell with subdivided, lessJ
+    have included := IntervalPartition.cell_subset with qPartition, lessJ
+    have inCell := included with s[j], inSubcell
+    have realTag : Real(s[j])
+      rcases subdivided with ⟨qPartition, tags, cells⟩
+      exact RealSequence.value with tags
+    have near := FineCellOscillation.on_cell with oscillation, fine, before, inCell, sample
+    obtain ⟨lowerBound, upperBound⟩ := openBall.order_characterization.forward with near
+    have memberTag : s[j] ∈ ℝ by exact realTag
+    have image := FunctionBetween.apply_closed with function, memberTag
+    exact realLess.implies_le with lowerBound
+  have upper : ∀ k ∈ ℕ, k < M →
+      (f(s[k]):R) ≤ f(T) + E
+    intros k naturalK lessK
+    have qPartition : IntervalPartition(q, p[i], p[succ(i)], M)
+      rcases subdivided with ⟨qPartition, tags, cells⟩
+      exact qPartition
+    have inSubcell := TaggedPartition.cell with subdivided, lessK
+    have included := IntervalPartition.cell_subset with qPartition, lessK
+    have inCell := included with s[k], inSubcell
+    have realTag : Real(s[k])
+      rcases subdivided with ⟨qPartition, tags, cells⟩
+      exact RealSequence.value with tags
+    have near := FineCellOscillation.on_cell with oscillation, fine, before, inCell, sample
+    obtain ⟨lowerBound, upperBound⟩ := openBall.order_characterization.forward with near
+    exact realLess.implies_le with upperBound
+  obtain ⟨below, above⟩ := riemannSum.between_constants with function, subdivided, lower, upper
+  have leftAlgebra : (f(T) - E) * (p[succ(i)] - p[i]) =
+      f(T) * (p[succ(i)] - p[i]) - E * (p[succ(i)] - p[i])
+    ring
+  have rightAlgebra : (f(T) + E) * (p[succ(i)] - p[i]) =
+      f(T) * (p[succ(i)] - p[i]) + E * (p[succ(i)] - p[i])
+    ring
+  rw leftAlgebra at below
+  rw rightAlgebra at above
+  have widthReal := realSubValue.real with pointNext, pointI
+  have productReal := realMulValue.real with valueReal, widthReal
+  have errorReal := realMulValue.real at E, p[succ(i)] - p[i] with assumption, widthReal
+  have leftReal := realSubValue.real with productReal, errorReal
+  have sumReal : Real(riemannSum(f, q, s, M))
+    have qPartition : IntervalPartition(q, p[i], p[succ(i)], M)
+      rcases subdivided with ⟨qPartition, tags, cells⟩
+      exact qPartition
+    rcases qPartition with ⟨qPoints, start, finish, steps⟩
+    rcases subdivided with ⟨another, tags, cells⟩
+    exact riemannSum.real with function, qPoints, tags
+  have shifted := realLe.add_right with leftReal, sumReal, errorReal, below
+  have cancel : (f(T) * (p[succ(i)] - p[i]) - E * (p[succ(i)] - p[i])) +
+      E * (p[succ(i)] - p[i]) = f(T) * (p[succ(i)] - p[i])
+    ring
+  rw cancel at shifted
+  have first : f(T) * (p[succ(i)] - p[i]) ≤ riemannSum(f, q, s, M) + E * (p[succ(i)] - p[i]) by exact shifted
+  refine ⟨first, above⟩
+
+-- Section: CommonRefinementComparison
+theorem realPartialSum.cell_error_prefix (u v p : Set) (E : Real, N n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires points : RealSequence(p)
+  requires errors : ∀ i ∈ ℕ, i < N → (u[i]:R) ≤ (v[i]:R) + E * ((p[succ(i)]:R) - (p[i]:R))
+  shows n ≤ N → (realPartialSum(u, n):R) ≤ (realPartialSum(v, n):R) + E * ((p[n]:R) - (p[0]:R))
+proof
+  induction n
+  | zero =>
+    intro bounded
+    rw [realPartialSum.zero, realPartialSum.zero]
+    have point0 := RealSequence.value at p, 0 with points
+    have self := realSubValue.self with point0
+    rw self
+    have zeroProduct : E * (0:R) = (0:R) by ring
+    rw zeroProduct
+    have zeroSum : (0:R) + (0:R) = (0:R) by ring
+    rw zeroSum
+    exact realLe.reflexive with realZero.real
+  | succ(k) using ih =>
+    intro bounded
+    have before : k < N by exact bounded
+    have kLeNext := LessEqual.successor at k
+    have kLeN := LessEqual.transitive at k, succ(k), N with
+      assumption, Naturals.constructor.succ at k with *{2}, kLeNext, bounded
+    have prefix := ih with kLeN
+    have point0 := RealSequence.value at p, 0 with points
+    have pointK := RealSequence.value at p, k with points
+    have pointNext := RealSequence.value at p, succ(k) with points
+    have termU := RealSequence.value at u, k with sequenceU
+    have termV := RealSequence.value at v, k with sequenceV
+    have sumU := realPartialSum.real at u, k with sequenceU
+    have sumV := realPartialSum.real at v, k with sequenceV
+    have prefixWidth := realSubValue.real with pointK, point0
+    have cellWidth := realSubValue.real with pointNext, pointK
+    have prefixError := realMulValue.real at E, p[k] - p[0] with assumption, prefixWidth
+    have cellError := realMulValue.real at E, p[succ(k)] - p[k] with assumption, cellWidth
+    have firstRhs := realAddValue.real with sumV, prefixError
+    have secondRhs := realAddValue.real with termV, cellError
+    have bound := errors with k, nat.omega.forward at k with assumption, before
+    have added := realLe.add with sumU, firstRhs, termU, secondRhs, prefix, bound
+    have rearrange : (realPartialSum(v, k) + E * (p[k] - p[0])) +
+        (v[k] + E * (p[succ(k)] - p[k])) =
+      (realPartialSum(v, k) + v[k]) + E * (p[succ(k)] - p[0])
+      ring
+    rw rearrange at added
+    rw [realPartialSum.succ, realPartialSum.succ]
+    unfold realAddValue
+    unfold realAddValue
+    unfold call2 at added
+    unfold call2 at added
+    unfold call2 at added
+    unfold call2
+    exact added
+
+-- Only cells of the partition are compared; arbitrary sequence tails do not
+-- affect the resulting bound.
+theorem realPartialSum.cell_error_on_partition (u v p : Set) (A B E : Real, N : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires partition : IntervalPartition(p, A, B, N)
+  requires errors : ∀ i ∈ ℕ, i < N →
+    (u[i]:R) ≤ (v[i]:R) + E * ((p[succ(i)]:R) - (p[i]:R))
+  shows (realPartialSum(u, N):R) ≤ (realPartialSum(v, N):R) + E * (B - A)
+proof
+  rcases partition with ⟨points, start, finish, increasing⟩
+  have result := realPartialSum.cell_error_prefix at u, v, p, E, N, N with
+    sequenceU, sequenceV, points, errors,
+    LessEqual.reflexive at N with assumption
+  rwa [start, finish] at result
+
+-- CellwiseSubdivision
+predicate CellwiseSubdivisionSums (f p u : Set) (N : Nat) :=
+  RealSequence(u) ∧
+  (∀ i ∈ ℕ, i < N → ∃ q, ∃ s, ∃ M ∈ ℕ,
+    TaggedPartition(q, s, p[i], p[succ(i)], M) ∧
+      u[i] = riemannSum(f, q, s, M))
+
+theorem FineCellOscillation.cellwise_subdivision_bounds (f p t u : Set) (A B D E : Real, N : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fine : FinePartition(p, A, B, N, D)
+  requires tagged : TaggedPartition(p, t, A, B, N)
+  requires subdivided : CellwiseSubdivisionSums(f, p, u, N)
+  shows (riemannSum(f, p, t, N):R) ≤
+      (realPartialSum(u, N):R) + E * (B - A) ∧
+    (realPartialSum(u, N):R) ≤
+      (riemannSum(f, p, t, N):R) + E * (B - A)
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases fine with ⟨partition, positive, widths⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, increasing⟩
+    exact points
+  have tags : RealSequence(t)
+    rcases tagged with ⟨partitionT, tags, cells⟩
+    exact tags
+  rcases subdivided with ⟨sequenceU, cellData⟩
+  have terms : RealSequence(riemannTerms(f, p, t))
+    unfold RealSequence
+    exact riemannTerms.function with function, points, tags
+  have local : ∀ i ∈ ℕ, i < N → ((riemannTerms(f, p, t)[i]:R) ≤ (u[i]:R) + E * ((p[succ(i)]:R) - (p[i]:R)) ∧ (u[i]:R) ≤ (riemannTerms(f, p, t)[i]:R) + E * ((p[succ(i)]:R) - (p[i]:R)))
+    intros i naturalI before
+    obtain ⟨q, s, M, naturalM, taggedSub, equal⟩ := cellData with i, naturalI, before
+    have typedM := nat.omega.backward with naturalM
+    have sample := TaggedPartition.cell with tagged, before
+    have estimates := FineCellOscillation.subdivision_bounds with
+      function, oscillation, fine, before, sample, taggedSub
+    rcases estimates with ⟨first, second⟩
+    have term := riemannTerms.value at f, p, t, i with function, points, tags
+    constructor
+    . rw [term, equal]
+      unfold realMulValue
+      unfold call2
+      unfold call2 at first
+      unfold call2 at first
+      exact first
+    . rw [term, equal]
+      unfold realMulValue
+      unfold call2
+      unfold call2 at second
+      unfold call2 at second
+      unfold call2 at second
+      unfold call2
+      exact second
+  have upperErrors : ∀ j ∈ ℕ, j < N →
+    (riemannTerms(f, p, t)[j]:R) ≤ (u[j]:R) + E * ((p[succ(j)]:R) - (p[j]:R))
+    intros j naturalJ beforeJ
+    obtain ⟨first, second⟩ := local with j, naturalJ, beforeJ
+    exact first
+  have lowerErrors : ∀ k ∈ ℕ, k < N →
+    (u[k]:R) ≤ (riemannTerms(f, p, t)[k]:R) + E * ((p[succ(k)]:R) - (p[k]:R))
+    intros k naturalK beforeK
+    obtain ⟨first, second⟩ := local with k, naturalK, beforeK
+    exact second
+  have first := realPartialSum.cell_error_on_partition with terms, sequenceU, partition, upperErrors
+  have second := realPartialSum.cell_error_on_partition with sequenceU, terms, partition, lowerErrors
+  constructor
+  . unfold riemannSum
+    exact first
+  . unfold riemannSum
+    exact second
+
+-- CommonRefinementComparison
+predicate SharedSubdivisionTotal (f p q u v : Set) (N M : Nat) :=
+  CellwiseSubdivisionSums(f, p, u, N) ∧
+  CellwiseSubdivisionSums(f, q, v, M) ∧
+  realPartialSum(u, N) = realPartialSum(v, M)
+
+theorem FineCellOscillation.compare_shared_subdivision (f p t q s u v : Set) (A B D E : Real, N M : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires fineP : FinePartition(p, A, B, N, D)
+  requires fineQ : FinePartition(q, A, B, M, D)
+  requires taggedP : TaggedPartition(p, t, A, B, N)
+  requires taggedQ : TaggedPartition(q, s, A, B, M)
+  requires shared : SharedSubdivisionTotal(f, p, q, u, v, N, M)
+  shows (riemannSum(f, p, t, N):R) ≤ (riemannSum(f, q, s, M):R) + (E + E) * (B - A) ∧
+    (riemannSum(f, q, s, M):R) ≤ (riemannSum(f, p, t, N):R) + (E + E) * (B - A)
+proof
+  rcases shared with ⟨cellsP, cellsQ, equalTotals⟩
+  have boundP := FineCellOscillation.cellwise_subdivision_bounds with
+    function, oscillation, fineP, taggedP, cellsP
+  have boundQ := FineCellOscillation.cellwise_subdivision_bounds with
+    function, oscillation, fineQ, taggedQ, cellsQ
+  rcases boundP with ⟨pToU, uToP⟩
+  rcases boundQ with ⟨qToV, vToQ⟩
+  have partitionP : IntervalPartition(p, A, B, N)
+    rcases fineP with ⟨partition, positive, widths⟩
+    exact partition
+  have partitionQ : IntervalPartition(q, A, B, M)
+    rcases fineQ with ⟨partition, positive, widths⟩
+    exact partition
+  have pointsP : RealSequence(p)
+    rcases partitionP with ⟨points, start, finish, increasing⟩
+    exact points
+  have pointsQ : RealSequence(q)
+    rcases partitionQ with ⟨points, start, finish, increasing⟩
+    exact points
+  have tagsP : RealSequence(t)
+    rcases taggedP with ⟨partition, tags, cells⟩
+    exact tags
+  have tagsQ : RealSequence(s)
+    rcases taggedQ with ⟨partition, tags, cells⟩
+    exact tags
+  have sumP := riemannSum.real at f, p, t, N with function, pointsP, tagsP
+  have sumQ := riemannSum.real at f, q, s, M with function, pointsQ, tagsQ
+  rcases cellsP with ⟨sequenceU, dataU⟩
+  rcases cellsQ with ⟨sequenceV, dataV⟩
+  have totalU := realPartialSum.real at u, N with sequenceU
+  have totalV := realPartialSum.real at v, M with sequenceV
+  have width := realSubValue.real at B, A with *
+  have err := realMulValue.real at E, B - A with assumption, width
+  have sumPErr := realAddValue.real with sumP, err
+  have sumQErr := realAddValue.real with sumQ, err
+  have firstShift := realLe.add_right with totalV, sumQErr, err, vToQ
+  rw ← equalTotals at firstShift
+  have firstChain := realLe.transitive with pToU, firstShift
+  have secondShift := realLe.add_right with totalU, sumPErr, err, uToP
+  rw equalTotals at secondShift
+  have secondChain := realLe.transitive with qToV, secondShift
+  have firstShape : (riemannSum(f, q, s, M) + E * (B - A)) + E * (B - A) =
+      riemannSum(f, q, s, M) + (E + E) * (B - A)
+    ring
+  have secondShape : (riemannSum(f, p, t, N) + E * (B - A)) + E * (B - A) =
+      riemannSum(f, p, t, N) + (E + E) * (B - A)
+    ring
+  rw firstShape at firstChain
+  rw secondShape at secondChain
+  refine ⟨firstChain, secondChain⟩
+
+-- Section: OneCellComparison
+def oneCellPoint (A B : Real, n : Nat) → Set
+  | A, B, zero => A
+  | A, B, succ(k) => B
+
+theorem oneCellPoint.real (A B : Real, n : Nat)
+  shows Real(oneCellPoint(A, B, n))
+proof
+  induction n
+  | zero =>
+    rwa oneCellPoint
+  | succ(k) using ih =>
+    rwa oneCellPoint
+
+-- A checked parameterized graph. The closure proof is the only graph-specific
+-- obligation; defgraph derives membership, function, and application laws.
+defgraph oneCellPoints (A B : Real) (n ∈ ℕ) : ℝ := oneCellPoint(A, B, n)
+proof
+  have realPoint := oneCellPoint.real at A, B, n with
+    *{3}
+  exact realPoint
+
+theorem oneCellPoints.sequence (A B : Real)
+  shows RealSequence(oneCellPoints(A, B))
+proof
+  unfold RealSequence
+  exact oneCellPoints.function with *{2}
+
+theorem Nat.lt_one_zero (i : Nat)
+  requires before : i < succ(0)
+  shows i = 0
+proof
+  have zeroNatural := Naturals.constructor.zero
+  have oneNatural := Naturals.constructor.succ with zeroNatural
+  have member := membership.of_Less at i, succ(0) with
+    assumption, oneNatural, before
+  have alternatives := membership.successor_forward{n := 0} with member
+  cases alternatives with empty | equal
+  . exfalso
+    rw nat.zero at empty
+    simp
+  . exact equal
+
+theorem oneCellPoints.zero (A B : Real)
+  shows oneCellPoints(A, B)[0] = A
+proof
+  have value := oneCellPoints.value at A, B, 0 with
+    *{2}, Naturals.constructor.zero
+  rwa oneCellPoint at value
+
+theorem oneCellPoints.one (A B : Real)
+  shows oneCellPoints(A, B)[succ(0)] = B
+proof
+  have zeroNatural := Naturals.constructor.zero
+  have oneNatural := Naturals.constructor.succ with zeroNatural
+  have value := oneCellPoints.value at A, B, succ(0) with
+    *{2}, oneNatural
+  rwa oneCellPoint at value
+
+-- OneCellPartition
+theorem oneCellPoints.partition (A B : Real)
+  requires ordered : A < B
+  shows IntervalPartition(oneCellPoints(A, B), A, B, succ(0))
+proof
+  constructor
+  . exact oneCellPoints.sequence with *{2}
+  . constructor
+    . exact oneCellPoints.zero with *{2}
+    . constructor
+      . exact oneCellPoints.one with *{2}
+      . intros i naturalI before
+        have typedI := nat.omega.backward with naturalI
+        have atZero := Nat.lt_one_zero with typedI, before
+        rwa [atZero, oneCellPoints.zero, oneCellPoints.one]
+
+theorem oneCellPoints.tagged (A B : Real)
+  requires ordered : A < B
+  shows TaggedPartition(oneCellPoints(A, B), constantSequence(A), A, B, succ(0))
+proof
+  constructor
+  . exact oneCellPoints.partition with ordered
+  . constructor
+    . exact constantSequence.sequence at A
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have atZero := Nat.lt_one_zero with typedI, before
+      rw [atZero, constantSequence.value, oneCellPoints.zero, oneCellPoints.one]
+      have le := realLess.implies_le with ordered
+      exact closedInterval.left_mem with *
+
+-- OneCellTaggedValue
+theorem oneCellPoints.tagged_at (A B T : Real)
+  requires ordered : A < B
+  requires tag : T ∈ closedInterval(A, B)
+  shows TaggedPartition(oneCellPoints(A, B), constantSequence(T), A, B, succ(0))
+proof
+  constructor
+  . exact oneCellPoints.partition with ordered
+  . constructor
+    . exact constantSequence.sequence at T
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have atZero := Nat.lt_one_zero with typedI, before
+      rwa [atZero, constantSequence.value, oneCellPoints.zero, oneCellPoints.one]
+
+theorem riemannSum.one_cell_tag (f : Set) (A B T : Real)
+  requires function : f : ℝ → ℝ
+  shows riemannSum(f, oneCellPoints(A, B), constantSequence(T), succ(0)) =
+    f(T) * (B - A)
+proof
+  have pointSequence := oneCellPoints.sequence at A, B with *
+  have tagSequence := constantSequence.sequence at T
+  have step := riemannSum.succ at
+    f, oneCellPoints(A, B), constantSequence(T), 0 with
+      function, pointSequence, tagSequence
+  rw [riemannSum.zero, oneCellPoints.zero, oneCellPoints.one, constantSequence.value] at step
+  rw step
+  have realT : T ∈ ℝ
+    have typedT : Real(T) by assumption
+    exact typedT
+  have imageMember := FunctionBetween.apply_closed with function, realT
+  have imageReal : Real(f(T)) by exact imageMember
+  have width := realSubValue.real at B, A with *
+  have product := realMulValue.real with imageReal, width
+  have zero := realAddValue.zero_left with product
+  unfold realAddValue
+  unfold realMulValue
+  unfold call2 at zero
+  unfold call2 at zero
+  unfold call2
+  unfold call2
+  rfl
+
+-- TrivialSubdivision
+theorem TaggedPartition.trivial_subdivision (f p t : Set) (A B : Real, N : Nat)
+  requires function : f : ℝ → ℝ
+  requires tagged : TaggedPartition(p, t, A, B, N)
+  shows CellwiseSubdivisionSums(f, p, riemannTerms(f, p, t), N)
+proof
+  have partition : IntervalPartition(p, A, B, N)
+    rcases tagged with ⟨partition, tags, cells⟩
+    exact partition
+  have points : RealSequence(p)
+    rcases partition with ⟨points, start, finish, increasing⟩
+    exact points
+  have tags : RealSequence(t)
+    rcases tagged with ⟨partitionT, tags, cells⟩
+    exact tags
+  constructor
+  . unfold RealSequence
+    exact riemannTerms.function with function, points, tags
+  . intros i naturalI before
+    have typedI := nat.omega.backward with naturalI
+    have pointI := RealSequence.value at p, i with points
+    have pointNext := RealSequence.value at p, succ(i) with points
+    have tagI := RealSequence.value at t, i with tags
+    have increasing := IntervalPartition.cell with partition, before
+    have cell := TaggedPartition.cell with tagged, before
+    have single := oneCellPoints.tagged_at with increasing, cell
+    witness oneCellPoints(p[i], p[succ(i)])
+    witness constantSequence(t[i])
+    witness succ(0)
+    constructor
+    . have zeroNat := Naturals.constructor.zero
+      have oneNat := Naturals.constructor.succ with zeroNat
+      exact nat.omega.forward with oneNat
+    . constructor
+      . exact single
+      . have term := riemannTerms.value at f, p, t, i with function, points, tags
+        have singleValue := riemannSum.one_cell_tag at f, p[i], p[succ(i)], t[i] with function
+        rw [term, singleValue]
+        unfold realMulValue
+        unfold call2
+        rfl
+
+-- OneCellCommonRefinement
+theorem SharedSubdivisionTotal.one_cell (f q s : Set) (A B T : Real, M : Nat)
+  requires function : f : ℝ → ℝ
+  requires tagged : TaggedPartition(q, s, A, B, M)
+  shows SharedSubdivisionTotal(f, oneCellPoints(A, B), q,
+    constantSequence(riemannSum(f, q, s, M)), riemannTerms(f, q, s), succ(0), M)
+proof
+  have partition : IntervalPartition(q, A, B, M)
+    rcases tagged with ⟨partition, tags, cells⟩
+    exact partition
+  have points : RealSequence(q)
+    rcases partition with ⟨points, start, finish, increasing⟩
+    exact points
+  have tags : RealSequence(s)
+    rcases tagged with ⟨partitionS, tags, cells⟩
+    exact tags
+  have sumReal := riemannSum.real with function, points, tags
+  have trivial := TaggedPartition.trivial_subdivision with function, tagged
+  have terms : RealSequence(riemannTerms(f, q, s))
+    unfold RealSequence
+    exact riemannTerms.function with function, points, tags
+  have totalReal := realPartialSum.real with terms
+  have coarse : CellwiseSubdivisionSums(f, oneCellPoints(A, B),
+      constantSequence(riemannSum(f, q, s, M)), succ(0))
+    constructor
+    . exact constantSequence.sequence with sumReal
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have zero := Nat.lt_one_zero with typedI, before
+      witness q
+      witness s
+      witness M
+      constructor
+      . exact nat.omega.forward at M with assumption
+      . constructor
+        . rw [zero, oneCellPoints.zero, oneCellPoints.one]
+          exact tagged
+        . rw [zero, constantSequence.value]
+          rfl
+  have total : realPartialSum(constantSequence(riemannSum(f, q, s, M)), succ(0)) =
+      realPartialSum(riemannTerms(f, q, s), M)
+    rw [realPartialSum.succ, realPartialSum.zero, constantSequence.value]
+    unfold riemannSum
+    have zero := realAddValue.zero_left with totalReal
+    unfold realAddValue
+    unfold call2 at zero
+    exact zero
+  refine ⟨coarse, trivial, total⟩
+
+-- OneCellFine
+theorem oneCellPoints.fine (A B D : Real)
+  requires ordered : A < B
+  requires positive : (0:R) < D
+  requires width : B - A < D
+  shows FinePartition(oneCellPoints(A, B), A, B, succ(0), D)
+proof
+  constructor
+  . exact oneCellPoints.partition with ordered
+  . constructor
+    . exact positive
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have atZero := Nat.lt_one_zero with typedI, before
+      rwa [atZero, oneCellPoints.zero, oneCellPoints.one]
+
+-- OneCellComparison
+theorem FineCellOscillation.compare_one_cell (f q s : Set) (A B D E T : Real, M : Nat)
+  requires function : f : ℝ → ℝ
+  requires oscillation : FineCellOscillation(f, A, B, D, E)
+  requires ordered : A < B
+  requires width : B - A < D
+  requires fine : FinePartition(q, A, B, M, D)
+  requires tagged : TaggedPartition(q, s, A, B, M)
+  requires tag : T ∈ closedInterval(A, B)
+  shows (f(T):R) * (B - A) ≤ (riemannSum(f, q, s, M):R) + (E + E) * (B - A) ∧
+    (riemannSum(f, q, s, M):R) ≤ f(T) * (B - A) + (E + E) * (B - A)
+proof
+  have positive : (0:R) < D
+    rcases fine with ⟨partition, positive, widths⟩
+    exact positive
+  have coarse := oneCellPoints.fine with ordered, positive, width
+  have coarseTagged := oneCellPoints.tagged_at with ordered, tag
+  have shared := SharedSubdivisionTotal.one_cell at f, q, s, A, B, T, M with
+    function, tagged
+  have comparison := FineCellOscillation.compare_shared_subdivision with
+    function, oscillation, coarse, fine, coarseTagged, tagged, shared
+  have value := riemannSum.one_cell_tag at f, A, B, T with function
+  rwa value at comparison
+
+-- Section: AffineCofinality
+def intervalMidpoint (A B : Real) : Real := A + half(B - A)
+
+theorem intervalMidpoint.real (A B : Real)
+  shows Real(intervalMidpoint(A, B))
+proof
+  unfold intervalMidpoint
+  have width := realSubValue.real at B, A with *
+  have halfWidth := half.real with width
+  exact realAddValue.real with assumption, halfWidth
+
+theorem intervalMidpoint.left_width (A B : Real)
+  shows intervalMidpoint(A, B) - A = half(B - A)
+proof
+  unfold intervalMidpoint
+  ring
+
+theorem intervalMidpoint.right_width (A B : Real)
+  shows B - intervalMidpoint(A, B) = half(B - A)
+proof
+  have width := realSubValue.real at B, A with *
+  have doubled := half.add_self with width
+  have cancellation : (half(B - A) + half(B - A)) - half(B - A) = half(B - A) by ring
+  rw doubled at cancellation
+  unfold intervalMidpoint
+  have reassociated : B - (A + half(B - A)) = (B - A) - half(B - A) by ring
+  rwa reassociated
+
+theorem intervalMidpoint.between (A B : Real)
+  requires ordered : A < B
+  shows A < intervalMidpoint(A, B) ∧ intervalMidpoint(A, B) < B
+proof
+  have positive := realLess.iff_pos_sub.forward with ordered
+  have halfPositive := half.positive with positive
+  have left := intervalMidpoint.left_width at A, B with *
+  have right := intervalMidpoint.right_width at A, B with *
+  constructor
+  . have positiveLeft := halfPositive
+    rw ← left at positiveLeft
+    exact realLess.iff_pos_sub.backward with positiveLeft
+  . have positiveRight := halfPositive
+    rw ← right at positiveRight
+    exact realLess.iff_pos_sub.backward with positiveRight
+
+-- TwoCellPoints
+def twoCellPoint (A M B : Real, n : Nat) → Set
+  | A, M, B, zero => A
+  | A, M, B, succ(k) => oneCellPoint(M, B, k)
+
+theorem twoCellPoint.real (A M B : Real, n : Nat)
+  shows Real(twoCellPoint(A, M, B, n))
+proof
+  induction n
+  | zero =>
+    rwa twoCellPoint
+  | succ(k) using ih =>
+    rw twoCellPoint
+    exact oneCellPoint.real with *{3}
+
+-- A checked parameterized graph. The closure proof is the only graph-specific
+-- obligation; defgraph derives membership, function, and application laws.
+defgraph twoCellPoints (A M B : Real) (n ∈ ℕ) : ℝ := twoCellPoint(A, M, B, n)
+proof
+  have realPoint := twoCellPoint.real at A, M, B, n with
+    *{4}
+  exact realPoint
+
+theorem twoCellPoints.sequence (A M B : Real)
+  shows RealSequence(twoCellPoints(A, M, B))
+proof
+  unfold RealSequence
+  exact twoCellPoints.function with *{3}
+
+theorem Nat.lt_two_cases (i : Nat)
+  requires before : i < succ(succ(0))
+  shows i = 0 ∨ i = succ(0)
+proof
+  have zeroNatural := Naturals.constructor.zero
+  have oneNatural := Naturals.constructor.succ with zeroNatural
+  have twoNatural := Naturals.constructor.succ with oneNatural
+  have member := membership.of_Less at i, succ(succ(0)) with
+    assumption, twoNatural, before
+  have alternatives := membership.successor_forward{n := succ(0)} at i with member
+  cases alternatives with earlier | equal
+  . have cases := membership.successor_forward{n := 0} at i with earlier
+    cases cases with empty | zero
+    . exfalso
+      rw nat.zero at empty
+      simp
+    . left
+      exact zero
+  . right
+    exact equal
+
+theorem twoCellPoints.zero (A M B : Real)
+  shows twoCellPoints(A, M, B)[0] = A
+proof
+  have value := twoCellPoints.value at A, M, B, 0 with
+    *{3}, Naturals.constructor.zero
+  rwa twoCellPoint at value
+
+theorem twoCellPoints.one (A M B : Real)
+  shows twoCellPoints(A, M, B)[succ(0)] = M
+proof
+  have zeroNatural := Naturals.constructor.zero
+  have oneNatural := Naturals.constructor.succ with zeroNatural
+  have value := twoCellPoints.value at A, M, B, succ(0) with
+    *{3}, oneNatural
+  rwa [twoCellPoint, oneCellPoint] at value
+
+theorem twoCellPoints.two (A M B : Real)
+  shows twoCellPoints(A, M, B)[succ(succ(0))] = B
+proof
+  have zeroNatural := Naturals.constructor.zero
+  have oneNatural := Naturals.constructor.succ with zeroNatural
+  have twoNatural := Naturals.constructor.succ with oneNatural
+  have value := twoCellPoints.value at A, M, B, succ(succ(0)) with
+    *{3}, twoNatural
+  rwa [twoCellPoint, oneCellPoint] at value
+
+-- TwoCellPartition
+theorem twoCellPoints.partition (A M B : Real)
+  requires left : A < M
+  requires right : M < B
+  shows IntervalPartition(twoCellPoints(A, M, B), A, B, succ(succ(0)))
+proof
+  constructor
+  . exact twoCellPoints.sequence at A, M, B with
+      *{3}
+  . constructor
+    . exact twoCellPoints.zero at A, M, B with
+        *{3}
+    . constructor
+      . exact twoCellPoints.two at A, M, B with
+          *{3}
+      . intros i naturalI before
+        have typedI := nat.omega.backward with naturalI
+        have cases := Nat.lt_two_cases with typedI, before
+        cases cases with first | second
+        . rw [first, twoCellPoints.zero, twoCellPoints.one]
+          exact left
+        . rw [second, twoCellPoints.one, twoCellPoints.two]
+          exact right
+
+theorem twoCellPoints.tagged (A M B : Real)
+  requires left : A < M
+  requires right : M < B
+  shows TaggedPartition(twoCellPoints(A, M, B), twoCellPoints(A, M, B),
+    A, B, succ(succ(0)))
+proof
+  have partition := twoCellPoints.partition with left, right
+  have sequence := twoCellPoints.sequence at A, M, B with
+    *{3}
+  constructor
+  . exact partition
+  . constructor
+    . exact sequence
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have cell := IntervalPartition.cell with partition, before
+      have le := realLess.implies_le with cell
+      have realI := RealSequence.value with sequence
+      have realNext := RealSequence.value at twoCellPoints(A, M, B), succ(i) with sequence
+      exact closedInterval.left_mem with realI, realNext, le
+
+-- TwoCellFine
+theorem twoCellPoints.fine (A B D : Real)
+  requires ordered : A < B
+  requires positive : (0:R) < D
+  requires halfWidth : half(B - A) < D
+  shows FinePartition(twoCellPoints(A, intervalMidpoint(A, B), B),
+    A, B, succ(succ(0)), D)
+proof
+  obtain ⟨left, right⟩ := intervalMidpoint.between with ordered
+  have middle := intervalMidpoint.real at A, B with *
+  constructor
+  . exact twoCellPoints.partition at A, intervalMidpoint(A, B), B with
+      assumption, middle, assumption, left, right
+  . constructor
+    . exact positive
+    . intros i naturalI before
+      have typedI := nat.omega.backward with naturalI
+      have cases := Nat.lt_two_cases with typedI, before
+      cases cases with first | second
+      . rw [first, twoCellPoints.zero, twoCellPoints.one, intervalMidpoint.left_width]
+        exact halfWidth
+      . rw [second, twoCellPoints.one, twoCellPoints.two, intervalMidpoint.right_width]
+        exact halfWidth
+
+-- LargeMeshPartitions
+theorem FineTaggedPartitionsExist.large_mesh (A B D : Real)
+  requires ordered : A < B
+  requires positive : (0:R) < D
+  requires width : B - A < D
+  shows ∃ p, ∃ t, ∃ N ∈ ℕ,
+    TaggedPartition(p, t, A, B, N) ∧ FinePartition(p, A, B, N, D)
+proof
+  witness oneCellPoints(A, B)
+  witness constantSequence(A)
+  witness succ(0)
+  constructor
+  . have naturalZero := Naturals.constructor.zero
+    have naturalOne := Naturals.constructor.succ with naturalZero
+    exact nat.omega.forward with naturalOne
+  . constructor
+    . exact oneCellPoints.tagged with ordered
+    . exact oneCellPoints.fine at A, B, D with
+        *{3}, ordered, positive, width
+
+-- HalfMeshPartitions
+theorem FineTaggedPartitionsExist.half_mesh (A B D : Real)
+  requires ordered : A < B
+  requires positive : (0:R) < D
+  requires halfWidth : half(B - A) < D
+  shows ∃ p, ∃ t, ∃ N ∈ ℕ,
+    TaggedPartition(p, t, A, B, N) ∧ FinePartition(p, A, B, N, D)
+proof
+  have midpointReal := intervalMidpoint.real at A, B with *
+  obtain ⟨left, right⟩ := intervalMidpoint.between with ordered
+  witness twoCellPoints(A, intervalMidpoint(A, B), B)
+  witness twoCellPoints(A, intervalMidpoint(A, B), B)
+  witness succ(succ(0))
+  constructor
+  . have naturalZero := Naturals.constructor.zero
+    have naturalOne := Naturals.constructor.succ with naturalZero
+    have naturalTwo := Naturals.constructor.succ with naturalOne
+    exact nat.omega.forward with naturalTwo
+  . constructor
+    . exact twoCellPoints.tagged at A, intervalMidpoint(A, B), B with
+        assumption, midpointReal, assumption, left, right
+    . exact twoCellPoints.fine at A, B, D with
+        *{3}, ordered, positive, halfWidth
+
+-- SubdivisionScale
+theorem dyadicRadius.eventually_scaled_below (W D : Real)
+  requires positive : (0:R) < D
+  shows ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n → W * dyadicRadius(n) < D
+proof
+  have constant := constantSequence.converges at W
+  have scaled := ConvergesTo.mul with constant, dyadicRadii.converges_zero
+  have zero := realMulValue.zero_right at W
+  rw zero at scaled
+  obtain ⟨N, naturalN, near⟩ := ConvergesTo.eventually with scaled, positive
+  witness N
+  constructor
+  . exact naturalN
+  . intros n memberN afterN
+    have typedN := nat.omega.backward with memberN
+    have nearN := near with n, memberN, afterN
+    have constantValue := constantSequence.value at W, n with
+      assumption, typedN
+    have radiusValue := dyadicRadii.value with typedN
+    have constantSequenceReal := constantSequence.sequence at W
+    have valueReal := RealSequence.value with constantSequenceReal
+    have radiusReal := RealSequence.value with dyadicRadii.sequence
+    have productValue := mulSequence.value with
+      constantSequenceReal, dyadicRadii.sequence, valueReal, radiusReal
+    rw [constantValue, radiusValue] at productValue
+    rw productValue at nearN
+    obtain ⟨lower, upper⟩ := openBall.order_characterization.forward with nearN
+    have zeroAdd := realAddValue.zero_left at D
+    rwa zeroAdd at upper
+
+-- DyadicCofinality
+theorem FinePartitionsExist.of_dyadic (A B W : Real)
+  requires family : ∀ n ∈ ℕ,
+    ∃ p, ∃ N ∈ ℕ,
+      FinePartition(p, A, B, N, W * dyadicRadius(n))
+  shows FinePartitionsExist(A, B)
+proof
+  intros D realD positiveD
+  have typedD : Real(D) by exact realD
+  obtain ⟨n, naturalN, eventually⟩ :=
+    dyadicRadius.eventually_scaled_below at W, D with
+      assumption, typedD, positiveD
+  have typedN := nat.omega.backward with naturalN
+  have reflexive := LessEqual.reflexive with typedN
+  have small := eventually with n, naturalN, reflexive
+  have weak := realLess.implies_le with small
+  obtain ⟨p, N, naturalCells, fine⟩ := family with n, naturalN
+  have relaxed := FinePartition.weaken with fine, weak
+  witness p
+  witness N
+  refine ⟨naturalCells, relaxed⟩
+
+-- The sole remaining geometric obligation is to construct the dyadic family.
+theorem FineTaggedPartitionsExist.of_dyadic (A B W : Real)
+  requires family : ∀ n ∈ ℕ,
+    ∃ p, ∃ t, ∃ N ∈ ℕ,
+      TaggedPartition(p, t, A, B, N) ∧
+        FinePartition(p, A, B, N, W * dyadicRadius(n))
+  shows FineTaggedPartitionsExist(A, B)
+proof
+  intros D realD positiveD
+  have typedD : Real(D) by exact realD
+  obtain ⟨n, naturalN, eventually⟩ :=
+    dyadicRadius.eventually_scaled_below at W, D with
+      assumption, typedD, positiveD
+  have typedN := nat.omega.backward with naturalN
+  have reflexive := LessEqual.reflexive with typedN
+  have small := eventually with n, naturalN, reflexive
+  have weak := realLess.implies_le with small
+  obtain ⟨p, t, N, naturalCells, tagged, fine⟩ := family with n, naturalN
+  have typedCells := nat.omega.backward with naturalCells
+  have relaxed := FinePartition.weaken with fine, weak
+  witness p
+  witness t
+  witness N
+  refine ⟨naturalCells, tagged, relaxed⟩
+
+-- AffineCofinality
+theorem FinePartitionsExist.positive_interval (A B : Real)
+  requires ordered : A < B
+  shows FinePartitionsExist(A, B)
+proof
+  have family : ∀ n ∈ ℕ,
+      ∃ p, ∃ N ∈ ℕ,
+        FinePartition(p, A, B, N, (B - A) * dyadicRadius(n))
+    intros n naturalN
+    have typedN := nat.omega.backward with naturalN
+    witness affinePoints(A, (B - A) * dyadicRadius(succ(n)))
+    witness dyadicCellCount(succ(n))
+    constructor
+    . have next := Naturals.constructor.succ at n with typedN
+      have count := dyadicCellCount.nat with next
+      exact nat.omega.forward with count
+    . exact affinePoints.dyadic_fine at A, B, n with
+        *{2}, typedN, ordered
+  exact FinePartitionsExist.of_dyadic with family
+
+theorem FineTaggedPartitionsExist.positive_interval (A B : Real)
+  requires ordered : A < B
+  shows FineTaggedPartitionsExist(A, B)
+proof
+  have fine := FinePartitionsExist.positive_interval with ordered
+  exact FinePartitionsExist.tagged with fine

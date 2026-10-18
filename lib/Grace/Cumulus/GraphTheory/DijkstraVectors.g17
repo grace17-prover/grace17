@@ -1,0 +1,237 @@
+-- Indexed semantics of Dijkstra's recursive vector operations.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DijkstraVectors
+import DijkstraMinimum
+
+namespace Dijkstra
+
+theorem list_cases (A : Set, values : List(A))
+  shows values = List.nil ∨ ∃ head ∈ A, ∃ tail, List(A, tail) ∧ values = List.cons(head, tail)
+proof
+  induction values
+  | List.nil =>
+    left
+    rfl
+  | List.cons(head, tail) using ih =>
+    right
+    refine ⟨head, assumption, tail, assumption, rfl⟩
+
+theorem successor_less_iff (a b : Nat)
+  shows Less(succ(a), succ(b)) ↔ Less(a, b)
+proof
+  have saNat := Naturals.constructor.succ at a
+  have sbNat := Naturals.constructor.succ at b
+  have outer := Dijkstra.less.true_iff with saNat, sbNat
+  have inner := Dijkstra.less.true_iff at a, b with *
+  have computed : Dijkstra.less(succ(a), succ(b)) = Dijkstra.less(a, b)
+    settle with Dijkstra.less, isZero, predecessor, BoolOps.not, BoolOps.and
+  rw computed at outer
+  tauto
+
+theorem no_less_zero (a : Nat)
+  shows ¬Less(a, 0)
+proof
+  intro impossible
+  have member := membership.of_Less at a, 0 with Naturals.constructor.zero, impossible
+  rw nat.zero at member
+  exact set.empty with member
+
+def flagAt (flags : Set, index : Nat) → Set
+  | flags, zero => Dijkstra.boolHead(flags)
+  | flags, succ(index) => flagAt(Dijkstra.boolTail(flags), index)
+  descends index
+
+theorem optionTail.closed (A : Set, values : List(A))
+  shows List(A, Dijkstra.optionTail(values))
+proof
+  induction values
+  | List.nil =>
+    have computed : Dijkstra.optionTail(List.nil) = List.nil by simp [Dijkstra.optionTail]
+    rw computed
+    exact List.inductive.constructor.nil
+  | List.cons(head, tail) using ih =>
+    have computed : Dijkstra.optionTail(List.cons(head, tail)) = tail by simp [Dijkstra.optionTail]
+    rwa computed
+
+theorem optionHead.valid (A : Set, values : List(A))
+  requires cells : ∀ d ∈ A, Option(ℕ, d)
+  shows Option(ℕ, Dijkstra.optionHead(values))
+proof
+  induction values
+  | List.nil =>
+    have computed : Dijkstra.optionHead(List.nil) = Option.none by simp [Dijkstra.optionHead]
+    rw computed
+    exact Option.inductive.constructor.none
+  | List.cons(head, tail) using ih =>
+    have computed : Dijkstra.optionHead(List.cons(head, tail)) = head by simp [Dijkstra.optionHead]
+    rw computed
+    exact cells with head, assumption
+
+theorem entry.valid (A : Set, index : Nat, values : List(A))
+  requires cells : ∀ d ∈ A, Option(ℕ, d)
+  shows Option(ℕ, Dijkstra.entry(values, index))
+proof
+  induction index generalizing values
+  | zero =>
+    intros values valuesType
+    have computed : Dijkstra.entry(values, 0) = Dijkstra.optionHead(values) by settle with Dijkstra.entry
+    rw computed
+    exact optionHead.valid with valuesType, cells
+  | succ(k) using ih =>
+    intros values valuesType
+    have tailType := optionTail.closed with valuesType
+    have computed : Dijkstra.entry(values, succ(k)) = Dijkstra.entry(Dijkstra.optionTail(values), k)
+      settle with Dijkstra.entry
+    rw computed
+    exact ih with Dijkstra.optionTail(values), tailType
+
+theorem flagAt.natural (index : Nat, flags : List(ℕ))
+  shows Nat(flagAt(flags, index))
+proof
+  induction index generalizing flags
+  | zero =>
+    intros flags flagsType
+    have computed : flagAt(flags, 0) = Dijkstra.boolHead(flags) by settle with flagAt
+    rw computed
+    exact Dijkstra.boolHead.natural with flagsType
+  | succ(k) using ih =>
+    intros flags flagsType
+    have tailType := Dijkstra.boolTail.closed with flagsType
+    have computed : flagAt(flags, succ(k)) = flagAt(Dijkstra.boolTail(flags), k) by settle with flagAt
+    rw computed
+    exact ih with Dijkstra.boolTail(flags), tailType
+
+theorem relax.entry (A : Set, index : Nat, values : List(A), weights flags sourceDistance : Set)
+  requires bound : Less(index, ListOps.length{A := A}(values))
+  shows Dijkstra.entry(Dijkstra.relax(weights, values, flags, sourceDistance), index) =
+    Dijkstra.relaxValue(Dijkstra.entry(values, index), Dijkstra.entry(weights, index),
+      equalNat(flagAt(flags, index), 1), sourceDistance)
+proof
+  induction index generalizing values weights flags sourceDistance
+  | zero =>
+    intros values weights flags sourceDistance valuesType bound
+    have shape := list_cases with valuesType
+    cases shape with empty | cons
+    . rw empty at bound
+      have lengthZero : ListOps.length{A := A}(List.nil) = 0 by settle with ListOps.length
+      rw lengthZero at bound
+      have impossible := no_less_zero with Naturals.constructor.zero
+      exfalso
+      exact impossible with bound
+    . rcases cons with ⟨head, hhead, tail, tailType, equality⟩
+      rw equality
+      settle with Dijkstra.relax, Dijkstra.entry, Dijkstra.optionHead, flagAt
+  | succ(k) using ih =>
+    intros values weights flags sourceDistance valuesType bound
+    have shape := list_cases with valuesType
+    cases shape with empty | cons
+    . rw empty at bound
+      have lengthZero : ListOps.length{A := A}(List.nil) = 0 by settle with ListOps.length
+      rw lengthZero at bound
+      have kNat : Nat(k) by typecheck
+      have skNat := Naturals.constructor.succ with kNat
+      have impossible := no_less_zero with skNat
+      exfalso
+      exact impossible with bound
+    . rcases cons with ⟨head, hhead, tail, tailType, equality⟩
+      rw equality at bound
+      have lengthStep : ListOps.length{A := A}(List.cons(head, tail)) = succ(ListOps.length{A := A}(tail))
+        settle with ListOps.length
+      rw lengthStep at bound
+      have kNat : Nat(k) by typecheck
+      have lengthNat := ListOps.length.closed with tailType
+      have smaller := successor_less_iff.forward with kNat, lengthNat, bound
+      have previous := ih with tail, Dijkstra.optionTail(weights), Dijkstra.boolTail(flags), sourceDistance, tailType, smaller
+      rw equality
+      simp [Dijkstra.relax, Dijkstra.entry, Dijkstra.optionTail, flagAt]
+
+-- A set carrier for optional natural distances.
+def FiniteDistances : Set := { Option.some(d) | d ∈ ℕ }
+def DistanceValues : Set := {Option.none} ∪ FiniteDistances
+
+theorem DistanceValues.membership (value : Set)
+  shows value ∈ DistanceValues ↔ Option(ℕ, value)
+proof
+  have characterized : value ∈ DistanceValues ↔
+    (value = Option.none ∨ ∃ d ∈ ℕ, Option.some(d) = value)
+    simp [DistanceValues, union2.membership, singleton.membership, FiniteDistances]
+  constructor
+  . intro member
+    have shape := characterized.forward with member
+    cases shape with absent | finite
+    . rw absent
+      exact Option.inductive.constructor.none
+    . rcases finite with ⟨d, hd, equality⟩
+      rw ← equality
+      exact Option.inductive.constructor.some with hd
+  . intro valid
+    have options := Dijkstra.option_cases with valid
+    apply characterized.backward
+    cases options with absent | finite
+    . left
+      exact absent
+    . rcases finite with ⟨n, hn, equality⟩
+      right
+      refine ⟨n, hn, _⟩
+      symm
+      exact equality
+
+theorem DistanceValues.cells
+  shows ∀ value ∈ DistanceValues, Option(ℕ, value)
+proof
+  simp
+
+theorem relaxValue.closed (old weight sourceDistance : Option(ℕ), flag : Bool)
+  shows Option(ℕ, Dijkstra.relaxValue(old, weight, flag, sourceDistance))
+proof
+  induction flag
+  | Bool.false =>
+    have extended := Dijkstra.extension.closed at sourceDistance, weight with *
+    have minimized := Dijkstra.minOption.closed at old, Dijkstra.extension(sourceDistance, weight) with assumption, extended
+    simp [Dijkstra.relaxValue]
+  | Bool.true =>
+    simp [Dijkstra.relaxValue]
+
+theorem relax.closed (values weights : List(DistanceValues), flags : List(ℕ), sourceDistance : Option(ℕ))
+  shows List(DistanceValues, Dijkstra.relax(weights, values, flags, sourceDistance))
+proof
+  induction values generalizing weights flags
+  | List.nil =>
+    intros weights flags weightsType flagsType
+    have computed : Dijkstra.relax(weights, List.nil, flags, sourceDistance) = List.nil by simp [Dijkstra.relax]
+    rw computed
+    exact List.inductive.constructor.nil
+  | List.cons(head, tail) using ih =>
+    intros weights flags weightsType flagsType
+    have headType := DistanceValues.membership.forward at head with assumption
+    have weightType := entry.valid at DistanceValues, 0, weights with Naturals.constructor.zero, weightsType, DistanceValues.cells
+    have headNat := Dijkstra.boolHead.natural with flagsType
+    have condition := Dijkstra.equalNat.boolean with headNat, assumption
+    have nextType := relaxValue.closed at head, Dijkstra.entry(weights, 0), sourceDistance, equalNat(Dijkstra.boolHead(flags), 1) with headType, weightType
+    have nextMember := DistanceValues.membership.backward with nextType
+    have weightsTail := optionTail.closed with weightsType
+    have flagsTail := Dijkstra.boolTail.closed with flagsType
+    have tailResult := ih with Dijkstra.optionTail(weights), Dijkstra.boolTail(flags), weightsTail, flagsTail
+    have constructed := List.inductive.constructor.cons with nextMember, tailResult
+    simp [Dijkstra.relax]
+
+def vectorLength (values : Set) : Set := ListOps.length{A := DistanceValues}(values)
+
+theorem relax.length (A : Set, values : List(A), weights flags sourceDistance : Set)
+  shows vectorLength(Dijkstra.relax(weights, values, flags, sourceDistance)) = vectorLength(values)
+proof
+  induction values generalizing weights flags
+  | List.nil =>
+    intros weights flags
+    simp [Dijkstra.relax, vectorLength, ListOps.length]
+  | List.cons(head, tail) using ih =>
+    intros weights flags
+    have previous := ih with Dijkstra.optionTail(weights), Dijkstra.boolTail(flags)
+    unfold vectorLength at previous
+    simp [Dijkstra.relax, vectorLength, ListOps.length]
+
+end Dijkstra

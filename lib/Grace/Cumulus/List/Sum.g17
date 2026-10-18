@@ -1,0 +1,317 @@
+-- Sums of lists of natural numbers: the equation lemmas, concatenation,
+-- reversal, constant lists, bounds by the entries, splitting by take and
+-- drop or by a filter, and invariance under permutation
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.List.Sum
+import Permutation
+
+def listSum (xs : List(ℕ)) → Nat
+  | [] => 0
+  | x :: rest => add(x, listSum(rest))
+
+theorem listSum.nil
+  shows listSum([]) = 0
+proof
+  simp [listSum]
+
+theorem listSum.cons (x : Nat) (rest : List(ℕ))
+  shows listSum(x :: rest) = x + listSum(rest)
+proof
+  simp [listSum]
+
+theorem listSum.natural (xs : List(ℕ))
+  shows Nat(listSum(xs))
+proof
+  typecheck
+
+theorem listSum.singleton (x : Nat)
+  shows listSum(x :: []) = x
+proof
+  simp [listSum, add.right_unit]
+
+theorem listSum.append (xs ys : List(ℕ))
+  shows listSum(append(ys, xs)) = listSum(xs) + listSum(ys)
+proof
+  induction xs
+  | List.nil =>
+    rw [append.nil, listSum.nil, add.left_unit]
+    rfl
+  | List.cons(x, tail) using ih =>
+    have xIn : x ∈ ℕ by assumption
+    have xNat := nat.omega.backward with xIn
+    have appended := append.closed at ℕ, tail, ys with *
+    rw [append.cons, listSum.cons, ih, listSum.cons, add.associative]
+    rfl
+
+theorem listSum.reverse (xs : List(ℕ))
+  shows listSum(reverse(xs)) = listSum(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw reverse.nil
+    rfl
+  | List.cons(x, tail) using ih =>
+    have xIn : x ∈ ℕ by assumption
+    have xNat := nat.omega.backward with xIn
+    have single : List(ℕ, x :: []) by typecheck
+    have reversed : List(ℕ, reverse{ℕ}(tail)) by typecheck
+    rw [reverse.cons, listSum.append, ih, listSum.singleton, listSum.cons]
+    rw add.commutative
+    rfl
+
+theorem listSum.replicate (x : Nat) (n : Nat)
+  shows listSum(listReplicate(n, x)) = n * x
+proof
+  induction n
+  | zero =>
+    rw [listReplicate.zero, listSum.nil, mul.left_zero]
+    rfl
+  | succ(k) using ih =>
+    have xIn : x ∈ ℕ := nat.omega.forward with *
+    have list := listReplicate.closed at ℕ, x, k with xIn
+    rw [listReplicate.succ, listSum.cons, ih, mul.succ_left]
+    rfl
+
+theorem listSum.cons_le (x : Nat) (rest : List(ℕ))
+  shows listSum(rest) ≤ listSum(x :: rest)
+proof
+  rw listSum.cons
+  arith
+
+theorem listSum.head_le (x : Nat) (rest : List(ℕ))
+  shows x ≤ listSum(x :: rest)
+proof
+  rw listSum.cons
+  arith
+
+theorem listSum.le_of_mem (x : Set) (xs : List(ℕ))
+  requires member : x ∈ listSupport{ℕ}(xs)
+  shows x ≤ listSum(xs)
+proof
+  induction xs
+  | List.nil =>
+    intro member
+    rw listSupport.nil at member
+    exfalso
+    exact set.empty with member
+  | List.cons(y, tail) using ih =>
+    intro member
+    have yIn : y ∈ ℕ by assumption
+    have yNat := nat.omega.backward with yIn
+    have split := listSupport.mem_cons_iff.forward with yIn, member
+    rw listSum.cons
+    cases split with head | rest
+    . rw head
+      arith
+    . have inner := ih with rest
+      have subset := listSupport.subset at ℕ, tail with *
+      have xIn := subset with x, rest
+      have xNat := nat.omega.backward with xIn
+      arith
+
+theorem listSum.eq_zero (xs : List(ℕ))
+  requires zero : listSum(xs) = 0
+  shows ∀ x ∈ listSupport{ℕ}(xs), x = 0
+proof
+  intros x hx
+  have bound := listSum.le_of_mem with hx
+  rw zero at bound
+  have subset := listSupport.subset at ℕ, xs with *
+  have xIn := subset with x, hx
+  have xNat := nat.omega.backward with xIn
+  have lower : 0 ≤ x by arith
+  exact LessEqual.antisymmetric with bound, lower
+
+theorem listSum.zero_of_all (xs : List(ℕ))
+  requires zeros : ∀ x ∈ listSupport{ℕ}(xs), x = 0
+  shows listSum(xs) = 0
+proof
+  induction xs
+  | List.nil =>
+    intro zeros
+    exact listSum.nil
+  | List.cons(y, tail) using ih =>
+    intro zeros
+    have yIn : y ∈ ℕ by assumption
+    have headIn := listSupport.mem_cons_self at ℕ, y, tail with yIn
+    have head := zeros with y, headIn
+    have rest : ∀ x ∈ listSupport{ℕ}(tail), x = 0
+      intros x hx
+      have outer := listSupport.mem_cons_of_mem with yIn, hx
+      exact zeros with x, outer
+    have inner := ih with rest
+    rw [listSum.cons, head, inner, add.right_unit]
+    rfl
+
+theorem listSum.zero_iff (xs : List(ℕ))
+  shows listSum(xs) = 0 ↔ ∀ x ∈ listSupport{ℕ}(xs), x = 0
+proof
+  constructor
+  . intro zero
+    exact listSum.eq_zero with zero
+  . intro zeros
+    exact listSum.zero_of_all with zeros
+
+theorem listSum.take_add_drop (xs : List(ℕ)) (n : Nat)
+  shows listSum(listTake{ℕ}(n, xs)) + listSum(listDrop{ℕ}(n, xs)) = listSum(xs)
+proof
+  have split := listTake.append_drop at ℕ, xs, n with *
+  have taken := listTake.closed at ℕ, xs, n with *
+  have dropped := listDrop.closed at ℕ, xs, n with *
+  have sums := listSum.append at listTake{ℕ}(n, xs), listDrop{ℕ}(n, xs) with *
+  rw split at sums
+  symm
+  exact sums
+
+theorem listSum.filter_add_complement (S : Set) (xs : List(ℕ))
+  shows listSum(listFilter{ℕ}(S, xs)) + listSum(listFilter{ℕ}(ℕ ∖ S, xs)) = listSum(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw [listFilter.nil, listFilter.nil, listSum.nil, add.right_unit]
+    rfl
+  | List.cons(x, tail) using ih =>
+    have xIn : x ∈ ℕ by assumption
+    have xNat := nat.omega.backward with xIn
+    have kept := listFilter.closed at ℕ, S, tail with *
+    have discarded := listFilter.closed at ℕ, ℕ ∖ S, tail with *
+    have keptNat := listSum.natural at listFilter{ℕ}(S, tail) with *
+    have discardedNat := listSum.natural at listFilter{ℕ}(ℕ ∖ S, tail) with *
+    have alternatives : x ∈ S ∨ ¬(x ∈ S) by tauto
+    rw listSum.cons
+    cases alternatives with member | absent
+    . have notDifference : ¬(x ∈ ℕ ∖ S) by simp
+      rw [listFilter.cons_member, listFilter.cons_other, listSum.cons, add.associative, ih]
+      rfl
+    . have inDifference : x ∈ ℕ ∖ S by simp
+      rw [listFilter.cons_other, listFilter.cons_member, listSum.cons]
+      rw [add.swap, ih]
+      rfl
+
+theorem listSum.filter_le (S : Set) (xs : List(ℕ))
+  shows listSum(listFilter{ℕ}(S, xs)) ≤ listSum(xs)
+proof
+  have total := listSum.filter_add_complement at S, xs with *
+  have kept := listFilter.closed at ℕ, S, xs with *
+  have discarded := listFilter.closed at ℕ, ℕ ∖ S, xs with *
+  have keptNat := listSum.natural at listFilter{ℕ}(S, xs) with *
+  have discardedNat := listSum.natural at listFilter{ℕ}(ℕ ∖ S, xs) with *
+  rw ← total
+  arith
+
+theorem listSum.append_le_left (xs ys : List(ℕ))
+  shows listSum(xs) ≤ listSum(append(ys, xs))
+proof
+  have xsNat := listSum.natural at xs with *
+  have ysNat := listSum.natural at ys with *
+  rw listSum.append
+  arith
+
+theorem listSum.append_le_right (xs ys : List(ℕ))
+  shows listSum(ys) ≤ listSum(append(ys, xs))
+proof
+  have xsNat := listSum.natural at xs with *
+  have ysNat := listSum.natural at ys with *
+  rw listSum.append
+  arith
+
+theorem listSum.take_le (xs : List(ℕ)) (n : Nat)
+  shows listSum(listTake{ℕ}(n, xs)) ≤ listSum(xs)
+proof
+  have total := listSum.take_add_drop at xs, n with *
+  have taken := listTake.closed at ℕ, xs, n with *
+  have dropped := listDrop.closed at ℕ, xs, n with *
+  have takenNat := listSum.natural at listTake{ℕ}(n, xs) with *
+  have droppedNat := listSum.natural at listDrop{ℕ}(n, xs) with *
+  rw ← total
+  arith
+
+theorem listSum.drop_le (xs : List(ℕ)) (n : Nat)
+  shows listSum(listDrop{ℕ}(n, xs)) ≤ listSum(xs)
+proof
+  have total := listSum.take_add_drop at xs, n with *
+  have taken := listTake.closed at ℕ, xs, n with *
+  have dropped := listDrop.closed at ℕ, xs, n with *
+  have takenNat := listSum.natural at listTake{ℕ}(n, xs) with *
+  have droppedNat := listSum.natural at listDrop{ℕ}(n, xs) with *
+  rw ← total
+  arith
+
+-- The sum does not depend on the order of the entries.
+theorem listSum.of_permutation (xs ys : List(ℕ))
+  requires permutation : ListPermutation(ℕ, xs, ys)
+  shows listSum(xs) = listSum(ys)
+proof
+  induction xs generalizing ys
+  | List.nil =>
+    intros ys ysList permutation
+    have back := ListPermutation.symmetric with permutation
+    have empty := ListPermutation.nil with back
+    rw empty
+    rfl
+  | List.cons(x, tail) using ih =>
+    intros ys ysList permutation
+    have xIn : x ∈ ℕ by assumption
+    have xNat := nat.omega.backward with xIn
+    obtain ⟨front, frontList, back, backList, equal, rest⟩ :=
+      ListPermutation.cons_split with xIn, permutation
+    have appended := append.closed at ℕ, front, back with *
+    have inner := ih with append{ℕ}(back, front), appended, rest
+    have backCons : List(ℕ, x :: back) by typecheck
+    have frontNat := listSum.natural at front with *
+    have backNat := listSum.natural at back with *
+    rw [equal, listSum.cons, inner, listSum.append, listSum.append, listSum.cons]
+    exact add.swap at listSum(front), listSum(back), x with *
+
+theorem listSum.length_le_of_positive (xs : List(ℕ))
+  requires positive : ∀ x ∈ listSupport{ℕ}(xs), 0 < x
+  shows length{ℕ}(xs) ≤ listSum(xs)
+proof
+  induction xs
+  | List.nil =>
+    intro positive
+    rw [length.nil, listSum.nil]
+    arith
+  | List.cons(y, tail) using ih =>
+    intro positive
+    have yIn : y ∈ ℕ by assumption
+    have yNat := nat.omega.backward with yIn
+    have headIn := listSupport.mem_cons_self at ℕ, y, tail with yIn
+    have head := positive with y, headIn
+    have rest : ∀ x ∈ listSupport{ℕ}(tail), 0 < x
+      intros x hx
+      have outer := listSupport.mem_cons_of_mem with yIn, hx
+      exact positive with x, outer
+    have inner := ih with rest
+    have tailNat := listSum.natural at tail with *
+    rw [length.cons, listSum.cons]
+    arith
+
+theorem listSum.le_length_mul (xs : List(ℕ)) (bound : Nat)
+  requires bounded : ∀ x ∈ listSupport{ℕ}(xs), x ≤ bound
+  shows listSum(xs) ≤ length{ℕ}(xs) * bound
+proof
+  induction xs
+  | List.nil =>
+    intro bounded
+    rw [length.nil, listSum.nil, mul.left_zero]
+    arith
+  | List.cons(y, tail) using ih =>
+    intro bounded
+    have yIn : y ∈ ℕ by assumption
+    have yNat := nat.omega.backward with yIn
+    have headIn := listSupport.mem_cons_self at ℕ, y, tail with yIn
+    have head := bounded with y, headIn
+    have rest : ∀ x ∈ listSupport{ℕ}(tail), x ≤ bound
+      intros x hx
+      have outer := listSupport.mem_cons_of_mem with yIn, hx
+      exact bounded with x, outer
+    have inner := ih with rest
+    have tailNat := listSum.natural at tail with *
+    have product : Nat(length{ℕ}(tail) * bound) by typecheck
+    rw [length.cons, listSum.cons, mul.succ_left]
+    arith

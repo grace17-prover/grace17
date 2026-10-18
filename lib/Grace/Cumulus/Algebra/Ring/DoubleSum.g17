@@ -1,0 +1,229 @@
+-- Interchange of arbitrary finite rectangular sums over a commutative ring (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.DoubleSum
+import SumSupport
+import Cardinal.Product
+
+predicate RingRowValues (w A x n : Set) := ∀ j ∈ n, w((x, j)) ∈ A
+predicate RingMatrixValues (w A m n : Set) := ∀ i ∈ m, RingRowValues(w, A, i, n)
+predicate TransposedValues (w v m n : Set) := ∀ i ∈ m, ∀ j ∈ n, w((i, j)) = v((j, i))
+
+def ringRowSum (w add z x : Set, n : Nat) → Set
+  | w, add, z, x, zero => z
+  | w, add, z, x, succ(k) => call2(add, ringRowSum(w, add, z, x, k), w((x, k)))
+
+def ringDoubleSum (w add z : Set, m n : Nat) → Set
+  | w, add, z, zero, n => z
+  | w, add, z, succ(k), n => call2(add, ringDoubleSum(w, add, z, k, n), ringRowSum(w, add, z, k, n))
+
+theorem RingRowValues.prefix (w A x : Set, n : Nat)
+  requires values : RingRowValues(w, A, x, succ(n))
+  shows RingRowValues(w, A, x, n)
+proof
+  intros j hj
+  have included := membership.into_successor with *
+  exact values with j, included
+
+theorem RingRowValues.last (w A x : Set, n : Nat)
+  requires values : RingRowValues(w, A, x, succ(n))
+  shows w((x, n)) ∈ A
+proof
+  exact values with n, membership.self_successor at n with *
+
+theorem RingMatrixValues.prefix (w A n : Set, m : Nat)
+  requires values : RingMatrixValues(w, A, succ(m), n)
+  shows RingMatrixValues(w, A, m, n)
+proof
+  intros i hi
+  have included := membership.into_successor with *
+  exact values with i, included
+
+theorem RingMatrixValues.last (w A n : Set, m : Nat)
+  requires values : RingMatrixValues(w, A, succ(m), n)
+  shows RingRowValues(w, A, m, n)
+proof
+  exact values with m, membership.self_successor at m with *
+
+section Rings
+variable (A add zero neg mul one : Set)
+hypothesis ring : IsCommRing(A, add, zero, neg, mul, one)
+notation ring R := (A, add, zero, neg, mul, one)
+
+theorem ringRowSum.closed (w x : Set, n : Nat)
+  shows RingRowValues(w, A, x, n) → ringRowSum(w, add, zero, x, n) ∈ A
+proof
+  induction n
+  | zero =>
+    intro values
+    have ordinary := IsCommRing.ring with ring
+    rw ringRowSum
+    exact IsRing.zero_in_carrier with ordinary
+  | succ(k) using ih =>
+    intro values
+    have ordinary := IsCommRing.ring with ring
+    have prefix := RingRowValues.prefix at w, A, x, k with *
+    have last := RingRowValues.last at w, A, x, k with *
+    have previous := ih with prefix
+    rw ringRowSum
+    exact IsRing.add_closed with ordinary, previous, last
+
+theorem ringDoubleSum.closed (w : Set, m n : Nat)
+  shows RingMatrixValues(w, A, m, n) → ringDoubleSum(w, add, zero, m, n) ∈ A
+proof
+  induction m
+  | zero =>
+    intro values
+    have ordinary := IsCommRing.ring with ring
+    rw ringDoubleSum
+    exact IsRing.zero_in_carrier with ordinary
+  | succ(k) using ih =>
+    intro values
+    have ordinary := IsCommRing.ring with ring
+    have prefix := RingMatrixValues.prefix at w, A, n, k with *
+    have last := RingMatrixValues.last at w, A, n, k with *
+    have previous := ih with prefix
+    have rowClosed := ringRowSum.closed at A, add, zero, neg, mul, one, w, k, n with *
+    have row := rowClosed with last
+    rw ringDoubleSum
+    exact IsRing.add_closed with ordinary, previous, row
+
+theorem ringDoubleSum.empty_columns (w : Set, m : Nat)
+  shows ringDoubleSum(w, add, zero, m, (0:Nat)) = zero
+proof
+  induction m
+  | zero =>
+    rw ringDoubleSum
+    rfl
+  | succ(k) using ih =>
+    rw [ringDoubleSum, ringRowSum, ih]
+    ring
+
+-- A new column contributes one row of the transposed matrix.
+theorem ringDoubleSum.extend_columns (w v : Set, m n : Nat)
+  shows RingMatrixValues(w, A, m, succ(n)) → RingRowValues(v, A, n, m) →
+    (∀ i ∈ m, w((i, n)) = v((n, i))) →
+    ringDoubleSum(w, add, zero, m, succ(n)) = ringDoubleSum(w, add, zero, m, n) + ringRowSum(v, add, zero, n, m)
+proof
+  induction m
+  | zero =>
+    intros values rowValues transposed
+    simp [ringDoubleSum, ringRowSum]
+    ring
+  | succ(k) using ih =>
+    intros values rowValues transposed
+    have prefix := RingMatrixValues.prefix at w, A, succ(n), k with *
+    have last := RingMatrixValues.last at w, A, succ(n), k with *
+    have rowPrefix := RingRowValues.prefix at v, A, n, k with *
+    have rowLast := RingRowValues.last at v, A, n, k with *
+    have prefixTranspose : ∀ i ∈ k, w((i, n)) = v((n, i))
+      intros i hi
+      have included := membership.into_successor at i, k with *
+      exact transposed with i, included
+    have lastTranspose := transposed with k, membership.self_successor at k with *
+    have previous := ih with prefix, rowPrefix, prefixTranspose
+    have shorter : RingMatrixValues(w, A, k, n)
+      intros i hi
+      have row := prefix with i, hi
+      exact RingRowValues.prefix at w, A, i, n with *
+    have lastPrefix := RingRowValues.prefix at w, A, k, n with *
+    have totalClosed := ringDoubleSum.closed at A, add, zero, neg, mul, one, w, k, n with *
+    have totalIn := totalClosed with shorter
+    have columnClosed := ringRowSum.closed at A, add, zero, neg, mul, one, v, n, k with *
+    have columnIn := columnClosed with rowPrefix
+    have rowClosed := ringRowSum.closed at A, add, zero, neg, mul, one, w, k, n with *
+    have rowIn := rowClosed with lastPrefix
+    rw [ringDoubleSum, ringDoubleSum, ringRowSum, ringRowSum, previous, lastTranspose]
+    ring
+
+theorem ringDoubleSum.transpose (w v : Set, m n : Nat)
+  shows RingMatrixValues(w, A, m, n) → RingMatrixValues(v, A, n, m) → TransposedValues(w, v, m, n) →
+    ringDoubleSum(w, add, zero, m, n) = ringDoubleSum(v, add, zero, n, m)
+proof
+  induction n
+  | zero =>
+    intros valuesW valuesV transposed
+    have empty := ringDoubleSum.empty_columns at A, add, zero, neg, mul, one, w, m with *
+    rw [empty, ringDoubleSum]
+    rfl
+  | succ(k) using ih =>
+    intros valuesW valuesV transposed
+    have prefixW : RingMatrixValues(w, A, m, k)
+      have rows := valuesW
+      intros i hi
+      have row := rows with i, hi
+      exact RingRowValues.prefix at w, A, i, k with *
+    have prefixV := RingMatrixValues.prefix at v, A, m, k with *
+    have lastV := RingMatrixValues.last at v, A, m, k with *
+    have prefixTranspose : TransposedValues(w, v, m, k)
+      intros i hi j hj
+      have included := membership.into_successor at j, k with *
+      exact transposed with i, hi, j, included
+    have lastTranspose : ∀ i ∈ m, w((i, k)) = v((k, i))
+      intros i hi
+      exact transposed with i, hi, k, membership.self_successor at k with *
+    have previous := ih with prefixW, prefixV, prefixTranspose
+    have extension := ringDoubleSum.extend_columns at A, add, zero, neg, mul, one, w, v, m, k with *, valuesW, lastV, lastTranspose
+    rw [extension, ringDoubleSum, previous]
+    rfl
+
+end Rings
+
+-- A matrix is a function on a Cartesian rectangle.
+theorem RingMatrixValues.of_function (w A m n : Set)
+  requires function : w : m × n → A
+  shows RingMatrixValues(w, A, m, n)
+proof
+  intros i hi j hj
+  have pair := product.pair with hi, hj
+  exact FunctionBetween.apply_closed with *
+
+defgraph transposedMatrix (m n A w : Set) (p ∈ n × m) : A := w(productSwap(n, m)(p))
+requires matrix : w : m × n → A
+proof
+  have swap := productSwap.function at n, m
+  have pair := FunctionBetween.apply_closed with *
+  exact FunctionBetween.apply_closed with *
+
+theorem transposedMatrix.pair (m n A w i j : Set)
+  requires matrix : w : m × n → A
+  requires row : i ∈ m
+  requires column : j ∈ n
+  shows transposedMatrix(m, n, A, w)((j, i)) = w((i, j))
+proof
+  have pair := product.pair at j, i, n, m with *
+  have swap := productSwap.pair at n, m, j, i with *
+  have value := transposedMatrix.value at m, n, A, w, (j, i) with *
+  cc
+
+theorem transposedMatrix.involution (m n A w : Set)
+  requires matrix : w : m × n → A
+  shows transposedMatrix(n, m, A, transposedMatrix(m, n, A, w)) = w
+proof
+  have once := transposedMatrix.function at m, n, A, w with *
+  have twice := transposedMatrix.function at n, m, A, transposedMatrix(m, n, A, w) with *
+  apply FunctionBetween.ext with twice, matrix
+  intros p hp
+  obtain ⟨bound, i, hi, j, hj, shape⟩ := product.membership.forward with hp
+  have first := transposedMatrix.pair at m, n, A, w, i, j with *
+  have second := transposedMatrix.pair at n, m, A, transposedMatrix(m, n, A, w), j, i with *
+  cc
+
+-- Public interface: one matrix graph, with all side conditions explicit.
+theorem ringDoubleSum.interchange (A add zero neg mul one w : Set, m n : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires matrix : w : m × n → A
+  shows ringDoubleSum(w, add, zero, m, n) = ringDoubleSum(transposedMatrix(m, n, A, w), add, zero, n, m)
+proof
+  have transposed := transposedMatrix.function at m, n, A, w with *
+  have valuesW := RingMatrixValues.of_function with matrix
+  have valuesV := RingMatrixValues.of_function with transposed
+  have entries : TransposedValues(w, transposedMatrix(m, n, A, w), m, n)
+    intros i hi j hj
+    symm
+    exact transposedMatrix.pair with *
+  have interchange := ringDoubleSum.transpose at A, add, zero, neg, mul, one, w, transposedMatrix(m, n, A, w), m, n with *
+  exact interchange with valuesW, valuesV, entries

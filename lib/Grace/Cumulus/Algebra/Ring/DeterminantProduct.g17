@@ -1,0 +1,607 @@
+-- The determinant is multiplicative: det(MN) = det(M) · det(N). Each
+-- Leibniz term of MN is a product of row sums, which expands over the
+-- functions f : n → n; interchanging the two sums leaves, for each f, the
+-- determinant of the matrix whose rows are the rows f(i) of N, which
+-- vanishes unless f is a permutation and is then sign(f) · det(N)
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.DeterminantProduct
+import DeterminantRowPermutation
+import ProductExpansion
+import MatrixEntries
+
+-- The pair weights of the entries of a product along a permutation p:
+-- (i, k) ↦ M[i, k] · N[k, p(i)].
+defgraph productPairWeights (n A add zero neg mul one M N p : Set) (q ∈ n × n) : A :=
+  call2(mul, M[fst(q), snd(q)], N[snd(q), p(fst(q))])
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires matrixM : RingMatrix(n, A, M)
+requires matrixN : RingMatrix(n, A, N)
+requires function : p : n → n
+proof
+  obtain ⟨bound, i, hi, k, hk, shape⟩ := product.membership.forward with assumption
+  have first : fst(q) = i
+    rw shape
+    exact fst.pair at i, k
+  have second : snd(q) = k
+    rw shape
+    exact snd.pair at i, k
+  rw [first, second]
+  have image := FunctionBetween.apply_closed with function, hi
+  have entryM := RingMatrix.entry at n, A, M, i, k with matrixM, hi, hk
+  have entryN := RingMatrix.entry at n, A, N, k, p(i) with matrixN, hk, image
+  have ordinary := IsCommRing.ring with ring
+  exact IsRing.mul_closed with ordinary, entryM, entryN
+
+-- The matrix whose row i is the row f(i) of N.
+defgraph selectedRows (n A N f : Set) (q ∈ n × n) : A := N[f(fst(q)), snd(q)]
+requires matrixN : RingMatrix(n, A, N)
+requires function : f : n → n
+proof
+  obtain ⟨bound, i, hi, j, hj, shape⟩ := product.membership.forward with assumption
+  have first : fst(q) = i
+    rw shape
+    exact fst.pair at i, j
+  have second : snd(q) = j
+    rw shape
+    exact snd.pair at i, j
+  rw [first, second]
+  have image := FunctionBetween.apply_closed with function, hi
+  exact RingMatrix.entry at n, A, N, f(i), j with matrixN, image, hj
+
+theorem selectedRows.matrix (n A N f : Set)
+  requires matrixN : RingMatrix(n, A, N)
+  requires function : f : n → n
+  shows RingMatrix(n, A, selectedRows(n, A, N, f))
+proof
+  unfold RingMatrix
+  exact selectedRows.function at n, A, N, f with matrixN, function
+
+theorem selectedRows.entry (n A N f i j : Set)
+  requires matrixN : RingMatrix(n, A, N)
+  requires function : f : n → n
+  requires hi : i ∈ n
+  requires hj : j ∈ n
+  shows selectedRows(n, A, N, f)[i, j] = N[f(i), j]
+proof
+  have pair := product.pair at i, j, n, n with hi, hj
+  have value := selectedRows.value at n, A, N, f, (i, j) with matrixN, function, pair
+  rw [value, fst.pair, snd.pair]
+  rfl
+
+-- The terms sign(p) · (∏ M[i, f(i)]) · (∏ N[f(i), p(i)]) indexed by a
+-- permutation p and a function f.
+defgraph doubleTerms (n A add zero neg mul one M N : Set)
+    (q ∈ permutations(n) × functionSpace(n, n)) : A :=
+  call2(mul, permutationSign(n, A, add, zero, neg, mul, one, fst(q)),
+    call2(mul, functionProducts(n, n, A, add, zero, neg, mul, one, M)(snd(q)),
+      functionProducts(n, n, A, add, zero, neg, mul, one, selectedRows(n, A, N, snd(q)))(fst(q))))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires finite : Finite(n)
+requires matrixM : RingMatrix(n, A, M)
+requires matrixN : RingMatrix(n, A, N)
+proof
+  obtain ⟨bound, p, hp, f, hf, shape⟩ := product.membership.forward with assumption
+  have first : fst(q) = p
+    rw shape
+    exact fst.pair at p, f
+  have second : snd(q) = f
+    rw shape
+    exact snd.pair at p, f
+  rw [first, second]
+  have fFunction := functionSpace.membership.forward with hf
+  have pFunction := permutations.function with hp
+  have pIn : p ∈ functionSpace(n, n) := functionSpace.membership.backward with pFunction
+  have matrixF := selectedRows.matrix at n, A, N, f with matrixN, fFunction
+  unfold RingMatrix at matrixM
+  unfold RingMatrix at matrixF
+  have productsM := functionProducts.function at n, n, A, add, zero, neg, mul, one, M
+    with ring, finite, matrixM
+  have productsF := functionProducts.function at n, n, A, add, zero, neg, mul, one,
+    selectedRows(n, A, N, f) with ring, finite, matrixF
+  have aIn := FunctionBetween.apply_closed with productsM, hf
+  have bIn := FunctionBetween.apply_closed with productsF, pIn
+  have sign := permutationSign.closed at A, add, zero, neg, mul, one, n, p with ring, finite
+  have ordinary := IsCommRing.ring with ring
+  have inner := IsRing.mul_closed with ordinary, aIn, bIn
+  exact IsRing.mul_closed with ordinary, sign, inner
+
+section Product
+variable (A add zero neg mul one : Set)
+hypothesis ring : IsCommRing(A, add, zero, neg, mul, one)
+
+-- A function n → n that is not a permutation repeats a value.
+theorem functionSpace.collision (n : Nat) (f : Set)
+  requires hf : f ∈ functionSpace(n, n)
+  requires outside : ¬(f ∈ permutations(n))
+  shows ∃ a ∈ n, ∃ b ∈ n, a ≠ b ∧ f(a) = f(b)
+proof
+  have function := functionSpace.membership.forward with hf
+  have finite := Finite.natural at n
+  by_contra
+  rename this => none
+  have cancel : ∀ x ∈ n, ∀ y ∈ n, f(x) = f(y) → x = y
+    intros x hx y hy same
+    by_contra
+    exact none with ⟨x, hx, y, hy, this, same⟩
+  have injective := Injective.of_pointwise with function, cancel
+  have bijective := Finite.self_injective_bijective with injective, finite
+  have member := permutations.of_bijective with bijective
+  exact outside with member
+
+-- The product of the entries of P along p, when P is the product of M and
+-- N, is the sum over the functions f of the products of picked entries.
+theorem productPairWeights.product (n : Nat) (M N P p : Set)
+  requires matrixM : RingMatrix(n, A, M)
+  requires matrixN : RingMatrix(n, A, N)
+  requires matrixP : RingMatrix(n, A, P)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n,
+    P[i, j] = matrixProductEntry(n, A, add, zero, neg, mul, one, M, N, i, j)
+  requires hp : p ∈ permutations(n)
+  shows finiteRingProduct(n, A, add, zero, neg, mul, one, permutationEntries(n, A, P, p)) =
+    finiteRingSum(functionSpace(n, n), A, add, zero, neg, mul, one,
+      functionProducts(n, n, A, add, zero, neg, mul, one,
+        productPairWeights(n, A, add, zero, neg, mul, one, M, N, p)))
+proof
+  have finite := Finite.natural at n
+  have pBijective := permutations.bijective with hp
+  have pFunction := permutations.function with hp
+  have weightsP := permutationEntries.function at n, A, P, p with matrixP, pBijective
+  have pairs := productPairWeights.function at n, A, add, zero, neg, mul, one, M, N, p
+    with ring, matrixM, matrixN, pFunction
+  have rows := finiteRowSums.function at n, n, A, add, zero, neg, mul, one,
+    productPairWeights(n, A, add, zero, neg, mul, one, M, N, p) with ring, finite, pairs
+  have sameRows : ∀ i ∈ n, permutationEntries(n, A, P, p)(i) =
+      finiteRowSums(n, n, A, add, zero, neg, mul, one,
+        productPairWeights(n, A, add, zero, neg, mul, one, M, N, p))(i)
+    intros i hi
+    have image := FunctionBetween.apply_closed with pFunction, hi
+    have entry := permutationEntries.value at n, A, P, p, i with matrixP, pBijective, hi
+    have productEntry := entries with i, hi, p(i), image
+    have rowValue := finiteRowSums.value at n, n, A, add, zero, neg, mul, one,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), i with ring, finite, pairs, hi
+    have rowWeights := finiteRowWeights.function at n, n, A,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), i with pairs, hi
+    have productWeights := matrixProductWeights.function at n, A, add, zero, neg, mul, one,
+      M, N, i, p(i) with ring, matrixM, matrixN, hi, image
+    have sameWeights : ∀ k ∈ n, matrixProductWeights(n, A, add, zero, neg, mul, one, M, N, i, p(i))(k) =
+        finiteRowWeights(n, n, A, productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), i)(k)
+      intros k hk
+      have left := matrixProductWeights.value at n, A, add, zero, neg, mul, one, M, N, i, p(i), k
+        with ring, matrixM, matrixN, hi, image, hk
+      have right := finiteRowWeights.value at n, n, A,
+        productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), i, k with pairs, hi, hk
+      have pair := product.pair at i, k, n, n with hi, hk
+      have pairValue := productPairWeights.value at n, A, add, zero, neg, mul, one, M, N, p, (i, k)
+        with ring, matrixM, matrixN, pFunction, pair
+      rw [left, right, pairValue, fst.pair, snd.pair]
+      rfl
+    have congruent := finiteRingSum.congr at n, A, add, zero, neg, mul, one,
+      matrixProductWeights(n, A, add, zero, neg, mul, one, M, N, i, p(i)),
+      finiteRowWeights(n, n, A, productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), i)
+      with ring, finite, productWeights, rowWeights, sameWeights
+    rw [entry, productEntry, rowValue]
+    unfold matrixProductEntry
+    rfl
+  have congruent := finiteRingProduct.congr at n, A, add, zero, neg, mul, one,
+    permutationEntries(n, A, P, p),
+    finiteRowSums(n, n, A, add, zero, neg, mul, one,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p))
+    with ring, finite, weightsP, rows, sameRows
+  have expansion := finiteRingProduct.row_sums at n, A, add, zero, neg, mul, one, n
+    with ring, finite
+  have expanded := expansion with productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), pairs
+  rw [congruent, expanded]
+  rfl
+
+-- The product of the picked pair weights splits into the product over M
+-- and the product over the selected rows of N.
+theorem productPairWeights.split (n : Nat) (M N p f : Set)
+  requires matrixM : RingMatrix(n, A, M)
+  requires matrixN : RingMatrix(n, A, N)
+  requires hp : p ∈ permutations(n)
+  requires hf : f ∈ functionSpace(n, n)
+  shows functionProducts(n, n, A, add, zero, neg, mul, one,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p))(f) =
+    call2(mul, functionProducts(n, n, A, add, zero, neg, mul, one, M)(f),
+      functionProducts(n, n, A, add, zero, neg, mul, one, selectedRows(n, A, N, f))(p))
+proof
+  have finite := Finite.natural at n
+  have pFunction := permutations.function with hp
+  have fFunction := functionSpace.membership.forward with hf
+  have pIn : p ∈ functionSpace(n, n) := functionSpace.membership.backward with pFunction
+  have pairs := productPairWeights.function at n, A, add, zero, neg, mul, one, M, N, p
+    with ring, matrixM, matrixN, pFunction
+  have matrixF := selectedRows.matrix at n, A, N, f with matrixN, fFunction
+  have mFunction : M : n × n → A := matrixM
+  have fMatrix : selectedRows(n, A, N, f) : n × n → A := matrixF
+  have valuePairs := functionProducts.value at n, n, A, add, zero, neg, mul, one,
+    productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), f with ring, finite, pairs, hf
+  have valueM := functionProducts.value at n, n, A, add, zero, neg, mul, one, M, f
+    with ring, finite, mFunction, hf
+  have valueF := functionProducts.value at n, n, A, add, zero, neg, mul, one,
+    selectedRows(n, A, N, f), p with ring, finite, fMatrix, pIn
+  have pickedPairs := pickedWeights.function at n, n, A,
+    productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), f with pairs, fFunction
+  have pickedM := pickedWeights.function at n, n, A, M, f with mFunction, fFunction
+  have pickedF := pickedWeights.function at n, n, A, selectedRows(n, A, N, f), p
+    with fMatrix, pFunction
+  have equations : ∀ i ∈ n,
+      pickedWeights(n, n, A, productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), f)(i) =
+      call2(mul, pickedWeights(n, n, A, M, f)(i),
+        pickedWeights(n, n, A, selectedRows(n, A, N, f), p)(i))
+    intros i hi
+    have fi := FunctionBetween.apply_closed with fFunction, hi
+    have pi := FunctionBetween.apply_closed with pFunction, hi
+    have left := pickedWeights.value at n, n, A,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), f, i with pairs, fFunction, hi
+    have pair := product.pair at i, f(i), n, n with hi, fi
+    have pairValue := productPairWeights.value at n, A, add, zero, neg, mul, one, M, N, p, (i, f(i))
+      with ring, matrixM, matrixN, pFunction, pair
+    have rightM := pickedWeights.value at n, n, A, M, f, i with mFunction, fFunction, hi
+    have rightF := pickedWeights.value at n, n, A, selectedRows(n, A, N, f), p, i
+      with fMatrix, pFunction, hi
+    have selected := selectedRows.entry at n, A, N, f, i, p(i) with matrixN, fFunction, hi, pi
+    rw [left, pairValue, fst.pair, snd.pair, rightM, rightF, selected]
+    rfl
+  have split := finiteRingProduct.mul at n, A, add, zero, neg, mul, one,
+    pickedWeights(n, n, A, M, f), pickedWeights(n, n, A, selectedRows(n, A, N, f), p),
+    pickedWeights(n, n, A, productPairWeights(n, A, add, zero, neg, mul, one, M, N, p), f)
+    with ring, finite, pickedM, pickedF, pickedPairs, equations
+  rw [valuePairs, valueM, valueF, split]
+  rfl
+
+-- The inner sum over the permutations, for a fixed f, is the product over
+-- M times the determinant of the selected rows of N.
+theorem doubleTerms.column (n : Nat) (M N f : Set)
+  requires matrixM : RingMatrix(n, A, M)
+  requires matrixN : RingMatrix(n, A, N)
+  requires hf : f ∈ functionSpace(n, n)
+  shows finiteRingSum(permutations(n), A, add, zero, neg, mul, one,
+      finiteRowWeights(functionSpace(n, n), permutations(n), A,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f)) =
+    call2(mul, functionProducts(n, n, A, add, zero, neg, mul, one, M)(f),
+      determinant(n, A, add, zero, neg, mul, one, selectedRows(n, A, N, f)))
+proof
+  have finite := Finite.natural at n
+  have permutationsFinite := permutations.finite at n with finite
+  have fFunction := functionSpace.membership.forward with hf
+  have matrixF := selectedRows.matrix at n, A, N, f with matrixN, fFunction
+  have mFunction : M : n × n → A := matrixM
+  have fMatrix : selectedRows(n, A, N, f) : n × n → A := matrixF
+  have terms := doubleTerms.function at n, A, add, zero, neg, mul, one, M, N
+    with ring, finite, matrixM, matrixN
+  have transposed := transposedMatrix.function at permutations(n), functionSpace(n, n), A,
+    doubleTerms(n, A, add, zero, neg, mul, one, M, N) with terms
+  have rowWeights := finiteRowWeights.function at functionSpace(n, n), permutations(n), A,
+    transposedMatrix(permutations(n), functionSpace(n, n), A,
+      doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f with transposed, hf
+  have termsF := determinantTerms.function at n, A, add, zero, neg, mul, one,
+    selectedRows(n, A, N, f) with ring, finite, matrixF
+  have productsM := functionProducts.function at n, n, A, add, zero, neg, mul, one, M
+    with ring, finite, mFunction
+  have aIn := FunctionBetween.apply_closed with productsM, hf
+  have values : ∀ p ∈ permutations(n),
+      finiteRowWeights(functionSpace(n, n), permutations(n), A,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f)(p) =
+      call2(mul, functionProducts(n, n, A, add, zero, neg, mul, one, M)(f),
+        determinantTerms(n, A, add, zero, neg, mul, one, selectedRows(n, A, N, f))(p))
+    intros p hp
+    have pFunction := permutations.function with hp
+    have pBijective := permutations.bijective with hp
+    have pIn : p ∈ functionSpace(n, n) := functionSpace.membership.backward with pFunction
+    have rowValue := finiteRowWeights.value at functionSpace(n, n), permutations(n), A,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f, p with transposed, hf, hp
+    have swap := transposedMatrix.pair at permutations(n), functionSpace(n, n), A,
+      doubleTerms(n, A, add, zero, neg, mul, one, M, N), p, f with terms, hp, hf
+    have pair := product.pair at p, f, permutations(n), functionSpace(n, n) with hp, hf
+    have termValue := doubleTerms.value at n, A, add, zero, neg, mul, one, M, N, (p, f)
+      with ring, finite, matrixM, matrixN, pair
+    have detTerm := determinantTerms.value at n, A, add, zero, neg, mul, one,
+      selectedRows(n, A, N, f), p with ring, finite, matrixF, hp
+    have valueF := functionProducts.value at n, n, A, add, zero, neg, mul, one,
+      selectedRows(n, A, N, f), p with ring, finite, fMatrix, pIn
+    have pickedF := pickedWeights.function at n, n, A, selectedRows(n, A, N, f), p
+      with fMatrix, pFunction
+    have entriesF := permutationEntries.function at n, A, selectedRows(n, A, N, f), p
+      with matrixF, pBijective
+    have sameEntries : ∀ i ∈ n, permutationEntries(n, A, selectedRows(n, A, N, f), p)(i) =
+        pickedWeights(n, n, A, selectedRows(n, A, N, f), p)(i)
+      intros i hi
+      have left := permutationEntries.value at n, A, selectedRows(n, A, N, f), p, i
+        with matrixF, pBijective, hi
+      have right := pickedWeights.value at n, n, A, selectedRows(n, A, N, f), p, i
+        with fMatrix, pFunction, hi
+      rw [left, right]
+      rfl
+    have congruent := finiteRingProduct.congr at n, A, add, zero, neg, mul, one,
+      permutationEntries(n, A, selectedRows(n, A, N, f), p),
+      pickedWeights(n, n, A, selectedRows(n, A, N, f), p)
+      with ring, finite, entriesF, pickedF, sameEntries
+    have sign := permutationSign.closed at A, add, zero, neg, mul, one, n, p with ring, finite
+    have bIn := finiteRingProduct.closed at n, A, add, zero, neg, mul, one,
+      pickedWeights(n, n, A, selectedRows(n, A, N, f), p) with ring, finite, pickedF
+    rw [rowValue, swap, termValue, fst.pair, snd.pair, detTerm, congruent, valueF]
+    ring
+  have scaled := finiteRingSum.scale_eq at permutations(n), A, add, zero, neg, mul, one,
+    determinantTerms(n, A, add, zero, neg, mul, one, selectedRows(n, A, N, f)),
+    finiteRowWeights(functionSpace(n, n), permutations(n), A,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f),
+    functionProducts(n, n, A, add, zero, neg, mul, one, M)(f)
+    with ring, permutationsFinite, termsF, rowWeights, aIn, values
+  rw scaled
+  unfold determinant
+  rfl
+
+-- The determinant of a product matrix is the product of the determinants.
+theorem determinant.product (n : Nat) (M N P : Set)
+  requires matrixM : RingMatrix(n, A, M)
+  requires matrixN : RingMatrix(n, A, N)
+  requires matrixP : RingMatrix(n, A, P)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n,
+    P[i, j] = matrixProductEntry(n, A, add, zero, neg, mul, one, M, N, i, j)
+  shows determinant(n, A, add, zero, neg, mul, one, P) =
+    call2(mul, determinant(n, A, add, zero, neg, mul, one, M),
+      determinant(n, A, add, zero, neg, mul, one, N))
+proof
+  have finite := Finite.natural at n
+  have permutationsFinite := permutations.finite at n with finite
+  have spaceFinite := functionSpace.finite at n, n with finite, finite
+  have mFunction : M : n × n → A := matrixM
+  have ordinary := IsCommRing.ring with ring
+  have termsP := determinantTerms.function at n, A, add, zero, neg, mul, one, P
+    with ring, finite, matrixP
+  have termsM := determinantTerms.function at n, A, add, zero, neg, mul, one, M
+    with ring, finite, matrixM
+  have terms := doubleTerms.function at n, A, add, zero, neg, mul, one, M, N
+    with ring, finite, matrixM, matrixN
+  have rows := finiteRowSums.function at permutations(n), functionSpace(n, n), A, add, zero,
+    neg, mul, one, doubleTerms(n, A, add, zero, neg, mul, one, M, N) with ring, spaceFinite, terms
+  have productsM := functionProducts.function at n, n, A, add, zero, neg, mul, one, M
+    with ring, finite, mFunction
+  have detN := determinant.closed at A, add, zero, neg, mul, one, N, n with ring, matrixN
+  -- Each term of P is the row sum of the double terms at p.
+  have rowValues : ∀ p ∈ permutations(n),
+      determinantTerms(n, A, add, zero, neg, mul, one, P)(p) =
+      finiteRowSums(permutations(n), functionSpace(n, n), A, add, zero, neg, mul, one,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))(p)
+    intros p hp
+    have pFunction := permutations.function with hp
+    have termP := determinantTerms.value at n, A, add, zero, neg, mul, one, P, p
+      with ring, finite, matrixP, hp
+    have expansion := productPairWeights.product at A, add, zero, neg, mul, one, n, M, N, P, p
+      with ring, matrixM, matrixN, matrixP, entries, hp
+    have rowValue := finiteRowSums.value at permutations(n), functionSpace(n, n), A, add, zero,
+      neg, mul, one, doubleTerms(n, A, add, zero, neg, mul, one, M, N), p
+      with ring, spaceFinite, terms, hp
+    have rowWeights := finiteRowWeights.function at permutations(n), functionSpace(n, n), A,
+      doubleTerms(n, A, add, zero, neg, mul, one, M, N), p with terms, hp
+    have pairs := productPairWeights.function at n, A, add, zero, neg, mul, one, M, N, p
+      with ring, matrixM, matrixN, pFunction
+    have products := functionProducts.function at n, n, A, add, zero, neg, mul, one,
+      productPairWeights(n, A, add, zero, neg, mul, one, M, N, p) with ring, finite, pairs
+    have sign := permutationSign.closed at A, add, zero, neg, mul, one, n, p with ring, finite
+    have scaledValues : ∀ f ∈ functionSpace(n, n),
+        finiteRowWeights(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N), p)(f) =
+        call2(mul, permutationSign(n, A, add, zero, neg, mul, one, p),
+          functionProducts(n, n, A, add, zero, neg, mul, one,
+            productPairWeights(n, A, add, zero, neg, mul, one, M, N, p))(f))
+      intros f hf
+      have left := finiteRowWeights.value at permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N), p, f with terms, hp, hf
+      have pair := product.pair at p, f, permutations(n), functionSpace(n, n) with hp, hf
+      have termValue := doubleTerms.value at n, A, add, zero, neg, mul, one, M, N, (p, f)
+        with ring, finite, matrixM, matrixN, pair
+      have split := productPairWeights.split at A, add, zero, neg, mul, one, n, M, N, p, f
+        with ring, matrixM, matrixN, hp, hf
+      rw [left, termValue, fst.pair, snd.pair, split]
+      rfl
+    have scaled := finiteRingSum.scale_eq at functionSpace(n, n), A, add, zero, neg, mul, one,
+      functionProducts(n, n, A, add, zero, neg, mul, one,
+        productPairWeights(n, A, add, zero, neg, mul, one, M, N, p)),
+      finiteRowWeights(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N), p),
+      permutationSign(n, A, add, zero, neg, mul, one, p)
+      with ring, spaceFinite, products, rowWeights, sign, scaledValues
+    rw [termP, expansion, rowValue, scaled]
+    rfl
+  have congruent := finiteRingSum.congr at permutations(n), A, add, zero, neg, mul, one,
+    determinantTerms(n, A, add, zero, neg, mul, one, P),
+    finiteRowSums(permutations(n), functionSpace(n, n), A, add, zero, neg, mul, one,
+      doubleTerms(n, A, add, zero, neg, mul, one, M, N))
+    with ring, permutationsFinite, termsP, rows, rowValues
+  have interchange := finiteDoubleSum.interchange at permutations(n), functionSpace(n, n), A,
+    add, zero, neg, mul, one, doubleTerms(n, A, add, zero, neg, mul, one, M, N)
+    with ring, permutationsFinite, spaceFinite, terms
+  have transposed := transposedMatrix.function at permutations(n), functionSpace(n, n), A,
+    doubleTerms(n, A, add, zero, neg, mul, one, M, N) with terms
+  have rowsT := finiteRowSums.function at functionSpace(n, n), permutations(n), A, add, zero,
+    neg, mul, one, transposedMatrix(permutations(n), functionSpace(n, n), A,
+      doubleTerms(n, A, add, zero, neg, mul, one, M, N)) with ring, permutationsFinite, transposed
+  have permutationsSubset : permutations(n) ⊆ functionSpace(n, n)
+    intros p hp
+    exact functionSpace.membership.backward with (permutations.function with hp)
+  have restrictedRows := restrict.domain_function at
+    finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))), functionSpace(n, n), A,
+    permutations(n) with rowsT, permutationsSubset
+  -- The column at f is the product over M times the determinant of the
+  -- selected rows of N.
+  have columns : ∀ f ∈ functionSpace(n, n),
+      finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N)))(f) =
+      call2(mul, functionProducts(n, n, A, add, zero, neg, mul, one, M)(f),
+        determinant(n, A, add, zero, neg, mul, one, selectedRows(n, A, N, f)))
+    intros f hf
+    have rowValue := finiteRowSums.value at functionSpace(n, n), permutations(n), A, add, zero,
+      neg, mul, one, transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N)), f
+      with ring, permutationsFinite, transposed, hf
+    have column := doubleTerms.column at A, add, zero, neg, mul, one, n, M, N, f
+      with ring, matrixM, matrixN, hf
+    rw [rowValue, column]
+    rfl
+  have agreement : ∀ f ∈ permutations(n),
+      finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N)))(f) =
+      restrict(finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N))), permutations(n))(f)
+    intros f hf
+    have value := restrict.domain_apply at
+      finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N))), functionSpace(n, n), A,
+      permutations(n), f with rowsT, permutationsSubset, hf
+    symm at value
+    exact value
+  -- Outside the permutations a column vanishes: two rows of the selected
+  -- matrix coincide.
+  have vanishing : ∀ f ∈ functionSpace(n, n), ¬(f ∈ permutations(n)) →
+      finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N)))(f) = zero
+    intros f hf outside
+    have column := columns with f, hf
+    have fFunction := functionSpace.membership.forward with hf
+    have matrixF := selectedRows.matrix at n, A, N, f with matrixN, fFunction
+    obtain ⟨a, ha, b, hb, distinct, same⟩ := functionSpace.collision at A, add, zero, neg, mul,
+      one, n, f with ring, hf, outside
+    have equalRows : ∀ j ∈ n, selectedRows(n, A, N, f)[a, j] = selectedRows(n, A, N, f)[b, j]
+      intros j hj
+      have left := selectedRows.entry at n, A, N, f, a, j with matrixN, fFunction, ha, hj
+      have right := selectedRows.entry at n, A, N, f, b, j with matrixN, fFunction, hb, hj
+      rw [left, right, same]
+      rfl
+    have vanish := determinant.equal_rows at A, add, zero, neg, mul, one, n, a, b,
+      selectedRows(n, A, N, f) with ring, matrixF, ha, hb, distinct, equalRows
+    have aIn := FunctionBetween.apply_closed with productsM, hf
+    have annihilate := IsRing.mul_zero at A, add, zero, neg, mul, one,
+      functionProducts(n, n, A, add, zero, neg, mul, one, M)(f) with ordinary, aIn
+    rw [column, vanish, annihilate]
+    rfl
+  have extension := finiteRingSum.zero_extension at functionSpace(n, n), permutations(n), A,
+    add, zero, neg, mul, one,
+    finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))),
+    restrict(finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))), permutations(n))
+    with ring, spaceFinite, rowsT, restrictedRows, permutationsSubset, agreement, vanishing
+  -- On the permutations the column at f is det(N) times the term of M at f.
+  have commutative := IsCommRing.commutative with ring
+  unfold Commutative at commutative
+  have scaledTerms : ∀ f ∈ permutations(n),
+      restrict(finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+        transposedMatrix(permutations(n), functionSpace(n, n), A,
+          doubleTerms(n, A, add, zero, neg, mul, one, M, N))), permutations(n))(f) =
+      call2(mul, determinant(n, A, add, zero, neg, mul, one, N),
+        determinantTerms(n, A, add, zero, neg, mul, one, M)(f))
+    intros f hf
+    have fIn := permutationsSubset with f, hf
+    have fFunction := permutations.function with hf
+    have fBijective := permutations.bijective with hf
+    have agree := agreement with f, hf
+    have column := columns with f, fIn
+    have matrixF := selectedRows.matrix at n, A, N, f with matrixN, fFunction
+    have selected : ∀ i ∈ n, ∀ j ∈ n, selectedRows(n, A, N, f)[i, j] = N[f(i), j]
+      intros i hi j hj
+      exact selectedRows.entry at n, A, N, f, i, j with matrixN, fFunction, hi, hj
+    have permuted := determinant.row_permutation at A, add, zero, neg, mul, one, n, N,
+      selectedRows(n, A, N, f), f with ring, matrixN, matrixF, hf, selected
+    have termM := determinantTerms.value at n, A, add, zero, neg, mul, one, M, f
+      with ring, finite, matrixM, hf
+    have valueM := functionProducts.value at n, n, A, add, zero, neg, mul, one, M, f
+      with ring, finite, mFunction, fIn
+    have entriesM := permutationEntries.function at n, A, M, f with matrixM, fBijective
+    have pickedM := pickedWeights.function at n, n, A, M, f with mFunction, fFunction
+    have sameEntries : ∀ i ∈ n, pickedWeights(n, n, A, M, f)(i) = permutationEntries(n, A, M, f)(i)
+      intros i hi
+      have left := pickedWeights.value at n, n, A, M, f, i with mFunction, fFunction, hi
+      have right := permutationEntries.value at n, A, M, f, i with matrixM, fBijective, hi
+      rw [left, right]
+      rfl
+    have congruentM := finiteRingProduct.congr at n, A, add, zero, neg, mul, one,
+      pickedWeights(n, n, A, M, f), permutationEntries(n, A, M, f)
+      with ring, finite, pickedM, entriesM, sameEntries
+    have sign := permutationSign.closed at A, add, zero, neg, mul, one, n, f with ring, finite
+    have productIn := finiteRingProduct.closed at n, A, add, zero, neg, mul, one,
+      permutationEntries(n, A, M, f) with ring, finite, entriesM
+    rw [← agree, column, permuted, valueM, congruentM, termM]
+    ring
+  have scaled := finiteRingSum.scale_eq at permutations(n), A, add, zero, neg, mul, one,
+    determinantTerms(n, A, add, zero, neg, mul, one, M),
+    restrict(finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+      transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))), permutations(n)),
+    determinant(n, A, add, zero, neg, mul, one, N)
+    with ring, permutationsFinite, termsM, restrictedRows, detN, scaledTerms
+  have detM := determinant.closed at A, add, zero, neg, mul, one, M, n with ring, matrixM
+  have swap := commutative with determinant(n, A, add, zero, neg, mul, one, N), detN,
+    determinant(n, A, add, zero, neg, mul, one, M), detM
+  have detP : determinant(n, A, add, zero, neg, mul, one, P) =
+      finiteRingSum(permutations(n), A, add, zero, neg, mul, one,
+        determinantTerms(n, A, add, zero, neg, mul, one, P))
+    unfold determinant
+    rfl
+  have detMvalue : determinant(n, A, add, zero, neg, mul, one, M) =
+      finiteRingSum(permutations(n), A, add, zero, neg, mul, one,
+        determinantTerms(n, A, add, zero, neg, mul, one, M))
+    unfold determinant
+    rfl
+  have transposedSum : finiteDoubleSum(functionSpace(n, n), permutations(n), A, add, zero, neg,
+      mul, one, transposedMatrix(permutations(n), functionSpace(n, n), A,
+        doubleTerms(n, A, add, zero, neg, mul, one, M, N))) =
+      finiteRingSum(functionSpace(n, n), A, add, zero, neg, mul, one,
+        finiteRowSums(functionSpace(n, n), permutations(n), A, add, zero, neg, mul, one,
+          transposedMatrix(permutations(n), functionSpace(n, n), A,
+            doubleTerms(n, A, add, zero, neg, mul, one, M, N))))
+    unfold finiteDoubleSum
+    rfl
+  unfold finiteDoubleSum at interchange
+  rw [detP, congruent, interchange, transposedSum, extension, scaled, ← detMvalue, swap]
+  rfl
+
+end Product
+
+section Bundled
+variable (R : Set) (n : Nat)
+hypothesis comm : CommRing(R)
+
+-- The determinant is multiplicative on the matrix ring.
+theorem Matrix.det_mul (M N P : R ^ n × n)
+  requires product : P = M * N
+  shows det(P) = det(M) * det(N)
+proof
+  have parts := CommRing.parts with comm
+  have matrixM : RingMatrix(n, Ring.carrier(R), M)
+    unfold RingMatrix
+    exact Matrix.function with *
+  have matrixN : RingMatrix(n, Ring.carrier(R), N)
+    unfold RingMatrix
+    exact Matrix.function with *
+  have matrixP : RingMatrix(n, Ring.carrier(R), P)
+    unfold RingMatrix
+    exact Matrix.function with *
+  have entries : ∀ i ∈ n, ∀ j ∈ n, P[i, j] = matrixProductEntry(n, Ring.carrier(R),
+      Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R), Ring.one(R), M, N, i, j)
+    intros i hi j hj
+    have entry := matrixRing.mul_entry at R, n, M, N, i, j with comm, hi, hj
+    rw product
+    exact entry
+  exact determinant.product at Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R),
+    Ring.mul(R), Ring.one(R), n, M, N, P with parts, matrixM, matrixN, matrixP, entries
+
+end Bundled

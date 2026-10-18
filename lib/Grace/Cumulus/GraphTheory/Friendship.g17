@@ -1,0 +1,580 @@
+-- Friendship graphs: every two distinct vertices have exactly one common
+-- neighbour. Two non-adjacent vertices have the same degree, since sending
+-- a neighbour w of u to the common neighbour of w and v is injective; and
+-- when no vertex is adjacent to all others, every vertex has the same
+-- degree. Hence a finite friendship graph with two vertices of different
+-- degree has a vertex adjacent to all others.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Friendship
+import Basic
+import Combinatorics.Partitions
+
+-- Every two distinct vertices have exactly one common neighbour.
+predicate Friendship (V E : Set) :=
+  SimpleGraph(V, E) ∧ (∀ x ∈ V, ∀ y ∈ V, x ≠ y →
+    ∃ z, neighbors(V, E, x) ∩ neighbors(V, E, y) = {z})
+
+theorem Friendship.graph (V E : Set)
+  requires friendship : Friendship(V, E)
+  shows SimpleGraph(V, E)
+proof
+  obtain ⟨graph, common⟩ := friendship
+  exact graph
+
+theorem Friendship.common (V E x y : Set)
+  requires friendship : Friendship(V, E)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  requires distinct : x ≠ y
+  shows ∃ z, neighbors(V, E, x) ∩ neighbors(V, E, y) = {z}
+proof
+  obtain ⟨graph, common⟩ := friendship
+  exact common with x, hx, y, hy, distinct
+
+theorem neighbors.subset_vertices (V E x : Set)
+  shows neighbors(V, E, x) ⊆ V
+proof
+  intros y hy
+  have parts := neighbors.membership.forward with hy
+  exact parts.left
+
+theorem neighbors.finite (V E x : Set)
+  requires finite : Finite(V)
+  shows Finite(neighbors(V, E, x))
+proof
+  exact Finite.subset with finite, (neighbors.subset_vertices at V, E, x)
+
+-- The common neighbour of two distinct vertices.
+defunique commonNeighbor (V E x y : Set) (z ∈ V) :=
+  neighbors(V, E, x) ∩ neighbors(V, E, y) = {z}
+requires friendship : Friendship(V, E)
+requires hx : x ∈ V
+requires hy : y ∈ V
+requires distinct : x ≠ y
+proof
+  obtain ⟨z, shape⟩ := Friendship.common with friendship, hx, hy, distinct
+  have zIn : z ∈ neighbors(V, E, x) ∩ neighbors(V, E, y)
+    rw shape
+    exact singleton.self at z
+  have both := intersection.membership.forward with zIn
+  have parts := neighbors.membership.forward with both.left
+  exact ⟨z, parts.left, shape⟩
+uniqueness
+  intros u hu first v hv second
+  have uIn : u ∈ {v}
+    rw [← second, first]
+    exact singleton.self at u
+  exact singleton.membership.forward with uIn
+
+section CommonNeighbor
+variable (V E x y : Set)
+hypothesis friendship : Friendship(V, E)
+hypothesis hx : x ∈ V
+hypothesis hy : y ∈ V
+hypothesis distinct : x ≠ y
+
+theorem commonNeighbor.member
+  shows commonNeighbor(V, E, x, y) ∈ V
+proof
+  have selected := commonNeighbor.selected at V, E, x, y with *
+  exact selected.left
+
+theorem commonNeighbor.shape
+  shows neighbors(V, E, x) ∩ neighbors(V, E, y) = {commonNeighbor(V, E, x, y)}
+proof
+  have selected := commonNeighbor.selected at V, E, x, y with *
+  exact selected.right
+
+theorem commonNeighbor.adjacent_left
+  shows Adjacent(E, x, commonNeighbor(V, E, x, y))
+proof
+  have shape := commonNeighbor.shape at V, E, x, y with *
+  have inside := singleton.self at commonNeighbor(V, E, x, y)
+  rw ← shape at inside
+  have both := intersection.membership.forward with inside
+  have parts := neighbors.membership.forward with both.left
+  exact parts.right
+
+theorem commonNeighbor.adjacent_right
+  shows Adjacent(E, y, commonNeighbor(V, E, x, y))
+proof
+  have shape := commonNeighbor.shape at V, E, x, y with *
+  have inside := singleton.self at commonNeighbor(V, E, x, y)
+  rw ← shape at inside
+  have both := intersection.membership.forward with inside
+  have parts := neighbors.membership.forward with both.right
+  exact parts.right
+
+-- Any vertex adjacent to both x and y is their common neighbour.
+theorem commonNeighbor.of_adjacent (w : Set)
+  requires hw : w ∈ V
+  requires left : Adjacent(E, x, w)
+  requires right : Adjacent(E, y, w)
+  shows w = commonNeighbor(V, E, x, y)
+proof
+  have shape := commonNeighbor.shape at V, E, x, y with *
+  have inLeft : w ∈ neighbors(V, E, x) :=
+    neighbors.membership.backward with ⟨hw, left⟩
+  have inRight : w ∈ neighbors(V, E, y) :=
+    neighbors.membership.backward with ⟨hw, right⟩
+  have inside : w ∈ neighbors(V, E, x) ∩ neighbors(V, E, y) :=
+    intersection.membership.backward with ⟨inLeft, inRight⟩
+  rw shape at inside
+  exact singleton.membership.forward with inside
+
+end CommonNeighbor
+
+-- For non-adjacent u and v, a neighbour w of u is sent to the common
+-- neighbour of w and v; this is an injection of the neighbourhoods.
+defgraph friendMap (V E u v : Set) (w ∈ neighbors(V, E, u)) :
+    neighbors(V, E, v) :=
+  commonNeighbor(V, E, w, v)
+requires friendship : Friendship(V, E)
+requires hv : v ∈ V
+requires apart : ¬Adjacent(E, u, v)
+proof
+  obtain ⟨wIn, edge⟩ := neighbors.membership.forward with member
+  have wv : w ≠ v
+    intro same
+    rw same at edge
+    exact apart with edge
+  have inV := commonNeighbor.member at V, E, w, v with friendship, wIn, hv, wv
+  have adjacent := commonNeighbor.adjacent_right at V, E, w, v with
+    friendship, wIn, hv, wv
+  exact neighbors.membership.backward with ⟨inV, adjacent⟩
+
+theorem friendMap.injective (V E u v : Set)
+  requires friendship : Friendship(V, E)
+  requires hu : u ∈ V
+  requires hv : v ∈ V
+  requires apart : ¬Adjacent(E, u, v)
+  shows InjectiveBetween(friendMap(V, E, u, v), neighbors(V, E, u),
+    neighbors(V, E, v))
+proof
+  have graph := Friendship.graph with friendship
+  have function := friendMap.function at V, E, u, v with friendship, hv, apart
+  apply Injective.of_pointwise with function
+  intros w hw w2 hw2 same
+  obtain ⟨wIn, edgeW⟩ := neighbors.membership.forward with hw
+  obtain ⟨wIn2, edgeW2⟩ := neighbors.membership.forward with hw2
+  have wv : w ≠ v
+    intro equal
+    rw equal at edgeW
+    exact apart with edgeW
+  have wv2 : w2 ≠ v
+    intro equal
+    rw equal at edgeW2
+    exact apart with edgeW2
+  have valueW := friendMap.value at V, E, u, v, w with friendship, hv, apart, hw
+  have valueW2 := friendMap.value at V, E, u, v, w2 with
+    friendship, hv, apart, hw2
+  rw [valueW, valueW2] at same
+  have zIn := commonNeighbor.member at V, E, w, v with friendship, wIn, hv, wv
+  have zW := commonNeighbor.adjacent_left at V, E, w, v with
+    friendship, wIn, hv, wv
+  have zW2 := commonNeighbor.adjacent_left at V, E, w2, v with
+    friendship, wIn2, hv, wv2
+  rw ← same at zW2
+  have zV := commonNeighbor.adjacent_right at V, E, w, v with
+    friendship, wIn, hv, wv
+  have uz : u ≠ commonNeighbor(V, E, w, v)
+    intro equal
+    rw ← equal at zV
+    exact apart with (Adjacent.symmetric with graph, zV)
+  have zWBack := Adjacent.symmetric with graph, zW
+  have zW2Back := Adjacent.symmetric with graph, zW2
+  have first := commonNeighbor.of_adjacent at
+    V, E, u, commonNeighbor(V, E, w, v), w with
+    friendship, hu, zIn, uz, wIn, edgeW, zWBack
+  have second := commonNeighbor.of_adjacent at
+    V, E, u, commonNeighbor(V, E, w, v), w2 with
+    friendship, hu, zIn, uz, wIn2, edgeW2, zW2Back
+  rw first
+  symm
+  exact second
+
+-- Non-adjacent vertices have the same degree.
+theorem Friendship.degree_le_of_not_adjacent (V E u v : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hu : u ∈ V
+  requires hv : v ∈ V
+  requires apart : ¬Adjacent(E, u, v)
+  shows cardinality(neighbors(V, E, u)) ≤ cardinality(neighbors(V, E, v))
+proof
+  have injective := friendMap.injective with friendship, hu, hv, apart
+  exact Injective.cardinality_le with injective,
+    (neighbors.finite at V, E, v with finite)
+
+theorem Friendship.degree_eq_of_not_adjacent (V E u v : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hu : u ∈ V
+  requires hv : v ∈ V
+  requires apart : ¬Adjacent(E, u, v)
+  shows cardinality(neighbors(V, E, u)) = cardinality(neighbors(V, E, v))
+proof
+  have graph := Friendship.graph with friendship
+  have apartV : ¬Adjacent(E, v, u)
+    intro edge
+    exact apart with (Adjacent.symmetric with graph, edge)
+  have le := Friendship.degree_le_of_not_adjacent with
+    friendship, finite, hu, hv, apart
+  have ge := Friendship.degree_le_of_not_adjacent with
+    friendship, finite, hv, hu, apartV
+  have natU := cardinality.nat with (neighbors.finite at V, E, u with finite)
+  have natV := cardinality.nat with (neighbors.finite at V, E, v with finite)
+  exact LessEqual.antisymmetric with le, ge
+
+-- When no vertex is adjacent to all others, every vertex has the degree of
+-- a given vertex u with a non-neighbour v: a vertex other than the common
+-- neighbour of u and v is non-adjacent to one of them, and the common
+-- neighbour has a non-neighbour of its own.
+theorem Friendship.degree_eq_all (V E u v : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hu : u ∈ V
+  requires hv : v ∈ V
+  requires distinct : u ≠ v
+  requires apart : ¬Adjacent(E, u, v)
+  requires noUniversal : ∀ x ∈ V, ∃ y ∈ V, y ≠ x ∧ ¬Adjacent(E, x, y)
+  shows ∀ z ∈ V,
+    cardinality(neighbors(V, E, z)) = cardinality(neighbors(V, E, u))
+proof
+  have graph := Friendship.graph with friendship
+  have sameUV := Friendship.degree_eq_of_not_adjacent with
+    friendship, finite, hu, hv, apart
+  have others : ∀ z ∈ V, z ≠ commonNeighbor(V, E, u, v) →
+      cardinality(neighbors(V, E, z)) = cardinality(neighbors(V, E, u))
+    intros z hz zc
+    have caseU : z = u ∨ z ≠ u by tauto
+    cases caseU with isU | notU
+    . rw isU
+      rfl
+    . have adjacentU : Adjacent(E, u, z) ∨ ¬Adjacent(E, u, z) by tauto
+      cases adjacentU with uz | notUZ
+      . have caseV : z = v ∨ z ≠ v by tauto
+        cases caseV with isV | notV
+        . rw isV
+          symm
+          exact sameUV
+        . have adjacentV : Adjacent(E, v, z) ∨ ¬Adjacent(E, v, z) by tauto
+          cases adjacentV with vz | notVZ
+          . exfalso
+            apply zc
+            exact commonNeighbor.of_adjacent at V, E, u, v, z with
+              friendship, hu, hv, distinct, hz, uz, vz
+          . have sameVZ := Friendship.degree_eq_of_not_adjacent at V, E, v, z
+              with friendship, finite, hv, hz, notVZ
+            rw ← sameVZ
+            symm
+            exact sameUV
+      . have sameUZ := Friendship.degree_eq_of_not_adjacent at V, E, u, z with
+          friendship, finite, hu, hz, notUZ
+        symm
+        exact sameUZ
+  intros z hz
+  have caseC : z = commonNeighbor(V, E, u, v) ∨ z ≠ commonNeighbor(V, E, u, v)
+    tauto
+  cases caseC with isC | notC
+  . have cIn := commonNeighbor.member at V, E, u, v with
+      friendship, hu, hv, distinct
+    obtain ⟨y, hy, yc, apartC⟩ :=
+      noUniversal with commonNeighbor(V, E, u, v), cIn
+    have sameCY := Friendship.degree_eq_of_not_adjacent at
+      V, E, commonNeighbor(V, E, u, v), y with
+      friendship, finite, cIn, hy, apartC
+    rw [isC, sameCY]
+    exact others with y, hy, yc
+  . exact others with z, hz, notC
+
+-- Without a vertex adjacent to all others, a finite friendship graph is
+-- regular.
+theorem Friendship.regular (V E : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires noUniversal : ∀ x ∈ V, ∃ y ∈ V, y ≠ x ∧ ¬Adjacent(E, x, y)
+  shows ∀ x ∈ V, ∀ y ∈ V,
+    cardinality(neighbors(V, E, x)) = cardinality(neighbors(V, E, y))
+proof
+  intros x hx y hy
+  obtain ⟨v, hv, vx, apart⟩ := noUniversal with x, hx
+  have xv : x ≠ v
+    intro same
+    apply vx
+    symm
+    exact same
+  have all := Friendship.degree_eq_all at V, E, x, v with
+    friendship, finite, hx, hv, xv, apart, noUniversal
+  symm
+  exact all with y, hy
+
+-- The combinatorial half of the friendship theorem: a finite friendship
+-- graph with two vertices of different degree has a vertex adjacent to all
+-- others.
+theorem Friendship.universal_of_irregular (V E x y : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hx : x ∈ V
+  requires hy : y ∈ V
+  requires different :
+    cardinality(neighbors(V, E, x)) ≠ cardinality(neighbors(V, E, y))
+  shows ∃ u ∈ V, ∀ w ∈ V, w ≠ u → Adjacent(E, u, w)
+proof
+  by_contra none
+  have noUniversal : ∀ u ∈ V, ∃ w ∈ V, w ≠ u ∧ ¬Adjacent(E, u, w)
+    intros u hu
+    by_contra missing
+    apply none
+    refine ⟨u, hu, ?_⟩
+    intros w hw wu
+    by_contra apart
+    apply missing
+    exact ⟨w, hw, wu, apart⟩
+  have regular := Friendship.regular with friendship, finite, noUniversal
+  exact different with (regular with x, hx, y, hy)
+
+-- Counting the vertices of a regular friendship graph. Every vertex other
+-- than x is adjacent to exactly one neighbour of x, its common neighbour
+-- with x, so the spokes (z, y) with z a neighbour of x and y a neighbour of
+-- z other than x correspond to the vertices other than x; each of the k
+-- neighbours z of x carries k − 1 of them, hence |V| = k(k − 1) + 1.
+
+def spokes (V E x : Set) : Set :=
+  { p ∈ neighbors(V, E, x) × V | ∃ z ∈ neighbors(V, E, x), ∃ y ∈ V,
+      p = (z, y) ∧ Adjacent(E, z, y) ∧ y ≠ x }
+
+theorem spokes.membership (V E x p : Set)
+  shows p ∈ spokes(V, E, x) ↔ p ∈ neighbors(V, E, x) × V ∧
+    ∃ z ∈ neighbors(V, E, x), ∃ y ∈ V, p = (z, y) ∧ Adjacent(E, z, y) ∧ y ≠ x
+proof
+  simp [spokes]
+
+theorem spokes.pair (V E x z y : Set)
+  shows (z, y) ∈ spokes(V, E, x) ↔
+    z ∈ neighbors(V, E, x) ∧ y ∈ V ∧ Adjacent(E, z, y) ∧ y ≠ x
+proof
+  constructor
+  . intro member
+    obtain ⟨bound, u, hu, w, hw, shape, edge, away⟩ :=
+      spokes.membership.forward with member
+    have coordinates := orderedPair.injective with shape
+    rw [coordinates.left, coordinates.right]
+    exact ⟨hu, hw, edge, away⟩
+  . intro parts
+    obtain ⟨hz, hy, edge, away⟩ := parts
+    apply spokes.membership.backward
+    refine ⟨(product.pair with hz, hy), z, hz, y, hy, rfl, edge, away⟩
+
+theorem spokes.finite (V E x : Set)
+  requires finite : Finite(V)
+  shows Finite(spokes(V, E, x))
+proof
+  have product := Finite.product with (neighbors.finite at V, E, x with finite),
+    finite
+  have subset : spokes(V, E, x) ⊆ neighbors(V, E, x) × V
+    intros p hp
+    have parts := spokes.membership.forward with hp
+    exact parts.left
+  exact Finite.subset with product, subset
+
+-- A vertex y other than x determines the spoke through its common
+-- neighbour with x.
+defgraph spokeOf (V E x : Set) (y ∈ V ∖ {x}) : spokes(V, E, x) :=
+  (commonNeighbor(V, E, x, y), y)
+requires friendship : Friendship(V, E)
+requires hx : x ∈ V
+proof
+  have graph := Friendship.graph with friendship
+  obtain ⟨hy, yx⟩ := difference.singleton_membership.forward with member
+  have xy : x ≠ y
+    intro same
+    apply yx
+    symm
+    exact same
+  have cIn := commonNeighbor.member at V, E, x, y with friendship, hx, hy, xy
+  have cx := commonNeighbor.adjacent_left at V, E, x, y with
+    friendship, hx, hy, xy
+  have cy := commonNeighbor.adjacent_right at V, E, x, y with
+    friendship, hx, hy, xy
+  have inNeighbors : commonNeighbor(V, E, x, y) ∈ neighbors(V, E, x) :=
+    neighbors.membership.backward with ⟨cIn, cx⟩
+  apply spokes.pair.backward
+  exact ⟨inNeighbors, hy, (Adjacent.symmetric with graph, cy), yx⟩
+
+theorem spokeOf.bijective (V E x : Set)
+  requires friendship : Friendship(V, E)
+  requires hx : x ∈ V
+  shows BijectiveBetween(spokeOf(V, E, x), V ∖ {x}, spokes(V, E, x))
+proof
+  have graph := Friendship.graph with friendship
+  have function := spokeOf.function at V, E, x with friendship, hx
+  constructor
+  . apply Injective.of_pointwise with function
+    intros y hy w hw same
+    have valueY := spokeOf.value at V, E, x, y with friendship, hx, hy
+    have valueW := spokeOf.value at V, E, x, w with friendship, hx, hw
+    rw [valueY, valueW] at same
+    have coordinates := orderedPair.injective with same
+    exact coordinates.right
+  . unfold SurjectiveBetween
+    refine ⟨function, ?_⟩
+    intros p hp
+    obtain ⟨bound, z, hz, y, hy, shape, edge, away⟩ :=
+      spokes.membership.forward with hp
+    have yIn : y ∈ V ∖ {x} :=
+      difference.singleton_membership.backward with ⟨hy, away⟩
+    have xy : x ≠ y
+      intro same
+      apply away
+      symm
+      exact same
+    obtain ⟨zIn, zx⟩ := neighbors.membership.forward with hz
+    have chosen := commonNeighbor.of_adjacent at V, E, x, y, z with
+      friendship, hx, hy, xy, zIn, zx, (Adjacent.symmetric with graph, edge)
+    have value := spokeOf.value at V, E, x, y with friendship, hx, yIn
+    refine ⟨y, yIn, ?_⟩
+    have related := FunctionBetween.relates_apply with function, yIn
+    rw [value, ← chosen, ← shape] at related
+    exact related
+
+theorem spokes.count (V E x : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hx : x ∈ V
+  shows cardinality(V ∖ {x}) = cardinality(spokes(V, E, x))
+proof
+  have finiteRest := Finite.subset with finite,
+    (difference.subset_left at V, {x})
+  exact cardinality.bijective with finiteRest,
+    (spokeOf.bijective with friendship, hx)
+
+-- The first coordinate of a spoke.
+defunique spokeStartPoint (V E x p : Set) (z ∈ neighbors(V, E, x)) :=
+  ∃ y, p = (z, y)
+requires member : p ∈ spokes(V, E, x)
+proof
+  obtain ⟨bound, z, hz, y, hy, shape, edge, away⟩ :=
+    spokes.membership.forward with member
+  exact ⟨z, hz, y, shape⟩
+uniqueness
+  intros u hu first v hv second
+  obtain ⟨y, shapeY⟩ := first
+  obtain ⟨w, shapeW⟩ := second
+  have same : (u, y) = (v, w) by cc
+  have coordinates := orderedPair.injective with same
+  exact coordinates.left
+
+defgraph spokeStart (V E x : Set) (p ∈ spokes(V, E, x)) : neighbors(V, E, x) :=
+  spokeStartPoint(V, E, x, p)
+proof
+  have selected := spokeStartPoint.selected at V, E, x, p with member
+  exact selected.left
+
+theorem spokeStart.pair (V E x z y : Set)
+  requires member : (z, y) ∈ spokes(V, E, x)
+  shows spokeStart(V, E, x)((z, y)) = z
+proof
+  have selected := spokeStartPoint.selected at V, E, x, (z, y) with member
+  obtain ⟨w, shape⟩ := selected.right
+  have coordinates := orderedPair.injective with shape
+  have value := spokeStart.value at V, E, x, (z, y) with member
+  rw value
+  symm
+  exact coordinates.left
+
+-- The spokes through a neighbour z of x are its neighbours other than x.
+defgraph spokeAt (V E x z : Set) (y ∈ neighbors(V, E, z) ∖ {x}) :
+    functionPreimage(spokeStart(V, E, x), spokes(V, E, x), {z}) :=
+  (z, y)
+requires hz : z ∈ neighbors(V, E, x)
+proof
+  obtain ⟨hy, away⟩ := difference.singleton_membership.forward with member
+  obtain ⟨yIn, edge⟩ := neighbors.membership.forward with hy
+  have spoke : (z, y) ∈ spokes(V, E, x) :=
+    spokes.pair.backward with ⟨hz, yIn, edge, away⟩
+  have start := spokeStart.pair with spoke
+  exact functionPreimage.point_membership.backward with ⟨spoke, start⟩
+
+theorem spokeAt.bijective (V E x z : Set)
+  requires hz : z ∈ neighbors(V, E, x)
+  shows BijectiveBetween(spokeAt(V, E, x, z), neighbors(V, E, z) ∖ {x},
+    functionPreimage(spokeStart(V, E, x), spokes(V, E, x), {z}))
+proof
+  have function := spokeAt.function at V, E, x, z with hz
+  constructor
+  . apply Injective.of_pointwise with function
+    intros y hy w hw same
+    have valueY := spokeAt.value at V, E, x, z, y with hz, hy
+    have valueW := spokeAt.value at V, E, x, z, w with hz, hw
+    rw [valueY, valueW] at same
+    have coordinates := orderedPair.injective with same
+    exact coordinates.right
+  . unfold SurjectiveBetween
+    refine ⟨function, ?_⟩
+    intros p hp
+    obtain ⟨spoke, start⟩ := functionPreimage.point_membership.forward with hp
+    obtain ⟨bound, u, hu, y, hy, shape, edge, away⟩ :=
+      spokes.membership.forward with spoke
+    rw shape at start
+    have spokeU : (u, y) ∈ spokes(V, E, x) :=
+      spokes.pair.backward with ⟨hu, hy, edge, away⟩
+    have first := spokeStart.pair at V, E, x, u, y with spokeU
+    rw first at start
+    have yIn : y ∈ neighbors(V, E, z) ∖ {x}
+      apply difference.singleton_membership.backward
+      rw ← start
+      exact ⟨neighbors.membership.backward with ⟨hy, edge⟩, away⟩
+    refine ⟨y, yIn, ?_⟩
+    have value := spokeAt.value at V, E, x, z, y with hz, yIn
+    have related := FunctionBetween.relates_apply with function, yIn
+    rw value at related
+    rw [shape, start]
+    exact related
+
+-- The number of vertices of a regular friendship graph.
+theorem Friendship.vertex_count (V E x : Set)
+  requires friendship : Friendship(V, E)
+  requires finite : Finite(V)
+  requires hx : x ∈ V
+  requires regular : ∀ y ∈ V,
+    cardinality(neighbors(V, E, y)) = cardinality(neighbors(V, E, x))
+  shows cardinality(V) =
+    cardinality(neighbors(V, E, x)) * (cardinality(neighbors(V, E, x)) - 1) + 1
+proof
+  have graph := Friendship.graph with friendship
+  have finiteSpokes := spokes.finite at V, E, x with finite
+  have finiteNeighbors := neighbors.finite at V, E, x with finite
+  have natDegree := cardinality.nat with finiteNeighbors
+  have start := spokeStart.function at V, E, x
+  have total := cardinality.sum_of_preimages with start, finiteSpokes,
+    finiteNeighbors
+  have agree : ∀ z ∈ neighbors(V, E, x),
+      preimageSize(spokeStart(V, E, x), spokes(V, E, x),
+        neighbors(V, E, x))(z) = cardinality(neighbors(V, E, x)) - 1
+    intros z hz
+    have value := preimageSize.value at
+      spokeStart(V, E, x), spokes(V, E, x), neighbors(V, E, x), z with
+      finiteSpokes, hz
+    obtain ⟨zIn, edge⟩ := neighbors.membership.forward with hz
+    have back := Adjacent.symmetric with graph, edge
+    have xInZ : x ∈ neighbors(V, E, z) :=
+      neighbors.membership.backward with ⟨hx, back⟩
+    have finiteZ := neighbors.finite at V, E, z with finite
+    have finiteRest := Finite.subset with finiteZ,
+      (difference.subset_left at neighbors(V, E, z), {x})
+    have fiber := cardinality.bijective with finiteRest,
+      (spokeAt.bijective at V, E, x, z with hz)
+    have removed := cardinality.remove_sub_one with finiteZ, xInZ
+    have degreeZ := regular with z, zIn
+    rw [value, ← fiber, removed, degreeZ]
+    rfl
+  have sum := natSum.constant with finiteNeighbors, agree
+  have removedX := cardinality.remove_add_one with finite, hx
+  have count := spokes.count with friendship, finite, hx
+  rw [removedX, count, total, sum]
+  rfl

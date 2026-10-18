@@ -1,0 +1,50 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  library:
+    name: Cumulus library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Restore module artifacts
+        uses: actions/cache@v4
+        with:
+          path: build/modules
+          key: modules-${{ hashFiles('lib/**/*.g17', 'src/**/*.ts') }}
+          restore-keys: modules-
+      - name: Build library modules
+        run: npm run build:modules
+      - run: npm run check:headers
+      - name: Replay every library theorem in one process
+        run: node --disable-warning=ExperimentalWarning scripts/run-tests.ts cumulus.test --concurrency 1
+
+  tests:
+    name: Tests ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build:browser
+      - name: Run test files one process each
+        run: node --disable-warning=ExperimentalWarning scripts/run-tests.ts --shard ${{ matrix.shard }} --concurrency 2 --exclude cumulus.test

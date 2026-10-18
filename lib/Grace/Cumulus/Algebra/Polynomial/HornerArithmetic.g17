@@ -1,0 +1,322 @@
+-- Fixed-length Horner arithmetic with tracked terminal coefficients (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Polynomial.HornerArithmetic
+import HornerExtension
+
+-- carry + (b+dX)H(leading,cs); the terminal coefficient becomes d*leading.
+def hornerAffineProduct {A : Set} (add mul leading b d carry : Set) (cs : List(A)) → Set
+  | add, mul, leading, b, d, carry, List.nil => [call2(add, carry, call2(mul, b, leading))]
+  | add, mul, leading, b, d, carry, List.cons(c, tail) => call2(add, carry, call2(mul, b, c)) :: hornerAffineProduct(add, mul, leading, b, d, call2(mul, d, c), tail)
+  descends cs
+
+-- Equal-length inputs add without padding or changing the declared degree.
+def hornerAdd {A : Set} (add z : Set) (cs ds : List(A)) → Set
+  | add, z, List.nil, ds => []
+  | add, z, List.cons(c, tail), ds => call2(add, c, listHeadOr{A}(z, ds)) :: hornerAdd(add, z, tail, listTail{A}(ds))
+  descends cs
+
+def hornerScale {A : Set} (mul a : Set) (cs : List(A)) → Set
+  | mul, a, List.nil => []
+  | mul, a, List.cons(c, tail) => call2(mul, a, c) :: hornerScale(mul, a, tail)
+  descends cs
+
+theorem listHeadOr.closed (A z : Set) (xs : List(A))
+  requires zeroIn : z ∈ A
+  shows listHeadOr{A}(z, xs) ∈ A
+proof
+  induction xs
+  | List.nil =>
+    rwa listHeadOr
+  | List.cons(c, tail) using ih =>
+    rwa listHeadOr
+
+section Lists
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem hornerAffineProduct.data (leading b d carry : Set) (cs : List(A))
+  requires initial : leading ∈ R
+  requires constant : b ∈ R
+  requires slope : d ∈ R
+  requires carried : carry ∈ R
+  shows List(A, hornerAffineProduct{A}(add, mul, leading, b, d, carry, cs)) ∧
+    length{A}(hornerAffineProduct{A}(add, mul, leading, b, d, carry, cs)) = succ(length{A}(cs))
+proof
+  induction cs generalizing carry
+  | List.nil =>
+    intros carry carried
+    have ordinary := IsCommRing.ring with ring
+    have product := IsRing.mul_closed with ordinary, constant, initial
+    have head := IsRing.add_closed with ordinary, carried, product
+    have empty : List(A, []) by typecheck
+    rw hornerAffineProduct
+    constructor
+    . typecheck
+    . rw [length.cons, length.nil]
+      rfl
+  | List.cons(c, tail) using ih =>
+    intros carry carried
+    have coefficient : c ∈ R by assumption
+    have ordinary := IsCommRing.ring with ring
+    have product := IsRing.mul_closed with ordinary, constant, coefficient
+    have head := IsRing.add_closed with ordinary, carried, product
+    have next := IsRing.mul_closed with ordinary, slope, coefficient
+    have previous := ih with R[d * c], next
+    rw hornerAffineProduct
+    constructor
+    . typecheck
+    . rw [length.cons, previous.right, length.cons]
+      rfl
+
+theorem hornerAdd.data (cs ds : List(A))
+  shows List(A, hornerAdd{A}(add, zero, cs, ds)) ∧ length{A}(hornerAdd{A}(add, zero, cs, ds)) = length{A}(cs)
+proof
+  induction cs generalizing ds
+  | List.nil =>
+    intros ds dsList
+    rw hornerAdd
+    constructor
+    . typecheck
+    . rfl
+  | List.cons(c, tail) using ih =>
+    intros ds dsList
+    have coefficient : c ∈ R by assumption
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have other := listHeadOr.closed at A, zero, ds with *
+    have head := IsRing.add_closed with ordinary, coefficient, other
+    have rest := listTail.closed at A, ds with *
+    have previous := ih with listTail{A}(ds), rest
+    rw hornerAdd
+    constructor
+    . typecheck
+    . rw [length.cons, previous.right, length.cons]
+      rfl
+
+theorem hornerScale.data (a : Set) (cs : List(A))
+  requires scalar : a ∈ R
+  shows List(A, hornerScale{A}(mul, a, cs)) ∧ length{A}(hornerScale{A}(mul, a, cs)) = length{A}(cs)
+proof
+  induction cs
+  | List.nil =>
+    rw hornerScale
+    constructor
+    . typecheck
+    . rfl
+  | List.cons(c, tail) using ih =>
+    have coefficient : c ∈ R by assumption
+    have ordinary := IsCommRing.ring with ring
+    have head := IsRing.mul_closed with ordinary, scalar, coefficient
+    rw hornerScale
+    constructor
+    . typecheck
+    . rw [length.cons, ih.right, length.cons]
+      rfl
+
+end Lists
+
+section Extensions
+variable (A add zero neg mul one B plus z minus times unit f x : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+
+theorem hornerAffineProduct.map_value (leading b d carry : Set) (cs : List(A))
+  requires initial : leading ∈ R
+  requires constant : b ∈ R
+  requires slope : d ∈ R
+  requires carried : carry ∈ R
+  shows monicValue{A}(f, plus, times, f(R[d * leading]), x, hornerAffineProduct{A}(add, mul, leading, b, d, carry, cs)) =
+    S[f(carry) + (f(b) + f(d) * x) * monicValue{A}(f, plus, times, f(leading), x, cs)]
+proof
+  induction cs generalizing carry
+  | List.nil =>
+    intros carry carried
+    have ordinary := IsCommRing.ring with source
+    have product := IsRing.mul_closed with ordinary, constant, initial
+    have head := IsRing.add_closed with ordinary, carried, product
+    have fcarry := IsRingHom.closed with hom, carried
+    have fb := IsRingHom.closed with hom, constant
+    have fd := IsRingHom.closed with hom, slope
+    have fl := IsRingHom.closed with hom, initial
+    have sum := IsRingHom.add with hom, carried, product
+    have productB := IsRingHom.mul with hom, constant, initial
+    have productD := IsRingHom.mul with hom, slope, initial
+    rw [hornerAffineProduct, monicValue, monicValue, monicValue, sum, productB, productD]
+    ring
+  | List.cons(c, tail) using ih =>
+    intros carry carried
+    have coefficient : c ∈ R by assumption
+    have ordinary := IsCommRing.ring with source
+    have product := IsRing.mul_closed with ordinary, constant, coefficient
+    have head := IsRing.add_closed with ordinary, carried, product
+    have next := IsRing.mul_closed with ordinary, slope, coefficient
+    have previous := ih with R[d * c], next
+    have rest := hornerAffineProduct.data at A, add, zero, neg, mul, one, leading, b, d, R[d * c], tail with *
+    have initialImage := IsRingHom.closed with hom, initial
+    have tailValue := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(leading), tail with *
+    have fcarry := IsRingHom.closed with hom, carried
+    have fb := IsRingHom.closed with hom, constant
+    have fd := IsRingHom.closed with hom, slope
+    have fc := IsRingHom.closed with hom, coefficient
+    have sum := IsRingHom.add with hom, carried, product
+    have productB := IsRingHom.mul with hom, constant, coefficient
+    have productD := IsRingHom.mul with hom, slope, coefficient
+    have outer := hornerValue.cons at A, f, plus, times, f(R[d * leading]), x, R[carry + b * c], hornerAffineProduct{A}(add, mul, leading, b, d, R[d * c], tail) with *
+    have original := hornerValue.cons at A, f, plus, times, f(leading), x, c, tail with *
+    rw [hornerAffineProduct, outer, original, previous, sum, productB, productD]
+    ring
+
+theorem hornerAdd.map_value (a b : Set) (cs ds : List(A))
+  requires left : a ∈ R
+  requires right : b ∈ R
+  requires sameLength : length{A}(cs) = length{A}(ds)
+  shows monicValue{A}(f, plus, times, f(R[a + b]), x, hornerAdd{A}(add, zero, cs, ds)) =
+    S[monicValue{A}(f, plus, times, f(a), x, cs) + monicValue{A}(f, plus, times, f(b), x, ds)]
+proof
+  induction cs generalizing ds
+  | List.nil =>
+    intros ds dsList sameLength
+    have shape := List.cases with *
+    cases shape with empty | nonempty
+    . rw [empty, hornerAdd, monicValue, monicValue, monicValue]
+      exact IsRingHom.add with hom, left, right
+    . obtain ⟨e, he, rest, restList, equal⟩ := nonempty
+      rw [equal, length.nil, length.cons] at sameLength
+      exfalso
+      exact Naturals.disjoint.zero.succ at length{A}(rest) with sameLength
+  | List.cons(c, tail) using ih =>
+    intros ds dsList sameLength
+    have coefficient : c ∈ R by assumption
+    have shape := List.cases at A, ds with *
+    cases shape with empty | nonempty
+    . rw [empty, length.cons, length.nil] at sameLength
+      have impossible : (0 : Nat) = succ(length{A}(tail)) by cc
+      exfalso
+      exact Naturals.disjoint.zero.succ at length{A}(tail) with impossible
+    . obtain ⟨e, he, rest, restList, equal⟩ := nonempty
+      rw [equal, length.cons, length.cons] at sameLength
+      have sizes := Naturals.injective.succ with sameLength
+      have previous := ih with rest, restList, sizes
+      have ordinary := IsCommRing.ring with source
+      have head := IsRing.add_closed with ordinary, coefficient, he
+      have added := hornerAdd.data at A, add, zero, neg, mul, one, tail, rest with *
+      have fa := IsRingHom.closed with hom, left
+      have fb := IsRingHom.closed with hom, right
+      have fc := IsRingHom.closed with hom, coefficient
+      have fe := IsRingHom.closed with hom, he
+      have tailValue := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(a), tail with *
+      have restValue := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(b), rest with *
+      have mapped := IsRingHom.add with hom, coefficient, he
+      have outer := hornerValue.cons at A, f, plus, times, f(R[a + b]), x, R[c + e], hornerAdd{A}(add, zero, tail, rest) with *
+      have first := hornerValue.cons at A, f, plus, times, f(a), x, c, tail with *
+      have second := hornerValue.cons at A, f, plus, times, f(b), x, e, rest with *
+      rw [equal, hornerAdd, listHeadOr, listTail, outer, first, second, previous, mapped]
+      ring
+
+theorem hornerScale.map_value (a b : Set) (cs : List(A))
+  requires scalar : a ∈ R
+  requires initial : b ∈ R
+  shows monicValue{A}(f, plus, times, f(R[a * b]), x, hornerScale{A}(mul, a, cs)) =
+    S[f(a) * monicValue{A}(f, plus, times, f(b), x, cs)]
+proof
+  induction cs
+  | List.nil =>
+    rw [hornerScale, monicValue, monicValue]
+    exact IsRingHom.mul with hom, scalar, initial
+  | List.cons(c, tail) using ih =>
+    have coefficient : c ∈ R by assumption
+    have ordinary := IsCommRing.ring with source
+    have head := IsRing.mul_closed with ordinary, scalar, coefficient
+    have rest := hornerScale.data with scalar
+    have fa := IsRingHom.closed with hom, scalar
+    have fb := IsRingHom.closed with hom, initial
+    have fc := IsRingHom.closed with hom, coefficient
+    have tailValue := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(b), tail with *
+    have mapped := IsRingHom.mul with hom, scalar, coefficient
+    have outer := hornerValue.cons at A, f, plus, times, f(R[a * b]), x, R[a * c], hornerScale{A}(mul, a, tail) with *
+    have original := hornerValue.cons at A, f, plus, times, f(b), x, c, tail with *
+    rw [hornerScale, outer, original, ih, mapped]
+    ring
+
+end Extensions
+section Polynomials
+variable (I A add zero neg mul one j : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[I]
+hypothesis ring : IsCommRing(R)
+
+theorem polynomialFromHorner.add (a b : Set) (cs ds : List(A))
+  requires left : a ∈ R
+  requires right : b ∈ R
+  requires sameLength : length{A}(cs) = length{A}(ds)
+  shows polynomialFromHorner(I, R, j, R[a + b], hornerAdd{A}(add, zero, cs, ds)) =
+    P[polynomialFromHorner(I, R, j, a, cs) + polynomialFromHorner(I, R, j, b, ds)]
+proof
+  have target := polynomials.comm_ring at I, A, add, zero, neg, mul, one with *
+  have hom := polynomialCoefficients.hom at I, A, add, zero, neg, mul, one with *
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have sum := IsRing.add_closed with ordinary, left, right
+  have variable := polynomialVariable.member at I, A, zero, one, j with *
+  have first := polynomialCoefficients.value at I, A, zero, a with *
+  have second := polynomialCoefficients.value at I, A, zero, b with *
+  have combined := polynomialCoefficients.value at I, A, zero, R[a + b] with *
+  have result := hornerAdd.map_value at A, add, zero, neg, mul, one, P, polynomialAdd(I, R), P[0], polynomialNeg(I, R), polynomialMul(I, R), P[1], polynomialCoefficients(I, R), polynomialVariable(I, R, j), a, b, cs, ds with *
+  unfold polynomialFromHorner
+  unfold polynomialFromHorner
+  unfold polynomialFromHorner
+  cc
+
+theorem polynomialFromHorner.affine_product (a b d carry : Set) (cs : List(A))
+  requires initial : a ∈ R
+  requires constant : b ∈ R
+  requires slope : d ∈ R
+  requires carried : carry ∈ R
+  shows polynomialFromHorner(I, R, j, R[d * a], hornerAffineProduct{A}(add, mul, a, b, d, carry, cs)) =
+    P[polynomialCoefficients(I, R)(carry) + (polynomialCoefficients(I, R)(b) + polynomialCoefficients(I, R)(d) * polynomialVariable(I, R, j)) * polynomialFromHorner(I, R, j, a, cs)]
+proof
+  have target := polynomials.comm_ring at I, A, add, zero, neg, mul, one with *
+  have hom := polynomialCoefficients.hom at I, A, add, zero, neg, mul, one with *
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have product := IsRing.mul_closed with ordinary, slope, initial
+  have variable := polynomialVariable.member at I, A, zero, one, j with *
+  have first := polynomialCoefficients.value at I, A, zero, a with *
+  have combined := polynomialCoefficients.value at I, A, zero, R[d * a] with *
+  have result := hornerAffineProduct.map_value at A, add, zero, neg, mul, one, P, polynomialAdd(I, R), P[0], polynomialNeg(I, R), polynomialMul(I, R), P[1], polynomialCoefficients(I, R), polynomialVariable(I, R, j), a, b, d, carry, cs with *
+  unfold polynomialFromHorner
+  unfold polynomialFromHorner
+  cc
+
+theorem polynomialFromHorner.scale (a b : Set) (cs : List(A))
+  requires scalar : a ∈ R
+  requires initial : b ∈ R
+  shows polynomialFromHorner(I, R, j, R[a * b], hornerScale{A}(mul, a, cs)) =
+    P[polynomialCoefficients(I, R)(a) * polynomialFromHorner(I, R, j, b, cs)]
+proof
+  have target := polynomials.comm_ring at I, A, add, zero, neg, mul, one with *
+  have hom := polynomialCoefficients.hom at I, A, add, zero, neg, mul, one with *
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have product := IsRing.mul_closed with ordinary, scalar, initial
+  have variable := polynomialVariable.member at I, A, zero, one, j with *
+  have first := polynomialCoefficients.value at I, A, zero, b with *
+  have combined := polynomialCoefficients.value at I, A, zero, R[a * b] with *
+  have result := hornerScale.map_value at A, add, zero, neg, mul, one, P, polynomialAdd(I, R), P[0], polynomialNeg(I, R), polynomialMul(I, R), P[1], polynomialCoefficients(I, R), polynomialVariable(I, R, j), a, b, cs with *
+  unfold polynomialFromHorner
+  unfold polynomialFromHorner
+  cc
+
+end Polynomials

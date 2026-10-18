@@ -1,0 +1,450 @@
+-- The residues coprime to n as a list, Euler's totient as its length, the
+-- list scaled by a coprime factor, and what scaling does to products and to
+-- multiplicities: it permutes the units
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.ResidueLists
+import ModularInverse
+
+-- Prepend x exactly when the test holds.
+def consIf (test : Bool, x : Nat, xs : List(ℕ)) → List(ℕ)
+  | Bool.false, x, xs => xs
+  | Bool.true, x, xs => x :: xs
+
+theorem consIf.false (x : Nat) (xs : List(ℕ))
+  shows consIf(Bool.false, x, xs) = xs
+proof
+  simp [consIf]
+
+theorem consIf.true (x : Nat) (xs : List(ℕ))
+  shows consIf(Bool.true, x, xs) = x :: xs
+proof
+  simp [consIf]
+
+-- The residues below m that are coprime to n.
+def unitsBelow (n m : Nat) → List(ℕ)
+  | n, zero => []
+  | n, succ(m) => consIf(equalNat(gcd(m, n), 1), m, unitsBelow(n, m))
+  descends m
+
+theorem unitsBelow.zero (n : Nat)
+  shows unitsBelow(n, 0) = []
+proof
+  simp [unitsBelow]
+
+theorem unitsBelow.succ_unit (n m : Nat)
+  requires coprime : gcd(m, n) = 1
+  shows unitsBelow(n, succ(m)) = m :: unitsBelow(n, m)
+proof
+  simp [unitsBelow, coprime, equalNat.reflexive, consIf]
+
+theorem unitsBelow.succ_other (n m : Nat)
+  requires notCoprime : gcd(m, n) ≠ 1
+  shows unitsBelow(n, succ(m)) = unitsBelow(n, m)
+proof
+  have test := equalNat.false_iff.backward with notCoprime
+  simp [unitsBelow, test, consIf]
+
+theorem unitsBelow.list (n m : Nat)
+  shows List(ℕ, unitsBelow(n, m))
+proof
+  induction m
+  | zero =>
+    rw unitsBelow.zero
+    typecheck
+  | succ(j) using ih =>
+    have alternatives : gcd(j, n) = 1 ∨ gcd(j, n) ≠ 1 by tauto
+    cases alternatives with coprime | notCoprime
+    . have step := unitsBelow.succ_unit at n, j with coprime
+      rw step
+      typecheck
+    . have step := unitsBelow.succ_other at n, j with notCoprime
+      rw step
+      exact ih
+
+-- A residue that is not below m, or not coprime to n, does not occur.
+theorem unitsBelow.multiplicity_other (n m : Nat)
+  shows ∀ k, Nat(k) → ¬(k < m ∧ gcd(k, n) = 1) → multiplicity(k, unitsBelow(n, m)) = 0
+proof
+  induction m
+  | zero =>
+    intros k kNat notBoth
+    rw unitsBelow.zero
+    exact multiplicity.nil at k
+  | succ(j) using ih =>
+    intros k kNat notBoth
+    have restList := unitsBelow.list at n, j
+    have smaller : ¬(k < j ∧ gcd(k, n) = 1)
+      intro both
+      obtain ⟨kBelow, kCoprime⟩ := both
+      apply notBoth
+      constructor
+      . have below : k < succ(j) by arith
+        exact below
+      . exact kCoprime
+    have previous := ih with k, kNat, smaller
+    have alternatives : gcd(j, n) = 1 ∨ gcd(j, n) ≠ 1 by tauto
+    cases alternatives with coprime | notCoprime
+    . have step := unitsBelow.succ_unit at n, j with coprime
+      rw step
+      have different : k ≠ j
+        intro same
+        apply notBoth
+        rw same
+        constructor
+        . arith
+        . exact coprime
+      have other := multiplicity.cons_other at k, j, unitsBelow(n, j) with different
+      rw other
+      exact previous
+    . have step := unitsBelow.succ_other at n, j with notCoprime
+      rw step
+      exact previous
+
+-- A coprime residue below m occurs exactly once.
+theorem unitsBelow.multiplicity_unit (n m : Nat)
+  shows ∀ k, Nat(k) → k < m → gcd(k, n) = 1 → multiplicity(k, unitsBelow(n, m)) = 1
+proof
+  induction m
+  | zero =>
+    intros k kNat below coprime
+    exfalso
+    have impossible : ¬k < 0 by arith
+    exact impossible with below
+  | succ(j) using ih =>
+    intros k kNat below coprime
+    have restList := unitsBelow.list at n, j
+    have trichotomy := Less.trichotomy at k, j
+    rcases trichotomy with smaller | same | larger
+    . have previous := ih with k, kNat, smaller, coprime
+      have alternatives : gcd(j, n) = 1 ∨ gcd(j, n) ≠ 1 by tauto
+      cases alternatives with coprimeJ | notCoprimeJ
+      . have step := unitsBelow.succ_unit at n, j with coprimeJ
+        rw step
+        have different : k ≠ j
+          intro equal
+          rw equal at smaller
+          exact Less.irreflexive at j with *, smaller
+        have other := multiplicity.cons_other at k, j, unitsBelow(n, j) with different
+        rw other
+        exact previous
+      . have step := unitsBelow.succ_other at n, j with notCoprimeJ
+        rw step
+        exact previous
+    . rw same at coprime
+      have step := unitsBelow.succ_unit at n, j with coprime
+      rw [same, step]
+      have self := multiplicity.cons_self at j, unitsBelow(n, j) with *
+      rw self
+      have notBoth : ¬(j < j ∧ gcd(j, n) = 1)
+        intro both
+        exact Less.irreflexive at j with *, both.left
+      have others := unitsBelow.multiplicity_other at n, j
+      have jNat : Nat(j) by typecheck
+      have zero := others with j, jNat, notBoth
+      rw zero
+      ring
+    . exfalso
+      have impossible : ¬j < k by arith
+      exact impossible with larger
+
+theorem unitsBelow.member (n m k : Nat)
+  requires positive : 0 < multiplicity(k, unitsBelow(n, m))
+  shows k < m ∧ gcd(k, n) = 1
+proof
+  by_contra none
+  have others := unitsBelow.multiplicity_other at n, m
+  have kNat : Nat(k) by typecheck
+  have zero := others with k, none
+  rw zero at positive
+  exact Less.irreflexive with *, positive
+
+-- The units mod n and Euler's totient.
+def units (n : Nat) : Set := unitsBelow(n, n)
+
+def totient (n : Nat) : Nat := length{ℕ}(unitsBelow(n, n))
+
+theorem units.definition (n : Nat)
+  shows units(n) = unitsBelow(n, n)
+proof
+  unfold units
+  rfl
+
+theorem totient.definition (n : Nat)
+  shows totient(n) = length{ℕ}(units(n))
+proof
+  unfold totient
+  rw units.definition
+  rfl
+
+theorem units.list (n : Nat)
+  shows List(ℕ, units(n))
+proof
+  rw units.definition
+  exact unitsBelow.list
+
+theorem units.multiplicity (n k : Nat)
+  requires below : k < n
+  requires coprime : gcd(k, n) = 1
+  shows multiplicity(k, units(n)) = 1
+proof
+  rw units.definition
+  have all := unitsBelow.multiplicity_unit at n, n
+  have kNat : Nat(k) by typecheck
+  exact all with k, below, coprime
+
+theorem units.multiplicity_other (n k : Nat)
+  requires notBoth : ¬(k < n ∧ gcd(k, n) = 1)
+  shows multiplicity(k, units(n)) = 0
+proof
+  rw units.definition
+  have all := unitsBelow.multiplicity_other at n, n
+  have kNat : Nat(k) by typecheck
+  exact all with k, notBoth
+
+theorem units.member (n k : Nat)
+  requires positive : 0 < multiplicity(k, units(n))
+  shows k < n ∧ gcd(k, n) = 1
+proof
+  rw units.definition at positive
+  exact unitsBelow.member with positive
+
+-- Scaling every entry by a and reducing mod n.
+def scaledList (a n : Nat, xs : List(ℕ)) → List(ℕ)
+  | a, n, [] => []
+  | a, n, x :: rest => mul(a, x) % n :: scaledList(a, n, rest)
+
+theorem scaledList.nil (a n : Nat)
+  shows scaledList(a, n, []) = []
+proof
+  simp [scaledList]
+
+theorem scaledList.cons (a n x : Nat) (rest : List(ℕ))
+  shows scaledList(a, n, x :: rest) = ((a * x) % n) :: scaledList(a, n, rest)
+proof
+  simp [scaledList]
+
+theorem scaledList.list (a n : Nat) (xs : List(ℕ))
+  shows List(ℕ, scaledList(a, n, xs))
+proof
+  induction xs
+  | List.nil =>
+    rw scaledList.nil
+    typecheck
+  | List.cons(x, rest) using ih =>
+    rw scaledList.cons
+    typecheck
+
+theorem scaledList.length (a n : Nat) (xs : List(ℕ))
+  shows length{ℕ}(scaledList(a, n, xs)) = length{ℕ}(xs)
+proof
+  induction xs
+  | List.nil =>
+    rw scaledList.nil
+    rfl
+  | List.cons(x, rest) using ih =>
+    have scaledRest := scaledList.list at a, n, rest
+    have step := scaledList.cons at a, n, x, rest
+    have left := length.cons at ℕ, (a * x) % n, scaledList(a, n, rest) with *
+    have right := length.cons at ℕ, x, rest with *
+    rw step
+    rw left
+    rw right
+    rw ih
+    rfl
+
+-- The product of the scaled list is a^length times the product, mod n.
+theorem scaledList.product (a n : Nat) (xs : List(ℕ))
+  requires nonzero : n ≠ 0
+  shows (∏ scaledList(a, n, xs)) % n = (a ^ length{ℕ}(xs) * ∏ xs) % n
+proof
+  induction xs
+  | List.nil =>
+    have one : 1 * 1 = 1 by ring
+    rw [scaledList.nil, listProduct.nil, length.nil, pow.zero, one]
+    rfl
+  | List.cons(x, rest) using ih =>
+    have scaledRest := scaledList.list at a, n, rest
+    have expandScaled := listProduct.cons at (a * x) % n, scaledList(a, n, rest) with *
+    have expandRest := listProduct.cons at x, rest with *
+    have lengthRest := length.cons with *
+    have scaledProduct : Nat(∏ scaledList(a, n, rest)) by typecheck
+    have restProduct : Nat(∏ rest) by typecheck
+    have powerNat := pow.closed at a, length{ℕ}(rest)
+    have first := mod.mul_left at n, a * x, ∏ scaledList(a, n, rest) with nonzero
+    have second := mod.mul_right at n, a * x, ∏ scaledList(a, n, rest) with nonzero
+    have third := mod.mul_right at n, a * x, a ^ length{ℕ}(rest) * ∏ rest with nonzero
+    have rearrange : a * x * (a ^ length{ℕ}(rest) * ∏ rest) = a * a ^ length{ℕ}(rest) * (x * ∏ rest) by ring
+    rw [scaledList.cons, expandScaled, expandRest, lengthRest, pow.succ, first, ← second, ih, third, rearrange]
+    rfl
+
+-- Every entry of the scaled list is a residue below n.
+theorem scaledList.member (a n : Nat) (xs : List(ℕ))
+  requires nonzero : n ≠ 0
+  shows ∀ v, Nat(v) → 0 < multiplicity(v, scaledList(a, n, xs)) → v < n
+proof
+  induction xs
+  | List.nil =>
+    intros v vNat positive
+    rw [scaledList.nil, multiplicity.nil] at positive
+    exfalso
+    exact Less.irreflexive at 0 with *, positive
+  | List.cons(x, rest) using ih =>
+    intros v vNat positive
+    have scaledRest := scaledList.list at a, n, rest
+    rw scaledList.cons at positive
+    have alternatives : v = (a * x) % n ∨ v ≠ (a * x) % n by tauto
+    cases alternatives with same | different
+    . rw same
+      exact mod.less at a * x, n with nonzero
+    . have other := multiplicity.cons_other at v, (a * x) % n, scaledList(a, n, rest) with different
+      rw other at positive
+      exact ih with v, vNat, positive
+
+-- With b inverse to a, the entry v of the scaled list is counted as many
+-- times as b·v is counted in the original list of residues.
+theorem scaledList.multiplicity (a b n v : Nat) (xs : List(ℕ))
+  requires nonzero : n ≠ 0
+  requires inverse : (a * b) % n = 1
+  requires vBelow : v < n
+  shows (∀ x, Nat(x) → 0 < multiplicity(x, xs) → x < n) → multiplicity(v, scaledList(a, n, xs)) = multiplicity((b * v) % n, xs)
+proof
+  induction xs
+  | List.nil =>
+    intro residues
+    rw [scaledList.nil, multiplicity.nil, multiplicity.nil]
+    rfl
+  | List.cons(x, rest) using ih =>
+    intro residues
+    have scaledRest := scaledList.list at a, n, rest
+    have xPositive : 0 < multiplicity(x, x :: rest)
+      have self := multiplicity.cons_self at x, rest with *
+      rw self
+      arith
+    have xNat : Nat(x) by typecheck
+    have xBelow := residues with x, xNat, xPositive
+    have restResidues : ∀ y, Nat(y) → 0 < multiplicity(y, rest) → y < n
+      intros y yNat positive
+      have lifted := multiplicity.positive_cons at y, x, rest with positive
+      exact residues with y, yNat, lifted
+    have previous := ih with restResidues
+    have bvNat : Nat((b * v) % n) by typecheck
+    have cancelLeft : (b * ((a * x) % n)) % n = x
+      have step1 := mod.mul_right at n, b, a * x with nonzero
+      have rearrange : b * (a * x) = (a * b) * x by ring
+      have step2 := mod.mul_left at n, a * b, x with nonzero
+      have one : 1 * x = x by ring
+      have self := mod.of_less at n, x with xBelow
+      rw [step1, rearrange, ← step2, inverse, one, self]
+      rfl
+    have cancelRight : (a * ((b * v) % n)) % n = v
+      have step1 := mod.mul_right at n, a, b * v with nonzero
+      have rearrange : a * (b * v) = (a * b) * v by ring
+      have step2 := mod.mul_left at n, a * b, v with nonzero
+      have one : 1 * v = v by ring
+      have self := mod.of_less at n, v with vBelow
+      rw [step1, rearrange, ← step2, inverse, one, self]
+      rfl
+    rw scaledList.cons
+    have alternatives : x = (b * v) % n ∨ x ≠ (b * v) % n by tauto
+    cases alternatives with same | different
+    . have hit : (a * x) % n = v
+        rw same
+        exact cancelRight
+      rw hit
+      have leftSelf := multiplicity.cons_self at v, scaledList(a, n, rest) with *
+      rw ← same
+      have rightSelf := multiplicity.cons_self at x, rest with *
+      rw [leftSelf, rightSelf]
+      rw same
+      rw previous
+      rfl
+    . have miss : v ≠ (a * x) % n
+        intro equal
+        apply different
+        rw [← cancelLeft, ← equal]
+        rfl
+      have leftOther := multiplicity.cons_other at v, (a * x) % n, scaledList(a, n, rest) with miss
+      have differentReversed : (b * v) % n ≠ x
+        intro equal
+        apply different
+        rw equal
+        rfl
+      have rightOther := multiplicity.cons_other at (b * v) % n, x, rest with differentReversed
+      rw [leftOther, rightOther]
+      exact previous
+
+-- Lists with the same multiplicities have the same product.
+theorem listProduct.of_multiplicities (xs : List(ℕ))
+  shows ∀ ys, List(ℕ, ys) → (∀ q, Nat(q) → multiplicity(q, xs) = multiplicity(q, ys)) → ∏ xs = ∏ ys
+proof
+  induction xs
+  | List.nil =>
+    intros ys ysList same
+    have shape := List.cases with ysList
+    cases shape with nil | cons
+    . rw nil
+      rfl
+    . exfalso
+      obtain ⟨y, yIn, rest, restList, equal⟩ := cons
+      have yNat : Nat(y) by typecheck
+      have count := same with y
+      have self := multiplicity.cons_self at y, rest with *
+      rw [multiplicity.nil, equal, self] at count
+      have impossible : ¬(0:N) = 1 + multiplicity(y, rest) by arith
+      exact impossible with count
+  | List.cons(x, rest) using ih =>
+    intros ys ysList same
+    have positive : 0 < multiplicity(x, ys)
+      have count := same with x, *
+      have self := multiplicity.cons_self at x, rest with *
+      rw self at count
+      rw ← count
+      arith
+    have remove := multiplicity.remove at x, ys with *
+    obtain ⟨zs, zsList, product, counts⟩ := remove with positive
+    have restCounts : ∀ q, Nat(q) → multiplicity(q, rest) = multiplicity(q, zs)
+      intros q qNat
+      have count := same with q, qNat
+      have shifted := counts with q, qNat
+      have left := multiplicity.cons at q, x, rest with *
+      have right := multiplicity.cons at q, x, zs with *
+      rw [left, shifted, right] at count
+      have cancel := add.left_cancel at multiplicity(q, rest), multiplicity(q, zs), chooseNat(equalNat(q, x), 1, 0)
+      exact cancel with count
+    have previous := ih with zs, zsList, restCounts
+    have expandRest := listProduct.cons at x, rest with *
+    have expandZs := listProduct.cons at x, zs with *
+    rw [expandRest, previous, ← expandZs, product]
+    rfl
+
+-- A product of residues coprime to n is coprime to n.
+theorem listProduct.coprime (n : Nat) (xs : List(ℕ))
+  requires nonzero : n ≠ 0
+  shows (∀ x, Nat(x) → 0 < multiplicity(x, xs) → gcd(x, n) = 1) → gcd(∏ xs, n) = 1
+proof
+  induction xs
+  | List.nil =>
+    intro coprime
+    rw listProduct.nil
+    have divides := gcd.divides_left at 1, n
+    have natural := gcd.natural at 1, n
+    exact divides.one_only at gcd(1, n) with natural, divides
+  | List.cons(x, rest) using ih =>
+    intro coprime
+    have xPositive : 0 < multiplicity(x, x :: rest)
+      have self := multiplicity.cons_self at x, rest with *
+      rw self
+      arith
+    have xNat : Nat(x) by typecheck
+    have xCoprime := coprime with x, xNat, xPositive
+    have restCoprime : ∀ y, Nat(y) → 0 < multiplicity(y, rest) → gcd(y, n) = 1
+      intros y yNat positive
+      have lifted := multiplicity.positive_cons at y, x, rest with positive
+      exact coprime with y, yNat, lifted
+    have previous := ih with restCoprime
+    rw listProduct.cons
+    exact coprime.mul at x, ∏ rest, n with nonzero, xCoprime, previous

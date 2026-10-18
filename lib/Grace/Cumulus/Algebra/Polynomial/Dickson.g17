@@ -1,0 +1,244 @@
+-- Dickson's finite-basis theorem by classical finite-coordinate induction (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Polynomial.Dickson
+import Divisibility
+
+predicate MonomialCover (C S B : Set) := ∀ m ∈ S, ∃ b ∈ B, MonomialDivides(C, b, m)
+predicate FiniteMonomialBasis (C S B : Set) := Finite(B) ∧ B ⊆ S ∧ MonomialCover(C, S, B)
+predicate DicksonOn (V C : Set) := ∀ S, S ⊆ monomials(V) → ∃ B, FiniteMonomialBasis(C, S, B)
+def exponentSlice (S j n : Set) : Set := {m ∈ S | m(j) = n}
+predicate BoundedMonomialCover (C S j n B : Set) := ∀ m ∈ S, m(j) < n → ∃ b ∈ B, MonomialDivides(insert(j, C), b, m)
+
+theorem exponentSlice.membership (S j n m : Set)
+  shows m ∈ exponentSlice(S, j, n) ↔ m ∈ S ∧ m(j) = n
+proof
+  simp
+
+theorem exponentSlice.subset (S j n : Set)
+  shows exponentSlice(S, j, n) ⊆ S
+proof
+  simp
+
+theorem listExponents.bounded (C i : Set) (xs : List(C))
+  requires naturals : ∀ m ∈ C, Nat(m(i))
+  shows ∃ n, Nat(n) ∧ ∀ m ∈ listSupport{C}(xs), m(i) ≤ n
+proof
+  induction xs
+  | List.nil =>
+    refine ⟨0, Naturals.constructor.zero, _⟩
+    intros m member
+    rw listSupport at member
+    exfalso
+    exact set.empty with member
+  | List.cons(x, tail) using ih =>
+    obtain ⟨n, nNat, bounded⟩ := ih
+    have xNat := naturals with x
+    have nextNat : Nat(n + x(i)) by typecheck
+    refine ⟨n + x(i), nextNat, _⟩
+    intros m member
+    rw listSupport at member
+    have alternatives := insert.membership.forward with member
+    cases alternatives with equal | old
+    . rw equal
+      arith
+    . have bound := bounded with m, old
+      have subset := listSupport.subset with *
+      have inC := subset with m, old
+      have mNat := naturals with m, inC
+      arith
+
+theorem Finite.exponents_bounded (V S j : Set)
+  requires finite : Finite(S)
+  requires subset : S ⊆ monomials(V)
+  requires index : j ∈ V
+  shows ∃ n, Nat(n) ∧ ∀ m ∈ S, m(j) ≤ n
+proof
+  obtain ⟨xs, list, covered⟩ := Finite.list_cover with finite
+  have naturals : ∀ m ∈ S, Nat(m(j))
+    intros m hm
+    have included := subset
+    have member := included with m, hm
+    exact monomials.exponent with *
+  obtain ⟨n, natural, bound⟩ := listExponents.bounded at S, j, xs with *
+  refine ⟨n, natural, _⟩
+  intros m hm
+  have member := covered with m, hm
+  exact bound with m, member
+
+theorem DicksonOn.empty (V : Set)
+  shows DicksonOn(V, ∅)
+proof
+  intros S subset
+  have casesS : (∃ m, m ∈ S) ∨ ¬(∃ m, m ∈ S) by tauto
+  cases casesS with inhabited | empty
+  . obtain ⟨a, member⟩ := inhabited
+    witness {a}
+    unfold FiniteMonomialBasis
+    refine ⟨Finite.singleton at a, _, _⟩
+      intros b hb
+      have equal := singleton.membership.forward with hb
+      rwa equal
+      intros m hm
+      refine ⟨a, singleton.self at a, _⟩
+      intros i impossible
+      exfalso
+      exact set.empty with impossible
+  . witness ∅
+    unfold FiniteMonomialBasis
+    refine ⟨Finite.empty, empty.subset at S, _⟩
+    intros m hm
+    have inhabited : ∃ a, a ∈ S by refine ⟨m, hm⟩
+    exfalso
+    exact empty with inhabited
+
+-- At height n, finitely many slices inherit finite bases from C.
+theorem DicksonOn.bounded_slices (V C j : Set, n : Nat)
+  requires index : j ∈ V
+  requires previous : DicksonOn(V, C)
+  shows ∀ S, S ⊆ monomials(V) → ∃ B, Finite(B) ∧ B ⊆ S ∧ BoundedMonomialCover(C, S, j, n, B)
+proof
+  induction n
+  | zero =>
+    intros S subset
+    refine ⟨∅, Finite.empty, empty.subset at S, _⟩
+    intros m hm below
+    have member := subset with m, hm
+    have mNat := monomials.exponent at V, m, j with *
+    have impossible : m(j) < m(j) by arith
+    exfalso
+    exact Less.irreflexive with mNat, impossible
+  | succ(k) using ih =>
+    intros S subset
+    obtain ⟨B, finiteB, subsetB, coveredB⟩ := ih with S, subset
+    have sliceSubset := exponentSlice.subset at S, j, k
+    have sliceBound := Subset.transitive with sliceSubset, subset
+    have finiteBases := previous
+    obtain ⟨D, basisD⟩ := finiteBases with exponentSlice(S, j, k), sliceBound
+    rcases basisD with ⟨finiteD, subsetD, coveredD⟩
+    have finite := Finite.union with finiteB, finiteD
+    have subsetDS := Subset.transitive with subsetD, sliceSubset
+    have included : B ∪ D ⊆ S by simp [Subset, union2.membership]
+    refine ⟨B ∪ D, finite, included, _⟩
+    intros m hm below
+    have source := subset
+    have member := source with m, hm
+    have mNat := monomials.exponent at V, m, j with *
+    have alternatives : m(j) < k ∨ ¬(m(j) < k) by tauto
+    cases alternatives with earlier | last
+      obtain ⟨b, hb, divides⟩ := coveredB with m, hm, earlier
+      have inUnion : b ∈ B ∪ D
+        apply union2.membership.backward
+        left
+        exact hb
+      refine ⟨b, inUnion, divides⟩
+    . have lower := LessEqual.of_not_Less at m(j), k with *
+      have upper := Less.successor_upper at m(j), k with *
+      have atLast := LessEqual.antisymmetric at m(j), k with *
+      have inSlice : m ∈ exponentSlice(S, j, k) := exponentSlice.membership.backward with ⟨hm, atLast⟩
+      obtain ⟨d, hd, sliceDivides⟩ := coveredD with m, inSlice
+      have includedD := subsetD
+      have bInSlice := includedD with d, hd
+      have data := exponentSlice.membership.forward with bInSlice
+      have coordinate : d(j) ≤ m(j)
+        rw [data.right, atLast]
+        exact LessEqual.reflexive at k with *
+      have extended := MonomialDivides.insert with sliceDivides, coordinate
+      have dInUnion : d ∈ B ∪ D
+        apply union2.membership.backward
+        right
+        exact hd
+      refine ⟨d, dInUnion, extended⟩
+
+theorem DicksonOn.insert (V C j : Set)
+  requires index : j ∈ V
+  requires previous : DicksonOn(V, C)
+  shows DicksonOn(V, insert(j, C))
+proof
+  intros S subset
+  have finiteBases := previous
+  obtain ⟨B, basisB⟩ := finiteBases with S, subset
+  rcases basisB with ⟨finiteB, subsetB, coveredB⟩
+  have boundedB := Subset.transitive with subsetB, subset
+  obtain ⟨n, natural, bound⟩ := Finite.exponents_bounded at V, B, j with *
+  have slices := DicksonOn.bounded_slices at V, C, j, n with *
+  obtain ⟨D, finiteD, subsetD, coveredD⟩ := slices with S, subset
+  have finite := Finite.union with finiteB, finiteD
+  have included : B ∪ D ⊆ S by simp [Subset, union2.membership]
+  witness B ∪ D
+  unfold FiniteMonomialBasis
+  refine ⟨finite, included, _⟩
+  intros m hm
+  have source := subset
+  have member := source with m, hm
+  have mNat := monomials.exponent at V, m, j with *
+  have alternatives : n ≤ m(j) ∨ ¬(n ≤ m(j)) by tauto
+  cases alternatives with above | below
+    obtain ⟨b, hb, divides⟩ := coveredB with m, hm
+    have bBound := bound with b, hb
+    have bSource := subsetB
+    have inS := bSource with b, hb
+    have bMember := source with b, inS
+    have bNat := monomials.exponent at V, b, j with *
+    have coordinate := LessEqual.transitive at b(j), n, m(j) with *
+    have extended := MonomialDivides.insert with divides, coordinate
+    have inUnion : b ∈ B ∪ D
+      apply union2.membership.backward
+      left
+      exact hb
+    refine ⟨b, inUnion, extended⟩
+  . have earlier := Less.of_not_LessEqual at n, m(j) with *
+    obtain ⟨d, hd, sliceDivides⟩ := coveredD with m, hm, earlier
+    have dInUnion : d ∈ B ∪ D
+      apply union2.membership.backward
+      right
+      exact hd
+    refine ⟨d, dInUnion, sliceDivides⟩
+
+theorem Dickson.list (V : Set) (xs : List(V))
+  shows DicksonOn(V, listSupport{V}(xs))
+proof
+  induction xs
+  | List.nil =>
+    rw listSupport
+    exact DicksonOn.empty
+  | List.cons(x, tail) using ih =>
+    rw listSupport
+    exact DicksonOn.insert with ih
+
+theorem Dickson.finite_coordinates (V : Set)
+  requires finite : Finite(V)
+  shows DicksonOn(V, V)
+proof
+  obtain ⟨xs, list, covers⟩ := Finite.list_cover with finite
+  have subset := listSupport.subset with list
+  have equal := Subset.antisymmetric with subset, covers
+  have noetherian := Dickson.list with list
+  rwa equal at noetherian
+
+theorem Dickson.finite_basis (V S : Set)
+  requires finite : Finite(V)
+  requires subset : S ⊆ monomials(V)
+  shows ∃ B, FiniteMonomialBasis(V, S, B)
+proof
+  have noetherian := Dickson.finite_coordinates with finite
+  exact noetherian with S, subset
+
+theorem Dickson.finite_factor_basis (V S : Set)
+  requires variables : Finite(V)
+  requires subset : S ⊆ monomials(V)
+  shows ∃ B, Finite(B) ∧ B ⊆ S ∧ (∀ m ∈ S, ∃ b ∈ B, ∃ q ∈ monomials(V), monomialProduct(V, b, q) = m)
+proof
+  obtain ⟨B, basis⟩ := Dickson.finite_basis with variables, subset
+  rcases basis with ⟨finite, included, covered⟩
+  refine ⟨B, finite, included, _⟩
+  intros m hm
+  obtain ⟨b, hb, divides⟩ := covered with m, hm
+  have inS := included with b, hb
+  have memberB := subset with b, inS
+  have memberM := subset with m, hm
+  obtain ⟨q, hq, equation⟩ := MonomialDivides.iff_factor.forward at V, b, m with *
+  refine ⟨b, hb, q, hq, equation⟩

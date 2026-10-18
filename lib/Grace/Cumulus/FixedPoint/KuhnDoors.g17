@@ -1,0 +1,355 @@
+-- Doors of a labelled simplex: the faces whose labels are exactly
+-- 0, …, n − 1.  A completely labelled simplex has one door; any other
+-- simplex has none or two
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.FixedPoint.KuhnDoors
+import KuhnLabel
+import Cardinal.Pigeonhole
+
+-- The vertices whose opposite face carries exactly the labels below n.
+def doorsOf (ℓ s n : Set) : Set := { a ∈ s | functionImage(ℓ, s ∖ {a}, succ(n)) = n }
+
+theorem doorsOf.membership (a ℓ s n : Set)
+  shows a ∈ doorsOf(ℓ, s, n) ↔ a ∈ s ∧ functionImage(ℓ, s ∖ {a}, succ(n)) = n
+proof
+  simp [doorsOf]
+
+theorem Injective.of_cancel (f A B : Set)
+  requires function : f : A → B
+  requires cancel : ∀ x ∈ A, ∀ y ∈ A, f(x) = f(y) → x = y
+  shows InjectiveBetween(f, A, B)
+proof
+  constructor
+  . exact function
+  . intros x hx y hy z hz hxz hyz
+    have xValue := FunctionBetween.apply_value with function, hx, hxz
+    have yValue := FunctionBetween.apply_value with function, hy, hyz
+    have same : f(x) = f(y)
+      rw [xValue, yValue]
+      rfl
+    have first := cancel with hx
+    exact first with hy, same
+
+-- A completely labelled simplex: the vertex labelled n is its only door.
+theorem doorsOf.complete (ℓ s : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires finite : Finite(s)
+  requires size : cardinality(s) = succ(n)
+  requires full : functionImage(ℓ, s, succ(n)) = succ(n)
+  shows ∃ a ∈ s, ℓ(a) = n ∧ doorsOf(ℓ, s, n) = {a}
+proof
+  have nIn := bootstrap.succ.self at n
+  have selfSubset : s ⊆ s
+    intros x hx
+    exact hx
+  have imageCount : cardinality(functionImage(ℓ, s, succ(n))) = cardinality(s)
+    rw [full, size]
+    exact cardinality.natural
+  have inImage : n ∈ functionImage(ℓ, s, succ(n)) by rwa full
+  obtain ⟨inSucc, a, ha, shape⟩ := functionImage.membership.forward with inImage
+  witness a
+  constructor
+  . exact ha
+  . constructor
+    . symm
+      exact shape
+    . ext b
+      constructor
+      . intro hb
+        obtain ⟨bIn, door⟩ := doorsOf.membership.forward with hb
+        apply singleton.membership.backward
+        by_contra different
+        have aRest : a ∈ s ∖ {b}
+          apply difference.singleton_membership.backward
+          constructor
+          . exact ha
+          . intro equal
+            apply different
+            symm
+            exact equal
+        have nInFace : n ∈ functionImage(ℓ, s ∖ {b}, succ(n))
+          apply functionImage.membership.backward
+          constructor
+          . exact nIn
+          . refine ⟨a, aRest, shape⟩
+        rw door at nInFace
+        exact membership.irreflexive with nInFace
+      . intro hb
+        have equal := singleton.membership.forward with hb
+        rw equal
+        apply doorsOf.membership.backward
+        constructor
+        . exact ha
+        . apply Subset.antisymmetric
+          . intros k hk
+            obtain ⟨kIn, x, hx, kShape⟩ := functionImage.membership.forward with hk
+            obtain ⟨xIn, xDifferent⟩ := difference.singleton_membership.forward with hx
+            have notTop : k ≠ n
+              intro same
+              apply xDifferent
+              have values : ℓ(x) = ℓ(a) by rwa [← kShape, same]
+              exact cardinality.injective_of_image with function, selfSubset, finite, imageCount, xIn, ha, values
+            have split := bootstrap.succ.membership.forward with kIn
+            cases split with below | same
+            . exact below
+            . exfalso
+              exact notTop with same
+          . intros k hk
+            have kInSucc := membership.into_successor with hk
+            have kInImage : k ∈ functionImage(ℓ, s, succ(n)) by rwa full
+            obtain ⟨kIn, x, hx, kShape⟩ := functionImage.membership.forward with kInImage
+            apply functionImage.membership.backward
+            constructor
+            . exact kIn
+            . witness x
+              constructor
+              . apply difference.singleton_membership.backward
+                constructor
+                . exact hx
+                . intro xa
+                  rw [xa, ← shape] at kShape
+                  rw kShape at hk
+                  exact membership.irreflexive with hk
+              . exact kShape
+
+theorem doorsOf.complete_count (ℓ s : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires finite : Finite(s)
+  requires size : cardinality(s) = succ(n)
+  requires full : functionImage(ℓ, s, succ(n)) = succ(n)
+  shows cardinality(doorsOf(ℓ, s, n)) = 1
+proof
+  obtain ⟨a, ha, label, doors⟩ := doorsOf.complete with function, finite, size, full
+  rw doors
+  exact cardinality.singleton
+
+-- No door when some label below n is missing altogether.
+theorem doorsOf.empty_of_missing (ℓ s : Set) (n : Nat)
+  requires missing : ¬n ⊆ functionImage(ℓ, s, succ(n))
+  shows doorsOf(ℓ, s, n) = ∅
+proof
+  apply Subset.antisymmetric
+  . intros x hx
+    obtain ⟨xIn, door⟩ := doorsOf.membership.forward with hx
+    exfalso
+    apply missing
+    have mono := functionImage.monotone at ℓ, s, succ(n), s ∖ {x}, s with (difference.subset_left at s, {x})
+    rwa door at mono
+  . intros x hx
+    exfalso
+    simpa using hx
+
+theorem doorsOf.image_of_covered (ℓ s : Set) (n : Nat)
+  requires covered : n ⊆ functionImage(ℓ, s, succ(n))
+  requires partial : functionImage(ℓ, s, succ(n)) ≠ succ(n)
+  shows functionImage(ℓ, s, succ(n)) = n
+proof
+  have imageSubset := functionImage.subset at ℓ, s, succ(n)
+  apply Subset.antisymmetric
+  . intros k hk
+    have kInSucc := imageSubset with k, hk
+    have split := bootstrap.succ.membership.forward with kInSucc
+    cases split with below | same
+    . exact below
+    . exfalso
+      apply partial
+      apply Subset.antisymmetric
+      . exact imageSubset
+      . intros j hj
+        have split2 := bootstrap.succ.membership.forward with hj
+        cases split2 with jBelow | jSame
+        . exact covered with j, jBelow
+        . rw jSame
+          rwa same at hk
+  . exact covered
+
+-- Labels onto n from succ(n) vertices must collide.
+theorem doorsOf.collision (ℓ s : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires finite : Finite(s)
+  requires size : cardinality(s) = succ(n)
+  requires imageEq : functionImage(ℓ, s, succ(n)) = n
+  shows ∃ a ∈ s, ∃ b ∈ s, a ≠ b ∧ ℓ(a) = ℓ(b)
+proof
+  by_contra none
+  have cancel : ∀ x ∈ s, ∀ y ∈ s, ℓ(x) = ℓ(y) → x = y
+    intros x hx y hy same
+    by_contra different
+    apply none
+    witness x
+    constructor
+    . exact hx
+    . witness y
+      constructor
+      . exact hy
+      . exact ⟨different, same⟩
+  have injective := Injective.of_cancel with function, cancel
+  have selfSubset : s ⊆ s
+    intros x hx
+    exact hx
+  have count := cardinality.injective_image with injective, selfSubset, finite
+  rw [imageEq, size] at count
+  have natural := cardinality.natural at n
+  rw natural at count
+  arith
+
+-- With a collision ℓ(a) = ℓ(b) and image n, the face opposite a is complete.
+theorem doorsOf.face_full (ℓ s a b : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires imageEq : functionImage(ℓ, s, succ(n)) = n
+  requires ha : a ∈ s
+  requires hb : b ∈ s
+  requires different : a ≠ b
+  requires same : ℓ(a) = ℓ(b)
+  shows functionImage(ℓ, s ∖ {a}, succ(n)) = n
+proof
+  have restSubset := difference.subset_left at s, {a}
+  have bRest : b ∈ s ∖ {a}
+    apply difference.singleton_membership.backward
+    constructor
+    . exact hb
+    . intro equal
+      apply different
+      symm
+      exact equal
+  apply Subset.antisymmetric
+  . have mono := functionImage.monotone at ℓ, s, succ(n), s ∖ {a}, s with restSubset
+    rwa imageEq at mono
+  . intros k hk
+    have kInImage : k ∈ functionImage(ℓ, s, succ(n)) by rwa imageEq
+    obtain ⟨kIn, x, hx, kShape⟩ := functionImage.membership.forward with kInImage
+    apply functionImage.membership.backward
+    constructor
+    . exact kIn
+    . have alternatives : x = a ∨ x ≠ a
+        tauto
+      cases alternatives with xa | xna
+      . witness b
+        constructor
+        . exact bRest
+        . rw [kShape, xa, same]
+          rfl
+      . refine ⟨x, (difference.singleton_membership.backward with ⟨hx, xna⟩), kShape⟩
+
+theorem doorsOf.of_collision (ℓ s a b : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires finite : Finite(s)
+  requires size : cardinality(s) = succ(n)
+  requires imageEq : functionImage(ℓ, s, succ(n)) = n
+  requires ha : a ∈ s
+  requires hb : b ∈ s
+  requires different : a ≠ b
+  requires same : ℓ(a) = ℓ(b)
+  shows doorsOf(ℓ, s, n) = insert(a, {b})
+proof
+  have restSubset := difference.subset_left at s, {a}
+  have restFinite := Finite.subset with finite, restSubset
+  have restNat := cardinality.nat with restFinite
+  have removed := cardinality.remove with finite, ha
+  rw size at removed
+  have restCount : cardinality(s ∖ {a}) = n
+    have forward : cardinality(s ∖ {a}) ≤ n by arith
+    have backward : n ≤ cardinality(s ∖ {a}) by arith
+    exact LessEqual.antisymmetric with forward, backward
+  have bRest : b ∈ s ∖ {a}
+    apply difference.singleton_membership.backward
+    constructor
+    . exact hb
+    . intro equal
+      apply different
+      symm
+      exact equal
+  have reversed : b ≠ a
+    intro equal
+    apply different
+    symm
+    exact equal
+  have sameReversed : ℓ(b) = ℓ(a)
+    symm
+    exact same
+  have faceA := doorsOf.face_full with function, imageEq, ha, hb, different, same
+  have faceB := doorsOf.face_full with function, imageEq, hb, ha, reversed, sameReversed
+  have faceCount : cardinality(functionImage(ℓ, s ∖ {a}, succ(n))) = cardinality(s ∖ {a})
+    rw [faceA, restCount]
+    exact cardinality.natural
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨xIn, door⟩ := doorsOf.membership.forward with hx
+    apply insert.membership.backward
+    by_contra neither
+    have notA : x ≠ a
+      intro equal
+      apply neither
+      left
+      exact equal
+    have notB : x ≠ b
+      intro equal
+      apply neither
+      right
+      exact singleton.membership.backward with equal
+    have xRest : x ∈ s ∖ {a} := difference.singleton_membership.backward with ⟨xIn, notA⟩
+    have valueIn : ℓ(x) ∈ functionImage(ℓ, s ∖ {x}, succ(n))
+      rw door
+      have inImage : ℓ(x) ∈ functionImage(ℓ, s, succ(n))
+        apply functionImage.membership.backward
+        constructor
+        . exact FunctionBetween.apply_closed with function, xIn
+        . witness x
+          constructor
+          . exact xIn
+          . rfl
+      rwa imageEq at inImage
+    obtain ⟨vIn, y, hy, yShape⟩ := functionImage.membership.forward with valueIn
+    obtain ⟨yIn, yDifferent⟩ := difference.singleton_membership.forward with hy
+    have alternatives : y = a ∨ y ≠ a by tauto
+    cases alternatives with ya | yna
+    . have values : ℓ(x) = ℓ(b)
+        rw [yShape, ya, same]
+        rfl
+      have equal := cardinality.injective_of_image with function, restSubset, restFinite, faceCount, xRest, bRest, values
+      exact notB with equal
+    . have yRest : y ∈ s ∖ {a} := difference.singleton_membership.backward with ⟨yIn, yna⟩
+      have equal := cardinality.injective_of_image with function, restSubset, restFinite, faceCount, xRest, yRest, yShape
+      apply yDifferent
+      symm
+      exact equal
+  . intro hx
+    have split := insert.membership.forward with hx
+    apply doorsOf.membership.backward
+    cases split with xa | xb
+    . rw xa
+      exact ⟨ha, faceA⟩
+    . have equal := singleton.membership.forward with xb
+      rw equal
+      exact ⟨hb, faceB⟩
+
+theorem doorsOf.incomplete (ℓ s : Set) (n : Nat)
+  requires function : ℓ : s → succ(n)
+  requires finite : Finite(s)
+  requires size : cardinality(s) = succ(n)
+  requires partial : functionImage(ℓ, s, succ(n)) ≠ succ(n)
+  shows cardinality(doorsOf(ℓ, s, n)) = 0 ∨ cardinality(doorsOf(ℓ, s, n)) = 2
+proof
+  have alternatives : n ⊆ functionImage(ℓ, s, succ(n)) ∨ ¬n ⊆ functionImage(ℓ, s, succ(n)) by tauto
+  cases alternatives with covered | missing
+  . right
+    have imageEq := doorsOf.image_of_covered with covered, partial
+    obtain ⟨a, ha, b, hb, different, same⟩ := doorsOf.collision with function, finite, size, imageEq
+    have doors := doorsOf.of_collision with function, finite, size, imageEq, ha, hb, different, same
+    rw doors
+    have fresh : ¬a ∈ {b}
+      intro inside
+      exact different with (singleton.membership.forward with inside)
+    have count := cardinality.insert with (Finite.singleton at b), fresh
+    have one := cardinality.singleton at b
+    rw [count, one]
+    rfl
+  . left
+    have doors := doorsOf.empty_of_missing with missing
+    rw [doors, ← nat.zero]
+    exact cardinality.natural

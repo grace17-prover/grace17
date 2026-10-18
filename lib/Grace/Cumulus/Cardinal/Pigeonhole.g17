@@ -1,0 +1,199 @@
+-- Cardinality is monotone on finite sets, strictly so for proper subsets,
+-- an image is no larger than its domain, and a function whose image is as
+-- large as its finite domain is injective
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Pigeonhole
+import NaturalSum
+
+theorem cardinality.nat (A : Set)
+  requires finite : Finite(A)
+  shows Nat(cardinality(A))
+proof
+  exact HasCardinality.natural with (cardinality.correct with finite)
+
+theorem cardinality.monotone (S T : Set)
+  requires finite : Finite(T)
+  requires subset : S ⊆ T
+  shows cardinality(S) ≤ cardinality(T)
+proof
+  have finiteS := Finite.subset with finite, subset
+  have restSubset := difference.subset_left at T, S
+  have finiteRest := Finite.subset with finite, restSubset
+  have disjoint := Disjoint.symmetric with (difference.disjoint at T, S)
+  have restored : S ∪ (T ∖ S) = T
+    ext z
+    simp
+  have count := cardinality.union_disjoint with finiteS, finiteRest, disjoint
+  rw restored at count
+  have natS := cardinality.nat with finiteS
+  have natRest := cardinality.nat with finiteRest
+  rw count
+  arith
+
+theorem cardinality.strict (S T a : Set)
+  requires finite : Finite(T)
+  requires subset : S ⊆ T
+  requires member : a ∈ T
+  requires fresh : ¬a ∈ S
+  shows cardinality(S) < cardinality(T)
+proof
+  have finiteS := Finite.subset with finite, subset
+  have inserted : insert(a, S) ⊆ T
+    intros z hz
+    have split := insert.membership.forward with hz
+    cases split with same | inS
+    . rw same
+      exact member
+    . exact subset with z, inS
+  have count := cardinality.insert with finiteS, fresh
+  have mono := cardinality.monotone with finite, inserted
+  rw count at mono
+  have natS := cardinality.nat with finiteS
+  have natT := cardinality.nat with finite
+  arith
+
+theorem cardinality.eq_subset (S T : Set)
+  requires finite : Finite(T)
+  requires subset : S ⊆ T
+  requires same : cardinality(S) = cardinality(T)
+  shows S = T
+proof
+  apply Subset.antisymmetric with subset
+  intros z hz
+  by_contra outside
+  have strict := cardinality.strict with finite, subset, hz, outside
+  have natS := cardinality.nat with (Finite.subset with finite, subset)
+  have natT := cardinality.nat with finite
+  rw same at strict
+  arith
+
+theorem cardinality.insert_le (A a : Set)
+  requires finite : Finite(A)
+  shows cardinality(insert(a, A)) ≤ succ(cardinality(A))
+proof
+  have natA := cardinality.nat with finite
+  have alternatives : a ∈ A ∨ ¬a ∈ A by tauto
+  cases alternatives with inside | fresh
+  . have same : insert(a, A) = A
+      ext z
+      constructor
+      . intro hz
+        have split := insert.membership.forward with hz
+        cases split with equal | inA
+        . rw equal
+          exact inside
+        . exact inA
+      . intro hz
+        apply insert.membership.backward
+        right
+        exact hz
+    rw same
+    arith
+  . have count := cardinality.insert with finite, fresh
+    rw count
+    arith
+
+theorem cardinality.image_bounded (f A B : Set) (k : Nat)
+  requires function : f : A → B
+  shows ∀ S, S ⊆ A → HasCardinality(S, k) → cardinality(functionImage(f, S, B)) ≤ k
+proof
+  induction k
+  | zero =>
+    intros S subset counted
+    have empty := HasCardinality.empty_of_zero at S with counted
+    rw [empty, functionImage.empty, ← nat.zero]
+    have zero := cardinality.natural at 0
+    rw zero
+    arith
+  | succ(j) using ih =>
+    intros S subset counted
+    obtain ⟨x, hx⟩ := HasCardinality.exists_member with counted
+    have finite := Finite.from_cardinality with counted
+    have count := cardinality.eq_of_has with counted
+    have removed := cardinality.remove with finite, hx
+    have restSubset := difference.subset_left at S, {x}
+    have smallerFinite := Finite.subset with finite, restSubset
+    have smallerNat := cardinality.nat with smallerFinite
+    have smallerCount : cardinality(S ∖ {x}) = j
+      rw count at removed
+      have forward : cardinality(S ∖ {x}) ≤ j by arith
+      have backward : j ≤ cardinality(S ∖ {x}) by arith
+      exact LessEqual.antisymmetric with forward, backward
+    have smallerHas : HasCardinality(S ∖ {x}, j)
+      rw ← smallerCount
+      exact cardinality.correct with smallerFinite
+    have smallerSubset := Subset.transitive with restSubset, subset
+    have bound := ih with smallerSubset, smallerHas
+    have xInA := subset with x, hx
+    have image := functionImage.insert at f, A, B, x, S ∖ {x} with function, xInA
+    have restored := insert.restore with hx
+    rw restored at image
+    rw image
+    have finiteImage := Finite.function_image with function, smallerFinite, smallerSubset
+    have step := cardinality.insert_le at functionImage(f, S ∖ {x}, B), f(x) with finiteImage
+    have natImage := cardinality.nat with finiteImage
+    arith
+
+theorem cardinality.image_le (f A B S : Set)
+  requires function : f : A → B
+  requires subset : S ⊆ A
+  requires finite : Finite(S)
+  shows cardinality(functionImage(f, S, B)) ≤ cardinality(S)
+proof
+  have counted := cardinality.correct with finite
+  have natS := cardinality.nat with finite
+  have all := cardinality.image_bounded with function
+  exact all with subset, counted
+
+-- A function whose image is as large as its finite domain is injective.
+theorem cardinality.injective_of_image (f A B S x y : Set)
+  requires function : f : A → B
+  requires subset : S ⊆ A
+  requires finite : Finite(S)
+  requires full : cardinality(functionImage(f, S, B)) = cardinality(S)
+  requires hx : x ∈ S
+  requires hy : y ∈ S
+  requires same : f(x) = f(y)
+  shows x = y
+proof
+  by_contra different
+  have restSubset := difference.subset_left at S, {x}
+  have smallerFinite := Finite.subset with finite, restSubset
+  have smallerSubset := Subset.transitive with restSubset, subset
+  have yRest : y ∈ S ∖ {x}
+    apply difference.singleton_membership.backward
+    constructor
+    . exact hy
+    . intro equal
+      apply different
+      symm
+      exact equal
+  have inclusion : functionImage(f, S, B) ⊆ functionImage(f, S ∖ {x}, B)
+    intros z hz
+    obtain ⟨zIn, w, hw, shape⟩ := functionImage.membership.forward with hz
+    apply functionImage.membership.backward
+    constructor
+    . exact zIn
+    . have alternatives : w = x ∨ w ≠ x
+        tauto
+      cases alternatives with wx | wnx
+      . witness y
+        constructor
+        . exact yRest
+        . rw [shape, wx, same]
+          rfl
+      . refine ⟨w, (difference.singleton_membership.backward with ⟨hw, wnx⟩), shape⟩
+  have finiteImage := Finite.function_image with function, finite, subset
+  have finiteSmallImage := Finite.function_image with function, smallerFinite, smallerSubset
+  have mono := cardinality.monotone with finiteSmallImage, inclusion
+  have le := cardinality.image_le with function, smallerSubset, smallerFinite
+  have removed := cardinality.remove with finite, hx
+  have natImage := cardinality.nat with finiteImage
+  have natSmallImage := cardinality.nat with finiteSmallImage
+  have natSmaller := cardinality.nat with smallerFinite
+  have natS := cardinality.nat with finite
+  arith

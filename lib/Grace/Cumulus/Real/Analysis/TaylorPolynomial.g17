@@ -1,0 +1,589 @@
+-- Real analysis: Taylor polynomials
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Real.Analysis.TaylorPolynomial
+import CauchyMeanValue
+import FiniteSum
+
+-- Section: Preparations
+theorem realInvValue.one
+  shows realInvValue((1:R)) = (1:R)
+proof
+  have nonzero : (1:R) ≠ 0
+    intro zero
+    linarith
+  have unit := realInvValue.mul_right with nonzero
+  have typedInverse := realInvValue.real at (1:R) with realOne.real
+  have identity := realMulValue.one_left with typedInverse
+  rw ← identity
+  exact unit
+
+theorem realDiv.one_right (A : Real)
+  shows A / (1:R) = A
+proof
+  have division := realDiv.eq_mul_inv at A, (1:R) with assumption, realOne.real
+  rw [division, realInvValue.one]
+  exact realMulValue.one_right with assumption
+
+theorem realPow.nonzero (A : Real, n : Nat)
+  requires nonzero : A ≠ 0
+  shows A ^ n ≠ 0
+proof
+  induction n
+  | zero =>
+    rw realPow.zero
+    intro zero
+    linarith
+  | succ(j) using ih =>
+    rw realPow.succ
+    intro vanishes
+    have unit := realInvValue.mul_left with nonzero
+    have typedInverse := realInvValue.real at A
+    have typedPower := realPow.real at A, j
+    have zero : A ^ j = 0
+      linear_combination realInvValue(A) * vanishes - A ^ j * unit
+    exact ih with zero
+
+theorem realNat.succ_value (n : Nat)
+  shows realNat(succ(n)) = (realNat(n):R) + 1
+proof
+  rw realNat.succ
+  unfold realAddValue
+  unfold call2
+  rfl
+
+theorem realNat.ge_zero (n : Nat)
+  shows (0:R) ≤ realNat(n)
+proof
+  induction n
+  | zero =>
+    rw realNat.zero
+    linarith
+  | succ(k) using ih =>
+    have typedNat := realNat.real at k
+    rw realNat.succ_value
+    linarith
+
+theorem realNat.succ_nonzero (n : Nat)
+  shows (realNat(n):R) + 1 ≠ 0
+proof
+  have nonnegative := realNat.ge_zero at n
+  have typedNat := realNat.real at n
+  intro zero
+  linarith
+
+theorem realNat.factorial_succ (n : Nat)
+  shows realNat((n + 1)!) = ((realNat(n):R) + 1) * realNat(n!)
+proof
+  have step := factorial.succ at n
+  rw [step, realNat.mul, realNat.add, realNat.one]
+  rfl
+
+theorem realNat.factorial_positive (n : Nat)
+  shows (0:R) < realNat(n!)
+proof
+  induction n
+  | zero =>
+    have factorialZero : (0:N)! = 1 by simp [factorial]
+    rw [factorialZero, realNat.one]
+    linarith
+  | succ(k) using ih =>
+    have one : k + 1 = succ(k) := add.right_one with *
+    rw ← one
+    rw realNat.factorial_succ
+    have nonnegative := realNat.ge_zero at k
+    have typedNat := realNat.real at k
+    have factorialNat := factorial.closed at k
+    have typedFactorial := realNat.real at k!
+    have positive : (0:R) < (realNat(k):R) + 1 by linarith
+    exact realMulValue.positive with positive, ih
+
+theorem realNat.factorial_nonzero (n : Nat)
+  shows realNat(n!) ≠ (0:R)
+proof
+  have positive := realNat.factorial_positive at n
+  have factorialNat := factorial.closed at n
+  have typedFactorial := realNat.real at n!
+  intro zero
+  linarith
+
+-- Section: BasePowers
+-- The function x ↦ (B − x)^k, built from the pointwise constructors so that
+-- the derivative rules apply to it directly.
+def basePower (B : Real, k : Nat) → Set
+  | B, zero => constantRealFunction(realOne)
+  | B, succ(j) =>
+    pointwiseMul(pointwiseSub(constantRealFunction(B), identity(ℝ)),
+      basePower(B, j))
+
+def linearFactor (B : Real) : Set :=
+  pointwiseSub(constantRealFunction(B), identity(ℝ))
+
+theorem linearFactor.function (B : Real)
+  shows linearFactor(B) : ℝ → ℝ
+proof
+  have constant := constantRealFunction.function at B
+  have identityFunction := identity.function at ℝ
+  unfold linearFactor
+  exact pointwiseSub.function with constant, identityFunction
+
+theorem linearFactor.value (B X : Real)
+  shows linearFactor(B)(X) = B - X
+proof
+  have realX : X ∈ ℝ by simp [Real]
+  have constant := constantRealFunction.function at B
+  have identityFunction := identity.function at ℝ
+  have constantValue := constantRealFunction.value at B, X
+  have identityValue := identity.apply with realX
+  have typedConstant : Real(constantRealFunction(B)(X)) by rwa constantValue
+  have typedIdentity : Real(identity(ℝ)(X)) by rwa identityValue
+  have value := pointwiseSub.value at
+    constantRealFunction(B), identity(ℝ), X with
+    assumption, constant, identityFunction, typedConstant, typedIdentity
+  rw [constantValue, identityValue] at value
+  unfold linearFactor
+  cc
+
+theorem linearFactor.derivative (B X : Real)
+  shows HasDerivativeAt(linearFactor(B), -(1:R), X)
+proof
+  have constant := constantRealFunction.has_derivative_at at B, X
+  have identityDerivative := identity.has_derivative_at at X
+  have raw := HasDerivativeAt.sub with constant, identityDerivative
+  have value : realZero - realOne = -(1:R) by ring
+  unfold linearFactor
+  exact HasDerivativeAt.congr_value with raw, value
+
+theorem basePower.succ (B : Real, k : Nat)
+  shows basePower(B, k + 1) = pointwiseMul(linearFactor(B), basePower(B, k))
+proof
+  have one : k + 1 = succ(k) := add.right_one with *
+  rw one
+  rw basePower
+  unfold linearFactor
+  rfl
+
+theorem basePower.function (B : Real, k : Nat)
+  shows basePower(B, k) : ℝ → ℝ
+proof
+  induction k
+  | zero =>
+    rw basePower
+    exact constantRealFunction.function with realOne.real
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    rw basePower.succ
+    have linear := linearFactor.function at B
+    exact pointwiseMul.function with linear, ih
+
+theorem basePower.value (B X : Real, k : Nat)
+  shows basePower(B, k)(X) = (B - X) ^ k
+proof
+  induction k
+  | zero =>
+    rw [basePower, realPow.zero]
+    exact constantRealFunction.value with realOne.real, assumption
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    rw [basePower.succ, one, realPow.succ]
+    have realX : X ∈ ℝ by simp [Real]
+    have linear := linearFactor.function at B
+    have power := basePower.function at B, j
+    have linearValue := linearFactor.value at B, X
+    have typedDifference := realSubValue.real at B, X
+    have typedLinear : Real(linearFactor(B)(X)) by rwa linearValue
+    have typedPower : Real(basePower(B, j)(X))
+      exact FunctionBetween.apply_closed with power, realX
+    have value := pointwiseMul.value at linearFactor(B), basePower(B, j), X with
+      assumption, linear, power, typedLinear, typedPower
+    rwa [linearValue, ih] at value
+
+-- Section: TaylorTerms
+-- The Taylor terms f⁽ᵏ⁾(X) (B − X)ᵏ / k! as a real sequence in k; written
+-- by name here so that the generated laws can substitute the index.
+defgraph taylorTerms (f : Set, X B : Real) (k ∈ ℕ) : ℝ :=
+  iteratedDerivative(f, k)(X) * (B - X) ^ k / k!
+requires function : f : ℝ → ℝ
+proof
+  have naturalK := nat.omega.backward with member
+  have realX : X ∈ ℝ by simp [Real]
+  have kFunction := iteratedDerivative.function at f, k with function
+  have typedValue : Real(iteratedDerivative(f, k)(X))
+    exact FunctionBetween.apply_closed with kFunction, realX
+  have factorialNat := factorial.closed at k
+  have typedFactorial := realNat.real at k!
+  have typedPower := realPow.real at B - X, k
+  have typedProduct := realMulValue.real with typedValue, typedPower
+  exact realDiv.real with typedProduct, typedFactorial
+
+-- A sum of Taylor terms is written out, ∑ k ≤ n, f⁽ᵏ⁾(A) * (B - A) ^ k / k!,
+-- and prints that way.
+notation sequence taylorTerms
+
+-- Section: TaylorApproximant
+-- The function x ↦ ∑_{k ≤ n} f⁽ᵏ⁾(x) (B − x)ᵏ / k!, built from the pointwise
+-- constructors; its value at B is f(B) and its derivative telescopes.
+def taylorApproximant (f : Set, B : Real, n : Nat) → Set
+  | f, B, zero => f
+  | f, B, succ(j) =>
+    pointwiseAdd(taylorApproximant(f, B, j),
+      pointwiseMul(
+        constantRealFunction(realInvValue(realNat(factorial(succ(j))))),
+        pointwiseMul(iteratedDerivative(f, succ(j)), basePower(B, succ(j)))))
+
+def taylorStep (f : Set, B : Real, k : Nat) : Set :=
+  pointwiseMul(constantRealFunction(realInvValue(realNat(k!))),
+    pointwiseMul(iteratedDerivative(f, k), basePower(B, k)))
+
+theorem taylorApproximant.succ (f : Set) (B : Real, n : Nat)
+  shows taylorApproximant(f, B, n + 1) =
+    pointwiseAdd(taylorApproximant(f, B, n), taylorStep(f, B, n + 1))
+proof
+  have one : n + 1 = succ(n) := add.right_one with *
+  rw one
+  rw taylorApproximant
+  unfold taylorStep
+  rfl
+
+theorem taylorStep.function (f : Set) (B : Real, k : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorStep(f, B, k) : ℝ → ℝ
+proof
+  have factorialNat := factorial.closed at k
+  have typedFactorial := realNat.real at k!
+  have typedInverse := realInvValue.real with typedFactorial
+  have constant := constantRealFunction.function with typedInverse
+  have kFunction := iteratedDerivative.function at f, k with function
+  have power := basePower.function at B, k
+  have product := pointwiseMul.function with kFunction, power
+  unfold taylorStep
+  exact pointwiseMul.function with constant, product
+
+theorem taylorStep.value (f : Set) (B X : Real, k : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorStep(f, B, k)(X) = f⁽ᵏ⁾(X) * (B - X) ^ k / k!
+proof
+  have realX : X ∈ ℝ by simp [Real]
+  have factorialNat := factorial.closed at k
+  have typedFactorial := realNat.real at k!
+  have typedInverse := realInvValue.real with typedFactorial
+  have constant := constantRealFunction.function with typedInverse
+  have kFunction := iteratedDerivative.function at f, k with function
+  have power := basePower.function at B, k
+  have product := pointwiseMul.function with kFunction, power
+  have constantValue := constantRealFunction.value at
+    realInvValue(realNat(k!)), X with
+    typedInverse, assumption
+  have typedConstant : Real(constantRealFunction(realInvValue(realNat(k!)))(X))
+    rwa constantValue
+  have typedK : Real(iteratedDerivative(f, k)(X))
+    exact FunctionBetween.apply_closed with kFunction, realX
+  have powerValue := basePower.value at B, X, k
+  have typedPowerValue := realPow.real at B - X, k
+  have typedPower : Real(basePower(B, k)(X)) by rwa powerValue
+  have innerValue := pointwiseMul.value at
+    iteratedDerivative(f, k), basePower(B, k), X with
+      assumption, kFunction, power, typedK, typedPower
+  have typedInner : Real(pointwiseMul(iteratedDerivative(f, k), basePower(B, k))(X))
+    exact FunctionBetween.apply_closed with product, realX
+  have outerValue := pointwiseMul.value at
+    constantRealFunction(realInvValue(realNat(k!))),
+    pointwiseMul(iteratedDerivative(f, k), basePower(B, k)), X with
+      assumption, constant, product, typedConstant, typedInner
+  have typedProduct := realMulValue.real with typedK, typedPowerValue
+  have division := realDiv.eq_mul_inv with typedProduct, typedFactorial
+  unfold taylorStep
+  ring
+
+theorem taylorApproximant.function (f : Set) (B : Real, n : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorApproximant(f, B, n) : ℝ → ℝ
+proof
+  induction n
+  | zero =>
+    rw taylorApproximant
+    exact function
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    rw taylorApproximant.succ
+    have step := taylorStep.function at f, B, j + 1 with function
+    exact pointwiseAdd.function with ih, step
+
+theorem taylorApproximant.step (f : Set) (B X : Real, n : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorApproximant(f, B, n + 1)(X) =
+    taylorApproximant(f, B, n)(X) + f⁽ⁿ⁺¹⁾(X) * (B - X) ^ (n + 1) / (n + 1)!
+proof
+  have realX : X ∈ ℝ by simp [Real]
+  have previous := taylorApproximant.function at f, B, n with function
+  have step := taylorStep.function at f, B, n + 1 with function
+  have typedPrevious : Real(taylorApproximant(f, B, n)(X))
+    exact FunctionBetween.apply_closed with previous, realX
+  have typedStep : Real(taylorStep(f, B, n + 1)(X))
+    exact FunctionBetween.apply_closed with step, realX
+  have sum := pointwiseAdd.value at
+    taylorApproximant(f, B, n), taylorStep(f, B, n + 1), X with
+      assumption, previous, step, typedPrevious, typedStep
+  have stepValue := taylorStep.value at f, B, X, n + 1 with function
+  rw taylorApproximant.succ
+  rwa stepValue at sum
+
+-- Section: TaylorApproximantValues
+theorem taylorApproximant.value (f : Set) (B X : Real, n : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorApproximant(f, B, n)(X) = ∑ k ≤ n, f⁽ᵏ⁾(X) * (B - X) ^ k / k!
+proof
+  induction n
+  | zero =>
+    have one : (0:N) + 1 = succ(0) := add.right_one at (0:N)
+    rw one
+    rw [realPartialSum.succ, realPartialSum.zero, taylorApproximant]
+    have termValue := taylorTerms.value at f, X, B, (0:N) with function
+    rw [termValue, iteratedDerivative.zero, realPow.zero]
+    have factorialZero : (0:N)! = 1 by simp [factorial]
+    rw [factorialZero, realNat.one]
+    have realX : X ∈ ℝ by simp [Real]
+    have typedFX : Real(f(X))
+      exact FunctionBetween.apply_closed with function, realX
+    have unit := realMulValue.one_right with typedFX
+    rw [unit, realDiv.one_right]
+    have zero := realAddValue.zero_left with typedFX
+    unfold call2 at zero
+    unfold realAddValue
+    cc
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    have step := taylorApproximant.step at f, B, X, j with function
+    have two : j + 1 + 1 = succ(j + 1) := add.right_one at j + 1
+    rw [step, two, realPartialSum.succ, ← ih]
+    have termValue := taylorTerms.value at f, X, B, j + 1 with function
+    rw termValue
+    unfold realAddValue
+    unfold call2
+    rfl
+
+theorem taylorApproximant.at_endpoint (f : Set) (B : Real, n : Nat)
+  requires function : f : ℝ → ℝ
+  shows taylorApproximant(f, B, n)(B) = f(B)
+proof
+  induction n
+  | zero =>
+    rw taylorApproximant
+    rfl
+  | succ(j) using ih =>
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    have step := taylorApproximant.step at f, B, B, j with function
+    rw [step, ih]
+    have self := realSubValue.self at B
+    rw [self, one, realPow.zero_succ]
+    have realB : B ∈ ℝ by simp [Real]
+    have kFunction := iteratedDerivative.function at f, succ(j) with function
+    have typedK : Real(iteratedDerivative(f, succ(j))(B))
+      exact FunctionBetween.apply_closed with kFunction, realB
+    have factorialNat := factorial.closed at succ(j)
+    have typedFactorial := realNat.real at succ(j)!
+    have zeroProduct := realMulValue.zero_right with typedK
+    have zeroQuotient := realDiv.zero_left with typedFactorial
+    rw [zeroProduct, zeroQuotient]
+    have typedFB : Real(f(B))
+      exact FunctionBetween.apply_closed with function, realB
+    ring
+
+-- Section: TaylorDerivatives
+theorem basePower.derivative (B X : Real, k : Nat)
+  shows HasDerivativeAt(basePower(B, k + 1),
+    -((realNat(k) + 1) * (B - X) ^ k), X)
+proof
+  induction k
+  | zero =>
+    rw basePower.succ
+    rw basePower
+    have linear := linearFactor.derivative at B, X
+    have constantDerivative := constantRealFunction.has_derivative_at at
+      realOne, X
+    have linearValue := linearFactor.value at B, X
+    have constantValue := constantRealFunction.value at realOne, X with
+      realOne.real, assumption
+    have typedDifference := realSubValue.real at B, X
+    have typedOne := realOne.real
+    have typedLinear : Real(linearFactor(B)(X)) by rwa linearValue
+    have typedConstant : Real(constantRealFunction(realOne)(X))
+      rwa constantValue
+    have product := HasDerivativeAt.mul_value with
+      linear, constantDerivative, typedLinear, typedConstant
+    have algebra : -(1:R) * constantRealFunction(realOne)(X) +
+        linearFactor(B)(X) * realZero =
+        -(((realNat(0):R) + 1) * (B - X) ^ 0)
+      rw [constantValue, linearValue, realPow.zero, realNat.zero]
+      ring
+    exact HasDerivativeAt.congr_value with product, algebra
+  | succ(j) using ih =>
+    rw basePower.succ
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    have linear := linearFactor.derivative at B, X
+    have linearValue := linearFactor.value at B, X
+    have powerValue := basePower.value at B, X, j + 1
+    have typedDifference := realSubValue.real at B, X
+    have typedLinear : Real(linearFactor(B)(X)) by rwa linearValue
+    have typedPowerValue := realPow.real at B - X, j + 1
+    have typedPower : Real(basePower(B, j + 1)(X)) by rwa powerValue
+    have product := HasDerivativeAt.mul_value with
+      linear, ih, typedLinear, typedPower
+    have typedBase := realPow.real at B - X, j
+    have typedNat := realNat.real at j
+    have algebra : -(1:R) * basePower(B, j + 1)(X) +
+        linearFactor(B)(X) * (-(((realNat(j):R) + 1) * (B - X) ^ j)) =
+        -(((realNat(j + 1):R) + 1) * (B - X) ^ (j + 1))
+      rw [powerValue, linearValue, one, realPow.succ, realNat.succ_value]
+      ring
+    exact HasDerivativeAt.congr_value with product, algebra
+
+theorem taylorStep.derivative (f : Set) (B X : Real, k : Nat)
+  requires function : f : ℝ → ℝ
+  requires differentiable : DifferentiableAt(f⁽ᵏ⁺¹⁾, X)
+  shows HasDerivativeAt(taylorStep(f, B, k + 1),
+    f⁽ᵏ⁺¹⁺¹⁾(X) * (B - X) ^ (k + 1) / (k + 1)! -
+      f⁽ᵏ⁺¹⁾(X) * (B - X) ^ k / k!, X)
+proof
+  have realX : X ∈ ℝ by simp [Real]
+  have kFunction := iteratedDerivative.function at f, k + 1 with function
+  have nextFunction := iteratedDerivative.function at f, k + 1 + 1 with function
+  have derivativeK := derivative.has_derivative_at with differentiable
+  have shift := iteratedDerivative.succ at f, k + 1
+  rw ← shift at derivativeK
+  have powerDerivative := basePower.derivative at B, X, k
+  have powerValue := basePower.value at B, X, k + 1
+  have typedDifference := realSubValue.real at B, X
+  have typedPowerValue := realPow.real at B - X, k + 1
+  have typedBase := realPow.real at B - X, k
+  have typedPower : Real(basePower(B, k + 1)(X)) by rwa powerValue
+  have typedK : Real(iteratedDerivative(f, k + 1)(X))
+    exact FunctionBetween.apply_closed with kFunction, realX
+  have typedNext : Real(iteratedDerivative(f, k + 1 + 1)(X))
+    exact FunctionBetween.apply_closed with nextFunction, realX
+  have product := HasDerivativeAt.mul_value with
+    derivativeK, powerDerivative, typedK, typedPower
+  have factorialNat := factorial.closed at k
+  have factorialSuccNat := factorial.closed at k + 1
+  have typedFactorial := realNat.real at k!
+  have typedFactorialSucc := realNat.real at (k + 1)!
+  have typedInverse := realInvValue.real with typedFactorialSucc
+  have typedNat := realNat.real at k
+  have scaled := HasDerivativeAt.scale at
+    pointwiseMul(iteratedDerivative(f, k + 1), basePower(B, k + 1)),
+    realInvValue(realNat((k + 1)!)),
+    iteratedDerivative(f, k + 1 + 1)(X) * basePower(B, k + 1)(X) +
+      iteratedDerivative(f, k + 1)(X) * (-(((realNat(k):R) + 1) * (B - X) ^ k)),
+    X with typedInverse, product
+  have successorNonzero := realNat.succ_nonzero at k
+  have factorialNonzero := realNat.factorial_nonzero at k
+  have factorialSplit := realNat.factorial_succ at k
+  have inverseSplit : realInvValue(realNat((k + 1)!)) =
+      realInvValue((realNat(k):R) + 1) * realInvValue(realNat(k!))
+    rw factorialSplit
+    exact realInvValue.mul with successorNonzero, factorialNonzero
+  have unit := realInvValue.mul_right with successorNonzero
+  have typedProductNext := realMulValue.real with typedNext, typedPowerValue
+  have typedProductK := realMulValue.real with typedK, typedBase
+  have divisionNext := realDiv.eq_mul_inv with
+    typedProductNext, typedFactorialSucc
+  have divisionK := realDiv.eq_mul_inv with typedProductK, typedFactorial
+  have typedSuccessorInverse := realInvValue.real at (realNat(k):R) + 1
+  have typedFactorialInverse := realInvValue.real with typedFactorial
+  have algebra : realInvValue(realNat((k + 1)!)) *
+      (iteratedDerivative(f, k + 1 + 1)(X) * basePower(B, k + 1)(X) +
+        iteratedDerivative(f, k + 1)(X) *
+          (-(((realNat(k):R) + 1) * (B - X) ^ k))) =
+      iteratedDerivative(f, k + 1 + 1)(X) * (B - X) ^ (k + 1) /
+          realNat((k + 1)!) -
+        iteratedDerivative(f, k + 1)(X) * (B - X) ^ k / realNat(k!)
+    rw [powerValue, divisionNext, divisionK]
+    symm
+    linear_combination (iteratedDerivative(f, k + 1)(X) * (B - X) ^ k *
+        realInvValue(realNat(k!))) * unit +
+      (iteratedDerivative(f, k + 1)(X) * (B - X) ^ k * ((realNat(k):R) + 1)) *
+        inverseSplit
+  unfold taylorStep
+  exact HasDerivativeAt.congr_value with scaled, algebra
+
+-- The derivative of x ↦ ∑_{k ≤ n} f⁽ᵏ⁾(x)(B − x)ᵏ/k! telescopes to its last
+-- term's derivative, f⁽ⁿ⁺¹⁾(x)(B − x)ⁿ/n!.
+theorem taylorApproximant.derivative (f : Set) (B X : Real, n : Nat)
+  requires function : f : ℝ → ℝ
+  shows (∀ k ≤ n, DifferentiableAt(f⁽ᵏ⁾, X)) →
+    HasDerivativeAt(taylorApproximant(f, B, n),
+      f⁽ⁿ⁺¹⁾(X) * (B - X) ^ n / n!, X)
+proof
+  induction n
+  | zero =>
+    intro smooth
+    rw taylorApproximant
+    have naturalZero : Nat((0:N)) by typecheck
+    have reflexive : (0:N) ≤ (0:N) by arith
+    have differentiable := smooth with (0:N), naturalZero, reflexive
+    rw iteratedDerivative.zero at differentiable
+    have hasDerivative := derivative.has_derivative_at with differentiable
+    have typedValue := derivative.real at f, X
+    have factorialZero : (0:N)! = 1 by simp [factorial]
+    have algebra : derivative(f)(X) =
+        iteratedDerivative(f, (0:N) + 1)(X) * (B - X) ^ (0:N) / realNat((0:N)!)
+      rw [iteratedDerivative.succ, iteratedDerivative.zero, realPow.zero,
+        factorialZero, realNat.one]
+      have unit := realMulValue.one_right with typedValue
+      rw [unit, realDiv.one_right]
+      rfl
+    exact HasDerivativeAt.congr_value with hasDerivative, algebra
+  | succ(j) using ih =>
+    intro smooth
+    have one : j + 1 = succ(j) := add.right_one with *
+    rw ← one
+    have previous : ∀ k, Nat(k) → k ≤ j →
+        DifferentiableAt(iteratedDerivative(f, k), X)
+      intros k naturalK below
+      have belowSucc : k ≤ succ(j) by arith
+      exact smooth with k, naturalK, belowSucc
+    have previousDerivative := ih with previous
+    have naturalSucc : Nat(j + 1) by typecheck
+    have reflexive : j + 1 ≤ succ(j) by arith
+    have differentiable := smooth with j + 1, naturalSucc, reflexive
+    have stepDerivative := taylorStep.derivative at f, B, X, j with
+      function, differentiable
+    rw taylorApproximant.succ
+    have sum := HasDerivativeAt.add with previousDerivative, stepDerivative
+    have realX : X ∈ ℝ by simp [Real]
+    have kFunction := iteratedDerivative.function at f, j + 1 with function
+    have nextFunction := iteratedDerivative.function at f, j + 1 + 1 with
+      function
+    have typedK : Real(iteratedDerivative(f, j + 1)(X))
+      exact FunctionBetween.apply_closed with kFunction, realX
+    have typedNext : Real(iteratedDerivative(f, j + 1 + 1)(X))
+      exact FunctionBetween.apply_closed with nextFunction, realX
+    have typedDifference := realSubValue.real at B, X
+    have typedBase := realPow.real at B - X, j
+    have typedPowerValue := realPow.real at B - X, j + 1
+    have factorialNat := factorial.closed at j
+    have factorialSuccNat := factorial.closed at j + 1
+    have typedFactorial := realNat.real at j!
+    have typedFactorialSucc := realNat.real at (j + 1)!
+    have typedProductK := realMulValue.real with typedK, typedBase
+    have typedProductNext := realMulValue.real with typedNext, typedPowerValue
+    have typedQuotientK := realDiv.real with typedProductK, typedFactorial
+    have typedQuotientNext := realDiv.real with
+      typedProductNext, typedFactorialSucc
+    have algebra : iteratedDerivative(f, j + 1)(X) * (B - X) ^ j / realNat(j!) +
+        (iteratedDerivative(f, j + 1 + 1)(X) * (B - X) ^ (j + 1) /
+            realNat((j + 1)!) -
+          iteratedDerivative(f, j + 1)(X) * (B - X) ^ j / realNat(j!)) =
+        iteratedDerivative(f, j + 1 + 1)(X) * (B - X) ^ (j + 1) /
+          realNat((j + 1)!)
+      ring
+    exact HasDerivativeAt.congr_value with sum, algebra

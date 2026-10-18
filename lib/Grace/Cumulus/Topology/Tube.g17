@@ -1,0 +1,482 @@
+-- The tube lemma and the compactness of a product: if A is compact in X
+-- and B is compact in Y, then A × B is compact in the product topology.
+-- Every open cover refines to open boxes; over each point of A finitely
+-- many boxes cover the slice, and their widths meet in a tube; finitely
+-- many tubes cover A.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Tube
+import Product
+import FiniteIntersection
+import Cardinal.FiniteUnion
+
+-- Open boxes that sit inside some member of the cover C.
+def innerBoxes (X T Y S C : Set) : Set :=
+  { Z ∈ 𝒫(X × Y) | ∃ U ∈ T, ∃ V ∈ S, Z = U × V ∧ ∃ W ∈ C, Z ⊆ W }
+
+theorem innerBoxes.membership (Z X T Y S C : Set)
+  shows Z ∈ innerBoxes(X, T, Y, S, C) ↔ Z ∈ 𝒫(X × Y) ∧
+    ∃ U ∈ T, ∃ V ∈ S, Z = U × V ∧ ∃ W ∈ C, Z ⊆ W
+proof
+  simp [innerBoxes]
+
+theorem innerBoxes.cover (X T Y S C A B : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires cover : OpenCover(productTopology(X, T, Y, S), A × B, C)
+  shows A × B ⊆ ⋃(innerBoxes(X, T, Y, S, C))
+proof
+  intros p hp
+  obtain ⟨W, hW, hpW⟩ := union.membership.forward with (cover.right with p, hp)
+  have parts := productTopology.membership.forward with (cover.left with W, hW)
+  obtain ⟨U, hU, V, hV, inBox, boxInside⟩ := parts.right with p, hpW
+  have inside := product.monotone with (IsTopology.subset with topologyX, hU), (IsTopology.subset with topologyY, hV)
+  have member : U × V ∈ innerBoxes(X, T, Y, S, C)
+    exact innerBoxes.membership.backward with ⟨(powerset.membership_iff.backward with inside), U, hU, V, hV, rfl, W, hW, boxInside⟩
+  exact union.contains with member, inBox
+
+-- A finite family of inner boxes gives a finite subfamily of C.
+def boxOrigins (C Z : Set) : Set := { W ∈ C | Z ⊆ W }
+
+theorem boxOrigins.membership (W C Z : Set)
+  shows W ∈ boxOrigins(C, Z) ↔ W ∈ C ∧ Z ⊆ W
+proof
+  simp [boxOrigins]
+
+defgraph boxOrigin (X T Y S C G : Set) (Z ∈ G) : C := choose(boxOrigins(C, Z))
+requires inner : G ⊆ innerBoxes(X, T, Y, S, C)
+proof
+  have hZ := inner with Z, assumption
+  have parts := innerBoxes.membership.forward with hZ
+  obtain ⟨U, hU, V, hV, shape, W, hW, inside⟩ := parts.right
+  have original : W ∈ boxOrigins(C, Z) := boxOrigins.membership.backward with ⟨hW, inside⟩
+  have inhabited : Nonempty(boxOrigins(C, Z)) := ⟨W, original⟩
+  have chosen := choose.member with inhabited
+  have chosenParts := boxOrigins.membership.forward with chosen
+  exact chosenParts.left
+
+theorem Compact.of_inner_boxes (X T Y S C G A B : Set)
+  requires inner : G ⊆ innerBoxes(X, T, Y, S, C)
+  requires finite : Finite(G)
+  requires covers : A × B ⊆ ⋃(G)
+  shows ∃ F, F ⊆ C ∧ Finite(F) ∧ A × B ⊆ ⋃(F)
+proof
+  have graph := boxOrigin.function with inner
+  witness functionImage(boxOrigin(X, T, Y, S, C, G), G, C)
+  refine ⟨(functionImage.subset at boxOrigin(X, T, Y, S, C, G), G, C), (Finite.function_image with graph, finite, (Subset.reflexive at G)), ?_⟩
+  intros p hp
+  obtain ⟨Z, hZ, hpZ⟩ := union.membership.forward with (covers with p, hp)
+  have value := boxOrigin.value with inner
+  have hZInner := inner with Z, hZ
+  have parts := innerBoxes.membership.forward with hZInner
+  obtain ⟨U, hU, V, hV, shape, W, hW, inside⟩ := parts.right
+  have original : W ∈ boxOrigins(C, Z) := boxOrigins.membership.backward with ⟨hW, inside⟩
+  have inhabited : Nonempty(boxOrigins(C, Z)) := ⟨W, original⟩
+  have chosen := choose.member with inhabited
+  have chosenParts := boxOrigins.membership.forward with chosen
+  rw ← value at chosenParts
+  have member : boxOrigin(X, T, Y, S, C, G)(Z) ∈ functionImage(boxOrigin(X, T, Y, S, C, G), G, C)
+    have closed := FunctionBetween.apply_closed with graph, hZ
+    simp [functionImage.membership]
+    constructor
+    . exact closed
+    . witness Z
+      constructor
+      . exact hZ
+      . rfl
+  exact union.contains with member, (chosenParts.right with p, hpZ)
+
+-- Over a point x of A: the slices of the boxes through x cover B.
+def slices (T S G x : Set) : Set := { V ∈ S | ∃ U ∈ T, U × V ∈ G ∧ x ∈ U }
+
+theorem slices.membership (V T S G x : Set)
+  shows V ∈ slices(T, S, G, x) ↔ V ∈ S ∧ ∃ U ∈ T, U × V ∈ G ∧ x ∈ U
+proof
+  simp [slices]
+
+theorem slices.cover (X T Y S C A B x : Set)
+  requires hx : x ∈ A
+  requires covers : A × B ⊆ ⋃(innerBoxes(X, T, Y, S, C))
+  shows B ⊆ ⋃(slices(T, S, innerBoxes(X, T, Y, S, C), x))
+proof
+  intros y hy
+  have pair := product.pair with hx, hy
+  obtain ⟨Z, hZ, hpZ⟩ := union.membership.forward with (covers with (x, y), pair)
+  have parts := innerBoxes.membership.forward with hZ
+  obtain ⟨U, hU, V, hV, shape, W, hW, inside⟩ := parts.right
+  rw shape at hpZ
+  have coordinates := product.pair_membership.forward with hpZ
+  rw shape at hZ
+  have member : V ∈ slices(T, S, innerBoxes(X, T, Y, S, C), x)
+    exact slices.membership.backward with ⟨hV, U, hU, hZ, coordinates.left⟩
+  exact union.contains with member, coordinates.right
+
+-- Finitely many slices cover B; each slice has a chosen width through x.
+def sliceCovers (T S G x B : Set) : Set :=
+  { F ∈ 𝒫(slices(T, S, G, x)) | Finite(F) ∧ B ⊆ ⋃(F) }
+def sliceCover (T S G x B : Set) : Set := choose(sliceCovers(T, S, G, x, B))
+def widthCandidates (T G x V : Set) : Set := { U ∈ T | U × V ∈ G ∧ x ∈ U }
+def width (T G x V : Set) : Set := choose(widthCandidates(T, G, x, V))
+
+theorem sliceCovers.membership (F T S G x B : Set)
+  shows F ∈ sliceCovers(T, S, G, x, B) ↔ F ∈ 𝒫(slices(T, S, G, x)) ∧ Finite(F) ∧ B ⊆ ⋃(F)
+proof
+  simp [sliceCovers]
+
+theorem widthCandidates.membership (U T G x V : Set)
+  shows U ∈ widthCandidates(T, G, x, V) ↔ U ∈ T ∧ U × V ∈ G ∧ x ∈ U
+proof
+  simp [widthCandidates]
+
+theorem sliceCover.selected (Y T S G x B : Set)
+  requires compact : IsCompact(Y, S, B)
+  requires covers : B ⊆ ⋃(slices(T, S, G, x))
+  shows sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x) ∧ Finite(sliceCover(T, S, G, x, B)) ∧
+    B ⊆ ⋃(sliceCover(T, S, G, x, B))
+proof
+  have slicesOpen : slices(T, S, G, x) ⊆ S
+    intros V hV
+    have parts := slices.membership.forward with hV
+    exact parts.left
+  obtain ⟨F, hF, finiteF, coveredB⟩ := compact.right with slices(T, S, G, x), ⟨slicesOpen, covers⟩
+  have member : F ∈ sliceCovers(T, S, G, x, B)
+    exact sliceCovers.membership.backward with ⟨(powerset.membership_iff.backward with hF), finiteF, coveredB⟩
+  have inhabited : Nonempty(sliceCovers(T, S, G, x, B)) := ⟨F, member⟩
+  have chosen := choose.member with inhabited
+  have same : sliceCover(T, S, G, x, B) = choose(sliceCovers(T, S, G, x, B))
+    unfold sliceCover
+    rfl
+  rw same
+  have parts := sliceCovers.membership.forward with chosen
+  have rest := parts.right
+  refine ⟨(powerset.membership_iff.forward with parts.left), rest.left, rest.right⟩
+
+theorem width.selected (T S G x V : Set)
+  requires hV : V ∈ slices(T, S, G, x)
+  shows width(T, G, x, V) ∈ T ∧ width(T, G, x, V) × V ∈ G ∧ x ∈ width(T, G, x, V)
+proof
+  have parts := slices.membership.forward with hV
+  obtain ⟨U, hU, boxIn, hxU⟩ := parts.right
+  have candidate : U ∈ widthCandidates(T, G, x, V) := widthCandidates.membership.backward with ⟨hU, boxIn, hxU⟩
+  have inhabited : Nonempty(widthCandidates(T, G, x, V)) := ⟨U, candidate⟩
+  have chosen := choose.member with inhabited
+  have same : width(T, G, x, V) = choose(widthCandidates(T, G, x, V))
+    unfold width
+    rfl
+  rw same
+  exact widthCandidates.membership.forward with chosen
+
+-- The widths of the chosen slices meet in the tube over x.
+defgraph widthMap (T S G x B : Set) (V ∈ sliceCover(T, S, G, x, B)) : T := width(T, G, x, V)
+requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+proof
+  have hV := inner with V, assumption
+  have selected := width.selected with hV
+  exact selected.left
+
+def widths (T S G x B : Set) : Set :=
+  functionImage(widthMap(T, S, G, x, B), sliceCover(T, S, G, x, B), T)
+def tube (T S G x B : Set) : Set := ⋂(widths(T, S, G, x, B))
+
+theorem widths.membership (U T S G x B : Set)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  shows U ∈ widths(T, S, G, x, B) ↔ ∃ V ∈ sliceCover(T, S, G, x, B), U = width(T, G, x, V)
+proof
+  have same : widths(T, S, G, x, B) = functionImage(widthMap(T, S, G, x, B), sliceCover(T, S, G, x, B), T)
+    unfold widths
+    rfl
+  rw same
+  constructor
+  . intro hU
+    simp [functionImage.membership] at hU
+    obtain ⟨inT, V, hV, shape⟩ := hU
+    have value := widthMap.value with inner
+    rw value at shape
+    refine ⟨V, hV, shape⟩
+  . intro represented
+    obtain ⟨V, hV, shape⟩ := represented
+    have value := widthMap.value with inner
+    have selected := width.selected with (inner with V, hV)
+    rw [shape, ← value]
+    have graph := widthMap.function with inner
+    have closed := FunctionBetween.apply_closed with graph, hV
+    simp [functionImage.membership]
+
+theorem tube.open (X T S G x B : Set)
+  requires topology : IsTopology(X, T)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  requires finite : Finite(sliceCover(T, S, G, x, B))
+  requires inhabited : Nonempty(sliceCover(T, S, G, x, B))
+  shows tube(T, S, G, x, B) ∈ T
+proof
+  have graph := widthMap.function with inner
+  obtain ⟨V, hV⟩ := inhabited
+  have member : width(T, G, x, V) ∈ widths(T, S, G, x, B)
+    apply widths.membership.backward with inner
+    refine ⟨V, hV, rfl⟩
+  have nonempty : Nonempty(widths(T, S, G, x, B)) := ⟨width(T, G, x, V), member⟩
+  have finiteWidths : Finite(widths(T, S, G, x, B))
+    unfold widths
+    exact Finite.function_image with graph, finite, (Subset.reflexive at sliceCover(T, S, G, x, B))
+  have inside : widths(T, S, G, x, B) ⊆ T
+    unfold widths
+    exact functionImage.subset
+  unfold tube
+  exact IsTopology.finite_intersection with topology, finiteWidths, inside, nonempty
+
+theorem tube.contains (T S G x B : Set)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  requires inhabited : Nonempty(sliceCover(T, S, G, x, B))
+  shows x ∈ tube(T, S, G, x, B)
+proof
+  obtain ⟨V, hV⟩ := inhabited
+  have member : width(T, G, x, V) ∈ widths(T, S, G, x, B)
+    apply widths.membership.backward with inner
+    refine ⟨V, hV, rfl⟩
+  have nonempty : Nonempty(widths(T, S, G, x, B)) := ⟨width(T, G, x, V), member⟩
+  unfold tube
+  apply familyIntersection.membership_of_nonempty.backward with nonempty
+  intros U hU
+  obtain ⟨V2, hV2, shape⟩ := widths.membership.forward with inner, hU
+  rw shape
+  have selected := width.selected with (inner with V2, hV2)
+  have rest := selected.right
+  exact rest.right
+
+theorem tube.width (T S G x B u V : Set)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  requires hu : u ∈ tube(T, S, G, x, B)
+  requires hV : V ∈ sliceCover(T, S, G, x, B)
+  shows u ∈ width(T, G, x, V)
+proof
+  have member : width(T, G, x, V) ∈ widths(T, S, G, x, B)
+    apply widths.membership.backward with inner
+    refine ⟨V, hV, rfl⟩
+  have nonempty : Nonempty(widths(T, S, G, x, B)) := ⟨width(T, G, x, V), member⟩
+  unfold tube at hu
+  have all := familyIntersection.membership_of_nonempty.forward with nonempty, hu
+  exact all with width(T, G, x, V), member
+
+-- The boxes over the tube: one per chosen slice.
+defgraph tubeBoxMap (X T Y S G x B : Set) (V ∈ sliceCover(T, S, G, x, B)) : 𝒫(X × Y) := width(T, G, x, V) × V
+requires topologyX : IsTopology(X, T)
+requires topologyY : IsTopology(Y, S)
+requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+proof
+  have hV := inner with V, assumption
+  have selected := width.selected with hV
+  have sliceParts := slices.membership.forward with hV
+  have widthInside := IsTopology.subset with topologyX, selected.left
+  have sliceInside := IsTopology.subset with topologyY, sliceParts.left
+  apply powerset.membership_iff.backward
+  exact product.monotone with widthInside, sliceInside
+
+def tubeBoxes (X T Y S G x B : Set) : Set :=
+  functionImage(tubeBoxMap(X, T, Y, S, G, x, B), sliceCover(T, S, G, x, B), 𝒫(X × Y))
+
+theorem tubeBoxes.finite (X T Y S G x B : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  requires finite : Finite(sliceCover(T, S, G, x, B))
+  shows Finite(tubeBoxes(X, T, Y, S, G, x, B))
+proof
+  have graph := tubeBoxMap.function with topologyX, topologyY, inner
+  unfold tubeBoxes
+  exact Finite.function_image with graph, finite, (Subset.reflexive at sliceCover(T, S, G, x, B))
+
+theorem tubeBoxes.inside (X T Y S G x B : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  shows tubeBoxes(X, T, Y, S, G, x, B) ⊆ G
+proof
+  intros Z hZ
+  unfold tubeBoxes at hZ
+  simp [functionImage.membership] at hZ
+  obtain ⟨bound, V, hV, shape⟩ := hZ
+  have value := tubeBoxMap.value with topologyX, topologyY, inner
+  rw [shape, value]
+  have selected := width.selected with (inner with V, hV)
+  have rest := selected.right
+  exact rest.left
+
+theorem tube.covered (X T Y S G x B : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires inner : sliceCover(T, S, G, x, B) ⊆ slices(T, S, G, x)
+  requires covers : B ⊆ ⋃(sliceCover(T, S, G, x, B))
+  shows tube(T, S, G, x, B) × B ⊆ ⋃(tubeBoxes(X, T, Y, S, G, x, B))
+proof
+  have graph := tubeBoxMap.function with topologyX, topologyY, inner
+  intros p hp
+  obtain ⟨bound, u, hu, y, hy, shape⟩ := product.membership.forward with hp
+  obtain ⟨V, hV, hyV⟩ := union.membership.forward with (covers with y, hy)
+  have inWidth := tube.width with inner, hu, hV
+  have value := tubeBoxMap.value with topologyX, topologyY, inner
+  have member : width(T, G, x, V) × V ∈ tubeBoxes(X, T, Y, S, G, x, B)
+    unfold tubeBoxes
+    have closed := FunctionBetween.apply_closed with graph, hV
+    rw ← value
+    simp [functionImage.membership]
+    constructor
+    . exact closed
+    . witness V
+      constructor
+      . exact hV
+      . rfl
+  rw shape
+  exact union.contains with member, (product.pair with inWidth, hyV)
+
+-- Finitely many tubes cover A; their boxes form a finite subfamily of G.
+def tubes (T S G A B : Set) : Set := { tube(T, S, G, x, B) | x ∈ A }
+def tubeOrigins (T S G A B N : Set) : Set := { x ∈ A | tube(T, S, G, x, B) = N }
+
+theorem tubes.membership (N T S G A B : Set)
+  shows N ∈ tubes(T, S, G, A, B) ↔ ∃ x ∈ A, tube(T, S, G, x, B) = N
+proof
+  simp [tubes]
+
+theorem tubeOrigins.membership (x T S G A B N : Set)
+  shows x ∈ tubeOrigins(T, S, G, A, B, N) ↔ x ∈ A ∧ tube(T, S, G, x, B) = N
+proof
+  simp [tubeOrigins]
+
+defgraph tubeOrigin (T S G A B F : Set) (N ∈ F) : A := choose(tubeOrigins(T, S, G, A, B, N))
+requires inside : F ⊆ tubes(T, S, G, A, B)
+proof
+  have hN := inside with N, assumption
+  obtain ⟨x, hx, shape⟩ := tubes.membership.forward with hN
+  have original : x ∈ tubeOrigins(T, S, G, A, B, N) := tubeOrigins.membership.backward with ⟨hx, shape⟩
+  have inhabited : Nonempty(tubeOrigins(T, S, G, A, B, N)) := ⟨x, original⟩
+  have chosen := choose.member with inhabited
+  have parts := tubeOrigins.membership.forward with chosen
+  exact parts.left
+
+theorem tubeOrigin.tube (T S G A B F N : Set)
+  requires inside : F ⊆ tubes(T, S, G, A, B)
+  requires hN : N ∈ F
+  shows tube(T, S, G, tubeOrigin(T, S, G, A, B, F)(N), B) = N
+proof
+  have hNT := inside with N, hN
+  obtain ⟨x, hx, shape⟩ := tubes.membership.forward with hNT
+  have original : x ∈ tubeOrigins(T, S, G, A, B, N) := tubeOrigins.membership.backward with ⟨hx, shape⟩
+  have inhabited : Nonempty(tubeOrigins(T, S, G, A, B, N)) := ⟨x, original⟩
+  have chosen := choose.member with inhabited
+  have parts := tubeOrigins.membership.forward with chosen
+  have value := tubeOrigin.value with inside
+  rw value
+  exact parts.right
+
+defgraph tubeBoxFamily (X T Y S G A B F : Set) (N ∈ F) : 𝒫(𝒫(X × Y)) :=
+  tubeBoxes(X, T, Y, S, G, tubeOrigin(T, S, G, A, B, F)(N), B)
+requires inside : F ⊆ tubes(T, S, G, A, B)
+proof
+  apply powerset.membership_iff.backward
+  unfold tubeBoxes
+  exact functionImage.subset
+
+-- The product of compact sets is compact.
+theorem IsCompact.product (X T Y S A B : Set)
+  requires topologyX : IsTopology(X, T)
+  requires topologyY : IsTopology(Y, S)
+  requires compactA : IsCompact(X, T, A)
+  requires compactB : IsCompact(Y, S, B)
+  shows IsCompact(X × Y, productTopology(X, T, Y, S), A × B)
+proof
+  have hA := compactA.left
+  have hB := compactB.left
+  constructor
+  . exact product.monotone with hA, hB
+  . intros C cover
+    have split : Nonempty(B) ∨ ¬Nonempty(B) by tauto
+    cases split with inhabitedB | emptyB
+    . have boxesCover := innerBoxes.cover with topologyX, topologyY, cover
+      -- the facts about every point of A
+      have sliceFacts : ∀ x ∈ A,
+          sliceCover(T, S, innerBoxes(X, T, Y, S, C), x, B) ⊆ slices(T, S, innerBoxes(X, T, Y, S, C), x) ∧
+          Finite(sliceCover(T, S, innerBoxes(X, T, Y, S, C), x, B)) ∧
+          B ⊆ ⋃(sliceCover(T, S, innerBoxes(X, T, Y, S, C), x, B))
+        intros x hx
+        have slicesCover := slices.cover with hx, boxesCover
+        exact sliceCover.selected with compactB, slicesCover
+      have nonemptyCovers : ∀ x ∈ A, Nonempty(sliceCover(T, S, innerBoxes(X, T, Y, S, C), x, B))
+        intros x hx
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with x, hx
+        obtain ⟨y, hy⟩ := inhabitedB
+        obtain ⟨V, hV, hyV⟩ := union.membership.forward with (covers with y, hy)
+        exact ⟨V, hV⟩
+      have tubesOpen : tubes(T, S, innerBoxes(X, T, Y, S, C), A, B) ⊆ T
+        intros N hN
+        obtain ⟨x, hx, shape⟩ := tubes.membership.forward with hN
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with x, hx
+        rw ← shape
+        exact tube.open with topologyX, inner, finite, (nonemptyCovers with x, hx)
+      have tubesCover : A ⊆ ⋃(tubes(T, S, innerBoxes(X, T, Y, S, C), A, B))
+        intros x hx
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with x, hx
+        have member : tube(T, S, innerBoxes(X, T, Y, S, C), x, B) ∈ tubes(T, S, innerBoxes(X, T, Y, S, C), A, B)
+          exact tubes.membership.backward with ⟨x, hx, rfl⟩
+        exact union.contains with member, (tube.contains with inner, (nonemptyCovers with x, hx))
+      obtain ⟨F, hF, finiteF, coveredA⟩ := compactA.right with tubes(T, S, innerBoxes(X, T, Y, S, C), A, B), ⟨tubesOpen, tubesCover⟩
+      have familyGraph := tubeBoxFamily.function at X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F with hF
+      have originGraph := tubeOrigin.function with hF
+      -- the finite family of boxes
+      have familyFinite := Finite.function_image with familyGraph, finiteF, (Subset.reflexive at F)
+      have membersFinite : ∀ H ∈ functionImage(tubeBoxFamily(X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F), F, 𝒫(𝒫(X × Y))), Finite(H)
+        intros H hH
+        simp [functionImage.membership] at hH
+        obtain ⟨bound, N, hN, shape⟩ := hH
+        have value := tubeBoxFamily.value at X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F, N with hF
+        rw [shape, value]
+        have origin := FunctionBetween.apply_closed with originGraph, hN
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with tubeOrigin(T, S, innerBoxes(X, T, Y, S, C), A, B, F)(N), origin
+        exact tubeBoxes.finite with topologyX, topologyY, inner, finite
+      have unionFinite := Finite.big_union with familyFinite, membersFinite
+      have unionInside : ⋃(functionImage(tubeBoxFamily(X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F), F, 𝒫(𝒫(X × Y)))) ⊆ innerBoxes(X, T, Y, S, C)
+        apply union.subset
+        intros H hH
+        simp [functionImage.membership] at hH
+        obtain ⟨bound, N, hN, shape⟩ := hH
+        have value := tubeBoxFamily.value at X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F, N with hF
+        rw [shape, value]
+        have origin := FunctionBetween.apply_closed with originGraph, hN
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with tubeOrigin(T, S, innerBoxes(X, T, Y, S, C), A, B, F)(N), origin
+        exact tubeBoxes.inside with topologyX, topologyY, inner
+      have unionCovers : A × B ⊆ ⋃(⋃(functionImage(tubeBoxFamily(X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F), F, 𝒫(𝒫(X × Y)))))
+        intros p hp
+        obtain ⟨bound, a, ha, y, hy, shape⟩ := product.membership.forward with hp
+        obtain ⟨N, hN, haN⟩ := union.membership.forward with (coveredA with a, ha)
+        have origin := FunctionBetween.apply_closed with originGraph, hN
+        have tubeShape := tubeOrigin.tube with hF, hN
+        obtain ⟨inner, finite, covers⟩ := sliceFacts with tubeOrigin(T, S, innerBoxes(X, T, Y, S, C), A, B, F)(N), origin
+        have covered := tube.covered with topologyX, topologyY, inner, covers
+        rw tubeShape at covered
+        have inTube : (a, y) ∈ N × B := product.pair with haN, hy
+        obtain ⟨Z, hZ, hpZ⟩ := union.membership.forward with (covered with (a, y), inTube)
+        have value := tubeBoxFamily.value at X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F, N with hF
+        have familyMember : tubeBoxFamily(X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F)(N) ∈ functionImage(tubeBoxFamily(X, T, Y, S, innerBoxes(X, T, Y, S, C), A, B, F), F, 𝒫(𝒫(X × Y)))
+          have closed := FunctionBetween.apply_closed with familyGraph, hN
+          simp [functionImage.membership]
+          constructor
+          . exact closed
+          . witness N
+            constructor
+            . exact hN
+            . rfl
+        rw value at familyMember
+        have inUnion := union.contains with familyMember, hZ
+        rw shape
+        exact union.contains with inUnion, hpZ
+      exact Compact.of_inner_boxes with unionInside, unionFinite, unionCovers
+    . have bEmpty : B = ∅
+        by_contra different
+        apply emptyB
+        exact Nonempty.of_ne_empty with different
+      rw under bEmpty
+      rw under product.right_empty
+      witness ∅
+      refine ⟨(empty.subset at C), Finite.empty, (empty.subset at ⋃(∅))⟩

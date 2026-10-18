@@ -1,0 +1,292 @@
+-- Kernels and images of group homomorphisms: both are subgroups, a
+-- homomorphism is injective exactly when its kernel is trivial, and
+-- subgroups pull back and push forward along homomorphisms
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Kernel
+import Homomorphism
+import Set.Function.Image
+
+-- The kernel of f : G →* H: the elements sent to the unit, written ker(f)
+-- wherever a hypothesis in scope supplies the homomorphism.
+def kernel (f G H : Set) : Set := { x ∈ G.carrier | f(x) = H.one }
+
+notation function "ker(f)" => kernel(f, G, H) via hypothesis GroupHom(f, G, H)
+
+theorem kernel.membership (f G H x : Set)
+  shows x ∈ kernel(f, G, H) ↔ x ∈ G.carrier ∧ f(x) = H.one
+proof
+  simp [kernel]
+
+theorem kernel.subset (f G H : Set)
+  shows kernel(f, G, H) ⊆ G.carrier
+proof
+  intros x hx
+  have parts := kernel.membership.forward with hx
+  exact parts.left
+
+theorem kernel.mem_carrier (f G H x : Set)
+  requires hx : x ∈ kernel(f, G, H)
+  shows x ∈ G.carrier
+proof
+  have parts := kernel.membership.forward with hx
+  exact parts.left
+
+theorem kernel.value (f G H x : Set)
+  requires hx : x ∈ kernel(f, G, H)
+  shows f(x) = H.one
+proof
+  have parts := kernel.membership.forward with hx
+  exact parts.right
+
+theorem kernel.of_value (f G H x : Set)
+  requires hx : x ∈ G.carrier
+  requires vanishes : f(x) = H.one
+  shows x ∈ kernel(f, G, H)
+proof
+  exact kernel.membership.backward with ⟨hx, vanishes⟩
+
+section KernelLaws
+variable (f G H : Set)
+hypothesis hom : f : G →* H
+
+theorem GroupHom.one_mem_kernel
+  shows G.one ∈ ker(f)
+proof
+  have group := GroupHom.source with hom
+  have unitIn : G.one ∈ G := Group.one_mem with *
+  have value := GroupHom.map_one with hom
+  exact kernel.of_value with unitIn, value
+
+theorem GroupHom.kernel_subgroup
+  shows Subgroup(ker(f), G)
+proof
+  apply Subgroup.mk with (GroupHom.source with hom), (kernel.subset at f, G, H), (GroupHom.one_mem_kernel with hom)
+  . intros x hx y hy
+    obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+    obtain ⟨yIn, vy⟩ := kernel.membership.forward with hy
+    have vanishes : f(x * y) = H.one by simp [GroupHom.map_mul, vx, vy, one_mul]
+    exact kernel.of_value with (Group.mul_mem with *), vanishes
+  . intros x hx
+    obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+    have vanishes : f(x⁻¹) = H.one by simp [GroupHom.map_inv, vx, inv_one]
+    exact kernel.of_value with (Group.inv_mem with *), vanishes
+
+-- Two elements have the same image exactly when they differ by an
+-- element of the kernel.
+theorem GroupHom.apply_eq_iff (a b : G)
+  shows f(a) = f(b) ↔ a⁻¹ * b ∈ ker(f)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have preserved : f(a⁻¹ * b) = f(a)⁻¹ * f(b) := GroupHom.map_inv_mul with *
+  have criterion : f(a)⁻¹ * f(b) = H.one ↔ f(a) = f(b) := inv_mul_eq_one with *
+  constructor
+  . intro equal
+    have vanishes := criterion.backward with equal
+    rw ← preserved at vanishes
+    exact kernel.of_value with (Group.mul_mem with *), vanishes
+  . intro member
+    have vanishes := kernel.value with member
+    rw preserved at vanishes
+    exact criterion.forward with vanishes
+
+theorem GroupHom.injective_of_kernel_trivial
+  requires trivial : ∀ x ∈ ker(f), x = G.one
+  shows InjectiveBetween(f, G.carrier, H.carrier)
+proof
+  have group := GroupHom.source with hom
+  have function := GroupHom.function with hom
+  constructor
+  . exact function
+  . intros x hx y hy z hz hxz hyz
+    have vx := FunctionBetween.apply_value with function, hx, hxz
+    have vy := FunctionBetween.apply_value with function, hy, hyz
+    have same : f(x) = f(y) by cc
+    have criterion : f(x) = f(y) ↔ x⁻¹ * y ∈ ker(f) := GroupHom.apply_eq_iff with *
+    have vanishes := trivial with x⁻¹ * y, (criterion.forward with same)
+    have solved : x⁻¹ * y = G.one ↔ x = y := inv_mul_eq_one with *
+    exact solved.forward with vanishes
+
+theorem GroupHom.kernel_trivial_of_injective
+  requires injective : InjectiveBetween(f, G.carrier, H.carrier)
+  shows ∀ x ∈ ker(f), x = G.one
+proof
+  have group := GroupHom.source with hom
+  intros x hx
+  obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+  have unitIn : G.one ∈ G := Group.one_mem with *
+  have unitValue := GroupHom.map_one with hom
+  have same : f(x) = f(G.one) by cc
+  exact Injective.apply_cancel with injective, xIn, unitIn, same
+
+theorem GroupHom.injective_iff_kernel_trivial
+  shows InjectiveBetween(f, G.carrier, H.carrier) ↔ ker(f) = {G.one}
+proof
+  have subgroup := GroupHom.kernel_subgroup with hom
+  have criterion := Subgroup.eq_trivial_iff with subgroup
+  constructor
+  . intro injective
+    have trivial := GroupHom.kernel_trivial_of_injective with hom, injective
+    exact criterion.backward with trivial
+  . intro equal
+    have trivial := criterion.forward with equal
+    exact GroupHom.injective_of_kernel_trivial with hom, trivial
+
+theorem GroupHom.kernel_eq_preimage
+  shows ker(f) = functionPreimage(f, G.carrier, {H.one})
+proof
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+    have value : f(x) ∈ {H.one}
+      rw vx
+      exact singleton.self
+    exact functionPreimage.of_apply with xIn, value
+  . intro hx
+    have parts := functionPreimage.membership.forward with hx
+    have equal := singleton.membership.forward with parts.right
+    exact kernel.of_value with parts.left, equal
+
+-- Images of subgroups are subgroups.
+theorem GroupHom.image_subgroup (K : Set)
+  requires subgroup : Subgroup(K, G)
+  shows Subgroup(functionImage(f, K, H.carrier), H)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have unitValue := GroupHom.map_one with hom
+  have unitK : G.one ∈ K := Subgroup.one_mem with *
+  have unitIn : H.one ∈ functionImage(f, K, H.carrier)
+    have fUnit : f(G.one) ∈ H by typecheck
+    apply functionImage.membership.backward
+    refine ⟨?_, G.one, unitK, ?_⟩
+    . rwa ← unitValue
+    . symm
+      exact unitValue
+  apply Subgroup.mk with target, (functionImage.subset at f, K, H.carrier), unitIn
+  . intros y hy w hw
+    obtain ⟨yIn, a, ha, ya⟩ := functionImage.membership.forward with hy
+    obtain ⟨wIn, b, hb, wb⟩ := functionImage.membership.forward with hw
+    have closed : a * b ∈ K := Subgroup.mul_mem with *
+    have product : y * w ∈ H by typecheck
+    have preserved : f(a * b) = f(a) * f(b) := GroupHom.map_mul with *
+    apply functionImage.membership.backward
+    refine ⟨product, a * b, closed, ?_⟩
+    cc
+  . intros y hy
+    obtain ⟨yIn, a, ha, ya⟩ := functionImage.membership.forward with hy
+    have closed : a⁻¹ ∈ K := Subgroup.inv_mem with *
+    have invY : y⁻¹ ∈ H by typecheck
+    have preserved : f(a⁻¹) = f(a)⁻¹ := GroupHom.map_inv with *
+    apply functionImage.membership.backward
+    refine ⟨invY, a⁻¹, closed, ?_⟩
+    cc
+
+theorem GroupHom.range_subgroup
+  shows Subgroup(functionImage(f, G.carrier, H.carrier), H)
+proof
+  have group := GroupHom.source with hom
+  have whole := Subgroup.whole with group
+  exact GroupHom.image_subgroup with hom, whole
+
+-- Preimages of subgroups are subgroups.
+theorem GroupHom.preimage_subgroup (K : Set)
+  requires subgroup : Subgroup(K, H)
+  shows Subgroup(functionPreimage(f, G.carrier, K), G)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have unitValue := GroupHom.map_one with hom
+  have unitK : H.one ∈ K := Subgroup.one_mem with *
+  have unitG : G.one ∈ G := Group.one_mem with *
+  have unitIn : G.one ∈ functionPreimage(f, G.carrier, K)
+    have value : f(G.one) ∈ K by rwa unitValue
+    exact functionPreimage.of_apply with unitG, value
+  apply Subgroup.mk with group, (functionPreimage.subset at f, G.carrier, K), unitIn
+  . intros x hx y hy
+    have px := functionPreimage.membership.forward with hx
+    have py := functionPreimage.membership.forward with hy
+    have xIn := px.left
+    have yIn := py.left
+    have inK : f(x) * f(y) ∈ K := Subgroup.mul_mem with subgroup, px.right, py.right
+    have preserved : f(x * y) = f(x) * f(y) := GroupHom.map_mul with *
+    have value : f(x * y) ∈ K by rwa preserved
+    exact functionPreimage.of_apply with (Group.mul_mem with *), value
+  . intros x hx
+    have px := functionPreimage.membership.forward with hx
+    have xIn := px.left
+    have inK : f(x)⁻¹ ∈ K := Subgroup.inv_mem with subgroup, px.right
+    have preserved : f(x⁻¹) = f(x)⁻¹ := GroupHom.map_inv with *
+    have value : f(x⁻¹) ∈ K by rwa preserved
+    exact functionPreimage.of_apply with (Group.inv_mem with *), value
+
+theorem GroupHom.kernel_subset_preimage (K : Set)
+  requires subgroup : Subgroup(K, H)
+  shows ker(f) ⊆ functionPreimage(f, G.carrier, K)
+proof
+  have unitK : H.one ∈ K := Subgroup.one_mem with subgroup
+  intros x hx
+  obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+  have value : f(x) ∈ K by rwa vx
+  exact functionPreimage.of_apply with xIn, value
+
+theorem GroupHom.image_mono (K L : Set)
+  requires included : K ⊆ L
+  shows functionImage(f, K, H.carrier) ⊆ functionImage(f, L, H.carrier)
+proof
+  intros y hy
+  obtain ⟨yIn, a, ha, ya⟩ := functionImage.membership.forward with hy
+  have aL := included with a, ha
+  exact functionImage.membership.backward with ⟨yIn, a, aL, ya⟩
+
+theorem GroupHom.surjective_iff_range
+  shows SurjectiveBetween(f, G.carrier, H.carrier) ↔
+    functionImage(f, G.carrier, H.carrier) = H.carrier
+proof
+  have function := GroupHom.function with hom
+  have bounded := functionImage.subset at f, G.carrier, H.carrier
+  constructor
+  . intro surjective
+    apply Subset.antisymmetric with bounded
+    intros y hy
+    obtain ⟨x, hx, edge⟩ := surjective.right with y, hy
+    have value := FunctionBetween.apply_value with function, hx, edge
+    apply functionImage.membership.backward
+    refine ⟨hy, x, hx, ?_⟩
+    symm
+    exact value
+  . intro equal
+    constructor
+    . exact function
+    . intros y hy
+      rw ← equal at hy
+      obtain ⟨yIn, x, hx, yx⟩ := functionImage.membership.forward with hy
+      have edge := FunctionBetween.relates_apply with function, hx
+      refine ⟨x, hx, ?_⟩
+      rwa yx
+
+theorem GroupHom.corestrict_surjective
+  shows SurjectiveBetween(f, G.carrier, functionImage(f, G.carrier, H.carrier))
+proof
+  have function := GroupHom.function with hom
+  exact functionImage.surjective with function
+
+theorem GroupHom.kernel_comp_subset (g K : Set)
+  requires second : g : H →* K
+  shows ker(f) ⊆ kernel(compose(g, f, G.carrier, H.carrier, K.carrier), G, K)
+proof
+  have fFunction := GroupHom.function with hom
+  have gFunction := GroupHom.function with second
+  have unitValue := GroupHom.map_one with second
+  intros x hx
+  obtain ⟨xIn, vx⟩ := kernel.membership.forward with hx
+  have composed := compose.apply at g, f, G.carrier, H.carrier, K.carrier, x with *
+  have vanishes : compose(g, f, G.carrier, H.carrier, K.carrier)(x) = K.one by cc
+  exact kernel.of_value with xIn, vanishes
+
+end KernelLaws

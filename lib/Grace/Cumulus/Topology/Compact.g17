@@ -1,0 +1,224 @@
+-- Compactness: every open cover has a finite subcover. Finite sets are
+-- compact, compactness passes to finite unions, to closed subsets, and
+-- along continuous maps
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Compact
+import Continuity
+import Cardinal.FiniteImage
+import Set.Choice
+
+predicate OpenCover (T A C : Set) := (C ⊆ T) ∧ (A ⊆ ⋃(C))
+predicate IsCompact (X T A : Set) :=
+  (A ⊆ X) ∧ (∀ C, OpenCover(T, A, C) → ∃ F, F ⊆ C ∧ Finite(F) ∧ A ⊆ ⋃(F))
+
+theorem IsCompact.subset (X T A : Set)
+  requires compact : IsCompact(X, T, A)
+  shows A ⊆ X
+proof
+  exact compact.left
+
+theorem IsCompact.subcover (X T A C : Set)
+  requires compact : IsCompact(X, T, A)
+  requires cover : OpenCover(T, A, C)
+  shows ∃ F, F ⊆ C ∧ Finite(F) ∧ A ⊆ ⋃(F)
+proof
+  exact compact.right with C, cover
+
+theorem IsCompact.empty (X T : Set)
+  shows IsCompact(X, T, ∅)
+proof
+  constructor
+  . exact empty.subset at X
+  . intros C cover
+    witness ∅
+    refine ⟨(empty.subset at C), Finite.empty, (empty.subset at ⋃(∅))⟩
+
+theorem IsCompact.singleton (X T x : Set)
+  requires hx : x ∈ X
+  shows IsCompact(X, T, {x})
+proof
+  constructor
+  . intros y hy
+    have same := singleton.membership.forward with hy
+    rwa same
+  . intros C cover
+    have self : x ∈ {x} by simp [singleton.membership]
+    have covered := cover.right with x, self
+    obtain ⟨U, hU, hxU⟩ := union.membership.forward with covered
+    witness {U}
+    refine ⟨?_, (Finite.singleton at U), ?_⟩
+    . intros V hV
+      have same := singleton.membership.forward with hV
+      rwa same
+    . intros y hy
+      have same := singleton.membership.forward with hy
+      rwa [same, union.singleton]
+
+theorem IsCompact.union2 (X T A B : Set)
+  requires compactA : IsCompact(X, T, A)
+  requires compactB : IsCompact(X, T, B)
+  shows IsCompact(X, T, A ∪ B)
+proof
+  constructor
+  . exact union2.subset with compactA.left, compactB.left
+  . intros C cover
+    have coverA : OpenCover(T, A, C)
+      constructor
+      . exact cover.left
+      . exact Subset.transitive with (union2.subset_left at A, B), cover.right
+    have coverB : OpenCover(T, B, C)
+      constructor
+      . exact cover.left
+      . exact Subset.transitive with (union2.subset_right at A, B), cover.right
+    obtain ⟨F, hF, finiteF, coveredA⟩ := compactA.right with C, coverA
+    obtain ⟨G, hG, finiteG, coveredB⟩ := compactB.right with C, coverB
+    witness F ∪ G
+    refine ⟨(union2.subset with hF, hG), (Finite.union with finiteF, finiteG), ?_⟩
+    rw union.union2
+    exact union2.monotone with coveredA, coveredB
+
+-- A closed subset of a compact set is compact: add the complement to a
+-- cover of the subset, take a finite subcover of the whole, drop it again.
+theorem IsCompact.closed_subset (X T A C : Set)
+  requires topology : IsTopology(X, T)
+  requires compact : IsCompact(X, T, A)
+  requires closed : IsClosed(X, T, C)
+  requires hCA : C ⊆ A
+  shows IsCompact(X, T, C)
+proof
+  have hCX := closed.left
+  constructor
+  . exact hCX
+  . intros D cover
+    have extendedOpen : insert(complement(X, C), D) ⊆ T
+      intros U hU
+      have split := insert.membership.forward with hU
+      cases split with isComplement | inD
+      . rw isComplement
+        exact closed.right
+      . exact cover.left with U, inD
+    have extendedCover : A ⊆ ⋃(insert(complement(X, C), D))
+      intros a ha
+      have haX := compact.left with a, ha
+      have split : a ∈ C ∨ ¬a ∈ C by tauto
+      cases split with inC | outside
+      . have covered := cover.right with a, inC
+        obtain ⟨U, hU, haU⟩ := union.membership.forward with covered
+        have member : U ∈ insert(complement(X, C), D)
+          apply insert.membership.backward
+          right
+          exact hU
+        exact union.contains with member, haU
+      . have inComplement : a ∈ complement(X, C) := complement.membership.backward with ⟨haX, outside⟩
+        have member : complement(X, C) ∈ insert(complement(X, C), D)
+          apply insert.membership.backward
+          left
+          rfl
+        exact union.contains with member, inComplement
+    obtain ⟨F, hF, finiteF, coveredA⟩ := compact.right with insert(complement(X, C), D), ⟨extendedOpen, extendedCover⟩
+    witness F ∖ {complement(X, C)}
+    refine ⟨?_, (Finite.subset with finiteF, (difference.subset_left at F, {complement(X, C)})), ?_⟩
+    . intros U hU
+      have parts := difference.singleton_membership.forward with hU
+      have split := insert.membership.forward with (hF with U, parts.left)
+      cases split with isComplement | inD
+      . exfalso
+        exact parts.right with isComplement
+      . exact inD
+    . intros c hc
+      have covered := coveredA with c, (hCA with c, hc)
+      obtain ⟨U, hU, hcU⟩ := union.membership.forward with covered
+      have kept : U ∈ F ∖ {complement(X, C)}
+        apply difference.singleton_membership.backward
+        refine ⟨hU, ?_⟩
+        intro isComplement
+        rw isComplement at hcU
+        have away := complement.membership.forward with hcU
+        exact away.right with hc
+      exact union.contains with kept, hcU
+
+-- The continuous image of a compact set is compact: pull a cover back,
+-- take a finite subcover, and push each member forward through a chosen
+-- original.
+def preimages (f X C : Set) : Set := { functionPreimage(f, X, V) | V ∈ C }
+def originals (f X C U : Set) : Set := { V ∈ C | functionPreimage(f, X, V) = U }
+
+theorem preimages.membership (U f X C : Set)
+  shows U ∈ preimages(f, X, C) ↔ ∃ V ∈ C, functionPreimage(f, X, V) = U
+proof
+  simp [preimages]
+
+theorem originals.membership (V f X C U : Set)
+  shows V ∈ originals(f, X, C, U) ↔ V ∈ C ∧ functionPreimage(f, X, V) = U
+proof
+  simp [originals]
+
+defgraph originalMap (f X C F : Set) (U ∈ F) : C := choose(originals(f, X, C, U))
+requires inside : F ⊆ preimages(f, X, C)
+proof
+  have hU := inside with U, assumption
+  obtain ⟨V, hV, shape⟩ := preimages.membership.forward with hU
+  have original : V ∈ originals(f, X, C, U) := originals.membership.backward with ⟨hV, shape⟩
+  have inhabited : Nonempty(originals(f, X, C, U)) := ⟨V, original⟩
+  have chosen := choose.member with inhabited
+  have parts := originals.membership.forward with chosen
+  exact parts.left
+
+theorem IsCompact.image (f X T Y S A : Set)
+  requires continuous : ContinuousMap(f, X, T, Y, S)
+  requires compact : IsCompact(X, T, A)
+  shows IsCompact(Y, S, functionImage(f, A, Y))
+proof
+  have function := continuous.left
+  constructor
+  . exact functionImage.subset at f, A, Y
+  . intros D cover
+    have pulledOpen : preimages(f, X, D) ⊆ T
+      intros U hU
+      obtain ⟨V, hV, shape⟩ := preimages.membership.forward with hU
+      rw ← shape
+      exact continuous.right with V, (cover.left with V, hV)
+    have pulledCover : A ⊆ ⋃(preimages(f, X, D))
+      intros a ha
+      have haX := compact.left with a, ha
+      have value := FunctionBetween.apply_closed with function, haX
+      have imageMember : f(a) ∈ functionImage(f, A, Y) by simp [functionImage.membership]
+      have covered := cover.right with f(a), imageMember
+      obtain ⟨V, hV, inV⟩ := union.membership.forward with covered
+      have member : functionPreimage(f, X, V) ∈ preimages(f, X, D) := preimages.membership.backward with ⟨V, hV, rfl⟩
+      have inPreimage : a ∈ functionPreimage(f, X, V) := functionPreimage.membership.backward with ⟨haX, inV⟩
+      exact union.contains with member, inPreimage
+    obtain ⟨F, hF, finiteF, coveredA⟩ := compact.right with preimages(f, X, D), ⟨pulledOpen, pulledCover⟩
+    have graph := originalMap.function with hF
+    witness functionImage(originalMap(f, X, D, F), F, D)
+    refine ⟨(functionImage.subset at originalMap(f, X, D, F), F, D), (Finite.function_image with graph, finiteF, (Subset.reflexive at F)), ?_⟩
+    intros y hy
+    simp [functionImage.membership] at hy
+    obtain ⟨hyY, a, ha, shape⟩ := hy
+    have covered := coveredA with a, ha
+    obtain ⟨U, hU, haU⟩ := union.membership.forward with covered
+    have value := originalMap.value with hF
+    have hUP := hF with U, hU
+    obtain ⟨V, hV, preimageShape⟩ := preimages.membership.forward with hUP
+    have member : V ∈ originals(f, X, D, U) := originals.membership.backward with ⟨hV, preimageShape⟩
+    have inhabited : Nonempty(originals(f, X, D, U)) := ⟨V, member⟩
+    have chosen := choose.member with inhabited
+    have chosenParts := originals.membership.forward with chosen
+    rw ← value at chosenParts
+    have inChosen : a ∈ functionPreimage(f, X, originalMap(f, X, D, F)(U)) by rwa chosenParts.right
+    have hit := functionPreimage.membership.forward with inChosen
+    have chosenMember : originalMap(f, X, D, F)(U) ∈ functionImage(originalMap(f, X, D, F), F, D)
+      have closed := FunctionBetween.apply_closed with graph, hU
+      simp [functionImage.membership]
+      constructor
+      . exact closed
+      . witness U
+        constructor
+        . exact hU
+        . rfl
+    rw shape
+    exact union.contains with chosenMember, hit.right

@@ -1,0 +1,177 @@
+-- Executable Bézout coefficients and arbitrary-input correctness
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.ExtendedGCD
+import Bezout
+
+-- Each integer already has natural-pair representatives. Compute their four
+-- components together through one structurally recursive function. `first`
+-- selects the coefficient of a; `negative` selects its subtracted component.
+def bezoutBase (negative first : Bool) : Nat :=
+  chooseNat(first, chooseNat(negative, 0, 1), 0)
+
+def bezoutComponent (fuel a b : Nat, negative first : Bool) → Nat
+  | zero, a, b, negative, first => bezoutBase(negative, first)
+  | succ(fuel), a, b, negative, first =>
+      chooseNat(isZero(b), bezoutBase(negative, first),
+        chooseNat(first,
+          bezoutComponent(fuel, b, a % b, negative, Bool.false),
+          bezoutComponent(fuel, b, a % b, negative, Bool.true) +
+            quotientNat(a, b) * bezoutComponent(fuel, b, a % b, BoolOps.not(negative), Bool.false)))
+
+theorem bezoutBase.natural (negative first : Bool)
+  shows Nat(bezoutBase(negative, first))
+proof
+  have result := chooseNat.natural at first, chooseNat(negative, 0, 1), 0 with *
+  simpa [bezoutBase] using result
+
+theorem bezoutComponent.natural (fuel a b : Nat, negative first : Bool)
+  shows Nat(bezoutComponent(fuel, a, b, negative, first))
+proof
+  induction fuel generalizing a b negative first
+  | zero =>
+    intros a b negative first aNat bNat negativeBool firstBool
+    have result := bezoutBase.natural at negative, first with *
+    simpa [bezoutComponent] using result
+  | succ(k) using ih =>
+    intros a b negative first aNat bNat negativeBool firstBool
+    have flipped := BoolOps.not.boolean at negative with *
+    have remainderNat := mod.natural at b, a with *
+    have rightNat := ih with b, a % b, negative, Bool.false, bNat, remainderNat, negativeBool, Bool.inductive.constructor.false
+    have leftNat := ih with b, a % b, negative, Bool.true, bNat, remainderNat, negativeBool, Bool.inductive.constructor.true
+    have oppositeNat := ih with b, a % b, BoolOps.not(negative), Bool.false, bNat, remainderNat, flipped, Bool.inductive.constructor.false
+    have condition := isZero.boolean at b with *
+    have result := chooseNat.natural at isZero(b), bezoutBase(negative, first), chooseNat(first, bezoutComponent(k, b, a % b, negative, Bool.false), bezoutComponent(k, b, a % b, negative, Bool.true) + quotientNat(a, b) * bezoutComponent(k, b, a % b, BoolOps.not(negative), Bool.false)) with *
+    simpa [bezoutComponent] using result
+
+def bezoutLeftSteps (fuel a b : Nat) : Integer :=
+  integerClass(bezoutComponent(fuel, a, b, Bool.false, Bool.true), bezoutComponent(fuel, a, b, Bool.true, Bool.true))
+
+def bezoutRightSteps (fuel a b : Nat) : Integer :=
+  integerClass(bezoutComponent(fuel, a, b, Bool.false, Bool.false), bezoutComponent(fuel, a, b, Bool.true, Bool.false))
+
+theorem bezoutLeftSteps.integer (fuel a b : Nat)
+  shows Integer(bezoutLeftSteps(fuel, a, b))
+proof
+  unfold bezoutLeftSteps
+  exact integerClass.integer with *
+
+theorem bezoutRightSteps.integer (fuel a b : Nat)
+  shows Integer(bezoutRightSteps(fuel, a, b))
+proof
+  unfold bezoutRightSteps
+  exact integerClass.integer with *
+
+theorem bezoutComponent.zero_right (a fuel : Nat, negative first : Bool)
+  shows bezoutComponent(fuel, a, 0, negative, first) = bezoutBase(negative, first)
+proof
+  induction fuel
+  | zero => simp [bezoutComponent]
+  | succ(k) using ih => simp [bezoutComponent, isZero, chooseNat]
+
+theorem bezoutLeftSteps.zero_right (a fuel : Nat)
+  shows bezoutLeftSteps(fuel, a, 0) = integerOfNat(1)
+proof
+  simp [bezoutLeftSteps, bezoutComponent.zero_right, bezoutBase, chooseNat, integerOfNat]
+
+theorem bezoutRightSteps.zero_right (a fuel : Nat)
+  shows bezoutRightSteps(fuel, a, 0) = integerOfNat(0)
+proof
+  simp [bezoutRightSteps, bezoutComponent.zero_right, bezoutBase, chooseNat, integerOfNat]
+
+theorem bezoutLeftSteps.successor (fuel a b : Nat)
+  shows bezoutLeftSteps(succ(fuel), a, succ(b)) = bezoutRightSteps(fuel, succ(b), a % succ(b))
+proof
+  simp [bezoutLeftSteps, bezoutRightSteps, bezoutComponent, isZero, chooseNat]
+
+theorem bezoutRightSteps.successor (fuel a b : Nat)
+  shows bezoutRightSteps(succ(fuel), a, succ(b)) =
+    bezoutLeftSteps(fuel, succ(b), a % succ(b)) +
+      (-(integerOfNat(quotientNat(a, succ(b))) * bezoutRightSteps(fuel, succ(b), a % succ(b))))
+proof
+  simp [bezoutLeftSteps, bezoutRightSteps, bezoutComponent, isZero, chooseNat, BoolOps.not, integerOfNat, integerMulValue.classes, integerClassMul, integerNegValue.classes, integerClassNeg, integerAddValue.classes, integerClassSum, mul.right_zero, mul, add.right_unit, add]
+
+theorem bezoutSteps.correct (fuel a b : Nat)
+  shows integerLinearCombination(bezoutLeftSteps(fuel, a, b), bezoutRightSteps(fuel, a, b), a, b) =
+      integerOfNat(gcdSteps(fuel, a, b))
+proof
+  induction fuel generalizing a b
+  | zero =>
+    intros a b aNat bNat
+    have unit := integerLinearCombination.unit_left at a, b with *
+    simpa [bezoutLeftSteps, bezoutRightSteps, bezoutComponent, bezoutBase, chooseNat, gcdSteps, integerOfNat] using unit
+  | succ(k) using ih =>
+    intros a b aNat bNat
+    have shape := natural.zero_or_successor at b with *
+    cases shape with zero | successor
+    . rw zero
+      have unit := integerLinearCombination.unit_left at a, 0 with *
+      simpa [bezoutLeftSteps.zero_right, bezoutRightSteps.zero_right, gcdSteps.zero_right] using unit
+    . obtain ⟨j, jNat, bShape⟩ := successor
+      rw bShape
+      have remainderNat := mod.natural at succ(j), a with *
+      have recursive := ih with succ(j), a % succ(j), assumption, remainderNat
+      have preserved := integerLinearCombination.remainder_step at bezoutLeftSteps(k, succ(j), a % succ(j)), bezoutRightSteps(k, succ(j), a % succ(j)), a, succ(j) with *
+      have leftValue := bezoutLeftSteps.successor at k, a, j with *
+      have rightValue := bezoutRightSteps.successor at k, a, j with *
+      have gcdValue := gcdSteps.successor at k, a, j with *
+      rw [leftValue, rightValue, gcdValue, preserved]
+      exact recursive
+
+-- Public coefficients use the same proved sufficient bound as gcd.
+def bezoutLeft (a b : Nat) : Integer := bezoutLeftSteps(b, a, b)
+def bezoutRight (a b : Nat) : Integer := bezoutRightSteps(b, a, b)
+
+theorem bezoutLeft.integer (a b : Nat)
+  shows Integer(bezoutLeft(a, b))
+proof
+  unfold bezoutLeft
+  exact bezoutLeftSteps.integer with *
+
+theorem bezoutRight.integer (a b : Nat)
+  shows Integer(bezoutRight(a, b))
+proof
+  unfold bezoutRight
+  exact bezoutRightSteps.integer with *
+
+theorem bezout.correct (a b : Nat)
+  shows integerLinearCombination(bezoutLeft(a, b), bezoutRight(a, b), a, b) = integerOfNat(gcd(a, b))
+proof
+  have result := bezoutSteps.correct at b, a, b with *
+  simpa [bezoutLeft, bezoutRight, gcd] using result
+
+theorem bezout.certificate (a b : Nat)
+  shows IsGCD(a, b, gcd(a, b)) ∧
+    integerLinearCombination(bezoutLeft(a, b), bezoutRight(a, b), a, b) = integerOfNat(gcd(a, b))
+proof
+  have gcd := gcd.correct at a, b with *
+  have identity := bezout.correct at a, b with *
+  refine ⟨gcd, identity⟩
+
+theorem bezoutLeft.zero_right (a : Nat)
+  shows bezoutLeft(a, 0) = integerOfNat(1)
+proof
+  simp [bezoutLeft, bezoutLeftSteps.zero_right]
+
+theorem bezoutRight.zero_right (a : Nat)
+  shows bezoutRight(a, 0) = integerOfNat(0)
+proof
+  simp [bezoutRight, bezoutRightSteps.zero_right]
+
+-- Bridge executable natural components to their existing quotient classes.
+theorem bezoutLeft.representatives (a b p n : Nat)
+  requires positive : bezoutComponent(b, a, b, Bool.false, Bool.true) = p
+  requires negative : bezoutComponent(b, a, b, Bool.true, Bool.true) = n
+  shows bezoutLeft(a, b) = integerClass(p, n)
+proof
+  simp [bezoutLeft, bezoutLeftSteps]
+
+theorem bezoutRight.representatives (a b p n : Nat)
+  requires positive : bezoutComponent(b, a, b, Bool.false, Bool.false) = p
+  requires negative : bezoutComponent(b, a, b, Bool.true, Bool.false) = n
+  shows bezoutRight(a, b) = integerClass(p, n)
+proof
+  simp [bezoutRight, bezoutRightSteps]

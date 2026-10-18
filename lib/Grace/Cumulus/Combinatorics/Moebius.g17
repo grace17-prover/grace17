@@ -1,0 +1,731 @@
+-- The Möbius function: squarefree numbers, the set and number of prime
+-- divisors, μ(n) = (−1)^k at a squarefree n with k prime divisors and 0
+-- elsewhere, its values at 1, primes, prime squares, and products of two
+-- distinct primes, the step μ(p · d) = −μ(d) for a prime p not dividing d,
+-- and the key identity ∑_{d ∣ n} μ(d) = 0 for n > 1, proved by pairing each
+-- squarefree divisor d with d / p or p · d for a fixed prime p dividing n
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.Moebius
+import DivisorSums
+import Basics
+
+-- A natural number is squarefree when no prime square divides it.
+predicate Squarefree (n : Nat) := ∀ p ∈ ℕ, Prime(p) → ¬(p * p ∣ n)
+
+theorem Squarefree.not_divides (n p : Nat)
+  requires squarefree : Squarefree(n)
+  requires prime : Prime(p)
+  shows ¬(p * p ∣ n)
+proof
+  have pNat : Nat(p) by typecheck
+  have pMember := nat.omega.forward with pNat
+  exact squarefree with p, pMember, prime
+
+theorem Squarefree.of_divides (m n : Nat)
+  requires squarefree : Squarefree(n)
+  requires factor : m ∣ n
+  shows Squarefree(m)
+proof
+  intros p pMember prime square
+  have pNat := nat.omega.backward with pMember
+  have chained := divides.transitive with square, factor
+  have absent := Squarefree.not_divides with squarefree, prime
+  exact absent with chained
+
+theorem Squarefree.nonzero (n : Nat)
+  requires squarefree : Squarefree(n)
+  shows n ≠ 0
+proof
+  intro zero
+  have two := Prime.two
+  have four := divides.zero at 2 * 2
+  rw zero at squarefree
+  have absent := Squarefree.not_divides with squarefree, two
+  exact absent with four
+
+theorem Squarefree.one
+  shows Squarefree(1)
+proof
+  intros p pMember prime square
+  have pNat := nat.omega.backward with pMember
+  have pDivides := divides.of_mul_left with square
+  have pOne := divides.one_only at p with pNat, pDivides
+  exact Prime.ne_one with prime, pOne
+
+theorem Squarefree.prime (p : Nat)
+  requires prime : Prime(p)
+  shows Squarefree(p)
+proof
+  intros q qMember qPrime square
+  have qNat := nat.omega.backward with qMember
+  have qDivides := divides.of_mul_left with square
+  have same := Prime.divides_prime with qPrime, prime, qDivides
+  rw same at square
+  have nonzero := Prime.nonzero with prime
+  have unit : p * p ∣ p * 1
+    have shape : p * 1 = p by ring
+    rw shape
+    exact square
+  have cancel := divides.mul_cancel_left at p, p, 1 with nonzero
+  have pDividesOne := cancel.forward with unit
+  have pOne := divides.one_only at p with *
+  exact Prime.ne_one with prime, pOne
+
+theorem Squarefree.not_prime_square (p : Nat)
+  requires prime : Prime(p)
+  shows ¬Squarefree(p * p)
+proof
+  intro squarefree
+  have self := divides.reflexive at p * p
+  have absent := Squarefree.not_divides with squarefree, prime
+  exact absent with self
+
+-- A prime not dividing a squarefree number keeps the product squarefree.
+theorem Squarefree.mul_prime (d p : Nat)
+  requires squarefree : Squarefree(d)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ d)
+  shows Squarefree(p * d)
+proof
+  intros q qMember qPrime square
+  have qNat := nat.omega.backward with qMember
+  have alternatives : q = p ∨ q ≠ p by tauto
+  cases alternatives with same | different
+  . rw same at square
+    have nonzero := Prime.nonzero with prime
+    have cancel := divides.mul_cancel_left at p, p, d with nonzero
+    have pDivides := cancel.forward with square
+    exact notDivides with pDivides
+  . have qNotDividesP : ¬(q ∣ p)
+      intro qDivides
+      have equal := Prime.divides_prime with qPrime, prime, qDivides
+      exact different with equal
+    have coprimeQP := Prime.gcd_of_not_divides with qPrime, qNotDividesP
+    have characterization := coprime.mul_iff at q, q, p
+    have coprimeSquare := characterization.backward with ⟨coprimeQP, coprimeQP⟩
+    have coprimeSym := coprime.symmetric with coprimeSquare
+    have commuted : p * d = d * p by ring
+    rw commuted at square
+    have dividesD := coprime.cancel_right with coprimeSym, square
+    have absent := Squarefree.not_divides with squarefree, qPrime
+    exact absent with dividesD
+
+-- Dividing a squarefree number by a prime factor removes that prime.
+theorem Squarefree.quotient_not_divides (d p : Nat)
+  requires squarefree : Squarefree(d)
+  requires prime : Prime(p)
+  requires factor : p ∣ d
+  shows ¬(p ∣ quotientNat(d, p))
+proof
+  intro again
+  have pNonzero := Prime.nonzero with prime
+  have equation := divides.quotient_equation with pNonzero, factor
+  have self := divides.reflexive at p
+  have square := divides.mul_mono with self, again
+  rw ← equation at square
+  have absent := Squarefree.not_divides with squarefree, prime
+  exact absent with square
+
+-- The prime divisors of n and their number.
+def primeDivisors (n : Nat) : Set := { p ∈ divisors(n) | Prime(p) }
+
+theorem primeDivisors.membership (n : Nat, p : Set)
+  shows p ∈ primeDivisors(n) ↔ p ∈ divisors(n) ∧ Prime(p)
+proof
+  simp [primeDivisors]
+
+theorem primeDivisors.subset (n : Nat)
+  shows primeDivisors(n) ⊆ divisors(n)
+proof
+  intros p member
+  have both := primeDivisors.membership.forward with member
+  exact both.left
+
+theorem primeDivisors.finite (n : Nat)
+  shows Finite(primeDivisors(n))
+proof
+  have finite := divisors.finite at n
+  have subset := primeDivisors.subset at n
+  exact Finite.subset with finite, subset
+
+theorem primeDivisors.one
+  shows primeDivisors(1) = ∅
+proof
+  ext x
+  constructor
+  . intro member
+    have both := primeDivisors.membership.forward with member
+    have inOne := both.left
+    have prime := both.right
+    rw divisors.one at inOne
+    have xOne := singleton.membership.forward with inOne
+    rw xOne at prime
+    have distinct := Prime.ne_one at 1 with prime
+    exfalso
+    apply distinct
+    rfl
+  . intro member
+    exfalso
+    have absent := set.empty at x
+    exact absent with member
+
+theorem primeDivisors.prime (p : Nat)
+  requires prime : Prime(p)
+  shows primeDivisors(p) = {p}
+proof
+  have same := divisors.prime with prime
+  ext x
+  constructor
+  . intro member
+    have both := primeDivisors.membership.forward with member
+    have inDivisors := both.left
+    have xPrime := both.right
+    rw same at inDivisors
+    have alternatives := pair.membership.forward with inDivisors
+    cases alternatives with one | self
+    . exfalso
+      rw one at xPrime
+      have distinct := Prime.ne_one at 1 with xPrime
+      apply distinct
+      rfl
+    . rw self
+      simp
+  . intro member
+    have xP := singleton.membership.forward with member
+    rw xP
+    have self := divisors.self_member at p
+    exact primeDivisors.membership.backward with ⟨self, prime⟩
+
+theorem primeDivisors.mul_prime (d p : Nat)
+  requires nonzero : d ≠ 0
+  requires prime : Prime(p)
+  shows primeDivisors(p * d) = insert(p, primeDivisors(d))
+proof
+  have pNonzero := Prime.nonzero with prime
+  have productNonzero : p * d ≠ 0
+    intro zero
+    have characterization := mul.eq_zero_iff at p, d
+    have alternatives := characterization.forward with zero
+    cases alternatives with pZero | dZero
+    . exact pNonzero with pZero
+    . exact nonzero with dZero
+  ext q
+  constructor
+  . intro member
+    have both := primeDivisors.membership.forward with member
+    have inDivisors := both.left
+    have qPrime := both.right
+    have qNat := divisors.natural with inDivisors
+    have factor := divisors.divides with inDivisors
+    have alternatives := Prime.divides_mul with qPrime, factor
+    cases alternatives with dividesP | dividesD
+    . have same := Prime.divides_prime with qPrime, prime, dividesP
+      rw same
+      simp
+    . have below := divides.le with dividesD, nonzero
+      have characterization := divisors.membership_le at d, q
+      have inD := characterization.backward with ⟨below, dividesD⟩
+      have characterizationD := primeDivisors.membership at d, q
+      have inPrime := characterizationD.backward with ⟨inD, qPrime⟩
+      simp
+  . intro member
+    have alternatives := insert.membership.forward with member
+    cases alternatives with same | inD
+    . rw same
+      have self := divides.mul_left_self at p, d
+      have below := divides.le with self, productNonzero
+      have characterization := divisors.membership_le at p * d, p
+      have inDivisors := characterization.backward with ⟨below, self⟩
+      exact primeDivisors.membership.backward with ⟨inDivisors, prime⟩
+    . have both := primeDivisors.membership.forward with inD
+      have inDivisorsD := both.left
+      have qPrime := both.right
+      have qNat := divisors.natural with inDivisorsD
+      have factor := divisors.divides with inDivisorsD
+      have multiple := divides.mul_right_self at d, p
+      have chained := divides.transitive with factor, multiple
+      have below := divides.le with chained, productNonzero
+      have characterization := divisors.membership_le at p * d, q
+      have inDivisors := characterization.backward with ⟨below, chained⟩
+      exact primeDivisors.membership.backward with ⟨inDivisors, qPrime⟩
+
+def primeDivisorCount (n : Nat) : Set := cardinality(primeDivisors(n))
+
+theorem primeDivisorCount.natural (n : Nat)
+  shows Nat(primeDivisorCount(n))
+proof
+  have finite := primeDivisors.finite at n
+  have natural := cardinality.nat with finite
+  unfold primeDivisorCount
+  exact natural
+
+theorem primeDivisorCount.one
+  shows primeDivisorCount(1) = 0
+proof
+  have same := primeDivisors.one
+  have empty := cardinality.empty
+  unfold primeDivisorCount
+  cc
+
+theorem primeDivisorCount.prime (p : Nat)
+  requires prime : Prime(p)
+  shows primeDivisorCount(p) = 1
+proof
+  have same := primeDivisors.prime with prime
+  have single := cardinality.singleton at p
+  unfold primeDivisorCount
+  cc
+
+theorem primeDivisorCount.mul_prime (d p : Nat)
+  requires nonzero : d ≠ 0
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ d)
+  shows primeDivisorCount(p * d) = primeDivisorCount(d) + 1
+proof
+  have same := primeDivisors.mul_prime with nonzero, prime
+  have finite := primeDivisors.finite at d
+  have fresh : ¬(p ∈ primeDivisors(d))
+    intro member
+    have both := primeDivisors.membership.forward with member
+    have factor := divisors.divides with both.left
+    exact notDivides with factor
+  have count := cardinality.insert_add_one with finite, fresh
+  unfold primeDivisorCount
+  cc
+
+-- The squarefree numbers, so that the Möbius function has an indicator.
+def squarefreeNumbers : Set := { n ∈ ℕ | Squarefree(n) }
+
+theorem squarefreeNumbers.membership (n : Set)
+  shows n ∈ squarefreeNumbers ↔ n ∈ ℕ ∧ Squarefree(n)
+proof
+  simp [squarefreeNumbers]
+
+-- The Möbius function: (−1)^k at a squarefree number with k prime
+-- divisors, and 0 at every number with a repeated prime factor.
+def moebiusValue (n : Nat) : Set :=
+  integerOfNat(indicator(squarefreeNumbers, n)) *
+    integerPow(-integerOne, primeDivisorCount(n))
+
+theorem moebiusValue.integer (n : Nat)
+  shows Integer(moebiusValue(n))
+proof
+  have countNat := primeDivisorCount.natural at n
+  have indicatorNat := indicator.natural at squarefreeNumbers, n
+  have mask := integerOfNat.integer at indicator(squarefreeNumbers, n)
+  have sign := integerPow.integer at -integerOne, primeDivisorCount(n)
+  unfold moebiusValue
+  exact integerMulValue.integer at integerOfNat(indicator(squarefreeNumbers,
+    n)), integerPow(-integerOne, primeDivisorCount(n)) with *
+
+defgraph moebius (n ∈ ℕ) : ℤ := moebiusValue(n)
+proof
+  have nNat := nat.omega.backward with member
+  exact moebiusValue.integer at n
+
+theorem moebius.integer (n : Nat)
+  shows Integer(moebius(n))
+proof
+  have nNat : Nat(n) by typecheck
+  have nMember := nat.omega.forward with nNat
+  have function := moebius.function
+  exact FunctionBetween.apply_closed with function, nMember
+
+theorem moebius.of_squarefree (n : Nat)
+  requires squarefree : Squarefree(n)
+  shows moebius(n) = integerPow(-integerOne, primeDivisorCount(n))
+proof
+  have nNat : Nat(n) by typecheck
+  have nMember := nat.omega.forward with nNat
+  have countNat := primeDivisorCount.natural at n
+  have sign := integerPow.integer at -integerOne, primeDivisorCount(n)
+  have characterization := squarefreeNumbers.membership at n
+  have inSet := characterization.backward with ⟨nMember, squarefree⟩
+  have one := indicator.member with inSet
+  have value := moebius.value at n
+  rw value
+  unfold moebiusValue
+  rw integerOfNat.one
+  ring
+
+theorem moebius.of_not_squarefree (n : Nat)
+  requires notSquarefree : ¬Squarefree(n)
+  shows moebius(n) = integerZero
+proof
+  have nNat : Nat(n) by typecheck
+  have countNat := primeDivisorCount.natural at n
+  have sign := integerPow.integer at -integerOne, primeDivisorCount(n)
+  have absent : ¬(n ∈ squarefreeNumbers)
+    intro inSet
+    have both := squarefreeNumbers.membership.forward with inSet
+    exact notSquarefree with both.right
+  have zero := indicator.absent with absent
+  have value := moebius.value at n
+  rw value
+  unfold moebiusValue
+  rw integerOfNat.zero
+  ring
+
+theorem moebius.one
+  shows moebius(1) = integerOne
+proof
+  have squarefree := Squarefree.one
+  have value := moebius.of_squarefree with squarefree
+  have count := primeDivisorCount.one
+  rw [value, count, integerPow.zero]
+  rfl
+
+theorem moebius.prime (p : Nat)
+  requires prime : Prime(p)
+  shows moebius(p) = -integerOne
+proof
+  have squarefree := Squarefree.prime with prime
+  have value := moebius.of_squarefree with squarefree
+  have count := primeDivisorCount.prime with prime
+  rw [value, count, integerPow.one_right]
+  rfl
+
+theorem moebius.prime_square (p : Nat)
+  requires prime : Prime(p)
+  shows moebius(p * p) = integerZero
+proof
+  have notSquarefree := Squarefree.not_prime_square with prime
+  exact moebius.of_not_squarefree with notSquarefree
+
+-- Multiplying by a new prime flips the sign of the Möbius function.
+theorem moebius.mul_prime (d p : Nat)
+  requires prime : Prime(p)
+  requires notDivides : ¬(p ∣ d)
+  shows moebius(p * d) = -moebius(d)
+proof
+  have dInteger := moebius.integer at d
+  have alternatives : Squarefree(d) ∨ ¬Squarefree(d) by tauto
+  cases alternatives with squarefree | notSquarefree
+  . have nonzero := Squarefree.nonzero with squarefree
+    have productSquarefree := Squarefree.mul_prime with squarefree, prime,
+      notDivides
+    have valueD := moebius.of_squarefree with squarefree
+    have valueProduct := moebius.of_squarefree with productSquarefree
+    have count := primeDivisorCount.mul_prime with nonzero, prime, notDivides
+    have countNat := primeDivisorCount.natural at d
+    have sign := integerPow.integer at -integerOne, primeDivisorCount(d)
+    rw [valueProduct, count, integerPow.add_one, valueD]
+    ring
+  . have productNotSquarefree : ¬Squarefree(p * d)
+      intro productSquarefree
+      have multiple := divides.mul_right_self at d, p
+      have squarefree := Squarefree.of_divides with productSquarefree, multiple
+      exact notSquarefree with squarefree
+    have valueD := moebius.of_not_squarefree with notSquarefree
+    have valueProduct := moebius.of_not_squarefree with productNotSquarefree
+    rw [valueProduct, valueD]
+    ring
+
+theorem moebius.prime_product (p q : Nat)
+  requires primeP : Prime(p)
+  requires primeQ : Prime(q)
+  requires distinct : p ≠ q
+  shows moebius(p * q) = integerOne
+proof
+  have notDivides : ¬(p ∣ q)
+    intro factor
+    have same := Prime.divides_prime with primeP, primeQ, factor
+    exact distinct with same
+  have flipped := moebius.mul_prime with primeP, notDivides
+  have valueQ := moebius.prime with primeQ
+  have oneInteger := integerOne.integer
+  rw [flipped, valueQ]
+  ring
+
+-- The squarefree divisors of n, the support of μ on divisors(n).
+def squarefreeDivisors (n : Nat) : Set := { d ∈ divisors(n) | Squarefree(d) }
+
+theorem squarefreeDivisors.membership (n : Nat, d : Set)
+  shows d ∈ squarefreeDivisors(n) ↔ d ∈ divisors(n) ∧ Squarefree(d)
+proof
+  simp [squarefreeDivisors]
+
+theorem squarefreeDivisors.subset (n : Nat)
+  shows squarefreeDivisors(n) ⊆ divisors(n)
+proof
+  intros d member
+  have both := squarefreeDivisors.membership.forward with member
+  exact both.left
+
+theorem squarefreeDivisors.quotient_member (n p d : Nat)
+  requires nonzero : n ≠ 0
+  requires member : d ∈ squarefreeDivisors(n)
+  requires factor : p ∣ d
+  shows quotientNat(d, p) ∈ squarefreeDivisors(n)
+proof
+  have both := squarefreeDivisors.membership.forward with member
+  have inDivisors := both.left
+  have squarefree := both.right
+  have dDivides := divisors.divides with inDivisors
+  have dNonzero := divides.nonzero with dDivides, nonzero
+  have pNonzero := divides.nonzero with factor, dNonzero
+  have quotientDivides := divides.quotient with pNonzero, factor
+  have chained := divides.transitive with quotientDivides, dDivides
+  have below := divides.le with chained, nonzero
+  have characterization := divisors.membership_le at n, quotientNat(d, p)
+  have inN := characterization.backward with ⟨below, chained⟩
+  have quotientSquarefree := Squarefree.of_divides with squarefree,
+    quotientDivides
+  exact squarefreeDivisors.membership.backward with ⟨inN, quotientSquarefree⟩
+
+theorem squarefreeDivisors.mul_member (n p d : Nat)
+  requires nonzero : n ≠ 0
+  requires prime : Prime(p)
+  requires pDivides : p ∣ n
+  requires member : d ∈ squarefreeDivisors(n)
+  requires notDivides : ¬(p ∣ d)
+  shows d * p ∈ squarefreeDivisors(n)
+proof
+  have both := squarefreeDivisors.membership.forward with member
+  have inDivisors := both.left
+  have squarefree := both.right
+  have dDivides := divisors.divides with inDivisors
+  have coprimePD := Prime.gcd_of_not_divides with prime, notDivides
+  have coprimeDP := coprime.symmetric with coprimePD
+  have productDivides := coprime.mul_divides with coprimeDP, dDivides, pDivides
+  have below := divides.le with productDivides, nonzero
+  have characterization := divisors.membership_le at n, d * p
+  have inN := characterization.backward with ⟨below, productDivides⟩
+  have productSquarefree := Squarefree.mul_prime with squarefree, prime,
+    notDivides
+  have commuted : d * p = p * d by ring
+  rw commuted
+  rw commuted at inN
+  exact squarefreeDivisors.membership.backward with ⟨inN, productSquarefree⟩
+
+-- The partner of d under p: d / p when p divides d, and d · p otherwise.
+def moebiusPartnerValue (p d : Nat) : Nat :=
+  chooseNat(equalNat(d % p, 0), quotientNat(d, p), d * p)
+
+theorem moebiusPartnerValue.of_divides (p d : Nat)
+  requires factor : p ∣ d
+  shows moebiusPartnerValue(p, d) = quotientNat(d, p)
+proof
+  have characterization := divides.iff_mod_zero at p, d
+  have modZero := characterization.forward with factor
+  have flag := equalNat.true_iff.backward with modZero
+  clear modZero
+  unfold moebiusPartnerValue
+  simp [chooseNat, flag]
+
+theorem moebiusPartnerValue.of_not_divides (p d : Nat)
+  requires notDivides : ¬(p ∣ d)
+  shows moebiusPartnerValue(p, d) = d * p
+proof
+  have characterization := divides.iff_mod_zero at p, d
+  have modNonzero : d % p ≠ 0
+    intro modZero
+    apply notDivides
+    exact characterization.backward with modZero
+  have flag := equalNat.false_iff.backward with modNonzero
+  unfold moebiusPartnerValue
+  simp [chooseNat, flag]
+
+-- Pairing the squarefree divisors of n through a prime p dividing n.
+defgraph moebiusPartner (n p : Nat) (d ∈ squarefreeDivisors(n)) :
+    squarefreeDivisors(n) := moebiusPartnerValue(p, d)
+requires nonzero : n ≠ 0
+requires prime : Prime(p)
+requires factor : p ∣ n
+proof
+  have both := squarefreeDivisors.membership.forward with member
+  have dNat := divisors.natural with both.left
+  have alternatives : p ∣ d ∨ ¬(p ∣ d) by tauto
+  cases alternatives with divides | notDivides
+  . have value := moebiusPartnerValue.of_divides with divides
+    rw value
+    exact squarefreeDivisors.quotient_member with nonzero, member, divides
+  . have value := moebiusPartnerValue.of_not_divides with notDivides
+    rw value
+    exact squarefreeDivisors.mul_member with nonzero, prime, factor, member,
+      notDivides
+
+theorem moebiusPartner.involution (n p : Nat)
+  requires nonzero : n ≠ 0
+  requires prime : Prime(p)
+  requires factor : p ∣ n
+  shows InvolutionOn(moebiusPartner(n, p), squarefreeDivisors(n))
+proof
+  have function := moebiusPartner.function at n, p with nonzero, prime, factor
+  refine ⟨function, _⟩
+  intros d hd
+  have both := squarefreeDivisors.membership.forward with hd
+  have dNat := divisors.natural with both.left
+  have squarefree := both.right
+  have pNonzero := Prime.nonzero with prime
+  have first := moebiusPartner.value at n, p, d with nonzero, prime, factor, hd
+  have alternatives : p ∣ d ∨ ¬(p ∣ d) by tauto
+  cases alternatives with divides | notDivides
+  . have quotientValue := moebiusPartnerValue.of_divides with divides
+    have quotientMember := squarefreeDivisors.quotient_member with nonzero,
+      hd, divides
+    have second := moebiusPartner.value at n, p, quotientNat(d, p) with
+      nonzero, prime, factor, quotientMember
+    have notAgain := Squarefree.quotient_not_divides with squarefree, prime,
+      divides
+    have productValue := moebiusPartnerValue.of_not_divides with notAgain
+    have equation := divides.quotient_equation with pNonzero, divides
+    have quotientNatural := quotientNat.natural at p, d
+    have commuted := mul.commutative at p, quotientNat(d, p)
+    rw [first, quotientValue, second, productValue]
+    cc
+  . have productValue := moebiusPartnerValue.of_not_divides with notDivides
+    have productMember := squarefreeDivisors.mul_member with nonzero, prime,
+      factor, hd, notDivides
+    have second := moebiusPartner.value at n, p, d * p with nonzero, prime,
+      factor, productMember
+    have pDividesProduct := divides.mul_right_self at p, d
+    have quotientValue := moebiusPartnerValue.of_divides with pDividesProduct
+    have reduced : quotientNat(d * p, p) = d
+      have commuted := mul.commutative at p, d
+      rw commuted
+      exact quotientNat.mul_left with pNonzero
+    rw [first, productValue, second, quotientValue, reduced]
+    rfl
+
+theorem moebius.partner (n p : Nat) (d : Set)
+  requires nonzero : n ≠ 0
+  requires prime : Prime(p)
+  requires factor : p ∣ n
+  requires member : d ∈ squarefreeDivisors(n)
+  shows moebius(moebiusPartner(n, p)(d)) = -moebius(d)
+proof
+  have both := squarefreeDivisors.membership.forward with member
+  have dNat := divisors.natural with both.left
+  have squarefree := both.right
+  have pNonzero := Prime.nonzero with prime
+  have value := moebiusPartner.value at n, p, d with nonzero, prime, factor,
+    member
+  have alternatives : p ∣ d ∨ ¬(p ∣ d) by tauto
+  cases alternatives with divides | notDivides
+  . have quotientValue := moebiusPartnerValue.of_divides with divides
+    have notAgain := Squarefree.quotient_not_divides with squarefree, prime,
+      divides
+    have equation := divides.quotient_equation with pNonzero, divides
+    have flipped := moebius.mul_prime at quotientNat(d, p), p with prime,
+      notAgain
+    rw ← equation at flipped
+    have quotientInteger := moebius.integer at quotientNat(d, p)
+    rw [value, quotientValue, flipped, integerNegValue.involutive]
+    rfl
+  . have productValue := moebiusPartnerValue.of_not_divides with notDivides
+    have flipped := moebius.mul_prime with prime, notDivides
+    have commuted := mul.commutative at p, d
+    rw [value, productValue, commuted, flipped]
+    rfl
+
+-- The negated weight d ↦ −w(d).
+defgraph negatedWeights (w : Set) (d ∈ ℕ) : ℤ := integerNegValue(w(d))
+requires weights : w : ℕ → ℤ
+proof
+  have value := FunctionBetween.apply_closed with weights, member
+  exact integerNegValue.integer at w(d) with *
+
+theorem integerAddValue.self_eq_zero (x : Integer)
+  requires doubled : x + x = integerZero
+  shows x = integerZero
+proof
+  have zeroInteger := integerZero.integer
+  have collapse : integerZero + integerZero = integerZero by ring
+  have alternatives := integerLess.trichotomy at x, integerZero
+  rcases alternatives with negative | zero | positive
+  . exfalso
+    have sum := integerLess.add with negative, negative
+    rw [doubled, collapse] at sum
+    exact integerLess.irreflexive at integerZero with sum
+  . exact zero
+  . exfalso
+    have sum := integerLess.add with positive, positive
+    rw [doubled, collapse] at sum
+    exact integerLess.irreflexive at integerZero with sum
+
+theorem moebius.sum_one
+  shows divisorSum(1, moebius) = integerOne
+proof
+  have function := moebius.function
+  have one := divisorSum.one with function
+  rw [one, moebius.one]
+  rfl
+
+-- The key identity: the Möbius function sums to zero over the divisors of
+-- any n > 1.
+theorem moebius.sum_divisors (n : Nat)
+  requires aboveOne : 1 < n
+  shows divisorSum(n, moebius) = integerZero
+proof
+  have nonzero : n ≠ 0
+    intro zero
+    rw zero at aboveOne
+    arith
+  obtain ⟨p, prime, factor⟩ := natural.exists_prime_divisor with aboveOne
+  have pNat := Prime.natural with prime
+  have function := moebius.function
+  have negatedFunction := negatedWeights.function at moebius with function
+  have inner := squarefreeDivisors.subset at n
+  have finiteDivisors := divisors.finite at n
+  have finite := Finite.subset with finiteDivisors, inner
+  have naturals := divisors.subset_naturals at n
+  have subset := Subset.transitive with inner, naturals
+  have vanishes : ∀ d ∈ divisors(n), ¬(d ∈ squarefreeDivisors(n)) →
+      moebius(d) = integerZero
+    intros d hd absent
+    have dNat := divisors.natural with hd
+    have notSquarefree : ¬Squarefree(d)
+      intro squarefree
+      apply absent
+      exact squarefreeDivisors.membership.backward with ⟨hd, squarefree⟩
+    exact moebius.of_not_squarefree with notSquarefree
+  have restricted := divisorSum.support with function, inner, vanishes
+  have involution := moebiusPartner.involution with nonzero, prime, factor
+  have bijective := InvolutionOn.bijective with involution
+  have partnerFunction := InvolutionOn.function with involution
+  have values : ∀ d ∈ squarefreeDivisors(n),
+      moebius(d) = negatedWeights(moebius)(moebiusPartner(n, p)(d))
+    intros d hd
+    have image := FunctionBetween.apply_closed with partnerFunction, hd
+    have imageMember := subset with moebiusPartner(n, p)(d), image
+    have negValue := negatedWeights.value at moebius, moebiusPartner(n, p)(d)
+      with function
+    have flipped := moebius.partner with nonzero, prime, factor, hd
+    have dMember := subset with d, hd
+    have dInteger := FunctionBetween.apply_closed with function, dMember
+    rw [negValue, flipped, integerNegValue.involutive]
+    rfl
+  have reindexed := integerSetSum.reindex at squarefreeDivisors(n),
+    squarefreeDivisors(n), ℕ, ℕ, moebius, negatedWeights(moebius),
+      moebiusPartner(n, p) with finite, function, negatedFunction, subset,
+        subset, bijective, values
+  have scaledValues : ∀ d ∈ squarefreeDivisors(n),
+      negatedWeights(moebius)(d) = integerMulValue(-integerOne, moebius(d))
+    intros d hd
+    have dMember := subset with d, hd
+    have dInteger := FunctionBetween.apply_closed with function, dMember
+    have negValue := negatedWeights.value at moebius, d with function
+    rw negValue
+    ring
+  have scaled := integerSetSum.scale at squarefreeDivisors(n), ℕ, moebius,
+    negatedWeights(moebius), -integerOne with finite, function,
+      negatedFunction, subset, scaledValues
+  have total := integerSetSum.integer with finite, function, subset
+  have fixed : integerSetSum(squarefreeDivisors(n), moebius) =
+      integerMulValue(-integerOne, integerSetSum(squarefreeDivisors(n),
+        moebius)) by cc
+  have cancel : integerSetSum(squarefreeDivisors(n), moebius) +
+      integerMulValue(-integerOne, integerSetSum(squarefreeDivisors(n),
+        moebius)) = integerZero by ring
+  have doubled : integerSetSum(squarefreeDivisors(n), moebius) +
+      integerSetSum(squarefreeDivisors(n), moebius) = integerZero
+    rw ← fixed at cancel
+    exact cancel
+  have zero := integerAddValue.self_eq_zero with doubled
+  rw restricted
+  exact zero

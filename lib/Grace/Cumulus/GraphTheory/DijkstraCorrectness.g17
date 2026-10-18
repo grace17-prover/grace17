@@ -1,0 +1,454 @@
+-- End-to-end correctness of the executable Dijkstra solver.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DijkstraCorrectness
+import DijkstraInvariant
+
+namespace Dijkstra
+
+predicate OpenLowerBound (count values flags bound : Set) :=
+  ∀ v ∈ Dijkstra.Vertices(count), ∀ d ∈ ℕ, Dijkstra.entry(values, v) = Option.some(d) →
+    Dijkstra.flagAt(flags, v) ≠ 1 → bound ≤ d
+
+theorem minimum.open_lower_bound (count index distance : Nat, values : List(Dijkstra.DistanceValues), flags : List(ℕ))
+  requires length : Dijkstra.vectorLength(values) = count
+  requires chosen : Dijkstra.minimum(values, flags, 0) = Option.some(Dijkstra.Candidate.value(index, distance))
+  shows OpenLowerBound(count, values, flags, distance)
+proof
+  intros v vIn d dIn value open
+  have vInfo := Dijkstra.Vertices.membership.forward with vIn
+  have bound : Less(v, ListOps.length{A := Dijkstra.DistanceValues}(values))
+    unfold Dijkstra.vectorLength at length
+    rw length
+    simp
+  exact Dijkstra.minimum.le_open_entry at Dijkstra.DistanceValues, values, flags, index, distance, v, d with Dijkstra.DistanceValues.cells, chosen, bound, value, open
+
+-- The cut argument in the representation used by the executable algorithm.
+theorem StateInvariant.path_lower_bound (count E weights source values flags : Set, bound n : Nat)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires minimal : OpenLowerBound(count, values, flags, bound)
+  shows ∀ v ∈ Dijkstra.Vertices(count), ∀ c ∈ ℕ, Dijkstra.flagAt(flags, v) ≠ 1 →
+    (v, c) ∈ pathsOfLength(Dijkstra.Vertices(count), E, weights, source, n) → bound ≤ c
+proof
+  induction n
+  | zero =>
+    rcases invariant with ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩
+    intros v vIn c cIn open path
+    rw pathsOfLength.zero at path
+    have pair := singleton.membership.forward with path
+    obtain ⟨vs, c0⟩ := orderedPair.injective with pair
+    rw vs at open
+    have zeroIn := nat.omega.forward with Naturals.constructor.zero
+    have least := minimal with source, sourceIn, 0, zeroIn, sourceZero, open
+    rwa c0
+  | succ(m) using ih =>
+    rcases invariant with ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩
+    intros v vIn c cIn open path
+    rw pathsOfLength.successor at path
+    obtain ⟨bounded, u, uIn, y, yIn, prior, priorIn, k, kIn, earlier, edge, pair⟩ := costStep.membership.forward with path
+    obtain ⟨vy, cSum⟩ := orderedPair.injective with pair
+    rw vy at open
+    have priorNat : Nat(prior) by typecheck
+    have kNat : Nat(k) by typecheck
+    have alternatives : Dijkstra.flagAt(flags, u) = 1 ∨ Dijkstra.flagAt(flags, u) ≠ 1 by tauto
+    cases alternatives with closed | uOpen
+    . have certified := settled with u, uIn, closed
+      rcases certified with ⟨d, dIn, value, shortest⟩
+      rcases shortest with ⟨dNat, witnessed, least⟩
+      have mIn := nat.omega.forward at m with assumption
+      have prefix : HasPathCost(Dijkstra.Vertices(count), E, weights, source, u, prior)
+        unfold HasPathCost
+        refine ⟨m, mIn, earlier⟩
+      have priorBound := least with prior, priorIn, prefix
+      have crossing := frontier with u, uIn, y, yIn, k, kIn, closed, open, edge
+      rw value at crossing
+      simp [Dijkstra.extension, Dijkstra.extendSome] at crossing
+      have sumIn := nat.omega.forward at add(d, k) with assumption
+      have reflexive : Option.some(add(d, k)) = Option.some(add(d, k)) by rfl
+      obtain ⟨e, eIn, entryValue, upper⟩ := crossing with add(d, k), sumIn, reflexive
+      have chosenBound := minimal with y, yIn, e, eIn, entryValue, open
+      have first := LessEqual.transitive with chosenBound, upper
+      have reflexiveK := LessEqual.reflexive with kNat
+      have extension := LessEqual.add with dNat, priorBound, reflexiveK
+      rw cSum
+      exact LessEqual.transitive with first, extension
+    . have prefixBound := ih with u, uIn, prior, priorIn, uOpen, earlier
+      have extension := LessEqual.add_right with priorNat, kNat
+      rw cSum
+      exact LessEqual.transitive with prefixBound, extension
+
+theorem StateInvariant.open_path_bound (count E weights source values flags target : Set, bound cost : Nat)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires minimal : OpenLowerBound(count, values, flags, bound)
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  requires open : Dijkstra.flagAt(flags, target) ≠ 1
+  requires path : HasPathCost(Dijkstra.Vertices(count), E, weights, source, target, cost)
+  shows bound ≤ cost
+proof
+  rcases path with ⟨n, nIn, reached⟩
+  have costIn := nat.omega.forward at cost with assumption
+  have lower := Dijkstra.StateInvariant.path_lower_bound at count, E, weights, source, values, flags, bound, n with invariant, minimal
+  exact lower with target, targetIn, cost, costIn, open, reached
+
+theorem StateInvariant.certifies_minimum (count index distance : Nat, E weights source values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires chosen : Dijkstra.minimum(values, flags, 0) = Option.some(Dijkstra.Candidate.value(index, distance))
+  shows ShortestPathCost(Dijkstra.Vertices(count), E, weights, source, index, distance)
+proof
+  obtain ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩ := invariant
+  obtain ⟨bound, value, open⟩ := Dijkstra.minimum.selected_entry at Dijkstra.DistanceValues, values, flags, index, distance with valuesType, flagsType, Dijkstra.DistanceValues.cells, chosen
+  have indexIn : index ∈ Dijkstra.Vertices(count)
+    apply Dijkstra.Vertices.membership.backward
+    constructor
+    . exact nat.omega.forward at index with assumption
+    . unfold Dijkstra.vectorLength at valuesLength
+      rwa ← valuesLength
+  have minimal := minimum.open_lower_bound at count, index, distance, values, flags with *
+  have distanceIn := nat.omega.forward at distance with assumption
+  have witness := witnesses with index, indexIn
+  have path := witness with distance, distanceIn, value
+  unfold ShortestPathCost
+  refine ⟨assumption, path, _⟩
+  intros c cIn candidate
+  exact Dijkstra.StateInvariant.open_path_bound with invariant, minimal, indexIn, open, candidate
+
+
+theorem DistanceAtMost.transitive (a b c : Set)
+  requires first : Dijkstra.DistanceAtMost(a, b)
+  requires second : Dijkstra.DistanceAtMost(b, c)
+  shows Dijkstra.DistanceAtMost(a, c)
+proof
+  intros e eIn value
+  obtain ⟨d, dIn, bValue, de⟩ := second with e, eIn, value
+  obtain ⟨f, fIn, aValue, fd⟩ := first with d, dIn, bValue
+  refine ⟨f, fIn, aValue, _⟩
+  arith
+
+theorem DistanceAtMost.zero (value : Set)
+  requires bound : Dijkstra.DistanceAtMost(value, Option.some(0))
+  shows value = Option.some(0)
+proof
+  have zeroIn := nat.omega.forward at 0 with assumption
+  have reflexive : Option.some(0) = Option.some(0) by rfl
+  obtain ⟨d, dIn, equality, leZero⟩ := bound with 0, zeroIn, reflexive
+  have dNat : Nat(d) by typecheck
+  have nonnegative := Grace.Core.Nat.Order.LessEqual.zero with dNat
+  have zero := LessEqual.antisymmetric with dNat, Naturals.constructor.zero, leZero, nonnegative
+  rwa zero at equality
+
+theorem minOption.le_finite (old : Option(ℕ), cost : Nat)
+  shows Dijkstra.DistanceAtMost(Dijkstra.minOption(old, Option.some(cost)), Option.some(cost))
+proof
+  have cases := Dijkstra.option_cases at old with assumption
+  cases cases with absent | finite
+  . rw absent
+    simp [Dijkstra.minOption]
+    exact Dijkstra.DistanceAtMost.reflexive
+  . rcases finite with ⟨d, dIn, value⟩
+    obtain ⟨e, eIn, computed, choices, oldBound, newBound⟩ := Dijkstra.minOption.finite at d, cost with assumption
+    intros c cIn same
+    have equal := Option.inductive.injective.some with same
+    refine ⟨e, eIn, _, _⟩
+    . rw value
+      exact computed
+    . rw ← equal
+      exact newBound
+
+theorem relax.entry_settled (values : List(Dijkstra.DistanceValues), row flags distance : Set, index : Nat)
+  requires bound : Less(index, Dijkstra.vectorLength(values))
+  requires closed : Dijkstra.flagAt(flags, index) = 1
+  shows Dijkstra.entry(Dijkstra.relax(row, values, flags, distance), index) = Dijkstra.entry(values, index)
+proof
+  unfold Dijkstra.vectorLength at bound
+  have pointwise := Dijkstra.relax.entry at Dijkstra.DistanceValues, index, values, row, flags, distance with *
+  rw [pointwise, closed]
+  simp [Grace.Cumulus.Nat.Mod.equalNat.reflexive, Dijkstra.relaxValue]
+
+theorem relax.entry_edge_bound (values row : List(Dijkstra.DistanceValues), flags : List(ℕ), index distance weight : Nat)
+  requires bound : Less(index, Dijkstra.vectorLength(values))
+  requires open : Dijkstra.flagAt(flags, index) ≠ 1
+  requires edge : Dijkstra.entry(row, index) = Option.some(weight)
+  shows Dijkstra.DistanceAtMost(Dijkstra.entry(Dijkstra.relax(row, values, flags, Option.some(distance)), index), Option.some(add(distance, weight)))
+proof
+  have oldType := Dijkstra.entry.valid at Dijkstra.DistanceValues, index, values with Dijkstra.DistanceValues.cells
+  have no := Dijkstra.equalNat.false_iff.backward with open
+  have sumNat : Nat(add(distance, weight)) by typecheck
+  have least := minOption.le_finite with oldType, sumNat
+  unfold Dijkstra.vectorLength at bound
+  have pointwise := Dijkstra.relax.entry at Dijkstra.DistanceValues, index, values, row, flags, Option.some(distance) with *
+  have computed : Dijkstra.entry(Dijkstra.relax(row, values, flags, Option.some(distance)), index) = Dijkstra.minOption(Dijkstra.entry(values, index), Option.some(add(distance, weight)))
+    settle with pointwise, no, edge, Dijkstra.relaxValue, Dijkstra.extension, Dijkstra.extendSome
+  rwa computed
+
+
+theorem StateInvariant.relax_selected (count index distance : Nat, E weights source rows values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires matrix : Dijkstra.MatrixRepresents(count, rows, E, weights)
+  requires chosen : Dijkstra.minimum(values, flags, 0) = Option.some(Dijkstra.Candidate.value(index, distance))
+  shows Dijkstra.StateInvariant(count, E, weights, source,
+    Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), Dijkstra.mark(flags, index))
+proof
+  have certified := Dijkstra.StateInvariant.certifies_minimum at count, index, distance, E, weights, source, values, flags with *
+  rcases invariant with ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩
+  rcases matrix with ⟨rowsTyped, graph, edges⟩
+  have indexInNat := nat.omega.forward at index with assumption
+  have distanceIn := nat.omega.forward at distance with assumption
+  have rowType := rowsTyped with index, indexInNat
+  have distanceType := Option.inductive.constructor.some with distanceIn
+  obtain ⟨indexBound, selectedValue, selectedOpen⟩ := Dijkstra.minimum.selected_entry at Dijkstra.DistanceValues, values, flags, index, distance with valuesType, flagsType, Dijkstra.DistanceValues.cells, chosen
+  have indexIn : index ∈ Dijkstra.Vertices(count)
+    apply Dijkstra.Vertices.membership.backward
+    refine ⟨indexInNat, _⟩
+    unfold Dijkstra.vectorLength at valuesLength
+    rwa ← valuesLength
+  have markedType := Dijkstra.mark.closed at index, flags with flagsType
+  have markedLength := Dijkstra.mark.length at index, flags with flagsType
+  rw flagsLength at markedLength
+  have relaxedType := Dijkstra.relax.closed with valuesType, rowType, markedType, distanceType
+  have relaxedLength := Dijkstra.relax.length at Dijkstra.DistanceValues, values, Dijkstra.rowAt(rows, index), Dijkstra.mark(flags, index), Option.some(distance) with valuesType
+  rw valuesLength at relaxedLength
+  have indexVectorBound : Less(index, Dijkstra.vectorLength(values))
+    unfold Dijkstra.vectorLength
+    exact indexBound
+  have indexClosed := Dijkstra.mark.at_same at index, flags with flagsType
+  have newSelected : Dijkstra.entry(Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), index) = Option.some(distance)
+    have same := relax.entry_settled at values, Dijkstra.rowAt(rows, index), Dijkstra.mark(flags, index), Option.some(distance), index with valuesType, indexVectorBound, indexClosed
+    rwa same
+  have newSource : Dijkstra.entry(Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), source) = Option.some(0)
+    have sourceInfo := Dijkstra.Vertices.membership.forward with sourceIn
+    have bound : Less(source, ListOps.length{A := Dijkstra.DistanceValues}(values))
+      unfold Dijkstra.vectorLength at valuesLength
+      rw valuesLength
+      simp
+    have decreasing := Dijkstra.relax.entry_no_increase with valuesType, rowType, markedType, distanceType, bound
+    rw sourceZero at decreasing
+    exact Dijkstra.DistanceAtMost.zero with decreasing
+  have newWitnesses : Dijkstra.VectorWitnesses(count, E, weights, source, Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)))
+    intros v vIn
+    have vInfo := Dijkstra.Vertices.membership.forward with vIn
+    have bound : Less(v, ListOps.length{A := Dijkstra.DistanceValues}(values))
+      unfold Dijkstra.vectorLength at valuesLength
+      rw valuesLength
+      simp
+    have oldPaths := witnesses with v, vIn
+    have sourcePaths := witnesses with index, indexIn
+    rw selectedValue at sourcePaths
+    have represented : ∀ k ∈ ℕ, Dijkstra.entry(Dijkstra.rowAt(rows, index), v) = Option.some(k) → WeightedEdge(E, weights, index, v, k)
+      intros k kIn value
+      have agreement := edges with index, indexIn, v, vIn, k, kIn
+      exact agreement.forward with value
+    exact Dijkstra.relax.entry_witnessed with valuesType, rowType, distanceType, bound, indexIn, vIn, oldPaths, sourcePaths, represented
+  have newSettled : Dijkstra.SettledCorrect(count, E, weights, source, Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), Dijkstra.mark(flags, index))
+    intros v vIn closed
+    have vInfo := Dijkstra.Vertices.membership.forward with vIn
+    have bound : Less(v, Dijkstra.vectorLength(values))
+      rw valuesLength
+      simp
+    have alternatives := Dijkstra.mark.flag_cases at index, v, flags with flagsType
+    cases alternatives with same | unchanged
+    . rw under same
+      refine ⟨distance, distanceIn, newSelected, certified⟩
+    . have wasClosed := closed
+      rw unchanged at wasClosed
+      obtain ⟨d, dIn, value, shortest⟩ := settled with v, vIn, wasClosed
+      have preserved := relax.entry_settled at values, Dijkstra.rowAt(rows, index), Dijkstra.mark(flags, index), Option.some(distance), v with valuesType, bound, closed
+      refine ⟨d, dIn, _, shortest⟩
+      rwa preserved
+  have newFrontier : Dijkstra.RelaxedFrontier(count, E, weights, Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), Dijkstra.mark(flags, index))
+    intros u uIn v vIn k kIn closed open edge
+    have uInfo := Dijkstra.Vertices.membership.forward with uIn
+    have vInfo := Dijkstra.Vertices.membership.forward with vIn
+    have uBound : Less(u, Dijkstra.vectorLength(values))
+      rw valuesLength
+      simp
+    have vBound : Less(v, Dijkstra.vectorLength(values))
+      rw valuesLength
+      simp
+    have sameU := relax.entry_settled at values, Dijkstra.rowAt(rows, index), Dijkstra.mark(flags, index), Option.some(distance), u with valuesType, uBound, closed
+    rw sameU
+    have alternatives := Dijkstra.mark.flag_cases at index, u, flags with flagsType
+    cases alternatives with same | unchanged
+    . rw [same, selectedValue]
+      have shifted := edge
+      rw same at shifted
+      have agreement := edges with index, indexIn, v, vIn, k, kIn
+      have weightValue := agreement.backward with shifted
+      have relaxed := relax.entry_edge_bound at values, Dijkstra.rowAt(rows, index), Dijkstra.mark(flags, index), v, distance, k with valuesType, rowType, vBound, open, weightValue
+      simp [Dijkstra.extension, Dijkstra.extendSome]
+    . have wasClosed := closed
+      rw unchanged at wasClosed
+      have wasOpen := Dijkstra.mark.open_was_open with flagsType, open
+      have old := frontier with u, uIn, v, vIn, k, kIn, wasClosed, wasOpen, edge
+      unfold Dijkstra.vectorLength at vBound
+      have decreasing := Dijkstra.relax.entry_no_increase with valuesType, rowType, markedType, distanceType, vBound
+      exact Dijkstra.DistanceAtMost.transitive with decreasing, old
+  unfold Dijkstra.StateInvariant
+  refine ⟨countNat, sourceIn, relaxedType, markedType, relaxedLength, markedLength, newSource, newWitnesses, newSettled, newFrontier⟩
+
+
+theorem StateInvariant.advance (count : Nat, E weights source rows values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires matrix : Dijkstra.MatrixRepresents(count, rows, E, weights)
+  shows ∃ nextValues, ∃ nextFlags,
+    Dijkstra.advance(rows, Dijkstra.State.current(values, flags)) = Dijkstra.State.current(nextValues, nextFlags) ∧
+    Dijkstra.StateInvariant(count, E, weights, source, nextValues, nextFlags)
+proof
+  obtain ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩ := invariant
+  obtain ⟨valid, member, least⟩ := Dijkstra.minimum.correct at Dijkstra.DistanceValues, values, flags, 0 with valuesType, flagsType, Naturals.constructor.zero, Dijkstra.DistanceValues.cells
+  cases valid with absent | finite
+  . have fixed := Dijkstra.advance.none at rows, values, flags with absent
+    refine ⟨values, flags, fixed, invariant⟩
+  . rcases finite with ⟨index, indexIn, distance, distanceIn, chosen⟩
+    have preserved := Dijkstra.StateInvariant.relax_selected with invariant, matrix, chosen
+    refine ⟨Dijkstra.relax(Dijkstra.rowAt(rows, index), values, Dijkstra.mark(flags, index), Option.some(distance)), Dijkstra.mark(flags, index), _, preserved⟩
+    simp [Dijkstra.advance, Dijkstra.advanceChosen]
+
+theorem StateInvariant.iterate (count fuel : Nat, E weights source rows values flags : Set)
+  requires matrix : Dijkstra.MatrixRepresents(count, rows, E, weights)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  shows Dijkstra.StateInvariant(count, E, weights, source,
+    Dijkstra.distances(Dijkstra.iterate(fuel, rows, Dijkstra.State.current(values, flags))),
+    Dijkstra.settled(Dijkstra.iterate(fuel, rows, Dijkstra.State.current(values, flags))))
+proof
+  induction fuel generalizing values flags
+  | zero =>
+    intros values flags invariant
+    rwa [Dijkstra.iterate, Dijkstra.distances, Dijkstra.settled]
+  | succ(k) using ih =>
+    intros values flags invariant
+    obtain ⟨nextValues, nextFlags, advanced, preserved⟩ := Dijkstra.StateInvariant.advance with invariant, matrix
+    have previous := ih with nextValues, nextFlags, preserved
+    rwa [Dijkstra.iterate, advanced]
+
+theorem solve.invariant (count source : Nat, E weights rows : Set)
+  requires sourceIn : source ∈ Dijkstra.Vertices(count)
+  requires matrix : Dijkstra.MatrixRepresents(count, rows, E, weights)
+  shows Dijkstra.StateInvariant(count, E, weights, source,
+    Dijkstra.distances(Dijkstra.solve(count, source, rows)), Dijkstra.settled(Dijkstra.solve(count, source, rows)))
+proof
+  have initial := Dijkstra.StateInvariant.initial at count, E, weights, source with sourceIn
+  have preserved := Dijkstra.StateInvariant.iterate at count, count, E, weights, source, rows, Dijkstra.initialDistances(count, 0, source), Dijkstra.initialFlags(count) with *
+  rwa Dijkstra.solve
+
+theorem StateInvariant.finished_finite (count target distance : Nat, E weights source values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires absent : Dijkstra.minimum(values, flags, 0) = Option.none
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  requires value : Dijkstra.entry(values, target) = Option.some(distance)
+  shows ShortestPathCost(Dijkstra.Vertices(count), E, weights, source, target, distance)
+proof
+  rcases invariant with ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩
+  have targetInfo := Dijkstra.Vertices.membership.forward with targetIn
+  have bound : Less(target, ListOps.length{A := Dijkstra.DistanceValues}(values))
+    unfold Dijkstra.vectorLength at valuesLength
+    rw valuesLength
+    simp
+  have closed := Dijkstra.minimum.none_no_open_finite at Dijkstra.DistanceValues, values, flags, target, distance with valuesType, flagsType, Dijkstra.DistanceValues.cells, absent, bound, value
+  obtain ⟨d, dIn, entryValue, shortest⟩ := settled with target, targetIn, closed
+  rw value at entryValue
+  have same := Option.inductive.injective.some with entryValue
+  rwa same
+
+theorem StateInvariant.finished_open_unreachable (count target cost : Nat, E weights source values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires absent : Dijkstra.minimum(values, flags, 0) = Option.none
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  requires open : Dijkstra.flagAt(flags, target) ≠ 1
+  shows ¬HasPathCost(Dijkstra.Vertices(count), E, weights, source, target, cost)
+proof
+  intro path
+  obtain ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩ := invariant
+  have arbitraryBound : OpenLowerBound(count, values, flags, succ(cost))
+    intros v vIn d dIn value vOpen
+    have vInfo := Dijkstra.Vertices.membership.forward with vIn
+    have bound : Less(v, ListOps.length{A := Dijkstra.DistanceValues}(values))
+      unfold Dijkstra.vectorLength at valuesLength
+      rw valuesLength
+      simp
+    have closed := Dijkstra.minimum.none_no_open_finite at Dijkstra.DistanceValues, values, flags, v, d with valuesType, flagsType, Dijkstra.DistanceValues.cells, absent, bound, value
+    exfalso
+    exact vOpen with closed
+  have impossible := Dijkstra.StateInvariant.open_path_bound with invariant, arbitraryBound, targetIn, open, path
+  have strict : cost < cost by exact impossible
+  exact Less.irreflexive with strict
+
+theorem StateInvariant.finished_none (count target : Nat, E weights source values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires absent : Dijkstra.minimum(values, flags, 0) = Option.none
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  shows Dijkstra.entry(values, target) = Option.none ↔
+    (∀ cost ∈ ℕ, ¬HasPathCost(Dijkstra.Vertices(count), E, weights, source, target, cost))
+proof
+  obtain ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩ := invariant
+  constructor
+  . intro value
+    have open : Dijkstra.flagAt(flags, target) ≠ 1
+      intro closed
+      obtain ⟨settledDistance, settledIn, entryValue, shortest⟩ := settled with target, targetIn, closed
+      rw value at entryValue
+      exact Option.inductive.disjoint.none.some with entryValue
+    intros cost costIn
+    exact Dijkstra.StateInvariant.finished_open_unreachable at count, target, cost, E, weights, source, values, flags with *
+  . intro unreachable
+    have valueType := Dijkstra.entry.valid at Dijkstra.DistanceValues, target, values with valuesType, Dijkstra.DistanceValues.cells
+    have shape := Dijkstra.option_cases with valueType
+    cases shape with none | some
+    . exact none
+    . rcases some with ⟨d, dIn, value⟩
+      have witness := witnesses with target, targetIn
+      have path := witness with d, dIn, value
+      have impossible := unreachable with d, dIn
+      exfalso
+      exact impossible with path
+
+theorem StateInvariant.finished_value (count target distance : Nat, E weights source values flags : Set)
+  requires invariant : Dijkstra.StateInvariant(count, E, weights, source, values, flags)
+  requires absent : Dijkstra.minimum(values, flags, 0) = Option.none
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  shows Dijkstra.entry(values, target) = Option.some(distance) ↔
+    ShortestPathCost(Dijkstra.Vertices(count), E, weights, source, target, distance)
+proof
+  constructor
+  . intro value
+    exact Dijkstra.StateInvariant.finished_finite at count, target, distance, E, weights, source, values, flags with *
+  . intro shortest
+    obtain ⟨countNat, sourceIn, valuesType, flagsType, valuesLength, flagsLength, sourceZero, witnesses, settled, frontier⟩ := invariant
+    have valueType := Dijkstra.entry.valid at Dijkstra.DistanceValues, target, values with valuesType, Dijkstra.DistanceValues.cells
+    have shape := Dijkstra.option_cases with valueType
+    cases shape with none | some
+    . have characterization := Dijkstra.StateInvariant.finished_none at count, target, E, weights, source, values, flags with invariant, absent, targetIn
+      have unreachable := characterization.forward with none
+      have distanceIn := nat.omega.forward at distance with assumption
+      have impossible := unreachable with distance, distanceIn
+      rcases shortest with ⟨distanceNat, path, least⟩
+      exfalso
+      exact impossible with path
+    . rcases some with ⟨d, dIn, value⟩
+      have certified := Dijkstra.StateInvariant.finished_finite at count, target, d, E, weights, source, values, flags with *
+      have same := ShortestPathCost.unique with certified, shortest
+      rwa same at value
+
+-- For every natural size, represented nonnegative weighted graph, and source
+-- in range: finite results are shortest, and none is exactly unreachability.
+theorem solve.correct (count source target : Nat, E weights rows : Set)
+  requires sourceIn : source ∈ Dijkstra.Vertices(count)
+  requires targetIn : target ∈ Dijkstra.Vertices(count)
+  requires matrix : Dijkstra.MatrixRepresents(count, rows, E, weights)
+  shows (∀ distance ∈ ℕ,
+    Dijkstra.entry(Dijkstra.distances(Dijkstra.solve(count, source, rows)), target) = Option.some(distance) ↔
+      ShortestPathCost(Dijkstra.Vertices(count), E, weights, source, target, distance)) ∧
+    (Dijkstra.entry(Dijkstra.distances(Dijkstra.solve(count, source, rows)), target) = Option.none ↔
+      (∀ cost ∈ ℕ, ¬HasPathCost(Dijkstra.Vertices(count), E, weights, source, target, cost)))
+proof
+  have invariant := solve.invariant at count, source, E, weights, rows with *
+  have rowsTyped : Dijkstra.TypedRows(rows) by simp [Dijkstra.MatrixRepresents]
+  have absent := Dijkstra.solve.exhausts_finite_frontier at count, source, rows with *
+  constructor
+  . intros distance distanceIn
+    exact Dijkstra.StateInvariant.finished_value at count, target, distance, E, weights, source, Dijkstra.distances(Dijkstra.solve(count, source, rows)), Dijkstra.settled(Dijkstra.solve(count, source, rows)) with *
+  . exact Dijkstra.StateInvariant.finished_none at count, target, E, weights, source, Dijkstra.distances(Dijkstra.solve(count, source, rows)), Dijkstra.settled(Dijkstra.solve(count, source, rows)) with invariant, absent, targetIn
+
+end Dijkstra

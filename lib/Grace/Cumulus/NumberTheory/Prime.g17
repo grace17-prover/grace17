@@ -1,0 +1,232 @@
+-- Prime natural numbers
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.Prime
+import Divisibility
+import Set.Ordinal
+
+-- For von Neumann naturals, `1 in p` is literally the strict inequality 1 < p.
+-- A prime has no proper natural divisor other than one.
+-- The soft-typed binder is part of the predicate's meaning: Prime(p) entails
+-- Nat(p), including when Prime is used inside Separation over omega.
+predicate Prime (p : Nat) :=
+  1 ∈ p ∧
+  (∀ d, Nat(d) → d ∈ p → d ∣ p → d = 1)
+
+-- The primes form a set because they are separated from omega.
+def primes : Set := { p ∈ ℕ | Prime(p) }
+
+theorem primes.membership (p : Set)
+  shows p ∈ primes ↔ (p ∈ ℕ ∧ Prime(p))
+proof
+  simp
+
+theorem Prime.natural (p : Set)
+  requires hp : Prime(p)
+  shows Nat(p)
+proof
+  simp [Prime]
+
+lemma Prime.greater_than_one_membership (p : Set)
+  requires hp : Prime(p)
+  shows 1 ∈ p
+proof
+  simp [Prime]
+
+-- Representation bridge used internally by factorial arguments: a prime is
+-- positive as a von Neumann natural.  The public comparison theorem remains
+-- `Prime.greater_than_one` below.
+lemma Prime.positive_membership (p : Set)
+  requires hp : Prime(p)
+  shows 0 ∈ p
+proof
+  have hpNat := Prime.natural with hp
+  have hpOrdinal := Ordinal.natural with hpNat
+  have transitive := Ordinal.transitive with hpOrdinal
+  have oneSubset := transitive at 1
+  have oneMember := Prime.greater_than_one_membership with hp
+  specialize oneSubset with oneMember
+  have zeroMember := oneSubset at 0
+  have zeroInOne := membership.self_successor with Naturals.constructor.zero
+  exact zeroMember with zeroInOne
+
+theorem Prime.greater_than_one (p : Set)
+  requires hp : Prime(p)
+  shows 1 < p
+proof
+  have member := Prime.greater_than_one_membership with hp
+  exact Less.of_membership with member
+
+theorem Prime.divisor (p d : Set)
+  requires hp : Prime(p)
+  requires hd : Nat(d)
+  requires hproper : d ∈ p
+  requires hdivides : d ∣ p
+  shows d = 1
+proof
+  rcases hp with ⟨hpAbove, hpDivisors⟩
+  exact hpDivisors with d, hd, hproper, hdivides
+
+theorem primes.contains (p : Set)
+  requires hp : Prime(p)
+  shows p ∈ primes
+proof
+  apply primes.membership.backward
+  constructor
+  . have natural := Prime.natural with hp
+    simp [nat.omega]
+  . exact hp
+
+-- Foundation induction on the von Neumann membership order is strong
+-- induction on naturals. A hypothetical number with no prime divisor would
+-- itself be prime: every proper divisor above one already has a smaller prime
+-- divisor, contradicting the hypothesis.
+lemma natural.exists_prime_divisor_membership (m : Set)
+  shows Nat(m) → 1 ∈ m → ∃ p, Prime(p) ∧ p ∣ m
+proof
+  induction m using membership
+  intros current ih hCurrentNat hAboveOne
+  by_contra hNoPrimeDivisor
+  apply hNoPrimeDivisor
+  witness current
+  constructor
+    constructor
+    . exact hAboveOne
+    . intros d hdNat hdProper hdDivides
+      have cases := natural.zero_one_or_above_one with hdNat
+      cases cases with hdZero | hdRest
+      . exfalso
+        rw hdZero at hdDivides
+        have currentZero := zero.divides_only_zero with hCurrentNat, hdDivides
+        rw currentZero at hAboveOne
+        simp
+      . cases hdRest with hdOne | hdAboveOne
+        . exact hdOne
+        . have smaller := ih at d with hdProper, hdNat, hdAboveOne
+          obtain ⟨p, hpPrime, hpDividesD⟩ := smaller
+          exfalso
+          apply hNoPrimeDivisor
+          witness p
+          constructor
+          . exact hpPrime
+          . have hpNat := Prime.natural with hpPrime
+            exact divides.transitive with hdNat, hCurrentNat, hpDividesD, hdDivides
+  . exact divides.reflexive with hCurrentNat
+
+-- Public Nat-order form. The membership-induction lemma above is the
+-- representation bridge; elementary number theory uses this interface.
+theorem natural.exists_prime_divisor (m : Nat)
+  requires hAboveOne : 1 < m
+  shows ∃ p, Prime(p) ∧ p ∣ m
+proof
+  apply natural.exists_prime_divisor_membership
+  . assumption
+  . apply membership.of_Less at 1, m
+    . exact hAboveOne
+
+lemma prime_divisor.factorial_successor_not_bounded (p n : Set)
+  requires hnNat : Nat(n)
+  requires hp : Prime(p)
+  requires hDivides : p ∣ succ(n!)
+  requires hpBound : p ∈ succ(n)
+  shows false
+proof
+  have hpPositive := Prime.positive_membership with hp
+  have dividesFactorial := factorial.divisible_through with hnNat, hpPositive, hpBound
+  have common := divides.consecutive_one with dividesFactorial, hDivides
+  have aboveOne := Prime.greater_than_one_membership with hp
+  rw common at aboveOne
+  have oneMember := membership.one.forward with aboveOne
+  arith
+
+lemma prime_divisor.factorial_successor_above_membership (p n : Set)
+  requires hnNat : Nat(n)
+  requires hp : Prime(p)
+  requires hDivides : p ∣ succ(n!)
+  shows n ∈ p
+proof
+  have hpNat := Prime.natural with hp
+  have hnOrdinal := Ordinal.natural with hnNat
+  have hpOrdinal := Ordinal.natural with hpNat
+  have comparison := Ordinal.trichotomy with hnOrdinal, p, hpOrdinal
+  cases comparison with hnInP | hRest
+  . exact hnInP
+  . exfalso
+    apply prime_divisor.factorial_successor_not_bounded
+    . exact hnNat
+    . exact hp
+    . exact hDivides
+    . cases hRest with hnEqP | hpInN
+      . apply membership.successor_backward{n := n} at p
+        right
+        simp
+      . apply membership.successor_backward{n := n} at p
+        left
+        exact hpInN
+
+lemma factorial.successor_above_one_membership (n : Set)
+  requires hnNat : Nat(n)
+  shows 1 ∈ succ(n!)
+proof
+  have factorialNatural := factorial.closed with hnNat
+  have factorialCases := natural.zero_one_or_above_one with factorialNatural
+  cases factorialCases with hZero | hRest
+  . exfalso
+    have nonzero := factorial.nonzero with hnNat
+    apply nonzero
+    exact hZero
+  . cases hRest with hOne | hAbove
+    . apply membership.successor_backward{n := n!} at 1
+      right
+      simp
+    . apply membership.successor_backward{n := n!} at 1
+      left
+      exact hAbove
+
+theorem factorial.successor_greater_than_one (n : Nat)
+  shows 1 < succ(n!)
+proof
+  apply Less.of_membership
+  . apply factorial.successor_above_one_membership at n
+
+-- Public Nat-level form of the factorial argument. Its implementation bridge
+-- to von Neumann membership is confined to this proof.
+theorem prime_divisor.factorial_successor_greater (p n : Nat)
+  requires hp : Prime(p)
+  requires hDivides : p ∣ succ(n!)
+  shows n < p
+proof
+  apply Less.of_membership
+  . apply prime_divisor.factorial_successor_above_membership at p, n
+    . exact hp
+    . exact hDivides
+
+-- The Euclid number has a prime divisor.  This is the natural arithmetic
+-- witness lemma; its proof alone crosses to the von Neumann representation to
+-- use the foundational prime-divisor existence result.
+lemma factorial_successor.exists_prime_divisor (n : Nat)
+  shows ∃ p, Prime(p) ∧ p ∣ succ(n!)
+proof
+  have aboveOne := factorial.successor_greater_than_one at n
+  exact natural.exists_prime_divisor with aboveOne
+
+-- Euclid's theorem as elementary number theory: the visible statement and
+-- proof mention only naturals, primes, divisibility, factorial, and order.
+theorem Euclid.larger_prime (n : Nat)
+  shows ∃ p, Prime(p) ∧ n < p
+proof
+  obtain ⟨p, hpPrime, hpDivides⟩ := factorial_successor.exists_prime_divisor at n with assumption
+  witness p
+  constructor
+  . exact hpPrime
+  . apply prime_divisor.factorial_successor_greater at p, n
+    . exact hpPrime
+    . exact hpDivides
+
+theorem primes.unbounded (n : Nat)
+  shows ∃ p, Prime(p) ∧ n < p
+proof
+  apply Euclid.larger_prime

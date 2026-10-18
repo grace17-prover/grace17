@@ -1,0 +1,764 @@
+-- Group actions: an action act : G ↷ X of a group on a set, written
+-- g ·ₐ x, its orbits and stabilizers, the stabilizer a subgroup, the orbit
+-- of a point in bijection with the cosets of its stabilizer, so the
+-- orbit–stabilizer theorem, the orbits a partition of the set, the fixed
+-- points, and the count of the points outside the fixed points
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Action
+import Lagrange
+import Homomorphism
+
+-- act : G ↷ X: a function act : G.carrier × X → X under which the unit
+-- acts trivially and a product acts by composition. The form is a
+-- transparent guard, so a hypothesis act : G ↷ X also supplies the group G
+-- and its operation a * b; the action of g on x is written g ·ₐ x.
+predicate Action (act G X : Set) :=
+  Group(G) ∧ (act : G.carrier × X → X) ∧
+  (∀ x ∈ X, act(G.one, x) = x) ∧
+  (∀ g h ∈ G.carrier, ∀ x ∈ X, act(g * h, x) = act(g, act(h, x)))
+
+notation guard "_ : _ ↷ _" => Action
+notation infixr 73 "·ₐ" => call2(act, _, _) via hypothesis Action(act, G, X) for G.carrier
+
+-- The orbit of x, its stabilizer, the fixed points of the action, the set
+-- of all orbits, and the elements carrying x to y.
+def orbit (act G X x : Set) : Set := { y ∈ X | ∃ g ∈ G.carrier, y = act(g, x) }
+def stabilizer (act G X x : Set) : Set := { g ∈ G.carrier | act(g, x) = x }
+def fixedPoints (act G X : Set) : Set :=
+  { x ∈ X | ∀ g ∈ G.carrier, act(g, x) = x }
+def orbits (act G X : Set) : Set :=
+  { O ∈ 𝒫(X) | ∃ x ∈ X, O = orbit(act, G, X, x) }
+def transporters (act G x y : Set) : Set := { g ∈ G.carrier | act(g, x) = y }
+
+-- The orbit and the stabilizer of x are written orbit(x) and stabilizer(x)
+-- wherever a hypothesis in scope supplies the action.
+notation function "orbit(x)" => orbit(act, G, X, x) via hypothesis Action(act, G, X)
+notation function "stabilizer(x)" => stabilizer(act, G, X, x) via hypothesis Action(act, G, X)
+
+theorem Action.mk (act G X : Set)
+  requires group : Group(G)
+  requires function : act : G.carrier × X → X
+  requires unit : ∀ x ∈ X, act(G.one, x) = x
+  requires compatible : ∀ g h ∈ G.carrier, ∀ x ∈ X, act(g * h, x) = act(g, act(h, x))
+  shows act : G ↷ X
+proof
+  unfold Action
+  refine ⟨group, function, unit, compatible⟩
+
+theorem orbit.membership (act G X x y : Set)
+  shows y ∈ orbit(act, G, X, x) ↔ y ∈ X ∧ ∃ g ∈ G.carrier, y = act(g, x)
+proof
+  simp [orbit]
+
+theorem stabilizer.membership (act G X x g : Set)
+  shows g ∈ stabilizer(act, G, X, x) ↔ g ∈ G.carrier ∧ act(g, x) = x
+proof
+  simp [stabilizer]
+
+theorem fixedPoints.membership (act G X x : Set)
+  shows x ∈ fixedPoints(act, G, X) ↔ x ∈ X ∧ ∀ g ∈ G.carrier, act(g, x) = x
+proof
+  simp [fixedPoints]
+
+theorem orbits.membership (act G X O : Set)
+  shows O ∈ orbits(act, G, X) ↔ O ∈ 𝒫(X) ∧ ∃ x ∈ X, O = orbit(act, G, X, x)
+proof
+  simp [orbits]
+
+theorem transporters.membership (act G x y g : Set)
+  shows g ∈ transporters(act, G, x, y) ↔ g ∈ G.carrier ∧ act(g, x) = y
+proof
+  simp [transporters]
+
+theorem orbit.subset (act G X x : Set)
+  shows orbit(act, G, X, x) ⊆ X
+proof
+  intros y hy
+  have parts := orbit.membership.forward with hy
+  exact parts.left
+
+theorem stabilizer.subset (act G X x : Set)
+  shows stabilizer(act, G, X, x) ⊆ G.carrier
+proof
+  intros g hg
+  have parts := stabilizer.membership.forward with hg
+  exact parts.left
+
+theorem fixedPoints.subset (act G X : Set)
+  shows fixedPoints(act, G, X) ⊆ X
+proof
+  intros x hx
+  have parts := fixedPoints.membership.forward with hx
+  exact parts.left
+
+theorem orbits.subset_powerset (act G X : Set)
+  shows orbits(act, G, X) ⊆ 𝒫(X)
+proof
+  intros O hO
+  have parts := orbits.membership.forward with hO
+  exact parts.left
+
+theorem orbits.orbit_member (act G X x : Set)
+  requires hx : x ∈ X
+  shows orbit(act, G, X, x) ∈ orbits(act, G, X)
+proof
+  have subset := orbit.subset at act, G, X, x
+  have bounded := powerset.membership_iff.backward with subset
+  exact orbits.membership.backward with ⟨bounded, x, hx, rfl⟩
+
+section ActionLaws
+variable (act G X : Set)
+hypothesis action : act : G ↷ X
+
+theorem Action.group
+  shows Group(G)
+proof
+  obtain ⟨group, rest⟩ := action
+  exact group
+
+theorem Action.function
+  shows act : G.carrier × X → X
+proof
+  obtain ⟨group, function, rest⟩ := action
+  exact function
+
+theorem one_act (x : Set)
+  requires hx : x ∈ X
+  shows G.one ·ₐ x = x
+proof
+  obtain ⟨group, function, unit, compatible⟩ := action
+  exact unit with x, hx
+
+theorem mul_act (g h : G) (x : Set)
+  requires hx : x ∈ X
+  shows (g * h) ·ₐ x = g ·ₐ h ·ₐ x
+proof
+  obtain ⟨group, function, unit, compatible⟩ := action
+  have gIn : g ∈ G by assumption
+  have hIn : h ∈ G by assumption
+  exact compatible with g, gIn, h, hIn, x, hx
+
+-- Closure: the action of an element on a point is a point, so the
+-- membership of a compound term is synthesized.
+instance Action.act_mem (g : G) (x : Set)
+  requires hx : x ∈ X
+  shows g ·ₐ x ∈ X
+proof
+  have function := Action.function with action
+  have gIn : g ∈ G by assumption
+  have pair := product.pair at g, x, G.carrier, X with *
+  unfold call2
+  exact FunctionBetween.apply_closed with function, pair
+
+theorem inv_act_cancel (g : G) (x : Set)
+  requires hx : x ∈ X
+  shows g⁻¹ ·ₐ g ·ₐ x = x
+proof
+  have group := Action.group with action
+  have merged : (g⁻¹ * g) ·ₐ x = g⁻¹ ·ₐ g ·ₐ x := mul_act with *
+  rw [← merged, Group.inv_mul, one_act]
+  rfl
+
+theorem act_inv_cancel (g : G) (x : Set)
+  requires hx : x ∈ X
+  shows g ·ₐ g⁻¹ ·ₐ x = x
+proof
+  have group := Action.group with action
+  have merged : (g * g⁻¹) ·ₐ x = g ·ₐ g⁻¹ ·ₐ x := mul_act with *
+  rw [← merged, Group.mul_inv, one_act]
+  rfl
+
+theorem act_left_cancel (g : G) (x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ X
+  requires equal : g ·ₐ x = g ·ₐ y
+  shows x = y
+proof
+  have group := Action.group with action
+  calc
+    x = g⁻¹ ·ₐ g ·ₐ x := by rw inv_act_cancel
+    _ = g⁻¹ ·ₐ g ·ₐ y := by rw equal
+    _ = y := by rw inv_act_cancel
+
+theorem act_eq_iff (g : G) (x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ X
+  shows g ·ₐ x = y ↔ x = g⁻¹ ·ₐ y
+proof
+  have group := Action.group with action
+  constructor
+  . intro equal
+    rw [← equal, inv_act_cancel]
+    rfl
+  . intro equal
+    rw [equal, act_inv_cancel]
+    rfl
+
+-- Orbits: every point lies in its own orbit, orbits are closed under the
+-- action, any member of an orbit generates it, and two orbits are equal or
+-- disjoint.
+instance orbit.act_mem (g : G) (x : Set)
+  requires hx : x ∈ X
+  shows g ·ₐ x ∈ orbit(x)
+proof
+  have moved : g ·ₐ x ∈ X := Action.act_mem with *
+  have gIn : g ∈ G by assumption
+  exact orbit.membership.backward with ⟨moved, g, gIn, rfl⟩
+
+theorem orbit.self (x : Set)
+  requires hx : x ∈ X
+  shows x ∈ orbit(x)
+proof
+  have group := Action.group with action
+  have member : G.one ·ₐ x ∈ orbit(x) := orbit.act_mem with *
+  have fixed : G.one ·ₐ x = x := one_act with *
+  rwa fixed at member
+
+theorem orbit.act_mem_of_mem (g : G) (x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ orbit(x)
+  shows g ·ₐ y ∈ orbit(x)
+proof
+  have group := Action.group with action
+  obtain ⟨yIn, h, hIn, yEq⟩ := orbit.membership.forward with hy
+  have merged : (g * h) ·ₐ x = g ·ₐ h ·ₐ x := mul_act with *
+  have member : (g * h) ·ₐ x ∈ orbit(x) := orbit.act_mem with *
+  rw [yEq, ← merged]
+  exact member
+
+theorem orbit.of_member (x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ orbit(x)
+  shows orbit(y) = orbit(x)
+proof
+  have group := Action.group with action
+  obtain ⟨yIn, h, hIn, yEq⟩ := orbit.membership.forward with hy
+  ext z
+  constructor
+  . intro hz
+    obtain ⟨zIn, g, gIn, zEq⟩ := orbit.membership.forward with hz
+    have merged : (g * h) ·ₐ x = g ·ₐ h ·ₐ x := mul_act with *
+    have member : (g * h) ·ₐ x ∈ orbit(x) := orbit.act_mem with *
+    rw [zEq, yEq, ← merged]
+    exact member
+  . intro hz
+    obtain ⟨zIn, g, gIn, zEq⟩ := orbit.membership.forward with hz
+    have back : h⁻¹ ·ₐ y = x
+      rw [yEq, inv_act_cancel]
+      rfl
+    have merged : (g * h⁻¹) ·ₐ y = g ·ₐ h⁻¹ ·ₐ y := mul_act with *
+    have member : (g * h⁻¹) ·ₐ y ∈ orbit(y) := orbit.act_mem with *
+    rw [zEq, ← back, ← merged]
+    exact member
+
+theorem orbit.eq_of_common (x y z : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ X
+  requires hzx : z ∈ orbit(x)
+  requires hzy : z ∈ orbit(y)
+  shows orbit(x) = orbit(y)
+proof
+  have first : orbit(z) = orbit(x) := orbit.of_member with *
+  have second : orbit(z) = orbit(y) := orbit.of_member with *
+  rwa first at second
+
+theorem orbit.eq_or_disjoint (x y : Set)
+  requires hx : x ∈ X
+  requires hy : y ∈ X
+  shows orbit(x) = orbit(y) ∨ Disjoint(orbit(x), orbit(y))
+proof
+  by_contra neither
+  apply neither
+  right
+  apply Disjoint.iff.backward
+  intros z hzx hzy
+  apply neither
+  left
+  exact orbit.eq_of_common with *
+
+theorem orbit.finite (x : Set)
+  requires finite : Finite(X)
+  shows Finite(orbit(x))
+proof
+  exact Finite.subset with finite, (orbit.subset at act, G, X, x)
+
+-- The orbits partition the set.
+theorem orbits.cover
+  shows ⋃(orbits(act, G, X)) = X
+proof
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨O, hO, hxO⟩ := union.membership.forward with hx
+    have bounded := orbits.subset_powerset at act, G, X
+    have subset := powerset.membership_iff.forward with (bounded with O, hO)
+    exact subset with x, hxO
+  . intro hx
+    have self : x ∈ orbit(x) := orbit.self with *
+    have member := orbits.orbit_member at act, G, X, x with hx
+    exact union.membership.backward with ⟨orbit(x), member, self⟩
+
+theorem orbits.pairwise_disjoint
+  shows PairwiseDisjoint(orbits(act, G, X))
+proof
+  intros O hO P hP different
+  obtain ⟨boundO, x, hx, OEq⟩ := orbits.membership.forward with hO
+  obtain ⟨boundP, y, hy, PEq⟩ := orbits.membership.forward with hP
+  rw [OEq, PEq] at different
+  rw [OEq, PEq]
+  have split := orbit.eq_or_disjoint at act, G, X, x, y with *
+  cases split with equal | disjoint
+  . exfalso
+    exact different with equal
+  . exact disjoint
+
+theorem orbits.finite
+  requires finite : Finite(X)
+  shows Finite(orbits(act, G, X))
+proof
+  have finitePowerset := Finite.powerset with finite
+  exact Finite.subset with finitePowerset, (orbits.subset_powerset at act, G, X)
+
+theorem orbits.member_finite (O : Set)
+  requires hO : O ∈ orbits(act, G, X)
+  requires finite : Finite(X)
+  shows Finite(O)
+proof
+  have bounded := orbits.subset_powerset at act, G, X
+  have subset := powerset.membership_iff.forward with (bounded with O, hO)
+  exact Finite.subset with finite, subset
+
+-- Stabilizers are subgroups.
+theorem stabilizer.fixes (g x : Set)
+  requires hg : g ∈ stabilizer(x)
+  shows g ·ₐ x = x
+proof
+  have parts := stabilizer.membership.forward with hg
+  exact parts.right
+
+theorem stabilizer.of_fixes (g : G) (x : Set)
+  requires fixed : g ·ₐ x = x
+  shows g ∈ stabilizer(x)
+proof
+  have gIn : g ∈ G by assumption
+  exact stabilizer.membership.backward with ⟨gIn, fixed⟩
+
+theorem stabilizer.subgroup (x : Set)
+  requires hx : x ∈ X
+  shows Subgroup(stabilizer(x), G)
+proof
+  have group := Action.group with action
+  have unitIn : G.one ∈ stabilizer(x)
+    have fixed : G.one ·ₐ x = x := one_act with *
+    exact stabilizer.of_fixes with *
+  apply Subgroup.mk with group, (stabilizer.subset at act, G, X, x), unitIn
+  . intros g hg h hh
+    have gIn := stabilizer.subset at act, G, X, x with g, hg
+    have hIn := stabilizer.subset at act, G, X, x with h, hh
+    have fixedG : g ·ₐ x = x := stabilizer.fixes with *
+    have fixedH : h ·ₐ x = x := stabilizer.fixes with *
+    have fixed : (g * h) ·ₐ x = x
+      rw [mul_act, fixedH, fixedG]
+      rfl
+    exact stabilizer.of_fixes with *
+  . intros g hg
+    have gIn := stabilizer.subset at act, G, X, x with g, hg
+    have fixedG : g ·ₐ x = x := stabilizer.fixes with *
+    have fixed : g⁻¹ ·ₐ x = x
+      calc
+        g⁻¹ ·ₐ x = g⁻¹ ·ₐ g ·ₐ x := by rw fixedG
+        _ = x := by rw inv_act_cancel
+    exact stabilizer.of_fixes with *
+
+-- The elements carrying x to g ·ₐ x form the coset of the stabilizer by g.
+theorem transporters.eq_coset (g : G) (x : Set)
+  requires hx : x ∈ X
+  shows transporters(act, G, x, g ·ₐ x) = g • stabilizer(x)
+proof
+  have group := Action.group with action
+  have subgroup := stabilizer.subgroup with *
+  ext h
+  constructor
+  . intro hh
+    obtain ⟨hIn, carries⟩ := transporters.membership.forward with hh
+    have criterion : h ∈ g • stabilizer(x) ↔ g⁻¹ * h ∈ stabilizer(x) :=
+      leftCoset.mem_iff with *
+    have fixed : (g⁻¹ * h) ·ₐ x = x
+      rw [mul_act, carries, inv_act_cancel]
+      rfl
+    have member : g⁻¹ * h ∈ stabilizer(x) := stabilizer.of_fixes with *
+    exact criterion.backward with member
+  . intro hh
+    have hIn := leftCoset.subset at G, g, stabilizer(x) with h, hh
+    have criterion : h ∈ g • stabilizer(x) ↔ g⁻¹ * h ∈ stabilizer(x) :=
+      leftCoset.mem_iff with *
+    have member := criterion.forward with hh
+    have fixed : (g⁻¹ * h) ·ₐ x = x := stabilizer.fixes with *
+    have merged : (g * (g⁻¹ * h)) ·ₐ x = g ·ₐ (g⁻¹ * h) ·ₐ x := mul_act with *
+    rw [mul_inv_cancel_left, fixed] at merged
+    exact transporters.membership.backward with ⟨hIn, merged⟩
+
+end ActionLaws
+
+-- Each point of the orbit of x is sent to the coset of the elements
+-- carrying x to it.
+defgraph orbitCosetMap (act G X x : Set) (y ∈ orbit(act, G, X, x)) :
+    leftCosets(G, stabilizer(act, G, X, x)) := transporters(act, G, x, y)
+requires action : act : G ↷ X
+requires hx : x ∈ X
+proof
+  obtain ⟨yIn, g, gIn, yEq⟩ := orbit.membership.forward with member
+  have coset := transporters.eq_coset with action, hx, gIn
+  rw [yEq, coset]
+  exact leftCosets.coset_member with gIn
+
+section OrbitStabilizer
+variable (act G X : Set)
+hypothesis action : act : G ↷ X
+
+theorem orbitCosetMap.injective (x : Set)
+  requires hx : x ∈ X
+  shows InjectiveBetween(orbitCosetMap(act, G, X, x), orbit(x),
+    leftCosets(G, stabilizer(x)))
+proof
+  have function := orbitCosetMap.function at act, G, X, x with *
+  constructor
+  . exact function
+  . intros y hy z hz C hC hyC hzC
+    have yValue := FunctionBetween.apply_value with function, hy, hyC
+    have zValue := FunctionBetween.apply_value with function, hz, hzC
+    have yImage := orbitCosetMap.value at act, G, X, x, y with *
+    have zImage := orbitCosetMap.value at act, G, X, x, z with *
+    have same : transporters(act, G, x, y) = transporters(act, G, x, z) by cc
+    obtain ⟨yIn, g, gIn, yEq⟩ := orbit.membership.forward with hy
+    have carriesY : g ·ₐ x = y
+      symm
+      exact yEq
+    have carries : g ∈ transporters(act, G, x, y) :=
+      transporters.membership.backward with ⟨gIn, carriesY⟩
+    rw same at carries
+    have parts := transporters.membership.forward with carries
+    rw ← carriesY
+    exact parts.right
+
+theorem orbitCosetMap.surjective (x : Set)
+  requires hx : x ∈ X
+  shows SurjectiveBetween(orbitCosetMap(act, G, X, x), orbit(x),
+    leftCosets(G, stabilizer(x)))
+proof
+  have function := orbitCosetMap.function at act, G, X, x with *
+  constructor
+  . exact function
+  . intros C hC
+    obtain ⟨bound, g, gIn, CEq⟩ := leftCosets.membership.forward with hC
+    have moved : g ·ₐ x ∈ orbit(x) := orbit.act_mem with *
+    have coset := transporters.eq_coset with action, hx, gIn
+    have value := orbitCosetMap.value at act, G, X, x, g ·ₐ x with *
+    have edge := FunctionBetween.relates_apply with function, moved
+    witness g ·ₐ x
+    constructor
+    . exact moved
+    . rw [value, coset, ← CEq] at edge
+      exact edge
+
+theorem orbitCosetMap.bijective (x : Set)
+  requires hx : x ∈ X
+  shows BijectiveBetween(orbitCosetMap(act, G, X, x), orbit(x),
+    leftCosets(G, stabilizer(x)))
+proof
+  constructor
+  . exact orbitCosetMap.injective with *
+  . exact orbitCosetMap.surjective with *
+
+theorem orbit.equipotent_cosets (x : Set)
+  requires hx : x ∈ X
+  shows orbit(x) ≃ leftCosets(G, stabilizer(x))
+proof
+  witness orbitCosetMap(act, G, X, x)
+  exact orbitCosetMap.bijective with *
+
+theorem orbit.finite_of_group (x : Set)
+  requires hx : x ∈ X
+  requires finite : Finite(G)
+  shows Finite(orbit(x))
+proof
+  have group := Action.group with action
+  have subgroup := stabilizer.subgroup with *
+  have finiteCosets := leftCosets.finite with *
+  have equipotent := orbit.equipotent_cosets with *
+  exact Finite.of_equipotent with
+    finiteCosets, (Equipotent.symmetric with equipotent)
+
+theorem orbit.cardinality_eq_index (x : Set)
+  requires hx : x ∈ X
+  requires finite : Finite(G)
+  shows cardinality(orbit(x)) = index(G, stabilizer(x))
+proof
+  have finiteOrbit := orbit.finite_of_group with *
+  have bijective := orbitCosetMap.bijective with *
+  rw index.value
+  exact cardinality.bijective with finiteOrbit, bijective
+
+-- The orbit–stabilizer theorem.
+theorem orbit_stabilizer (x : Set)
+  requires hx : x ∈ X
+  requires finite : Finite(G)
+  shows cardinality(orbit(x)) * cardinality(stabilizer(x)) = order(G)
+proof
+  have group := Action.group with action
+  have subgroup := stabilizer.subgroup with *
+  have count := lagrange with *
+  have same := orbit.cardinality_eq_index with *
+  rw [same, count]
+  rfl
+
+theorem orbit.cardinality_dvd (x : Set)
+  requires hx : x ∈ X
+  requires finite : Finite(G)
+  shows cardinality(orbit(x)) ∣ order(G)
+proof
+  have group := Action.group with action
+  have subgroup := stabilizer.subgroup with *
+  have finiteStabilizer := Subgroup.finite with *
+  have stabilizerNat := cardinality.nat with finiteStabilizer
+  have orbitNat := cardinality.nat with (orbit.finite_of_group with *)
+  witness cardinality(stabilizer(x))
+  exact orbit_stabilizer with *
+
+end OrbitStabilizer
+
+section FixedPoints
+variable (act G X : Set)
+hypothesis action : act : G ↷ X
+
+-- A fixed point is a point whose orbit is itself alone.
+theorem fixedPoints.fixes (g : G) (x : Set)
+  requires hx : x ∈ fixedPoints(act, G, X)
+  shows g ·ₐ x = x
+proof
+  have parts := fixedPoints.membership.forward with hx
+  have gIn : g ∈ G by assumption
+  exact parts.right with g, gIn
+
+theorem fixedPoints.orbit (x : Set)
+  requires hx : x ∈ fixedPoints(act, G, X)
+  shows orbit(x) = {x}
+proof
+  have xIn := fixedPoints.subset at act, G, X with x, hx
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, g, gIn, yEq⟩ := orbit.membership.forward with hy
+    have fixed : g ·ₐ x = x := fixedPoints.fixes with *
+    rw [yEq, fixed]
+    exact singleton.self
+  . intro hy
+    have equal := singleton.membership.forward with hy
+    rw equal
+    exact orbit.self with *
+
+theorem fixedPoints.of_orbit (x : Set)
+  requires hx : x ∈ X
+  requires single : orbit(x) = {x}
+  shows x ∈ fixedPoints(act, G, X)
+proof
+  apply fixedPoints.membership.backward
+  refine ⟨hx, ?_⟩
+  intros g gIn
+  have member : g ·ₐ x ∈ orbit(x) := orbit.act_mem with *
+  rw single at member
+  exact singleton.membership.forward with member
+
+theorem fixedPoints.iff_orbit (x : Set)
+  requires hx : x ∈ X
+  shows x ∈ fixedPoints(act, G, X) ↔ orbit(x) = {x}
+proof
+  constructor
+  . intro fixed
+    exact fixedPoints.orbit with *
+  . intro single
+    exact fixedPoints.of_orbit with *
+
+theorem fixedPoints.finite
+  requires finite : Finite(X)
+  shows Finite(fixedPoints(act, G, X))
+proof
+  exact Finite.subset with finite, (fixedPoints.subset at act, G, X)
+
+end FixedPoints
+
+-- The orbits not inside the fixed points.
+def movedOrbits (act G X : Set) : Set :=
+  { O ∈ orbits(act, G, X) | ¬(O ⊆ fixedPoints(act, G, X)) }
+
+theorem movedOrbits.membership (act G X O : Set)
+  shows O ∈ movedOrbits(act, G, X) ↔
+    O ∈ orbits(act, G, X) ∧ ¬(O ⊆ fixedPoints(act, G, X))
+proof
+  simp [movedOrbits]
+
+theorem movedOrbits.subset (act G X : Set)
+  shows movedOrbits(act, G, X) ⊆ orbits(act, G, X)
+proof
+  intros O hO
+  have parts := movedOrbits.membership.forward with hO
+  exact parts.left
+
+-- A sum of multiples of d is a multiple of d.
+theorem natSum.dvd_of_cardinality (n : Nat)
+  shows ∀ V, ∀ w, ∀ d, Nat(d) → HasCardinality(V, n) → (∀ v ∈ V, w(v) ∈ ℕ) →
+    (∀ v ∈ V, d ∣ w(v)) → d ∣ natSum(V, w)
+proof
+  induction n
+  | zero =>
+    intros V w d dNat counted weights divisible
+    have empty := HasCardinality.empty_of_zero at V with counted
+    rw [empty, natSum.empty]
+    exact divides.zero at d
+  | k + 1 using ih =>
+    intros V w d dNat counted weights divisible
+    have hk : k + 1 = succ(k) := add.right_one with *
+    rw hk at counted
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at V, a, k with counted, member
+    have fresh : ¬a ∈ V ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have restSubset := difference.subset_left at V, {a}
+    have restWeights : ∀ v ∈ V ∖ {a}, w(v) ∈ ℕ
+      intros v hv
+      exact weights with v, (restSubset with v, hv)
+    have restDivisible : ∀ v ∈ V ∖ {a}, d ∣ w(v)
+      intros v hv
+      exact divisible with v, (restSubset with v, hv)
+    have restSum := ih with V ∖ {a}, w, d, dNat, rest, restWeights, restDivisible
+    have restFinite := Finite.from_cardinality with rest
+    have weight := weights with a, member
+    have weightA := divisible with a, member
+    have split := natSum.insert at V ∖ {a}, w, a with
+      restFinite, restWeights, weight, fresh
+    rw restored at split
+    rw split
+    have weightNat := nat.omega.backward with weight
+    have sumNat := natSum.natural at V ∖ {a}, w with restFinite, restWeights
+    exact divides.add with restSum, weightA
+
+theorem natSum.dvd (V w : Set) (d : Nat)
+  requires finite : Finite(V)
+  requires weights : ∀ v ∈ V, w(v) ∈ ℕ
+  requires divisible : ∀ v ∈ V, d ∣ w(v)
+  shows d ∣ natSum(V, w)
+proof
+  have counted := cardinality.correct with finite
+  have natV := cardinality.nat with finite
+  have all := natSum.dvd_of_cardinality at cardinality(V)
+  exact all with V, w, d, assumption, counted, weights, divisible
+
+-- A disjoint union of finite sets each of size divisible by d has size
+-- divisible by d.
+theorem cardinality.big_union_dvd (F : Set) (d : Nat)
+  requires finite : Finite(F)
+  requires members : ∀ S ∈ F, Finite(S)
+  requires disjoint : PairwiseDisjoint(F)
+  requires sizes : ∀ S ∈ F, d ∣ cardinality(S)
+  shows d ∣ cardinality(⋃F)
+proof
+  have count := cardinality.big_union_disjoint with finite, members, disjoint
+  have weights : ∀ S ∈ F, sizeMap(F)(S) ∈ ℕ
+    intros S hS
+    have value := sizeMap.value at F, S with members, hS
+    rw value
+    exact nat.omega.forward with (cardinality.nat with (members with S, hS))
+  have divisible : ∀ S ∈ F, d ∣ sizeMap(F)(S)
+    intros S hS
+    have value := sizeMap.value at F, S with members, hS
+    rw value
+    exact sizes with S, hS
+  rw count
+  exact natSum.dvd with finite, weights, divisible
+
+section MovedPoints
+variable (act G X : Set)
+hypothesis action : act : G ↷ X
+
+-- The orbits not inside the fixed points cover exactly the points outside
+-- the fixed points, and each is the orbit of such a point.
+theorem movedOrbits.cover
+  shows ⋃(movedOrbits(act, G, X)) = X ∖ fixedPoints(act, G, X)
+proof
+  ext x
+  constructor
+  . intro hx
+    obtain ⟨O, hO, hxO⟩ := union.membership.forward with hx
+    obtain ⟨orbitO, moved⟩ := movedOrbits.membership.forward with hO
+    obtain ⟨bound, y, hy, OEq⟩ := orbits.membership.forward with orbitO
+    have xInOrbit : x ∈ orbit(y)
+      rw OEq at hxO
+      exact hxO
+    have xIn := orbit.subset at act, G, X, y with x, xInOrbit
+    apply difference.membership.backward
+    refine ⟨xIn, ?_⟩
+    intro fixed
+    apply moved
+    have single : orbit(x) = {x} := fixedPoints.orbit with *
+    have same : orbit(x) = orbit(y) := orbit.of_member with action, hy, xInOrbit
+    rw [OEq, ← same, single]
+    intros z hz
+    have equal := singleton.membership.forward with hz
+    rw equal
+    exact fixed
+  . intro hx
+    obtain ⟨xIn, notFixed⟩ := difference.membership.forward with hx
+    have self : x ∈ orbit(x) := orbit.self with *
+    have member := orbits.orbit_member at act, G, X, x with xIn
+    have moved : ¬(orbit(x) ⊆ fixedPoints(act, G, X))
+      intro included
+      exact notFixed with (included with x, self)
+    have inMoved := movedOrbits.membership.backward at act, G, X, orbit(x) with
+      ⟨member, moved⟩
+    exact union.membership.backward with ⟨orbit(x), inMoved, self⟩
+
+theorem movedOrbits.representative (O : Set)
+  requires hO : O ∈ movedOrbits(act, G, X)
+  shows ∃ x ∈ X, ¬x ∈ fixedPoints(act, G, X) ∧ O = orbit(x)
+proof
+  obtain ⟨orbitO, moved⟩ := movedOrbits.membership.forward with hO
+  obtain ⟨bound, y, hy, OEq⟩ := orbits.membership.forward with orbitO
+  witness y
+  refine ⟨hy, ?_, OEq⟩
+  intro fixed
+  apply moved
+  have single : orbit(y) = {y} := fixedPoints.orbit with *
+  rw [OEq, single]
+  intros z hz
+  have equal := singleton.membership.forward with hz
+  rw equal
+  exact fixed
+
+-- If every orbit outside the fixed points has size divisible by d, so has
+-- the set of points outside the fixed points.
+theorem fixedPoints.difference_dvd (d : Nat)
+  requires finite : Finite(X)
+  requires orbitsDivisible : ∀ x ∈ X,
+    ¬x ∈ fixedPoints(act, G, X) → d ∣ cardinality(orbit(x))
+  shows d ∣ cardinality(X ∖ fixedPoints(act, G, X))
+proof
+  have movedSubset := movedOrbits.subset at act, G, X
+  have finiteMoved := Finite.subset with (orbits.finite with *), movedSubset
+  have members : ∀ O ∈ movedOrbits(act, G, X), Finite(O)
+    intros O hO
+    exact orbits.member_finite with action, (movedSubset with O, hO), finite
+  have disjoint := PairwiseDisjoint.subset with
+    movedSubset, (orbits.pairwise_disjoint with action)
+  have sizes : ∀ O ∈ movedOrbits(act, G, X), d ∣ cardinality(O)
+    intros O hO
+    obtain ⟨x, hx, notFixed, OEq⟩ := movedOrbits.representative with *
+    rw OEq
+    exact orbitsDivisible with x, hx, notFixed
+  have count := cardinality.big_union_dvd with finiteMoved, members, disjoint, sizes
+  rwa movedOrbits.cover at count
+
+end MovedPoints

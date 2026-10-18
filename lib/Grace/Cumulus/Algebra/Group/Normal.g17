@@ -1,0 +1,368 @@
+-- Conjugation and normal subgroups: conjugation by a fixed element is an
+-- automorphism, kernels are normal, every subgroup of an abelian group is
+-- normal, and a subgroup is normal exactly when its left and right cosets
+-- agree
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Normal
+import Kernel
+import Coset
+
+-- The conjugate g * x * g⁻¹ of x by g.
+def conjugate (G g x : Set) : Set := G.mul(G.mul(g, x), G.inv(g))
+
+theorem conjugate.value (G g x : Set)
+  shows conjugate(G, g, x) = G.mul(G.mul(g, x), G.inv(g))
+proof
+  simp [conjugate]
+
+section Conjugation
+variable (G : Set)
+hypothesis group : Group(G)
+
+instance conjugate.mem (g x : G)
+  shows conjugate(G, g, x) ∈ G
+proof
+  rw conjugate.value
+  typecheck
+
+theorem conjugate.one (g : G)
+  shows conjugate(G, g, G.one) = G.one
+proof
+  simp [conjugate.value, mul_one, Group.mul_inv]
+
+theorem conjugate.by_one (x : G)
+  shows conjugate(G, G.one, x) = x
+proof
+  simp [conjugate.value, one_mul, inv_one, mul_one]
+
+theorem conjugate.mul (g x y : G)
+  shows conjugate(G, g, x * y) = conjugate(G, g, x) * conjugate(G, g, y)
+proof
+  rw [conjugate.value, conjugate.value, conjugate.value]
+  group_simp
+
+theorem conjugate.inv (g x : G)
+  shows conjugate(G, g, x⁻¹) = conjugate(G, g, x)⁻¹
+proof
+  simp [conjugate.value, mul_inv_rev, inv_inv, mul_assoc]
+
+theorem conjugate.conjugate (g h x : G)
+  shows conjugate(G, g, conjugate(G, h, x)) = conjugate(G, g * h, x)
+proof
+  simp [conjugate.value, mul_inv_rev, mul_assoc]
+
+theorem conjugate.cancel (g x : G)
+  shows conjugate(G, g⁻¹, conjugate(G, g, x)) = x
+proof
+  rw [conjugate.value, conjugate.value]
+  group_simp
+
+theorem conjugate.injective (g x y : G)
+  requires equal : conjugate(G, g, x) = conjugate(G, g, y)
+  shows x = y
+proof
+  have cancelX : conjugate(G, g⁻¹, conjugate(G, g, x)) = x := conjugate.cancel with *
+  have cancelY : conjugate(G, g⁻¹, conjugate(G, g, y)) = y := conjugate.cancel with *
+  cc
+
+theorem conjugate.of_commute (g x : G)
+  requires commute : g * x = x * g
+  shows conjugate(G, g, x) = x
+proof
+  rw [conjugate.value, commute, mul_inv_cancel_right]
+  rfl
+
+theorem conjugate.commute_of_fixed (g x : G)
+  requires fixed : conjugate(G, g, x) = x
+  shows g * x = x * g
+proof
+  rw conjugate.value at fixed
+  have criterion : g * x * g⁻¹ = x ↔ g * x = x * g := mul_inv_eq_iff_eq_mul with *
+  exact criterion.forward with fixed
+
+end Conjugation
+
+-- Conjugation by g as a function on the carrier.
+defgraph conjugation (G g : Set) (x ∈ G.carrier) : G.carrier := conjugate(G, g, x)
+requires group : Group(G)
+requires hg : g ∈ G.carrier
+proof
+  exact conjugate.mem with group, hg, member
+
+section ConjugationMap
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem conjugation.hom (g : G)
+  shows conjugation(G, g) : G →* G
+proof
+  have function := conjugation.function at G, g with *
+  apply GroupHom.mk with group, group, function
+  intros x hx y hy
+  have closed : x * y ∈ G by typecheck
+  have vx := conjugation.value at G, g, x with *
+  have vy := conjugation.value at G, g, y with *
+  have output := conjugation.value at G, g, x * y with *
+  have merged : conjugate(G, g, x * y) = conjugate(G, g, x) * conjugate(G, g, y) := conjugate.mul with *
+  cc
+
+theorem conjugation.injective (g : G)
+  shows InjectiveBetween(conjugation(G, g), G.carrier, G.carrier)
+proof
+  have function := conjugation.function at G, g with *
+  constructor
+  . exact function
+  . intros x hx y hy z hz hxz hyz
+    have vx := FunctionBetween.apply_value with function, hx, hxz
+    have vy := FunctionBetween.apply_value with function, hy, hyz
+    have cx := conjugation.value at G, g, x with *
+    have cy := conjugation.value at G, g, y with *
+    have equal : conjugate(G, g, x) = conjugate(G, g, y) by cc
+    exact conjugate.injective with *
+
+theorem conjugation.surjective (g : G)
+  shows SurjectiveBetween(conjugation(G, g), G.carrier, G.carrier)
+proof
+  have function := conjugation.function at G, g with *
+  constructor
+  . exact function
+  . intros y hy
+    have preimage : conjugate(G, g⁻¹, y) ∈ G by typecheck
+    have cancel : conjugate(G, (g⁻¹)⁻¹, conjugate(G, g⁻¹, y)) = y := conjugate.cancel with *
+    rw inv_inv at cancel
+    have value := conjugation.value at G, g, conjugate(G, g⁻¹, y) with *
+    have edge := FunctionBetween.relates_apply with function, preimage
+    refine ⟨conjugate(G, g⁻¹, y), preimage, ?_⟩
+    rw [value, cancel] at edge
+    exact edge
+
+theorem conjugation.bijective (g : G)
+  shows BijectiveBetween(conjugation(G, g), G.carrier, G.carrier)
+proof
+  constructor
+  . exact conjugation.injective with *
+  . exact conjugation.surjective with *
+
+end ConjugationMap
+
+-- NormalSubgroup(N, G): a subgroup closed under conjugation by every
+-- element of G.
+predicate NormalSubgroup (N G : Set) :=
+  Subgroup(N, G) ∧ (∀ g ∈ G.carrier, ∀ n ∈ N, conjugate(G, g, n) ∈ N)
+
+notation infixl 70 "*" => call2(G.mul, _, _) via hypothesis NormalSubgroup(N, G) for N
+notation postfix 90 "⁻¹" => apply(G.inv, _) via hypothesis NormalSubgroup(N, G) for N
+notation infixr 80 "^" => groupPow(G, _, _) via hypothesis NormalSubgroup(N, G) for N
+
+theorem NormalSubgroup.subgroup (N G : Set)
+  requires normal : NormalSubgroup(N, G)
+  shows Subgroup(N, G)
+proof
+  exact normal.left
+
+theorem NormalSubgroup.conjugate_mem (N G g n : Set)
+  requires normal : NormalSubgroup(N, G)
+  requires hg : g ∈ G.carrier
+  requires hn : n ∈ N
+  shows conjugate(G, g, n) ∈ N
+proof
+  exact normal.right with g, hg, n, hn
+
+theorem NormalSubgroup.mk (N G : Set)
+  requires subgroup : Subgroup(N, G)
+  requires closed : ∀ g ∈ G.carrier, ∀ n ∈ N, conjugate(G, g, n) ∈ N
+  shows NormalSubgroup(N, G)
+proof
+  unfold NormalSubgroup
+  exact ⟨subgroup, closed⟩
+
+section NormalLaws
+variable (G N : Set)
+hypothesis group : Group(G)
+hypothesis normal : NormalSubgroup(N, G)
+
+theorem NormalSubgroup.mul_mem (g : G) (n : N)
+  shows g * n * g⁻¹ ∈ N
+proof
+  have member : conjugate(G, g, n) ∈ N := NormalSubgroup.conjugate_mem with *
+  rwa conjugate.value at member
+
+theorem NormalSubgroup.inv_mul_mem (g : G) (n : N)
+  shows g⁻¹ * n * g ∈ N
+proof
+  have member : conjugate(G, g⁻¹, n) ∈ N := NormalSubgroup.conjugate_mem with *
+  rw [conjugate.value, inv_inv] at member
+  exact member
+
+-- Normality through cosets: left and right cosets coincide.
+theorem NormalSubgroup.left_eq_right (g : G)
+  shows leftCoset(G, g, N) = rightCoset(G, g, N)
+proof
+  have subgroup := NormalSubgroup.subgroup with normal
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨yIn, n, hn, yEq⟩ := leftCoset.membership.forward with hy
+    have conj : g * n * g⁻¹ ∈ N := NormalSubgroup.mul_mem with *
+    apply rightCoset.membership.backward
+    refine ⟨yIn, g * n * g⁻¹, conj, ?_⟩
+    rw [yEq, inv_mul_cancel_right]
+    rfl
+  . intro hy
+    obtain ⟨yIn, n, hn, yEq⟩ := rightCoset.membership.forward with hy
+    have conj : g⁻¹ * n * g ∈ N := NormalSubgroup.inv_mul_mem with *
+    apply leftCoset.membership.backward
+    refine ⟨yIn, g⁻¹ * n * g, conj, ?_⟩
+    rw [yEq, ← mul_assoc, mul_inv_cancel_left]
+    rfl
+
+-- In a normal subgroup the order of a product does not matter for
+-- membership.
+theorem NormalSubgroup.mul_mem_comm (x y : G)
+  requires member : x * y ∈ N
+  shows y * x ∈ N
+proof
+  have conj : y * (x * y) * y⁻¹ ∈ N := NormalSubgroup.mul_mem with *
+  rw [← mul_assoc, mul_inv_cancel_right] at conj
+  exact conj
+
+end NormalLaws
+
+section NormalConstructions
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem NormalSubgroup.whole
+  shows NormalSubgroup(G.carrier, G)
+proof
+  have subgroup := Subgroup.whole with group
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  typecheck
+
+theorem NormalSubgroup.trivial
+  shows NormalSubgroup({G.one}, G)
+proof
+  have subgroup := Subgroup.trivial with group
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  have equal := singleton.membership.forward with hn
+  have fixed : conjugate(G, g, G.one) = G.one := conjugate.one with *
+  rw [equal, fixed]
+  exact singleton.self
+
+theorem NormalSubgroup.intersection (N M : Set)
+  requires normalN : NormalSubgroup(N, G)
+  requires normalM : NormalSubgroup(M, G)
+  shows NormalSubgroup(N ∩ M, G)
+proof
+  have subgroup := Subgroup.intersection with group, (NormalSubgroup.subgroup with normalN), (NormalSubgroup.subgroup with normalM)
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  obtain ⟨nN, nM⟩ := intersection.membership.forward with hn
+  have inN : conjugate(G, g, n) ∈ N := NormalSubgroup.conjugate_mem with *
+  have inM : conjugate(G, g, n) ∈ M := NormalSubgroup.conjugate_mem with *
+  exact intersection.membership.backward with ⟨inN, inM⟩
+
+theorem NormalSubgroup.of_left_eq_right (N : Set)
+  requires subgroup : Subgroup(N, G)
+  requires cosets : ∀ g ∈ G, leftCoset(G, g, N) = rightCoset(G, g, N)
+  shows NormalSubgroup(N, G)
+proof
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  have gn : g * n ∈ leftCoset(G, g, N) := leftCoset.mul_mem with *
+  have equal := cosets with g, hg
+  rw equal at gn
+  obtain ⟨gnIn, m, hm, gnEq⟩ := rightCoset.membership.forward with gn
+  rw [conjugate.value, gnEq, mul_inv_cancel_right]
+  exact hm
+
+theorem NormalSubgroup.iff_left_eq_right (N : Set)
+  requires subgroup : Subgroup(N, G)
+  shows NormalSubgroup(N, G) ↔ ∀ g ∈ G, leftCoset(G, g, N) = rightCoset(G, g, N)
+proof
+  constructor
+  . intros normal g hg
+    exact NormalSubgroup.left_eq_right with *
+  . intro cosets
+    exact NormalSubgroup.of_left_eq_right with *
+
+end NormalConstructions
+
+theorem NormalSubgroup.of_abelian (G N : Set)
+  requires abelian : AbelianGroup(G)
+  requires subgroup : Subgroup(N, G)
+  shows NormalSubgroup(N, G)
+proof
+  have group := AbelianGroup.to_group with abelian
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  have nIn : n ∈ G.carrier := Subgroup.mem_carrier with *
+  have commute : g * n = n * g := mul_comm with *
+  have fixed : conjugate(G, g, n) = n := conjugate.of_commute with *
+  rwa fixed
+
+section NormalHoms
+variable (f G H : Set)
+hypothesis hom : f : G →* H
+
+theorem GroupHom.kernel_normal
+  shows NormalSubgroup(ker(f), G)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have subgroup := GroupHom.kernel_subgroup with hom
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  obtain ⟨nIn, vn⟩ := kernel.membership.forward with hn
+  have vanishes : f(conjugate(G, g, n)) = H.one
+    rw [conjugate.value, GroupHom.map_mul, GroupHom.map_mul, GroupHom.map_inv, vn, mul_one, Group.mul_inv]
+    rfl
+  exact kernel.of_value with (conjugate.mem with *), vanishes
+
+theorem NormalSubgroup.preimage (K : Set)
+  requires normal : NormalSubgroup(K, H)
+  shows NormalSubgroup(functionPreimage(f, G.carrier, K), G)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have subgroup := GroupHom.preimage_subgroup with hom, (NormalSubgroup.subgroup with normal)
+  apply NormalSubgroup.mk with subgroup
+  intros g hg n hn
+  have parts := functionPreimage.membership.forward with hn
+  have nIn := parts.left
+  have conj : conjugate(H, f(g), f(n)) ∈ K := NormalSubgroup.conjugate_mem with normal, (GroupHom.map_mem with *), parts.right
+  have value : f(conjugate(G, g, n)) ∈ K
+    rw [conjugate.value, GroupHom.map_mul, GroupHom.map_mul, GroupHom.map_inv]
+    rwa conjugate.value at conj
+  exact functionPreimage.of_apply with (conjugate.mem with *), value
+
+theorem NormalSubgroup.image_of_surjective (N : Set)
+  requires surjective : SurjectiveBetween(f, G.carrier, H.carrier)
+  requires normal : NormalSubgroup(N, G)
+  shows NormalSubgroup(functionImage(f, N, H.carrier), H)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have function := GroupHom.function with hom
+  have subgroupN := NormalSubgroup.subgroup with normal
+  have subgroup := GroupHom.image_subgroup with hom, subgroupN
+  apply NormalSubgroup.mk with subgroup
+  intros h hh y hy
+  obtain ⟨yIn, n, hn, yEq⟩ := functionImage.membership.forward with hy
+  obtain ⟨g, hg, edge⟩ := surjective.right with h, hh
+  have hEq := FunctionBetween.apply_value with function, hg, edge
+  have nIn : n ∈ G := Subgroup.mem_carrier with *
+  have conj : conjugate(G, g, n) ∈ N := NormalSubgroup.conjugate_mem with *
+  have closed : conjugate(H, h, y) ∈ H by typecheck
+  apply functionImage.membership.backward
+  refine ⟨closed, conjugate(G, g, n), conj, ?_⟩
+  rw [conjugate.value, conjugate.value, GroupHom.map_mul, GroupHom.map_mul, GroupHom.map_inv, hEq, yEq]
+  rfl
+
+end NormalHoms

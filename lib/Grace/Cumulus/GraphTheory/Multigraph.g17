@@ -1,0 +1,351 @@
+-- Multigraphs with distinct edge identities and finite walks.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Multigraph
+import Cardinal.Enumeration
+import Nat.Parity
+
+-- Endpoint maps need not be injective: parallel edges remain distinct.
+-- Loops are allowed and contribute twice to incidence counts.
+predicate Graph (V E leftEnd rightEnd : Set) :=
+  FunctionBetween(leftEnd, E, V) ∧ FunctionBetween(rightEnd, E, V)
+
+predicate Traverses (E leftEnd rightEnd e u v : Set) :=
+  e ∈ E ∧ ((leftEnd(e) = u ∧ rightEnd(e) = v) ∨
+    (leftEnd(e) = v ∧ rightEnd(e) = u))
+
+-- The first n edge entries join successive entries of the vertex sequence.
+-- Only finite prefixes matter; the sequences may be defined on larger domains.
+predicate Walk (V E leftEnd rightEnd edges vertices n : Set) :=
+  (∀ i ∈ succ(n), vertices[i] ∈ V) ∧
+  (∀ i ∈ n, Traverses(E, leftEnd, rightEnd, edges[i], vertices[i], vertices[succ(i)]))
+
+predicate Trail (V E leftEnd rightEnd edges vertices n : Set) :=
+  Walk(V, E, leftEnd, rightEnd, edges, vertices, n) ∧ DistinctValues(edges, n)
+
+predicate EulerTrail (V E leftEnd rightEnd edges vertices n : Set) :=
+  Trail(V, E, leftEnd, rightEnd, edges, vertices, n) ∧
+  (∀ e ∈ E, Occurs(edges, n, e))
+
+theorem Traverses.reverse (E leftEnd rightEnd e u v : Set)
+  requires edge : Traverses(E, leftEnd, rightEnd, e, u, v)
+  shows Traverses(E, leftEnd, rightEnd, e, v, u)
+proof
+  unfold Traverses at edge
+  unfold Traverses
+  tauto
+
+theorem Traverses.bounds (V E leftEnd rightEnd e u v : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : Traverses(E, leftEnd, rightEnd, e, u, v)
+  shows u ∈ V ∧ v ∈ V
+proof
+  rcases graph with ⟨leftMap, rightMap⟩
+  rcases edge with ⟨member, orientation⟩
+  have leftIn := FunctionBetween.apply_closed at leftEnd, E, V, e with *
+  have rightIn := FunctionBetween.apply_closed at rightEnd, E, V, e with *
+  cases orientation with forward | backward
+  . rcases forward with ⟨leftEq, rightEq⟩
+    rw leftEq at leftIn
+    rw rightEq at rightIn
+    tauto
+  . rcases backward with ⟨leftEq, rightEq⟩
+    rw leftEq at leftIn
+    rw rightEq at rightIn
+    tauto
+
+theorem Walk.prefix (V E leftEnd rightEnd edges vertices : Set, n : Nat)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, succ(n))
+  shows Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+proof
+  rcases walk with ⟨verticesIn, steps⟩
+  constructor
+  . intros i before
+    have included := membership.into_successor with before
+    exact verticesIn with i, included
+  . intros i before
+    have included := membership.into_successor with before
+    exact steps with i, included
+
+theorem Trail.prefix (V E leftEnd rightEnd edges vertices : Set, n : Nat)
+  requires trail : Trail(V, E, leftEnd, rightEnd, edges, vertices, succ(n))
+  shows Trail(V, E, leftEnd, rightEnd, edges, vertices, n)
+proof
+  rcases trail with ⟨walk, distinct⟩
+  have shorter := Walk.prefix with *
+  have unique := DistinctValues.prefix with *
+  unfold Trail
+  tauto
+
+-- Each endpoint is counted separately, including the two ends of a loop.
+def incidences (leftEnd rightEnd edges x : Set, n : Nat) → Set
+  | leftEnd, rightEnd, edges, x, zero => 0
+  | leftEnd, rightEnd, edges, x, succ(k) =>
+    add(incidences(leftEnd, rightEnd, edges, x, k),
+      add(indicator({x}, leftEnd(edges[k])), indicator({x}, rightEnd(edges[k]))))
+
+theorem incidences.natural (leftEnd rightEnd edges x : Set, n : Nat)
+  shows Nat(incidences(leftEnd, rightEnd, edges, x, n))
+proof
+  induction n
+  | zero =>
+    rw incidences
+    typecheck
+  | succ(k) using ih =>
+    rw incidences
+    typecheck
+
+theorem Traverses.incidence (E leftEnd rightEnd e u v x : Set)
+  requires edge : Traverses(E, leftEnd, rightEnd, e, u, v)
+  shows add(indicator({x}, leftEnd(e)), indicator({x}, rightEnd(e))) =
+    add(indicator({x}, u), indicator({x}, v))
+proof
+  rcases edge with ⟨member, orientation⟩
+  cases orientation with forward | backward
+  . rcases forward with ⟨leftEq, rightEq⟩
+    rw [leftEq, rightEq]
+    rfl
+  . rcases backward with ⟨leftEq, rightEq⟩
+    rw [leftEq, rightEq]
+    ring
+
+-- Telescoping incidence balance, valid for walks of arbitrary finite length.
+-- countMembers({x}, vertices, n) counts departures from x.
+theorem Walk.incidence_balance (V E leftEnd rightEnd edges vertices x : Set, n : Nat)
+  shows Walk(V, E, leftEnd, rightEnd, edges, vertices, n) →
+    add(incidences(leftEnd, rightEnd, edges, x, n), indicator({x}, vertices[0])) =
+    add(add(countMembers({x}, vertices, n), countMembers({x}, vertices, n)),
+      indicator({x}, vertices[n]))
+proof
+  induction n
+  | zero =>
+    intro walk
+    simp [incidences, countMembers, add]
+  | succ(k) using ih =>
+    intro walk
+    have prefix := Walk.prefix at V, E, leftEnd, rightEnd, edges, vertices, k with *
+    have balance := ih with prefix
+    rcases walk with ⟨verticesIn, steps⟩
+    have last := membership.self_successor at k with *
+    have edge := steps with k, last
+    have contribution := Traverses.incidence at E, leftEnd, rightEnd, edges[k],
+      vertices[k], vertices[succ(k)], x with edge
+    rw [incidences, contribution, countMembers]
+    have regroup : add(add(incidences(leftEnd, rightEnd, edges, x, k),
+        add(indicator({x}, vertices[k]), indicator({x}, vertices[succ(k)]))),
+        indicator({x}, vertices[0])) =
+      add(add(incidences(leftEnd, rightEnd, edges, x, k), indicator({x}, vertices[0])),
+        add(indicator({x}, vertices[k]), indicator({x}, vertices[succ(k)])))
+      ring
+    rw [regroup, balance]
+    ring
+
+-- A closed walk has even incidence count at every vertex, loops included.
+theorem Walk.closed_even (V E leftEnd rightEnd edges vertices x : Set, n : Nat)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires closed : vertices[n] = vertices[0]
+  shows Even(incidences(leftEnd, rightEnd, edges, x, n))
+proof
+  have balance := Walk.incidence_balance at V, E, leftEnd, rightEnd, edges, vertices, x, n with walk
+  rw closed at balance
+  have equality := add.right_cancel with balance
+  rw equality
+  exact Even.double with *
+
+theorem Walk.nonendpoint_even (V E leftEnd rightEnd edges vertices x : Set, n : Nat)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires notStart : x ≠ vertices[0]
+  requires notEnd : x ≠ vertices[n]
+  shows Even(incidences(leftEnd, rightEnd, edges, x, n))
+proof
+  have startMissing : ¬(vertices[0] ∈ {x})
+    intro member
+    have equal := singleton.membership.forward with member
+    apply notStart
+    symm
+    exact equal
+  have endMissing : ¬(vertices[n] ∈ {x})
+    intro member
+    have equal := singleton.membership.forward with member
+    apply notEnd
+    symm
+    exact equal
+  have startZero := indicator.absent with startMissing
+  have endZero := indicator.absent with endMissing
+  have balance := Walk.incidence_balance at V, E, leftEnd, rightEnd, edges, vertices, x, n with walk
+  rw [startZero, endZero] at balance
+  simp [add.right_unit] at balance
+  rw balance
+  exact Even.double with *
+
+theorem Walk.noneven_endpoint (V E leftEnd rightEnd edges vertices x : Set, n : Nat)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires noneven : ¬Even(incidences(leftEnd, rightEnd, edges, x, n))
+  shows x = vertices[0] ∨ x = vertices[n]
+proof
+  have alternatives : (x = vertices[0] ∨ x = vertices[n]) ∨
+      (x ≠ vertices[0] ∧ x ≠ vertices[n])
+    tauto
+  cases alternatives with endpoint | interior
+  . exact endpoint
+  . rcases interior with ⟨notStart, notEnd⟩
+    have even := Walk.nonendpoint_even with *
+    tauto
+
+-- The fiber records edge identities, so two parallel edges count separately.
+def endpointFiber (E endpoint x : Set) : Set := { e ∈ E | endpoint(e) = x }
+
+theorem endpointFiber.membership (E endpoint x e : Set)
+  shows e ∈ endpointFiber(E, endpoint, x) ↔ (e ∈ E ∧ endpoint(e) = x)
+proof
+  simp
+
+theorem endpointFiber.indicator (E endpoint x e : Set)
+  requires member : e ∈ E
+  shows indicator({x}, endpoint(e)) = indicator(endpointFiber(E, endpoint, x), e)
+proof
+  have equivalent : endpoint(e) ∈ {x} ↔ e ∈ endpointFiber(E, endpoint, x)
+    have singleton := singleton.membership at endpoint(e), x
+    have fiber := endpointFiber.membership at E, endpoint, x, e
+    tauto
+  exact indicator.congr with equivalent
+
+-- Degree expressed as two finite set counts.
+theorem incidences.counts (E leftEnd rightEnd edges x : Set, n : Nat)
+  shows (∀ i ∈ n, edges[i] ∈ E) →
+    incidences(leftEnd, rightEnd, edges, x, n) =
+    add(countMembers(endpointFiber(E, leftEnd, x), edges, n),
+      countMembers(endpointFiber(E, rightEnd, x), edges, n))
+proof
+  induction n
+  | zero =>
+    intro values
+    simp [incidences, countMembers, add]
+  | succ(k) using ih =>
+    intro values
+    have prefix : ∀ i ∈ k, edges[i] ∈ E
+      intros i before
+      have included := membership.into_successor with before
+      exact values with i, included
+    have last := membership.self_successor at k with *
+    have member := values with k, last
+    have leftValue := endpointFiber.indicator at E, leftEnd, x, edges[k] with member
+    have rightValue := endpointFiber.indicator at E, rightEnd, x, edges[k] with member
+    have previous := ih with prefix
+    rw [incidences, previous, leftValue, rightValue, countMembers, countMembers]
+    ring
+
+theorem Walk.edge_values (V E leftEnd rightEnd edges vertices n : Set)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+  shows ∀ i ∈ n, edges[i] ∈ E
+proof
+  rcases walk with ⟨verticesIn, steps⟩
+  intros i before
+  have edge := steps with i, before
+  unfold Traverses at edge
+  tauto
+
+-- Any complete edge enumeration gives the same degrees as an Euler trail.
+theorem EulerTrail.incidence_reindex (V E leftEnd rightEnd edges vertices enumeration x : Set, n m : Nat)
+  requires trail : EulerTrail(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires bijective : BijectiveBetween(enumeration, m, E)
+  shows incidences(leftEnd, rightEnd, edges, x, n) =
+    incidences(leftEnd, rightEnd, enumeration, x, m)
+proof
+  rcases trail with ⟨path, covers⟩
+  rcases path with ⟨walk, distinct⟩
+  have values := Walk.edge_values with walk
+  have otherValues := Bijective.values with bijective
+  have injective := Bijective.injective with bijective
+  have onto := Bijective.surjective with bijective
+  have otherDistinct := Injective.distinct_values with injective
+  have covered : ∀ i ∈ n, Occurs(enumeration, m, edges[i])
+    intros i before
+    have member := values with i, before
+    exact Surjective.occurs with *
+  have otherCovered : ∀ i ∈ m, Occurs(edges, n, enumeration[i])
+    intros i before
+    have member := otherValues with i, before
+    exact covers with enumeration[i], member
+  have leftCount := countMembers.same_entries at endpointFiber(E, leftEnd, x), edges, enumeration, n, m with *
+  have rightCount := countMembers.same_entries at endpointFiber(E, rightEnd, x), edges, enumeration, n, m with *
+  have original := incidences.counts at E, leftEnd, rightEnd, edges, x, n with values
+  have reordered := incidences.counts at E, leftEnd, rightEnd, enumeration, x, m with otherValues
+  rw [original, reordered, leftCount, rightCount]
+  rfl
+
+theorem EulerTrail.noneven_endpoint (V E leftEnd rightEnd edges vertices enumeration x : Set, n m : Nat)
+  requires trail : EulerTrail(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires bijective : BijectiveBetween(enumeration, m, E)
+  requires noneven : ¬Even(incidences(leftEnd, rightEnd, enumeration, x, m))
+  shows x = vertices[0] ∨ x = vertices[n]
+proof
+  have reindex := EulerTrail.incidence_reindex at V, E, leftEnd, rightEnd, edges, vertices, enumeration, x, n, m with *
+  rw ← reindex at noneven
+  rcases trail with ⟨path, covers⟩
+  rcases path with ⟨walk, distinct⟩
+  exact Walk.noneven_endpoint with *
+
+-- Three distinct vertices of non-even degree obstruct every Euler trail.
+-- Degrees may be computed in any fixed bijective edge enumeration.
+theorem EulerTrail.three_noneven_obstruction (V E leftEnd rightEnd edges vertices enumeration a b c : Set, n m : Nat)
+  requires bijective : BijectiveBetween(enumeration, m, E)
+  requires ab : a ≠ b
+  requires ac : a ≠ c
+  requires bc : b ≠ c
+  requires degreeA : ¬Even(incidences(leftEnd, rightEnd, enumeration, a, m))
+  requires degreeB : ¬Even(incidences(leftEnd, rightEnd, enumeration, b, m))
+  requires degreeC : ¬Even(incidences(leftEnd, rightEnd, enumeration, c, m))
+  shows ¬EulerTrail(V, E, leftEnd, rightEnd, edges, vertices, n)
+proof
+  intro trail
+  have aEnds := EulerTrail.noneven_endpoint at V, E, leftEnd, rightEnd, edges, vertices, enumeration, a, n, m with *
+  have bEnds := EulerTrail.noneven_endpoint at V, E, leftEnd, rightEnd, edges, vertices, enumeration, b, n, m with *
+  have cEnds := EulerTrail.noneven_endpoint at V, E, leftEnd, rightEnd, edges, vertices, enumeration, c, n, m with *
+  cases aEnds with aStart | aEnd
+  . cases bEnds with bStart | bEnd
+    . cc
+    . cases cEnds with cStart | cEnd
+      . cc
+      . cc
+  . cases bEnds with bStart | bEnd
+    . cases cEnds with cStart | cEnd
+      . cc
+      . cc
+    . cc
+
+-- Conventional parity statements derived from the incidence obstruction.
+theorem Walk.odd_endpoint (V E leftEnd rightEnd edges vertices x : Set, n : Nat)
+  requires walk : Walk(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires odd : Odd(incidences(leftEnd, rightEnd, edges, x, n))
+  shows x = vertices[0] ∨ x = vertices[n]
+proof
+  have noneven := Odd.not_even with odd
+  exact Walk.noneven_endpoint with *
+
+theorem EulerTrail.odd_endpoint (V E leftEnd rightEnd edges vertices enumeration x : Set, n m : Nat)
+  requires trail : EulerTrail(V, E, leftEnd, rightEnd, edges, vertices, n)
+  requires bijective : BijectiveBetween(enumeration, m, E)
+  requires odd : Odd(incidences(leftEnd, rightEnd, enumeration, x, m))
+  shows x = vertices[0] ∨ x = vertices[n]
+proof
+  have noneven := Odd.not_even with odd
+  exact EulerTrail.noneven_endpoint with *
+
+theorem EulerTrail.three_odd_obstruction (V E leftEnd rightEnd edges vertices enumeration a b c : Set, n m : Nat)
+  requires bijective : BijectiveBetween(enumeration, m, E)
+  requires ab : a ≠ b
+  requires ac : a ≠ c
+  requires bc : b ≠ c
+  requires oddA : Odd(incidences(leftEnd, rightEnd, enumeration, a, m))
+  requires oddB : Odd(incidences(leftEnd, rightEnd, enumeration, b, m))
+  requires oddC : Odd(incidences(leftEnd, rightEnd, enumeration, c, m))
+  shows ¬EulerTrail(V, E, leftEnd, rightEnd, edges, vertices, n)
+proof
+  have degreeA := Odd.not_even with oddA
+  have degreeB := Odd.not_even with oddB
+  have degreeC := Odd.not_even with oddC
+  exact EulerTrail.three_noneven_obstruction with degreeA, degreeB, degreeC

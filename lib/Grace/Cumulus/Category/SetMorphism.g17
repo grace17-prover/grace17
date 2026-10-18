@@ -1,0 +1,632 @@
+-- The category of sets below a universe
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Category.SetMorphism
+import Examples
+
+-- Sets(U) is the category of the subsets of a universe set U with all
+-- functions between them. A morphism f : A ⟶ B is the function graph of f
+-- together with the entry (U ↦ B), which records the codomain: U is not a
+-- member of any subset of U, so the entry leaves the values on A untouched,
+-- and the codomain is read back as the value at U. A morphism therefore
+-- applies to its arguments as an ordinary function, f(x), and composition
+-- is composition of functions.
+def setArrow (U B f : Set) : Set := adjoinMap(f, U, B)
+
+-- The underlying function of a morphism: its graph without the codomain
+-- entry.
+def setsMap (U m : Set) : Set := m ∖ {(U ↦ m(U))}
+
+theorem setArrow.membership (U B f p : Set)
+  shows p ∈ setArrow(U, B, f) ↔ (p = (U ↦ B) ∨ p ∈ f)
+proof
+  simp [setArrow, adjoinMap, insert.membership]
+
+theorem universe.not_member (U A : Set)
+  requires subset : A ⊆ U
+  shows ¬U ∈ A
+proof
+  intro member
+  have inSelf := subset with U, member
+  have irreflexive := membership.irreflexive at U
+  exact irreflexive with inSelf
+
+theorem setArrow.function (U A B f : Set)
+  requires subset : A ⊆ U
+  requires function : f : A → B
+  shows setArrow(U, B, f) : insert(U, A) → insert(B, B)
+proof
+  have notIn := universe.not_member with subset
+  unfold setArrow
+  exact adjoinMap.function with function, notIn
+
+theorem setArrow.apply (U A B f x : Set)
+  requires subset : A ⊆ U
+  requires function : f : A → B
+  requires xIn : x ∈ A
+  shows setArrow(U, B, f)(x) = f(x)
+proof
+  have arrow := setArrow.function with subset, function
+  have xInserted : x ∈ insert(U, A) := insert.contains with xIn
+  have related := FunctionBetween.relates_apply with function, xIn
+  have lifted := adjoinMap.relates_old at f, U, B, x, f(x) with related
+  unfold setArrow at arrow
+  unfold setArrow
+  exact FunctionBetween.apply_value with arrow, xInserted, lifted
+
+theorem setArrow.codomain (U A B f : Set)
+  requires subset : A ⊆ U
+  requires function : f : A → B
+  shows setArrow(U, B, f)(U) = B
+proof
+  have arrow := setArrow.function with subset, function
+  have uInserted : U ∈ insert(U, A) := insert.self at U, A
+  have related := adjoinMap.relates_new at f, U, B
+  unfold setArrow at arrow
+  unfold setArrow
+  exact FunctionBetween.apply_value with arrow, uInserted, related
+
+theorem setArrow.map (U A B f : Set)
+  requires subset : A ⊆ U
+  requires function : f : A → B
+  shows setsMap(U, setArrow(U, B, f)) = f
+proof
+  have codomain := setArrow.codomain with subset, function
+  have notIn := universe.not_member with subset
+  unfold setsMap
+  ext p
+  constructor
+  . intro member
+    obtain ⟨inArrow, notEntry⟩ := difference.membership.forward with member
+    have shape := setArrow.membership.forward with inArrow
+    cases shape with entry | old
+    . exfalso
+      have isEntry : p ∈ {(U ↦ B)} by simp [entry]
+      exact notEntry with isEntry
+    . exact old
+  . intro member
+    apply difference.membership.backward
+    constructor
+    . apply setArrow.membership.backward
+      right
+      exact member
+    . intro isEntry
+      have entry : p = (U ↦ B) := singleton.membership.forward with isEntry
+      obtain ⟨x, xInA, y, yInB, shape, related⟩ :=
+        FunctionBetween.member_shape with function, member
+      have same : (U, B) = (x, y) by cc
+      have uIsX : U = x := orderedPair.first with same
+      rw ← uIsX at xInA
+      exact notIn with xInA
+
+-- A function with a two-sided inverse is a bijection.
+theorem Bijective.of_two_sided_inverse (f g A B : Set)
+  requires function : f : A → B
+  requires inverse : g : B → A
+  requires leftLaw : ∀ x ∈ A, g(f(x)) = x
+  requires rightLaw : ∀ y ∈ B, f(g(y)) = y
+  shows BijectiveBetween(f, A, B)
+proof
+  unfold BijectiveBetween
+  constructor
+  . unfold InjectiveBetween
+    refine ⟨function, ?_⟩
+    intros x hx y hy z hz relatesX relatesY
+    have valueX := FunctionBetween.apply_value with function, hx, relatesX
+    have valueY := FunctionBetween.apply_value with function, hy, relatesY
+    have leftX := leftLaw with x, hx
+    have leftY := leftLaw with y, hy
+    cc
+  . unfold SurjectiveBetween
+    refine ⟨function, ?_⟩
+    intros y hy
+    have preimage := FunctionBetween.apply_closed with inverse, hy
+    have edge := FunctionBetween.relates_apply with function, preimage
+    have value := rightLaw with y, hy
+    refine ⟨g(y), preimage, ?_⟩
+    rwa value at edge
+
+-- The domain of a function graph is its domain of definition.
+theorem FunctionBetween.domain (f A B : Set)
+  requires function : f : A → B
+  shows domain(f) = A
+proof
+  ext x
+  constructor
+  . intro member
+    obtain ⟨bounded, y, pairIn⟩ := domain.membership.forward with member
+    have related : relates(f, x, y) := pairIn
+    obtain ⟨xInA, yInB⟩ := FunctionBetween.bounds with function, related
+    exact xInA
+  . intro xInA
+    obtain ⟨y, yInB, related⟩ := FunctionBetween.exists_value with function, xInA
+    have pairIn : (x, y) ∈ f := related
+    have singletonIn : {x} ∈ (x, y) by simp [orderedPair, singleton, pair.membership]
+    have inUnion : {x} ∈ ⋃ f := union.contains with pairIn, singletonIn
+    have selfIn : x ∈ {x} := singleton.self at x
+    have inBound : x ∈ ⋃ ⋃ f := union.contains with inUnion, selfIn
+    have inCoordinates : x ∈ coordinateBound(f)
+      unfold coordinateBound
+      exact inBound
+    apply domain.membership.backward
+    refine ⟨inCoordinates, y, pairIn⟩
+
+theorem functionSpace.bounded (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows f ∈ 𝒫(U × U)
+proof
+  have function := functionSpace.membership.forward with fIn
+  have graph : f ⊆ A × B := function.left
+  have aSubset := powerset.membership_iff.forward with aIn
+  have bSubset := powerset.membership_iff.forward with bIn
+  have products := product.monotone with aSubset, bSubset
+  have bounded := Subset.transitive with graph, products
+  exact powerset.membership_iff.backward with bounded
+
+def setsBound (U : Set) : Set := (U × U) ∪ ({U} × 𝒫(U))
+
+def setsMorphisms (U : Set) : Set :=
+  { m ∈ 𝒫(setsBound(U)) | ∃ A ∈ 𝒫(U), ∃ B ∈ 𝒫(U),
+    ∃ f ∈ functionSpace(A, B), m = setArrow(U, B, f) }
+
+theorem setsMorphisms.membership (U m : Set)
+  shows m ∈ setsMorphisms(U) ↔ (m ∈ 𝒫(setsBound(U)) ∧ ∃ A ∈ 𝒫(U), ∃ B ∈ 𝒫(U),
+    ∃ f ∈ functionSpace(A, B), m = setArrow(U, B, f))
+proof
+  simp
+
+theorem setArrow.bounded (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows setArrow(U, B, f) ∈ 𝒫(setsBound(U))
+proof
+  have fBounded := functionSpace.bounded with aIn, bIn, fIn
+  have fSubset := powerset.membership_iff.forward with fBounded
+  have selfIn := singleton.self at U
+  have entryIn : (U, B) ∈ {U} × 𝒫(U) := product.pair with selfIn, bIn
+  apply powerset.membership_iff.backward
+  intros p member
+  have shape := setArrow.membership.forward with member
+  unfold setsBound
+  apply union2.membership.backward
+  cases shape with entry | old
+  . right
+    rw entry
+    exact entryIn
+  . left
+    exact fSubset with p, old
+
+theorem setsMorphisms.arrow (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows setArrow(U, B, f) ∈ setsMorphisms(U)
+proof
+  have bounded := setArrow.bounded with aIn, bIn, fIn
+  apply setsMorphisms.membership.backward
+  constructor
+  . exact bounded
+  . refine ⟨A, aIn, B, bIn, f, fIn, rfl⟩
+
+theorem setsMorphisms.shape (U m : Set)
+  requires member : m ∈ setsMorphisms(U)
+  shows ∃ A ∈ 𝒫(U), ∃ B ∈ 𝒫(U), ∃ f ∈ functionSpace(A, B), m = setArrow(U, B, f)
+proof
+  obtain ⟨bounded, rest⟩ := setsMorphisms.membership.forward with member
+  exact rest
+
+-- The codomain of a morphism is its value at U; its domain is the domain
+-- of its underlying function.
+defgraph setsCod (U : Set) (m ∈ setsMorphisms(U)) : 𝒫(U) := m(U)
+proof
+  obtain ⟨A, aIn, B, bIn, f, fIn, shape⟩ := setsMorphisms.shape with member
+  have subset := powerset.membership_iff.forward with aIn
+  have function := functionSpace.membership.forward with fIn
+  have value := setArrow.codomain with subset, function
+  rw shape
+  rw value
+  exact bIn
+
+defgraph setsDom (U : Set) (m ∈ setsMorphisms(U)) : 𝒫(U) := domain(setsMap(U, m))
+proof
+  obtain ⟨A, aIn, B, bIn, f, fIn, shape⟩ := setsMorphisms.shape with member
+  have subset := powerset.membership_iff.forward with aIn
+  have function := functionSpace.membership.forward with fIn
+  have underlying := setArrow.map with subset, function
+  have domainValue := FunctionBetween.domain with function
+  rw shape
+  rw [underlying, domainValue]
+  exact aIn
+
+theorem setsCod.arrow (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows setsCod(U)(setArrow(U, B, f)) = B
+proof
+  have member := setsMorphisms.arrow with aIn, bIn, fIn
+  have subset := powerset.membership_iff.forward with aIn
+  have function := functionSpace.membership.forward with fIn
+  have value := setsCod.value with member
+  have codomain := setArrow.codomain with subset, function
+  rw value
+  exact codomain
+
+theorem setsDom.arrow (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows setsDom(U)(setArrow(U, B, f)) = A
+proof
+  have member := setsMorphisms.arrow with aIn, bIn, fIn
+  have subset := powerset.membership_iff.forward with aIn
+  have function := functionSpace.membership.forward with fIn
+  have value := setsDom.value with member
+  have underlying := setArrow.map with subset, function
+  have domainValue := FunctionBetween.domain with function
+  rw value
+  rw underlying
+  exact domainValue
+
+theorem setsMap.arrow (U A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  shows setsMap(U, setArrow(U, B, f)) = f
+proof
+  have subset := powerset.membership_iff.forward with aIn
+  have function := functionSpace.membership.forward with fIn
+  exact setArrow.map with subset, function
+
+-- Identities and composition.
+defgraph setsIdentity (U : Set) (A ∈ 𝒫(U)) : setsMorphisms(U) :=
+  setArrow(U, A, identity(A))
+proof
+  have identityIn := functionSpace.identity at A
+  exact setsMorphisms.arrow with member, member, identityIn
+
+defgraph setsComposition (U : Set)
+    (p ∈ composablePairsOf(setsMorphisms(U), setsDom(U), setsCod(U))) :
+    setsMorphisms(U) :=
+  setArrow(U, setsCod(U)(fst(p)),
+    compose(setsMap(U, fst(p)), setsMap(U, snd(p)), setsDom(U)(snd(p)),
+      setsCod(U)(snd(p)), setsCod(U)(fst(p))))
+proof
+  obtain ⟨bounded, g, gIn, f, fIn, shape, composable⟩ :=
+    composablePairsOf.membership.forward with member
+  obtain ⟨B, bIn, C, cIn, gMap, gMapIn, gShape⟩ := setsMorphisms.shape with gIn
+  obtain ⟨A, aIn, D, dIn, fMap, fMapIn, fShape⟩ := setsMorphisms.shape with fIn
+  have domG := setsDom.arrow with bIn, cIn, gMapIn
+  have codG := setsCod.arrow with bIn, cIn, gMapIn
+  have mapG := setsMap.arrow with bIn, gMapIn
+  have codF0 := setsCod.arrow with aIn, dIn, fMapIn
+  have middle : B = D by cc
+  rw ← middle at fMapIn
+  rw ← middle at fShape
+  have domF := setsDom.arrow with aIn, bIn, fMapIn
+  have codF := setsCod.arrow with aIn, bIn, fMapIn
+  have mapF := setsMap.arrow with aIn, fMapIn
+  have composed := functionSpace.compose with fMapIn, gMapIn
+  rw shape
+  rw [fst.pair, snd.pair, gShape, fShape, codG, codF, domF, mapG, mapF]
+  exact setsMorphisms.arrow with aIn, cIn, composed
+
+theorem setsComposition.arrow (U A B C f g : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires cIn : C ∈ 𝒫(U)
+  requires fIn : f ∈ functionSpace(A, B)
+  requires gIn : g ∈ functionSpace(B, C)
+  shows setsComposition(U)(setArrow(U, C, g), setArrow(U, B, f)) =
+    setArrow(U, C, compose(g, f, A, B, C))
+proof
+  have gMember := setsMorphisms.arrow with bIn, cIn, gIn
+  have fMember := setsMorphisms.arrow with aIn, bIn, fIn
+  have domG := setsDom.arrow with bIn, cIn, gIn
+  have codF := setsCod.arrow with aIn, bIn, fIn
+  have domF := setsDom.arrow with aIn, bIn, fIn
+  have codG := setsCod.arrow with bIn, cIn, gIn
+  have mapG := setsMap.arrow with bIn, gIn
+  have mapF := setsMap.arrow with aIn, fIn
+  have composable : setsDom(U)(setArrow(U, C, g)) = setsCod(U)(setArrow(U, B, f))
+    cc
+  have pairIn := composablePairsOf.pair at setsMorphisms(U), setsDom(U),
+    setsCod(U), setArrow(U, C, g), setArrow(U, B, f) with
+    gMember, fMember, composable
+  have value := setsComposition.value with pairIn
+  have firstValue := fst.pair at setArrow(U, C, g), setArrow(U, B, f)
+  have secondValue := snd.pair at setArrow(U, C, g), setArrow(U, B, f)
+  unfold call2
+  rfl
+
+def Sets (U : Set) : Set :=
+  Category.mk(𝒫(U), setsMorphisms(U), setsDom(U), setsCod(U), setsIdentity(U),
+    setsComposition(U))
+
+theorem Sets.obj (U : Set)
+  shows obj(Sets(U)) = 𝒫(U)
+proof
+  simp [Sets, Category.mk.obj]
+
+theorem Sets.mor (U : Set)
+  shows mor(Sets(U)) = setsMorphisms(U)
+proof
+  simp [Sets, Category.mk.mor]
+
+theorem Sets.dom (U : Set)
+  shows dom(Sets(U)) = setsDom(U)
+proof
+  simp [Sets, Category.mk.dom]
+
+theorem Sets.cod (U : Set)
+  shows cod(Sets(U)) = setsCod(U)
+proof
+  simp [Sets, Category.mk.cod]
+
+theorem Sets.comp (U : Set)
+  shows comp(Sets(U)) = setsComposition(U)
+proof
+  simp [Sets, Category.mk.comp]
+
+theorem Sets.id (U : Set)
+  shows id(Sets(U)) = setsIdentity(U)
+proof
+  simp [Sets, Category.mk.id]
+
+tactic sets_projections := simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id]
+
+theorem Sets.category (U : Set)
+  shows Category(Sets(U))
+proof
+  have domFunction := setsDom.function at U
+  have codFunction := setsCod.function at U
+  have idFunction := setsIdentity.function at U
+  have compFunction := setsComposition.function at U
+  unfold Sets
+  apply Category.intro with domFunction, codFunction, idFunction, compFunction
+  . intros A aIn
+    have idValue := setsIdentity.value with aIn
+    have identityIn := functionSpace.identity at A
+    have domValue := setsDom.arrow with aIn, aIn, identityIn
+    have codValue := setsCod.arrow with aIn, aIn, identityIn
+    rw idValue
+    refine ⟨domValue, codValue⟩
+  . intros g gIn f fIn composable
+    obtain ⟨B, bIn, C, cIn, gMap, gMapIn, gShape⟩ := setsMorphisms.shape with gIn
+    obtain ⟨A, aIn, D, dIn, fMap, fMapIn, fShape⟩ := setsMorphisms.shape with fIn
+    have domG := setsDom.arrow with bIn, cIn, gMapIn
+    have codF := setsCod.arrow with aIn, dIn, fMapIn
+    have middle : B = D by cc
+    rw ← middle at fMapIn
+    rw ← middle at fShape
+    have composite := setsComposition.arrow with aIn, bIn, cIn, fMapIn, gMapIn
+    have composed := functionSpace.compose with fMapIn, gMapIn
+    have domComposite := setsDom.arrow with aIn, cIn, composed
+    have codComposite := setsCod.arrow with aIn, cIn, composed
+    have domF := setsDom.arrow with aIn, bIn, fMapIn
+    have codG := setsCod.arrow with bIn, cIn, gMapIn
+    rw [gShape, fShape, composite]
+    refine ⟨?_, ?_⟩
+    . cc
+    . cc
+  . intros f fIn
+    obtain ⟨A, aIn, B, bIn, fMap, fMapIn, fShape⟩ := setsMorphisms.shape with fIn
+    have domF := setsDom.arrow with aIn, bIn, fMapIn
+    have codF := setsCod.arrow with aIn, bIn, fMapIn
+    have aIdentity := setsIdentity.value with aIn
+    have bIdentity := setsIdentity.value with bIn
+    have aIdentityIn := functionSpace.identity at A
+    have bIdentityIn := functionSpace.identity at B
+    have leftComposite := setsComposition.arrow with
+      aIn, bIn, bIn, fMapIn, bIdentityIn
+    have rightComposite := setsComposition.arrow with
+      aIn, aIn, bIn, aIdentityIn, fMapIn
+    have function := functionSpace.membership.forward with fMapIn
+    have leftUnit := compose.identity_left with function
+    have rightUnit := compose.identity_right with function
+    rw fShape
+    rw [domF, codF, aIdentity, bIdentity, leftComposite, rightComposite]
+    rw [leftUnit, rightUnit]
+    refine ⟨rfl, rfl⟩
+  . intros h hIn g gIn f fIn outer inner
+    obtain ⟨C, cIn, D, dIn, hMap, hMapIn, hShape⟩ := setsMorphisms.shape with hIn
+    obtain ⟨B, bIn, E, eIn, gMap, gMapIn, gShape⟩ := setsMorphisms.shape with gIn
+    obtain ⟨A, aIn, K, kIn, fMap, fMapIn, fShape⟩ := setsMorphisms.shape with fIn
+    have domH := setsDom.arrow with cIn, dIn, hMapIn
+    have codG := setsCod.arrow with bIn, eIn, gMapIn
+    have domG := setsDom.arrow with bIn, eIn, gMapIn
+    have codF := setsCod.arrow with aIn, kIn, fMapIn
+    have outerMiddle : C = E by cc
+    have innerMiddle : B = K by cc
+    rw ← outerMiddle at gMapIn
+    rw ← outerMiddle at gShape
+    rw ← innerMiddle at fMapIn
+    rw ← innerMiddle at fShape
+    have hg := setsComposition.arrow with bIn, cIn, dIn, gMapIn, hMapIn
+    have gf := setsComposition.arrow with aIn, bIn, cIn, fMapIn, gMapIn
+    have hgIn := functionSpace.compose with gMapIn, hMapIn
+    have gfIn := functionSpace.compose with fMapIn, gMapIn
+    have leftComposite := setsComposition.arrow with aIn, bIn, dIn, fMapIn, hgIn
+    have rightComposite := setsComposition.arrow with
+      aIn, cIn, dIn, gfIn, hMapIn
+    have fFunction := functionSpace.membership.forward with fMapIn
+    have gFunction := functionSpace.membership.forward with gMapIn
+    have hFunction := functionSpace.membership.forward with hMapIn
+    have associative := compose.associative with fFunction, gFunction, hFunction
+    rw [hShape, gShape, fShape, hg, gf, leftComposite, rightComposite]
+    rw associative
+    rfl
+
+-- Morphisms of Sets(U) as functions: a hom-set is the function space, up
+-- to the codomain entry, and a morphism applies as a function.
+section SetsLaws
+variable (U : Set)
+hypothesis sets : Category(Sets(U))
+
+theorem Sets.hom_shape (A B m : Set)
+  requires mHom : m ∈ hom(Sets(U), A, B)
+  shows ∃ f ∈ functionSpace(A, B), m = setArrow(U, B, f)
+proof
+  obtain ⟨mIn, domM, codM⟩ := hom.membership.forward with mHom
+  simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id] at mIn
+  simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id] at domM
+  simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id] at codM
+  obtain ⟨A2, aIn, B2, bIn, f, fIn, shape⟩ := setsMorphisms.shape with mIn
+  have domValue := setsDom.arrow with aIn, bIn, fIn
+  have codValue := setsCod.arrow with aIn, bIn, fIn
+  have sameA : A2 = A by cc
+  have sameB : B2 = B by cc
+  rw [sameA, sameB] at fIn
+  rw sameB at shape
+  refine ⟨f, fIn, shape⟩
+
+theorem Sets.arrow_hom (A B f : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires bIn : B ∈ 𝒫(U)
+  requires function : f : A → B
+  shows setArrow(U, B, f) : A ⟶ B
+proof
+  have fIn := functionSpace.membership.backward with function
+  have member := setsMorphisms.arrow with aIn, bIn, fIn
+  have domValue := setsDom.arrow with aIn, bIn, fIn
+  have codValue := setsCod.arrow with aIn, bIn, fIn
+  unfold Morphism
+  rw [Sets.mor, Sets.dom, Sets.cod]
+  refine ⟨member, domValue, codValue⟩
+
+theorem Sets.object (A B : Set) (f : A ⟶ B)
+  shows A ∈ 𝒫(U)
+proof
+  have aIn : A ∈ obj(Sets(U)) := Morphism.dom_object with *
+  simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id] at aIn
+  exact aIn
+
+theorem Sets.target (A B : Set) (f : A ⟶ B)
+  shows B ∈ 𝒫(U)
+proof
+  have bIn : B ∈ obj(Sets(U)) := Morphism.cod_object with *
+  simp [Sets.obj, Sets.mor, Sets.dom, Sets.cod, Sets.comp, Sets.id] at bIn
+  exact bIn
+
+theorem Sets.function (A B : Set) (f : A ⟶ B)
+  shows setsMap(U, f) : A → B
+proof
+  have fHom : f ∈ hom(Sets(U), A, B) := Morphism.hom with *
+  have aIn := Sets.object with *
+  obtain ⟨f0, f0In, shape⟩ := Sets.hom_shape with sets, fHom
+  have function := functionSpace.membership.forward with f0In
+  have underlying := setsMap.arrow with aIn, f0In
+  rw shape
+  rw underlying
+  exact function
+
+theorem Sets.arrow_apply (A B f x : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires function : f : A → B
+  requires xIn : x ∈ A
+  shows setArrow(U, B, f)(x) = f(x)
+proof
+  have subset := powerset.membership_iff.forward with aIn
+  exact setArrow.apply with subset, function, xIn
+
+theorem Sets.apply_map (A B : Set) (f : A ⟶ B) (x : Set)
+  requires xIn : x ∈ A
+  shows f(x) = setsMap(U, f)(x)
+proof
+  have fHom : f ∈ hom(Sets(U), A, B) := Morphism.hom with *
+  have aIn := Sets.object with *
+  obtain ⟨f0, f0In, shape⟩ := Sets.hom_shape with sets, fHom
+  have function := functionSpace.membership.forward with f0In
+  have underlying := setsMap.arrow with aIn, f0In
+  have value := Sets.arrow_apply with sets, aIn, function, xIn
+  rw shape
+  rw [underlying, value]
+  rfl
+
+theorem Sets.apply_closed (A B : Set) (f : A ⟶ B) (x : Set)
+  requires xIn : x ∈ A
+  shows f(x) ∈ B
+proof
+  have function := Sets.function with *
+  have value := Sets.apply_map with *
+  rw value
+  exact FunctionBetween.apply_closed with function, xIn
+
+theorem Sets.id_apply (A x : Set)
+  requires aIn : A ∈ 𝒫(U)
+  requires xIn : x ∈ A
+  shows id(Sets(U))(A)(x) = x
+proof
+  have idValue := setsIdentity.value with aIn
+  have identityFunction := identity.function at A
+  have applied := identity.apply with xIn
+  have arrowValue := Sets.arrow_apply with sets, aIn, identityFunction, xIn
+  rw [Sets.id, idValue, arrowValue]
+  exact applied
+
+theorem Sets.comp_apply (A B C : Set) (f : A ⟶ B) (g : B ⟶ C) (x : Set)
+  requires xIn : x ∈ A
+  shows (g ∘ f)(x) = g(f(x))
+proof
+  have fHom : f ∈ hom(Sets(U), A, B) := Morphism.hom with *
+  have gHom : g ∈ hom(Sets(U), B, C) := Morphism.hom with *
+  have fTyped := Morphism.of_hom with fHom
+  have gTyped := Morphism.of_hom with gHom
+  have aIn : A ∈ obj(Sets(U)) := Morphism.dom_object with sets, fTyped
+  have bIn : B ∈ obj(Sets(U)) := Morphism.cod_object with sets, fTyped
+  have cIn : C ∈ obj(Sets(U)) := Morphism.cod_object with sets, gTyped
+  rw Sets.obj at aIn
+  rw Sets.obj at bIn
+  rw Sets.obj at cIn
+  obtain ⟨f0, f0In, fShape⟩ := Sets.hom_shape with sets, fHom
+  obtain ⟨g0, g0In, gShape⟩ := Sets.hom_shape with sets, gHom
+  have fFunction := functionSpace.membership.forward with f0In
+  have gFunction := functionSpace.membership.forward with g0In
+  have composite := setsComposition.arrow with aIn, bIn, cIn, f0In, g0In
+  have composed := compose.function with fFunction, gFunction
+  have composedValue := compose.apply with fFunction, gFunction, xIn
+  have fValue := Sets.arrow_apply with sets, aIn, fFunction, xIn
+  have fxIn := FunctionBetween.apply_closed with fFunction, xIn
+  have gValue := Sets.arrow_apply with sets, bIn, gFunction, fxIn
+  have compositeValue := Sets.arrow_apply with sets, aIn, composed, xIn
+  have operation := Sets.comp at U
+  rw [fShape, gShape]
+  rw [operation, composite, compositeValue, fValue, gValue]
+  exact composedValue
+
+theorem Sets.ext (A B : Set) (f g : A ⟶ B)
+  requires same : ∀ x ∈ A, f(x) = g(x)
+  shows f = g
+proof
+  have fHom : f ∈ hom(Sets(U), A, B) := Morphism.hom with *
+  have gHom : g ∈ hom(Sets(U), A, B) := Morphism.hom with *
+  have fTyped := Morphism.of_hom with fHom
+  have aIn : A ∈ obj(Sets(U)) := Morphism.dom_object with sets, fTyped
+  rw Sets.obj at aIn
+  obtain ⟨f0, f0In, fShape⟩ := Sets.hom_shape with sets, fHom
+  obtain ⟨g0, g0In, gShape⟩ := Sets.hom_shape with sets, gHom
+  have fFunction := functionSpace.membership.forward with f0In
+  have gFunction := functionSpace.membership.forward with g0In
+  have agree : ∀ x ∈ A, f0(x) = g0(x)
+    intros x xIn
+    have fValue := Sets.arrow_apply with sets, aIn, fFunction, xIn
+    have gValue := Sets.arrow_apply with sets, aIn, gFunction, xIn
+    have equal := same with x, xIn
+    rw [fShape, gShape] at equal
+    rw [fValue, gValue] at equal
+    exact equal
+  have underlying := FunctionBetween.ext with fFunction, gFunction, agree
+  rw [fShape, gShape, underlying]
+  rfl
+
+end SetsLaws
+
+-- The rewrite set for values of morphisms of Sets(U): composites and
+-- identities apply pointwise, and an arrow built from a function applies
+-- as that function.
+tactic sets_simp := simp [Sets.comp_apply, Sets.id_apply, Sets.arrow_apply]

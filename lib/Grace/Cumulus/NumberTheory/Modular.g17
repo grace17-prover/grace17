@@ -1,0 +1,260 @@
+-- Modular arithmetic on the natural numbers: the remainder is determined by
+-- the division equation, so remainders of sums and products reduce to the
+-- remainders of their parts, and a vanishing remainder means divisibility
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.NumberTheory.Modular
+import Nat.Division
+import Divisibility
+
+-- One step of the remainder: it wraps to zero exactly at the modulus.
+theorem mod.succ_wrap (n k : Nat)
+  requires wraps : succ(k % n) = n
+  shows succ(k) % n = 0
+proof
+  have condition := equalNat.true_iff.backward with wraps
+  simp [mod, nextRemainder, equalNat.reflexive, condition, chooseNat]
+
+theorem mod.succ_advance (n k : Nat)
+  requires advances : succ(k % n) ≠ n
+  shows succ(k) % n = succ(k % n)
+proof
+  have condition := equalNat.false_iff.backward with advances
+  simp [mod, nextRemainder, equalNat.reflexive, condition, chooseNat]
+
+-- The remainder is the unique r < n with a = n·q + r.
+theorem mod.unique_aux (n a : Nat)
+  requires nonzero : n ≠ 0
+  shows ∀ q, Nat(q) → ∀ r, Nat(r) → a = n * q + r → r < n → a % n = r
+proof
+  induction a
+  | zero =>
+    intros q qNat r rNat equation bound
+    have parts := add.eq_zero at r, n * q
+    symm at equation
+    have both := parts with equation
+    have rZero := both.right
+    rw rZero
+    exact mod.zero_left at n
+  | succ(k) using ih =>
+    intros q qNat r rNat equation bound
+    have shape := natural.zero_or_successor at r
+    cases shape with rZero | rSucc
+    . have qShape := natural.zero_or_successor at q
+      cases qShape with qZero | qSucc
+      . exfalso
+        rw [rZero, qZero] at equation
+        have zero : n * 0 + 0 = 0 by ring
+        rw zero at equation
+        have notSucc : succ(k) ≠ 0 by arith
+        exact notSucc with equation
+      . obtain ⟨qB, qBNat, qForm⟩ := qSucc
+        have nShape := natural.zero_or_successor at n
+        cases nShape with nZero | nSucc
+        . exfalso
+          exact nonzero with nZero
+        . obtain ⟨p, pNat, nForm⟩ := nSucc
+          rw [rZero, qForm] at equation
+          have expand : n * succ(qB) + 0 = (n * qB + p) + 1
+            rw nForm
+            ring
+          rw expand at equation
+          have unfoldK : succ(k) = k + 1 by ring
+          rw unfoldK at equation
+          have cancel := add.right_cancel at k, n * qB + p, 1
+          have previous := cancel with equation
+          have pBelow : p < n
+            rw nForm
+            arith
+          have remainder := ih with qB, qBNat, p, pNat, previous, pBelow
+          have wraps : succ(k % n) = n
+            rw [remainder, nForm]
+            rfl
+          have wrap := mod.succ_wrap at n, k with wraps
+          rw [wrap, rZero]
+          rfl
+    . obtain ⟨rP, rPNat, rForm⟩ := rSucc
+      rw rForm at equation
+      rw rForm at bound
+      have unfoldK : succ(k) = k + 1 by ring
+      have unfoldR : n * q + succ(rP) = (n * q + rP) + 1 by ring
+      rw [unfoldK, unfoldR] at equation
+      have cancel := add.right_cancel at k, n * q + rP, 1
+      have previous := cancel with equation
+      have rPBelow : rP < n by arith
+      have remainder := ih with q, qNat, rP, rPNat, previous, rPBelow
+      have different : succ(k % n) ≠ n
+        intro same
+        rw remainder at same
+        rw same at bound
+        exact Less.irreflexive at n with *, bound
+      have advance := mod.succ_advance at n, k with different
+      rw [advance, remainder, rForm]
+      rfl
+
+theorem mod.unique (n a q r : Nat)
+  requires nonzero : n ≠ 0
+  requires equation : a = n * q + r
+  requires bound : r < n
+  shows a % n = r
+proof
+  have all := mod.unique_aux at n, a with nonzero
+  have qNat : Nat(q) by typecheck
+  have rNat : Nat(r) by typecheck
+  exact all with q, r, equation, bound
+
+theorem mod.of_less (n a : Nat)
+  requires bound : a < n
+  shows a % n = a
+proof
+  have nonzero : n ≠ 0
+    intro zero
+    rw zero at bound
+    have impossible : ¬a < 0 by arith
+    exact impossible with bound
+  have equation : a = n * 0 + a by ring
+  exact mod.unique with nonzero, equation, bound
+
+theorem mod.mod (n a : Nat)
+  requires nonzero : n ≠ 0
+  shows (a % n) % n = a % n
+proof
+  have bound := mod.less at a, n with nonzero
+  exact mod.of_less with bound
+
+theorem mod.add_multiple (n a s : Nat)
+  requires nonzero : n ≠ 0
+  shows (a + n * s) % n = a % n
+proof
+  obtain ⟨q, qNat, equation⟩ := mod.equation at a, n with nonzero
+  have bound := mod.less at a, n with nonzero
+  have shifted : a + n * s = n * (q + s) + a % n
+    have same : a + n * s = (n * q + a % n) + n * s
+      rw ← equation
+      rfl
+    rw same
+    ring
+  exact mod.unique with nonzero, shifted, bound
+
+theorem mod.add (n a b : Nat)
+  requires nonzero : n ≠ 0
+  shows (a + b) % n = (a % n + b % n) % n
+proof
+  obtain ⟨q, qNat, eqA⟩ := mod.equation at a, n with nonzero
+  obtain ⟨qB, qBNat, eqB⟩ := mod.equation at b, n with nonzero
+  obtain ⟨qS, qSNat, eqS⟩ := mod.equation at a % n + b % n, n with nonzero
+  have bound := mod.less at a % n + b % n, n with nonzero
+  have combined : a + b = n * (q + qB + qS) + (a % n + b % n) % n
+    have same : a + b = (n * q + a % n) + (n * qB + b % n)
+      rw [← eqA, ← eqB]
+      rfl
+    have expand : n * (q + qB + qS) + (a % n + b % n) % n = n * q + n * qB + (n * qS + (a % n + b % n) % n) by ring
+    rw [same, expand, ← eqS]
+    ring
+  exact mod.unique with nonzero, combined, bound
+
+theorem mod.mul (n a b : Nat)
+  requires nonzero : n ≠ 0
+  shows (a * b) % n = ((a % n) * (b % n)) % n
+proof
+  obtain ⟨q, qNat, eqA⟩ := mod.equation at a, n with nonzero
+  obtain ⟨qB, qBNat, eqB⟩ := mod.equation at b, n with nonzero
+  obtain ⟨qS, qSNat, eqP⟩ := mod.equation at (a % n) * (b % n), n with nonzero
+  have bound := mod.less at (a % n) * (b % n), n with nonzero
+  have combined : a * b = n * (n * q * qB + q * (b % n) + (a % n) * qB + qS) + ((a % n) * (b % n)) % n
+    have same : a * b = (n * q + a % n) * (n * qB + b % n)
+      rw [← eqA, ← eqB]
+      rfl
+    have expand : n * (n * q * qB + q * (b % n) + (a % n) * qB + qS) + ((a % n) * (b % n)) % n = n * (n * q * qB + q * (b % n) + (a % n) * qB) + (n * qS + ((a % n) * (b % n)) % n) by ring
+    rw [same, expand, ← eqP]
+    ring
+  exact mod.unique with nonzero, combined, bound
+
+theorem mod.mul_left (n a b : Nat)
+  requires nonzero : n ≠ 0
+  shows ((a % n) * b) % n = (a * b) % n
+proof
+  have first := mod.mul at n, a % n, b with nonzero
+  have second := mod.mul at n, a, b with nonzero
+  have idempotent := mod.mod at n, a with nonzero
+  rw [first, idempotent, second]
+  rfl
+
+theorem mod.mul_right (n a b : Nat)
+  requires nonzero : n ≠ 0
+  shows (a * (b % n)) % n = (a * b) % n
+proof
+  have first := mod.mul at n, a, b % n with nonzero
+  have second := mod.mul at n, a, b with nonzero
+  have idempotent := mod.mod at n, b with nonzero
+  rw [first, idempotent, second]
+  rfl
+
+theorem mod.zero_iff (n a : Nat)
+  requires nonzero : n ≠ 0
+  shows a % n = 0 ↔ n ∣ a
+proof
+  constructor
+  . intro zero
+    obtain ⟨q, qNat, equation⟩ := mod.equation at a, n with nonzero
+    rw zero at equation
+    witness q
+    rw equation
+    ring
+  . intro divides
+    obtain ⟨k, kNat, equation⟩ := divides
+    have shape : a = n * k + 0
+      rw ← equation
+      ring
+    have positive : 0 < n
+      have alternatives := natural.zero_or_successor at n
+      cases alternatives with zero | successor
+      . exfalso
+        exact nonzero with zero
+      . obtain ⟨p, pNat, form⟩ := successor
+        rw form
+        arith
+    exact mod.unique with nonzero, shape, positive
+
+-- Adding c does not change the remainder exactly when n divides c.
+theorem mod.add_cancel (n b c : Nat)
+  requires nonzero : n ≠ 0
+  requires same : (b + c) % n = b % n
+  shows n ∣ c
+proof
+  obtain ⟨q, qNat, eqB⟩ := mod.equation at b, n with nonzero
+  obtain ⟨qB, qBNat, eqS⟩ := mod.equation at b + c, n with nonzero
+  rw same at eqS
+  have expanded : (n * q + c) + b % n = n * qB + b % n
+    have arranged : (n * q + c) + b % n = (n * q + b % n) + c by ring
+    rwa [arranged, ← eqB]
+  have cancel := add.right_cancel at n * q + c, n * qB, b % n
+  have reduced := cancel with expanded
+  have total := LessEqual.total at q, qB
+  cases total with below | above
+  . obtain ⟨d, dNat, shape⟩ := below
+    rw ← shape at reduced
+    have expand : n * (q + d) = n * q + n * d by ring
+    rw expand at reduced
+    have cancel2 := add.left_cancel at c, n * d, n * q
+    have form := cancel2 with reduced
+    witness d
+    rw form
+    rfl
+  . obtain ⟨d, dNat, shape⟩ := above
+    rw ← shape at reduced
+    have expand : n * (qB + d) = n * qB + n * d by ring
+    rw expand at reduced
+    have shifted : n * qB + (n * d + c) = n * qB + 0
+      have arranged : n * qB + (n * d + c) = n * qB + n * d + c by ring
+      have zeroSum : n * qB + 0 = n * qB by ring
+      rwa [arranged, zeroSum]
+    have cancel2 := add.left_cancel at n * d + c, 0, n * qB
+    have sumZero := cancel2 with shifted
+    have parts := add.eq_zero at c, n * d
+    have both := parts with sumZero
+    rw both.right
+    exact divides.zero

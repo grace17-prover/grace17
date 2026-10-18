@@ -1,0 +1,459 @@
+-- The parity step of Kuhn's lemma: rooms are the simplices of the cube,
+-- doors are their faces labelled 0, …, n − 1, and the handshake count
+-- turns an odd number of doors on the boundary into an odd number of
+-- completely labelled simplices
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.FixedPoint.KuhnParity
+import KuhnDoors
+import Cardinal.Handshake
+
+def kuhnDoors (n lab s : Set) : Set := doorsOf(reducedMap(n, lab, s), s, n)
+
+-- Faces of simplices of the cube whose labels are exactly 0, …, n − 1.
+def labelledFaces (p n lab : Set) : Set :=
+  { f ∈ 𝒫(functionSpace(n, succ(p))) |
+    (∃ s ∈ kuhnSimplices(p, n), ∃ a ∈ s, f = s ∖ {a}) ∧ labelImage(n, lab, f) = n }
+
+def faceIncidence (p n lab : Set) : Set :=
+  { q ∈ kuhnSimplices(p, n) × labelledFaces(p, n, lab) |
+    ∃ s ∈ kuhnSimplices(p, n), ∃ a ∈ s, q = (s, s ∖ {a}) }
+
+theorem labelledFaces.membership (f p n lab : Set)
+  shows f ∈ labelledFaces(p, n, lab) ↔ f ∈ 𝒫(functionSpace(n, succ(p))) ∧
+    (∃ s ∈ kuhnSimplices(p, n), ∃ a ∈ s, f = s ∖ {a}) ∧ labelImage(n, lab, f) = n
+proof
+  simp [labelledFaces]
+
+theorem faceIncidence.membership (q p n lab : Set)
+  shows q ∈ faceIncidence(p, n, lab) ↔ q ∈ kuhnSimplices(p, n) × labelledFaces(p, n, lab) ∧
+    ∃ s ∈ kuhnSimplices(p, n), ∃ a ∈ s, q = (s, s ∖ {a})
+proof
+  simp [faceIncidence]
+
+theorem product.components (x y A B : Set)
+  requires h : (x, y) ∈ A × B
+  shows x ∈ A ∧ y ∈ B
+proof
+  obtain ⟨bound, a, ha, b, hb, equal⟩ := product.membership.forward with h
+  obtain ⟨first, second⟩ := orderedPair.injective with equal
+  rw [first, second]
+  exact ⟨ha, hb⟩
+
+theorem faceIncidence.pair (p n lab s f : Set)
+  shows (s, f) ∈ faceIncidence(p, n, lab) ↔
+    s ∈ kuhnSimplices(p, n) ∧ f ∈ labelledFaces(p, n, lab) ∧ ∃ a ∈ s, f = s ∖ {a}
+proof
+  constructor
+  . intro h
+    obtain ⟨inProduct, t, ht, a, ha, equal⟩ := faceIncidence.membership.forward with h
+    obtain ⟨sIn, fIn⟩ := product.components with inProduct
+    obtain ⟨first, second⟩ := orderedPair.injective with equal
+    constructor
+    . exact sIn
+    . constructor
+      . exact fIn
+      . witness a
+        constructor
+        . rw first
+          exact ha
+        . rw first
+          exact second
+  . intro h
+    obtain ⟨sIn, fIn, a, ha, shape⟩ := h
+    apply faceIncidence.membership.backward
+    constructor
+    . exact product.pair with sIn, fIn
+    . witness s
+      constructor
+      . exact sIn
+      . witness a
+        constructor
+        . exact ha
+        . rw shape
+          rfl
+
+-- The labels of a subset, read through the map on a larger set.
+theorem labelImage.restrict (n : Nat) (lab S T : Set)
+  requires subset : T ⊆ S
+  shows functionImage(reducedMap(n, lab, S), T, succ(n)) = labelImage(n, lab, T)
+proof
+  ext k
+  constructor
+  . intro hk
+    obtain ⟨kIn, x, hx, shape⟩ := functionImage.membership.forward with hk
+    have xIn := subset with x, hx
+    have value := reducedMap.value at n, lab, S, x with xIn
+    apply labelImage.membership.backward
+    constructor
+    . exact kIn
+    . witness x
+      constructor
+      . exact hx
+      . rw [shape, value]
+        rfl
+  . intro hk
+    obtain ⟨kIn, x, hx, shape⟩ := labelImage.membership.forward with hk
+    have xIn := subset with x, hx
+    have value := reducedMap.value at n, lab, S, x with xIn
+    apply functionImage.membership.backward
+    constructor
+    . exact kIn
+    . witness x
+      constructor
+      . exact hx
+      . rw [shape, value]
+        rfl
+
+theorem kuhnDoors.membership (n : Nat) (a lab s : Set)
+  shows a ∈ kuhnDoors(n, lab, s) ↔ a ∈ s ∧ labelImage(n, lab, s ∖ {a}) = n
+proof
+  have same : kuhnDoors(n, lab, s) = doorsOf(reducedMap(n, lab, s), s, n)
+    unfold kuhnDoors
+    rfl
+  have face := labelImage.restrict at n, lab, s, s ∖ {a} with (difference.subset_left at s, {a})
+  rw [same, ← face]
+  exact doorsOf.membership
+
+theorem kuhnSimplices.finite_member (n p : Nat) (s : Set)
+  requires hs : s ∈ kuhnSimplices(p, n)
+  shows Finite(s) ∧ cardinality(s) = succ(n)
+proof
+  obtain ⟨base, baseFunction, bounds, upd, updBijective, shape⟩ := kuhnSimplices.shape with hs
+  have updInjective := Bijective.injective with updBijective
+  rw shape
+  constructor
+  . exact kuhnSimplex.finite with baseFunction, updInjective
+  . exact kuhnSimplex.cardinality with baseFunction, updInjective
+
+theorem kuhnDoors.count_complete (n p : Nat) (lab s : Set)
+  requires hs : s ∈ kuhnSimplices(p, n)
+  requires full : labelImage(n, lab, s) = succ(n)
+  shows cardinality(kuhnDoors(n, lab, s)) = 1
+proof
+  obtain ⟨finite, size⟩ := kuhnSimplices.finite_member with hs
+  have function := reducedMap.function at n, lab, s with *
+  have selfSubset : s ⊆ s
+    intros x hx
+    exact hx
+  have image := labelImage.restrict at n, lab, s, s with selfSubset
+  rw full at image
+  have same : kuhnDoors(n, lab, s) = doorsOf(reducedMap(n, lab, s), s, n)
+    unfold kuhnDoors
+    rfl
+  rw same
+  exact doorsOf.complete_count with function, finite, size, image
+
+theorem kuhnDoors.count_incomplete (n p : Nat) (lab s : Set)
+  requires hs : s ∈ kuhnSimplices(p, n)
+  requires partial : labelImage(n, lab, s) ≠ succ(n)
+  shows cardinality(kuhnDoors(n, lab, s)) = 0 ∨ cardinality(kuhnDoors(n, lab, s)) = 2
+proof
+  obtain ⟨finite, size⟩ := kuhnSimplices.finite_member with hs
+  have function := reducedMap.function at n, lab, s with *
+  have selfSubset : s ⊆ s
+    intros x hx
+    exact hx
+  have image := labelImage.restrict at n, lab, s, s with selfSubset
+  rw ← image at partial
+  have same : kuhnDoors(n, lab, s) = doorsOf(reducedMap(n, lab, s), s, n)
+    unfold kuhnDoors
+    rfl
+  rw same
+  exact doorsOf.incomplete with function, finite, size, partial
+
+-- Removing a vertex, as an injective map into the subsets of the simplex.
+defgraph faceOpposite (s : Set) (a ∈ s) : 𝒫(s) := s ∖ {a}
+proof
+  exact powerset.membership_iff.backward with (difference.subset_left at s, {a})
+
+theorem faceOpposite.injective (s : Set)
+  shows InjectiveBetween(faceOpposite(s), s, 𝒫(s))
+proof
+  have function := faceOpposite.function at s
+  apply Injective.of_cancel with function
+  intros x hx y hy same
+  have xValue := faceOpposite.value with hx
+  have yValue := faceOpposite.value with hy
+  rw [xValue, yValue] at same
+  by_contra different
+  have inY : x ∈ s ∖ {y} := difference.singleton_membership.backward with ⟨hx, different⟩
+  rw ← same at inY
+  have parts := difference.singleton_membership.forward with inY
+  apply parts.right
+  rfl
+
+theorem fiber.doors (n p : Nat) (lab s : Set)
+  requires hs : s ∈ kuhnSimplices(p, n)
+  shows fiber(faceIncidence(p, n, lab), labelledFaces(p, n, lab), s) =
+    functionImage(faceOpposite(s), kuhnDoors(n, lab, s), 𝒫(s))
+proof
+  have sParts := kuhnSimplices.membership.forward with hs
+  have sSubset := powerset.membership_iff.forward with sParts.left
+  ext f
+  constructor
+  . intro hf
+    obtain ⟨fIn, incident⟩ := fiber.membership.forward with hf
+    obtain ⟨sIn, fIn2, a, ha, shape⟩ := faceIncidence.pair.forward with incident
+    have fParts := labelledFaces.membership.forward with fIn
+    have labels := fParts.right.right
+    have value := faceOpposite.value with ha
+    apply functionImage.membership.backward
+    constructor
+    . rw shape
+      exact powerset.membership_iff.backward with (difference.subset_left at s, {a})
+    . witness a
+      constructor
+      . apply kuhnDoors.membership.backward
+        constructor
+        . exact ha
+        . rw ← shape
+          exact labels
+      . rw [shape, value]
+        rfl
+  . intro hf
+    obtain ⟨fIn, a, ha, shape⟩ := functionImage.membership.forward with hf
+    obtain ⟨aIn, labels⟩ := kuhnDoors.membership.forward with ha
+    have value := faceOpposite.value with aIn
+    rw value at shape
+    have fInFaces : f ∈ labelledFaces(p, n, lab)
+      apply labelledFaces.membership.backward
+      constructor
+      . apply powerset.membership_iff.backward
+        rw shape
+        exact Subset.transitive with (difference.subset_left at s, {a}), sSubset
+      . constructor
+        . witness s
+          constructor
+          . exact hs
+          . refine ⟨a, aIn, shape⟩
+        . rw shape
+          exact labels
+    apply fiber.membership.backward
+    constructor
+    . exact fInFaces
+    . exact faceIncidence.pair.backward with ⟨hs, fInFaces, a, aIn, shape⟩
+
+theorem fiber.doors_count (n p : Nat) (lab s : Set)
+  requires hs : s ∈ kuhnSimplices(p, n)
+  shows cardinality(fiber(faceIncidence(p, n, lab), labelledFaces(p, n, lab), s)) =
+    cardinality(kuhnDoors(n, lab, s))
+proof
+  have same := fiber.doors at n, p, lab, s with hs
+  rw same
+  have injective := faceOpposite.injective at s
+  have doorsSubset : kuhnDoors(n, lab, s) ⊆ s
+    intros a ha
+    have parts := kuhnDoors.membership.forward with ha
+    exact parts.left
+  obtain ⟨finite, size⟩ := kuhnSimplices.finite_member with hs
+  have finiteDoors := Finite.subset with finite, doorsSubset
+  exact cardinality.injective_image with injective, doorsSubset, finiteDoors
+
+theorem cofiber.through (n p : Nat) (lab f : Set)
+  requires hf : f ∈ labelledFaces(p, n, lab)
+  shows cofiber(faceIncidence(p, n, lab), kuhnSimplices(p, n), f) = simplicesThrough(p, n, f)
+proof
+  ext s
+  constructor
+  . intro hs
+    obtain ⟨sIn, incident⟩ := cofiber.membership.forward with hs
+    obtain ⟨sIn2, fIn, a, ha, shape⟩ := faceIncidence.pair.forward with incident
+    apply simplicesThrough.membership.backward
+    constructor
+    . exact sIn
+    . witness a
+      constructor
+      . exact ha
+      . symm
+        exact shape
+  . intro hs
+    obtain ⟨sIn, b, hb, shape⟩ := simplicesThrough.membership.forward with hs
+    apply cofiber.membership.backward
+    constructor
+    . exact sIn
+    . apply faceIncidence.pair.backward
+      refine ⟨sIn, hf, b, hb, ?_⟩
+      symm
+      exact shape
+
+-- A labelled face meets one simplex when it lies on a wall and two otherwise.
+theorem labelledFaces.through_wall (n p : Nat) (lab f : Set)
+  requires positive : 0 ∈ n
+  requires hf : f ∈ labelledFaces(p, n, lab)
+  requires wall : ∃ j ∈ n, (∀ x ∈ f, x(j) = 0) ∨ (∀ x ∈ f, x(j) = p)
+  shows cardinality(simplicesThrough(p, n, f)) = 1
+proof
+  obtain ⟨inCube, witnessed, labels⟩ := labelledFaces.membership.forward with hf
+  obtain ⟨s, hs, a, ha, shape⟩ := witnessed
+  obtain ⟨base, baseFunction, bounds, upd, updBijective, sShape⟩ := kuhnSimplices.shape with hs
+  rw sShape at ha
+  rw [sShape] at shape
+  obtain ⟨j, hj, flat⟩ := wall
+  rw under shape at flat
+  rw shape
+  exact simplicesThrough.wall_count with baseFunction, updBijective, bounds, positive, ha, hj, flat
+
+theorem labelledFaces.through_interior (n p : Nat) (lab f : Set)
+  requires positive : 0 ∈ n
+  requires hf : f ∈ labelledFaces(p, n, lab)
+  requires interior : ¬(∃ j ∈ n, (∀ x ∈ f, x(j) = 0) ∨ (∀ x ∈ f, x(j) = p))
+  shows cardinality(simplicesThrough(p, n, f)) = 2
+proof
+  obtain ⟨inCube, witnessed, labels⟩ := labelledFaces.membership.forward with hf
+  obtain ⟨s, hs, a, ha, shape⟩ := witnessed
+  obtain ⟨base, baseFunction, bounds, upd, updBijective, sShape⟩ := kuhnSimplices.shape with hs
+  rw sShape at ha
+  rw [sShape] at shape
+  rw shape
+  have lower : ∀ j ∈ n, ∃ x ∈ kuhnSimplex(n, base, upd) ∖ {a}, x(j) ≠ 0
+    intros j hj
+    by_contra none
+    apply interior
+    witness j
+    constructor
+    . exact hj
+    . left
+      intros x hx
+      by_contra nonzero
+      apply none
+      witness x
+      constructor
+      . rw ← shape
+        exact hx
+      . exact nonzero
+  have upper : ∀ j ∈ n, ∃ x ∈ kuhnSimplex(n, base, upd) ∖ {a}, x(j) ≠ p
+    intros j hj
+    by_contra none
+    apply interior
+    witness j
+    constructor
+    . exact hj
+    . right
+      intros x hx
+      by_contra notFull
+      apply none
+      witness x
+      constructor
+      . rw ← shape
+        exact hx
+      . exact notFull
+  exact simplicesThrough.interior_count with baseFunction, updBijective, bounds, positive, ha, lower, upper
+
+theorem boundaryDoors.wall (n p : Nat) (lab f : Set)
+  requires positive : 0 ∈ n
+  shows f ∈ boundaryDoors(faceIncidence(p, n, lab), kuhnSimplices(p, n), labelledFaces(p, n, lab)) ↔
+    f ∈ labelledFaces(p, n, lab) ∧ (∃ j ∈ n, (∀ x ∈ f, x(j) = 0) ∨ (∀ x ∈ f, x(j) = p))
+proof
+  constructor
+  . intro hf
+    obtain ⟨fIn, one⟩ := boundaryDoors.membership.forward with hf
+    constructor
+    . exact fIn
+    . by_contra interior
+      have same := cofiber.through with fIn
+      rw same at one
+      have two := labelledFaces.through_interior with positive, fIn, interior
+      rw two at one
+      arith
+  . intro h
+    obtain ⟨fIn, wall⟩ := h
+    apply boundaryDoors.membership.backward
+    constructor
+    . exact fIn
+    . have same := cofiber.through with fIn
+      rw same
+      exact labelledFaces.through_wall with positive, fIn, wall
+
+theorem cube.finite (n p : Nat)
+  shows Finite(functionSpace(n, succ(p)))
+proof
+  have pairs := Finite.product with (Finite.natural at n), (Finite.natural at succ(p))
+  have inside := functionSpace.subset_powerset at n, succ(p)
+  exact Finite.subset with (Finite.powerset with pairs), inside
+
+theorem labelledFaces.finite (n p : Nat) (lab : Set)
+  shows Finite(labelledFaces(p, n, lab))
+proof
+  have inside : labelledFaces(p, n, lab) ⊆ 𝒫(functionSpace(n, succ(p)))
+    intros f hf
+    have parts := labelledFaces.membership.forward with hf
+    exact parts.left
+  exact Finite.subset with (Finite.powerset with (cube.finite at n, p)), inside
+
+-- The parity step: an odd number of labelled faces on the boundary forces an
+-- odd number of completely labelled simplices.
+theorem kuhn.parity (n p : Nat) (lab : Set)
+  requires positive : 0 ∈ n
+  requires boundary : Odd(cardinality(boundaryDoors(faceIncidence(p, n, lab), kuhnSimplices(p, n), labelledFaces(p, n, lab))))
+  shows Odd(cardinality(completeSimplices(p, n, lab)))
+proof
+  have finiteR := kuhnSimplices.finite at n, p
+  have finiteD := labelledFaces.finite at n, p, lab
+  have inside : faceIncidence(p, n, lab) ⊆ kuhnSimplices(p, n) × labelledFaces(p, n, lab)
+    intros q hq
+    have parts := faceIncidence.membership.forward with hq
+    exact parts.left
+  have rooms : ∀ s ∈ kuhnSimplices(p, n),
+      cardinality(fiber(faceIncidence(p, n, lab), labelledFaces(p, n, lab), s)) = 0 ∨
+      cardinality(fiber(faceIncidence(p, n, lab), labelledFaces(p, n, lab), s)) = 1 ∨
+      cardinality(fiber(faceIncidence(p, n, lab), labelledFaces(p, n, lab), s)) = 2
+    intros s hs
+    have count := fiber.doors_count at n, p, lab, s with hs
+    rw count
+    have alternatives : labelImage(n, lab, s) = succ(n) ∨ labelImage(n, lab, s) ≠ succ(n) by tauto
+    cases alternatives with full | partial
+    . right
+      left
+      exact kuhnDoors.count_complete with hs, full
+    . have split := kuhnDoors.count_incomplete with hs, partial
+      cases split with zero | two
+      . left
+        exact zero
+      . right
+        right
+        exact two
+  have doors : ∀ f ∈ labelledFaces(p, n, lab),
+      cardinality(cofiber(faceIncidence(p, n, lab), kuhnSimplices(p, n), f)) = 1 ∨
+      cardinality(cofiber(faceIncidence(p, n, lab), kuhnSimplices(p, n), f)) = 2
+    intros f hf
+    have same := cofiber.through with hf
+    rw same
+    have alternatives : (∃ j ∈ n, (∀ x ∈ f, x(j) = 0) ∨ (∀ x ∈ f, x(j) = p)) ∨
+        ¬(∃ j ∈ n, (∀ x ∈ f, x(j) = 0) ∨ (∀ x ∈ f, x(j) = p))
+      tauto
+    cases alternatives with wall | interior
+    . left
+      exact labelledFaces.through_wall with positive, hf, wall
+    . right
+      exact labelledFaces.through_interior with positive, hf, interior
+  have odd := handshake with finiteR, finiteD, inside, rooms, doors, boundary
+  have same : completeRooms(faceIncidence(p, n, lab), kuhnSimplices(p, n), labelledFaces(p, n, lab)) = completeSimplices(p, n, lab)
+    ext s
+    constructor
+    . intro hs
+      obtain ⟨sIn, one⟩ := completeRooms.membership.forward with hs
+      apply completeSimplices.membership.backward
+      constructor
+      . exact sIn
+      . by_contra partial
+        have count := fiber.doors_count at n, p, lab, s with sIn
+        rw count at one
+        have split := kuhnDoors.count_incomplete with sIn, partial
+        cases split with zero | two
+        . rw zero at one
+          arith
+        . rw two at one
+          arith
+    . intro hs
+      obtain ⟨sIn, full⟩ := completeSimplices.membership.forward with hs
+      apply completeRooms.membership.backward
+      constructor
+      . exact sIn
+      . have count := fiber.doors_count at n, p, lab, s with sIn
+        rw count
+        exact kuhnDoors.count_complete with sIn, full
+  rwa same at odd

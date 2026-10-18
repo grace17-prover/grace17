@@ -1,0 +1,618 @@
+-- The Erdős–Szekeres theorem: a sequence of m·n + 1 distinct points of a
+-- linear order has an increasing subsequence of length m + 1 or a
+-- decreasing one of length n + 1. Each index carries the length of the
+-- longest increasing run and of the longest decreasing run ending there;
+-- a later larger term lengthens the first label and a later smaller term
+-- the second, so the label pairs are distinct, and there are only m·n of
+-- them.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.ErdosSzekeres
+import RamseyPigeonhole
+import Lattice.Linear
+import Nat.Least
+
+-- f increases, or decreases, along the index set S.
+predicate IncreasingOn (P f S : Set) :=
+  ∀ i ∈ S, ∀ j ∈ S, i < j → Le(P, f(i), f(j))
+
+predicate DecreasingOn (P f S : Set) :=
+  ∀ i ∈ S, ∀ j ∈ S, i < j → Le(P, f(j), f(i))
+
+theorem Le.transitive_linear (P a b c : Set)
+  requires order : LinearOrder(P)
+  requires ha : a ∈ points(P)
+  requires hb : b ∈ points(P)
+  requires hc : c ∈ points(P)
+  requires hab : Le(P, a, b)
+  requires hbc : Le(P, b, c)
+  shows Le(P, a, c)
+proof
+  have partial := LinearOrder.partial_order with order
+  have preorder := PartialOrder.preorder_of with partial
+  exact le_trans with *
+
+-- Decreasing along S is increasing in the dual order.
+theorem DecreasingOn.dual (P f S : Set)
+  requires values : ∀ i ∈ S, f(i) ∈ points(P)
+  shows IncreasingOn(dual(P), f, S) ↔ DecreasingOn(P, f, S)
+proof
+  constructor
+  . intros increasing i hi j hj ij
+    have step := increasing with i, hi, j, hj, ij
+    have related := Le.relates with step
+    rw dual.le at related
+    exact Le.of_relates with (converse.reflects with related)
+  . intros decreasing i hi j hj ij
+    have step := decreasing with i, hi, j, hj, ij
+    have related := Le.relates with step
+    have forward := converse.relates with
+      (values with j, hj), (values with i, hi), related
+    apply Le.of_relates
+    rw dual.le
+    exact forward
+
+-- A finite set has a subset of every smaller size.
+theorem Finite.subset_of_size (k : Nat)
+  shows ∀ A, Finite(A) → k ≤ cardinality(A) →
+    ∃ T, T ⊆ A ∧ HasCardinality(T, k)
+proof
+  induction k
+  | zero =>
+    intros A finite le
+    exact ⟨∅, empty.subset at A, HasCardinality.empty_set⟩
+  | j + 1 using ih =>
+    intros A finite le
+    have natA := cardinality.nat with finite
+    have jLe : j ≤ cardinality(A) by arith
+    obtain ⟨T, subset, counted⟩ := ih with A, finite, jLe
+    have sizeT := cardinality.eq_of_has with counted
+    have fresh : ∃ a ∈ A, ¬a ∈ T
+      by_contra none
+      have cover : A ⊆ T
+        intros a ha
+        by_contra outside
+        apply none
+        exact ⟨a, ha, outside⟩
+      have equal := Subset.antisymmetric with subset, cover
+      rw [← equal, sizeT] at le
+      arith
+    obtain ⟨a, ha, outside⟩ := fresh
+    have one : j + 1 = succ(j) := add.right_one with *
+    have inserted := HasCardinality.insert_fresh with counted, outside
+    rw ← one at inserted
+    refine ⟨insert(a, T), ?_, inserted⟩
+    intros x hx
+    have split := insert.membership.forward with hx
+    cases split with same | inT
+    . rw same
+      exact ha
+    . exact subset with x, inT
+
+-- The greatest member of a nonempty finite set of naturals.
+
+def naturalBounds (S : Set) : Set := { b ∈ ℕ | S ⊆ succ(b) }
+
+theorem naturalBounds.membership (S b : Set)
+  shows b ∈ naturalBounds(S) ↔ b ∈ ℕ ∧ S ⊆ succ(b)
+proof
+  simp [naturalBounds]
+
+-- A least bound of a nonempty set of naturals belongs to the set.
+theorem naturalBounds.least_member (S u : Set)
+  requires inhabited : Nonempty(S)
+  requires bound : u ∈ naturalBounds(S)
+  requires least : ∀ k ∈ naturalBounds(S), u ≤ k
+  shows u ∈ S
+proof
+  obtain ⟨uOmega, uBound⟩ := naturalBounds.membership.forward with bound
+  have uNat := nat.omega.backward with uOmega
+  by_contra absent
+  have below : S ⊆ u
+    intros x hx
+    have inNext := uBound with x, hx
+    have split := membership.successor_forward{n := u} with inNext
+    cases split with before | same
+    . exact before
+    . exfalso
+      apply absent
+      rw ← same
+      exact hx
+  have alternatives := natural.zero_or_successor at u
+  cases alternatives with zero | successor
+  . obtain ⟨x, hx⟩ := inhabited
+    have inZero := below with x, hx
+    rw [zero, nat.zero] at inZero
+    exact set.empty with inZero
+  . obtain ⟨k, kNat, shape⟩ := successor
+    rw shape at below
+    have kBound : k ∈ naturalBounds(S)
+      apply naturalBounds.membership.backward
+      exact ⟨nat.omega.forward with kNat, below⟩
+    have le := least with k, kBound
+    rw shape at le
+    arith
+
+theorem Finite.greatest_natural (S : Set)
+  requires inhabited : Nonempty(S)
+  requires naturals : S ⊆ ℕ
+  requires finite : Finite(S)
+  shows ∃ n ∈ ℕ, n ∈ S ∧ S ⊆ succ(n)
+proof
+  obtain ⟨b, bNat, bounded⟩ := Finite.naturals_bounded with naturals, finite
+  have bBound : b ∈ naturalBounds(S)
+    apply naturalBounds.membership.backward
+    have within : S ⊆ succ(b)
+      intros y hy
+      exact bounded with y, hy
+    exact ⟨nat.omega.forward with bNat, within⟩
+  have boundsInhabited : Nonempty(naturalBounds(S)) := ⟨b, bBound⟩
+  have boundsNatural : naturalBounds(S) ⊆ ℕ
+    intros x hx
+    have parts := naturalBounds.membership.forward with hx
+    exact parts.left
+  have least := leastNatural.member with boundsInhabited, boundsNatural
+  have minimal : ∀ k ∈ naturalBounds(S), leastNatural(naturalBounds(S)) ≤ k
+    intros k hk
+    have kNat := nat.omega.backward with (boundsNatural with k, hk)
+    exact leastNatural.least with boundsInhabited, boundsNatural, hk
+  have parts := naturalBounds.membership.forward with least
+  have member := naturalBounds.least_member with inhabited, least, minimal
+  refine ⟨leastNatural(naturalBounds(S)), parts.left, member, ?_⟩
+  exact parts.right
+
+defunique greatestNatural (S : Set) (n ∈ ℕ) := n ∈ S ∧ S ⊆ succ(n)
+requires inhabited : Nonempty(S)
+requires naturals : S ⊆ ℕ
+requires finite : Finite(S)
+proof
+  exact Finite.greatest_natural with inhabited, naturals, finite
+uniqueness
+  intros u hu first v hv second
+  have uNat := nat.omega.backward with hu
+  have vNat := nat.omega.backward with hv
+  have uBelow : u ∈ succ(v) := second.right with u, first.left
+  have vBelow : v ∈ succ(u) := first.right with v, second.left
+  have uLess := Less.of_membership at u, succ(v)
+  have vLess := Less.of_membership at v, succ(u)
+  have uLe := Less.successor_upper with (uLess with uBelow)
+  have vLe := Less.successor_upper with (vLess with vBelow)
+  exact LessEqual.antisymmetric with uLe, vLe
+
+theorem greatestNatural.member (S : Set)
+  requires inhabited : Nonempty(S)
+  requires naturals : S ⊆ ℕ
+  requires finite : Finite(S)
+  shows greatestNatural(S) ∈ S
+proof
+  have selected := greatestNatural.selected at S with *
+  exact selected.right.left
+
+theorem greatestNatural.greatest (S : Set, m : Nat)
+  requires inhabited : Nonempty(S)
+  requires naturals : S ⊆ ℕ
+  requires finite : Finite(S)
+  requires member : m ∈ S
+  shows m ≤ greatestNatural(S)
+proof
+  have selected := greatestNatural.selected at S with *
+  have natural := nat.omega.backward with selected.left
+  have below : m ∈ succ(greatestNatural(S)) :=
+    selected.right.right with m, member
+  have less := Less.of_membership at m, succ(greatestNatural(S))
+  exact Less.successor_upper with (less with below)
+
+-- The sizes of the index sets inside i + 1 that end at i and along which
+-- f increases; the longest of them is the first label of i.
+
+def riseLengths (P f : Set, i : Nat) : Set :=
+  { L ∈ ℕ | ∃ S ∈ 𝒫(i + 1),
+      i ∈ S ∧ IncreasingOn(P, f, S) ∧ cardinality(S) = L }
+
+theorem riseLengths.membership (P f L : Set, i : Nat)
+  shows L ∈ riseLengths(P, f, i) ↔ L ∈ ℕ ∧ ∃ S ∈ 𝒫(i + 1),
+    i ∈ S ∧ IncreasingOn(P, f, S) ∧ cardinality(S) = L
+proof
+  simp [riseLengths]
+
+theorem riseLengths.naturals (P f : Set, i : Nat)
+  shows riseLengths(P, f, i) ⊆ ℕ
+proof
+  intros L hL
+  have parts := riseLengths.membership.forward with hL
+  exact parts.left
+
+theorem IncreasingOn.singleton (P f : Set, i : Nat)
+  shows IncreasingOn(P, f, {i})
+proof
+  intros x hx y hy xy
+  have sameX := singleton.membership.forward with hx
+  have sameY := singleton.membership.forward with hy
+  rw [sameX, sameY] at xy
+  exfalso
+  exact Less.irreflexive at i with xy
+
+theorem riseLengths.one (P f : Set, i : Nat)
+  shows 1 ∈ riseLengths(P, f, i)
+proof
+  apply riseLengths.membership.backward
+  have oneNatural : Nat(1) by typecheck
+  have oneOmega := nat.omega.forward with oneNatural
+  have one : i + 1 = succ(i) := add.right_one with *
+  have inPower : {i} ∈ 𝒫(i + 1)
+    apply powerset.membership_iff.backward
+    intros x hx
+    have same := singleton.membership.forward with hx
+    rw [same, one]
+    exact membership.self_successor at i with *
+  have increasing := IncreasingOn.singleton at P, f, i
+  have size := cardinality.singleton at i
+  refine ⟨oneOmega, {i}, inPower, singleton.self at i, increasing, size⟩
+
+theorem riseLengths.bounded (P f : Set, i : Nat)
+  shows riseLengths(P, f, i) ⊆ succ(i + 1)
+proof
+  intros L hL
+  obtain ⟨LOmega, S, inPower, hiS, increasing, size⟩ :=
+    riseLengths.membership.forward with hL
+  have LNat := nat.omega.backward with LOmega
+  have subset := powerset.membership_iff.forward with inPower
+  have bound := cardinality.monotone with (Finite.natural at i + 1), subset
+  rw [size, cardinality.natural] at bound
+  have succNat : Nat(succ(i + 1)) by typecheck
+  have less : L < succ(i + 1) by arith
+  have bridge := membership.of_Less at L, succ(i + 1) with LNat, succNat
+  exact bridge with less
+
+theorem riseLengths.finite (P f : Set, i : Nat)
+  shows Finite(riseLengths(P, f, i))
+proof
+  exact Finite.subset with (Finite.natural at succ(i + 1)),
+    (riseLengths.bounded at P, f, i)
+
+theorem riseLengths.nonempty (P f : Set, i : Nat)
+  shows Nonempty(riseLengths(P, f, i))
+proof
+  have one := riseLengths.one at P, f, i
+  exact ⟨1, one⟩
+
+def rise (P f : Set, i : Nat) : Set := greatestNatural(riseLengths(P, f, i))
+
+theorem rise.value (P f : Set, i : Nat)
+  shows rise(P, f, i) = greatestNatural(riseLengths(P, f, i))
+proof
+  simp [rise]
+
+theorem rise.member (P f : Set, i : Nat)
+  shows rise(P, f, i) ∈ riseLengths(P, f, i)
+proof
+  rw rise.value
+  exact greatestNatural.member with (riseLengths.nonempty at P, f, i),
+    (riseLengths.naturals at P, f, i), (riseLengths.finite at P, f, i)
+
+theorem rise.natural (P f : Set, i : Nat)
+  shows Nat(rise(P, f, i))
+proof
+  have parts := riseLengths.membership.forward with (rise.member at P, f, i)
+  exact nat.omega.backward with parts.left
+
+theorem rise.witness (P f : Set, i : Nat)
+  shows ∃ S ∈ 𝒫(i + 1), i ∈ S ∧ IncreasingOn(P, f, S) ∧
+    cardinality(S) = rise(P, f, i)
+proof
+  have parts := riseLengths.membership.forward with (rise.member at P, f, i)
+  exact parts.right
+
+theorem rise.greatest (P f : Set, i L : Nat)
+  requires member : L ∈ riseLengths(P, f, i)
+  shows L ≤ rise(P, f, i)
+proof
+  rw rise.value
+  exact greatestNatural.greatest with (riseLengths.nonempty at P, f, i),
+    (riseLengths.naturals at P, f, i), (riseLengths.finite at P, f, i), member
+
+theorem rise.positive (P f : Set, i : Nat)
+  shows 1 ≤ rise(P, f, i)
+proof
+  exact rise.greatest with (riseLengths.one at P, f, i)
+
+-- A later, larger term extends every run ending at i: the label grows.
+theorem rise.step (P f : Set, N i j : Nat)
+  requires order : LinearOrder(P)
+  requires function : f : N → points(P)
+  requires hi : i ∈ N
+  requires hj : j ∈ N
+  requires below : i < j
+  requires le : Le(P, f(i), f(j))
+  shows rise(P, f, i) < rise(P, f, j)
+proof
+  obtain ⟨S, inPower, hiS, increasing, size⟩ := rise.witness at P, f, i
+  have subset := powerset.membership_iff.forward with inPower
+  have finiteS := Finite.subset with (Finite.natural at i + 1), subset
+  have one : i + 1 = succ(i) := add.right_one with *
+  have oneJ : j + 1 = succ(j) := add.right_one with *
+  have NNat : Nat(N) by typecheck
+  have succNat : Nat(succ(j)) by typecheck
+  have indexNat : ∀ x ∈ S, Nat(x)
+    intros x hx
+    have inNext := subset with x, hx
+    rw one at inNext
+    exact natural.member at succ(i) with x, inNext
+  have indexLe : ∀ x ∈ S, x ≤ i
+    intros x hx
+    have inNext := subset with x, hx
+    rw one at inNext
+    have xNat := indexNat with x, hx
+    have less := Less.of_membership at x, succ(i)
+    exact Less.successor_upper with (less with inNext)
+  have indexIn : ∀ x ∈ S, x ∈ N
+    intros x hx
+    have xNat := indexNat with x, hx
+    have xLe := indexLe with x, hx
+    have xLess : x < N
+      have jLess := Less.of_membership at j, N
+      have jBelow := jLess with hj
+      arith
+    have bridge := membership.of_Less at x, N with xNat, NNat
+    exact bridge with xLess
+  have fresh : ¬j ∈ S
+    intro inS
+    have jLe := indexLe with j, inS
+    arith
+  have count := cardinality.insert_add_one with finiteS, fresh
+  rw size at count
+  have inPowerJ : insert(j, S) ∈ 𝒫(j + 1)
+    apply powerset.membership_iff.backward
+    intros x hx
+    have split := insert.membership.forward with hx
+    rw oneJ
+    cases split with same | inS
+    . rw same
+      exact membership.self_successor at j with *
+    . have xNat := indexNat with x, inS
+      have xLe := indexLe with x, inS
+      have xLess : x < succ(j) by arith
+      have bridge := membership.of_Less at x, succ(j) with xNat, succNat
+      exact bridge with xLess
+  have fiIn := FunctionBetween.apply_closed with function, hi
+  have fjIn := FunctionBetween.apply_closed with function, hj
+  have increasingJ : IncreasingOn(P, f, insert(j, S))
+    intros x hx y hy xy
+    have splitX := insert.membership.forward with hx
+    have splitY := insert.membership.forward with hy
+    cases splitX with xIsJ | xInS
+    . exfalso
+      cases splitY with yIsJ | yInS
+      . rw [xIsJ, yIsJ] at xy
+        exact Less.irreflexive at j with xy
+      . have yNat := indexNat with y, yInS
+        have yLe := indexLe with y, yInS
+        rw xIsJ at xy
+        arith
+    . cases splitY with yIsJ | yInS
+      . rw yIsJ
+        have xNat := indexNat with x, xInS
+        have fxIn := FunctionBetween.apply_closed with function,
+          (indexIn with x, xInS)
+        have alternatives : x = i ∨ x ≠ i by tauto
+        cases alternatives with same | different
+        . rw same
+          exact le
+        . have xLe := indexLe with x, xInS
+          have xLess := Less.of_LessEqual_ne with xLe, different
+          have first := increasing with x, xInS, i, hiS, xLess
+          exact Le.transitive_linear with order, fxIn, fiIn, fjIn, first, le
+      . exact increasing with x, xInS, y, yInS, xy
+  have finiteJ := Finite.insert at S, j with finiteS
+  have natCount := cardinality.nat with finiteJ
+  have inLengths : cardinality(insert(j, S)) ∈ riseLengths(P, f, j)
+    apply riseLengths.membership.backward
+    have countOmega := nat.omega.forward with natCount
+    have jIn := insert.self at j, S
+    refine ⟨countOmega, insert(j, S), inPowerJ, jIn, increasingJ, rfl⟩
+  have bound := rise.greatest with inLengths
+  rw count at bound
+  have riseNat := rise.natural at P, f, i
+  have riseNatJ := rise.natural at P, f, j
+  arith
+
+-- Without an increasing run of length m + 1 inside N, every label is at
+-- most m.
+theorem rise.bounded (P f : Set, N i m : Nat)
+  requires hi : i ∈ N
+  requires none : ¬∃ S ∈ subsetsOfSize(N, m + 1), IncreasingOn(P, f, S)
+  shows rise(P, f, i) ≤ m
+proof
+  by_contra above
+  have riseNat := rise.natural at P, f, i
+  have more : m + 1 ≤ rise(P, f, i)
+    have less := Less.of_not_LessEqual with above
+    exact Less.gap.forward with less
+  obtain ⟨S, inPower, hiS, increasing, size⟩ := rise.witness at P, f, i
+  have subset := powerset.membership_iff.forward with inPower
+  have finiteS := Finite.subset with (Finite.natural at i + 1), subset
+  rw ← size at more
+  have all := Finite.subset_of_size at m + 1
+  obtain ⟨T, inS, counted⟩ := all with S, finiteS, more
+  apply none
+  have inN : T ⊆ N
+    have iLess := Less.of_membership at i, N
+    have le : i + 1 ≤ N := Less.gap.forward with (iLess with hi)
+    have nested := natural.subset_of_LessEqual at i + 1, N with le
+    exact Subset.transitive with inS, (Subset.transitive with subset, nested)
+  have member := subsetsOfSize.of_subset with inN, counted
+  refine ⟨T, member, ?_⟩
+  intros x hx y hy xy
+  exact increasing with x, (inS with x, hx), y, (inS with y, hy), xy
+
+-- The labels 1, …, m.
+
+def positives (m : Nat) : Set := (m + 1) ∖ {0}
+
+theorem positives.membership (x : Set, m : Nat)
+  shows x ∈ positives(m) ↔ x ∈ m + 1 ∧ x ≠ 0
+proof
+  simp [positives, difference.singleton_membership]
+
+theorem positives.of_bounds (x m : Nat)
+  requires lower : 1 ≤ x
+  requires upper : x ≤ m
+  shows x ∈ positives(m)
+proof
+  apply positives.membership.backward
+  have one : m + 1 = succ(m) := add.right_one with *
+  have succNat : Nat(succ(m)) by typecheck
+  constructor
+  . rw one
+    have less : x < succ(m) by arith
+    have bridge := membership.of_Less at x, succ(m) with assumption, succNat
+    exact bridge with less
+  . intro zero
+    rw zero at lower
+    arith
+
+theorem positives.finite (m : Nat)
+  shows Finite(positives(m))
+proof
+  unfold positives
+  exact Finite.subset with (Finite.natural at m + 1),
+    (difference.subset_left at m + 1, {0})
+
+theorem positives.count (m : Nat)
+  shows cardinality(positives(m)) = m
+proof
+  have one : m + 1 = succ(m) := add.right_one with *
+  have zeroNat : Nat(0) by typecheck
+  have succNat : Nat(succ(m)) by typecheck
+  have zeroIn : 0 ∈ m + 1
+    rw one
+    have less : 0 < succ(m) by arith
+    have bridge := membership.of_Less at 0, succ(m) with zeroNat, succNat
+    exact bridge with less
+  have removed := cardinality.remove with (Finite.natural at m + 1), zeroIn
+  rw [cardinality.natural, one] at removed
+  have equal := Naturals.injective.succ with removed
+  unfold positives
+  rfl
+
+-- The pair of labels of an index: the longest increasing run and the
+-- longest decreasing run ending there, the latter as a run of the dual
+-- order. Without long runs both labels lie in 1, …, m and 1, …, n.
+defgraph runLabel (P f : Set, m n : Nat) (i ∈ m * n + 1) :
+    positives(m) × positives(n) :=
+  (rise(P, f, i), rise(dual(P), f, i))
+requires function : f : m * n + 1 → points(P)
+requires noRise : ¬∃ S ∈ subsetsOfSize(m * n + 1, m + 1),
+  IncreasingOn(P, f, S)
+requires noFall : ¬∃ S ∈ subsetsOfSize(m * n + 1, n + 1),
+  DecreasingOn(P, f, S)
+proof
+  have iNat := natural.member at m * n + 1 with i, member
+  have noRiseDual : ¬∃ S ∈ subsetsOfSize(m * n + 1, n + 1),
+      IncreasingOn(dual(P), f, S)
+    intro some
+    obtain ⟨S, hS, increasing⟩ := some
+    apply noFall
+    refine ⟨S, hS, ?_⟩
+    have subset := subsetsOfSize.subset with hS
+    have values : ∀ x ∈ S, f(x) ∈ points(P)
+      intros x hx
+      exact FunctionBetween.apply_closed with function, (subset with x, hx)
+    have iff := DecreasingOn.dual with values
+    exact iff.forward with increasing
+  have riseLe := rise.bounded at P, f, m * n + 1, i, m with member, noRise
+  have fallLe := rise.bounded at dual(P), f, m * n + 1, i, n with
+    member, noRiseDual
+  have riseNat := rise.natural at P, f, i
+  have fallNat := rise.natural at dual(P), f, i
+  apply product.pair
+  . exact positives.of_bounds with (rise.positive at P, f, i), riseLe
+  . exact positives.of_bounds with (rise.positive at dual(P), f, i), fallLe
+
+-- The Erdős–Szekeres theorem.
+theorem erdos_szekeres (P f : Set) (m n : Nat)
+  requires order : LinearOrder(P)
+  requires distinct : InjectiveBetween(f, m * n + 1, points(P))
+  shows (∃ S ∈ subsetsOfSize(m * n + 1, m + 1), IncreasingOn(P, f, S)) ∨
+    (∃ S ∈ subsetsOfSize(m * n + 1, n + 1), DecreasingOn(P, f, S))
+proof
+  by_contra neither
+  have noRise : ¬∃ S ∈ subsetsOfSize(m * n + 1, m + 1),
+      IncreasingOn(P, f, S)
+    intro some
+    apply neither
+    left
+    exact some
+  have noFall : ¬∃ S ∈ subsetsOfSize(m * n + 1, n + 1),
+      DecreasingOn(P, f, S)
+    intro some
+    apply neither
+    right
+    exact some
+  have function := Injective.function with distinct
+  have labels := runLabel.function at P, f, m, n with function, noRise, noFall
+  have dualOrder := LinearOrder.dual with order
+  have dualFunction : f : m * n + 1 → points(dual(P))
+    rw dual.points
+    exact function
+  have injective : InjectiveBetween(runLabel(P, f, m, n), m * n + 1,
+      positives(m) × positives(n))
+    apply Injective.of_pointwise with labels
+    intros i hi j hj same
+    have valueI := runLabel.value at P, f, m, n, i with
+      function, noRise, noFall, hi
+    have valueJ := runLabel.value at P, f, m, n, j with
+      function, noRise, noFall, hj
+    rw [valueI, valueJ] at same
+    have coordinates := orderedPair.injective with same
+    have iNat := natural.member at m * n + 1 with i, hi
+    have jNat := natural.member at m * n + 1 with j, hj
+    have fiIn := FunctionBetween.apply_closed with function, hi
+    have fjIn := FunctionBetween.apply_closed with function, hj
+    have riseNatI := rise.natural at P, f, i
+    have riseNatJ := rise.natural at P, f, j
+    have fallNatI := rise.natural at dual(P), f, i
+    have fallNatJ := rise.natural at dual(P), f, j
+    have dualOf : ∀ x ∈ points(P), ∀ y ∈ points(P), Le(P, y, x) →
+        Le(dual(P), x, y)
+      intros x hx y hy le
+      apply Le.of_relates
+      rw dual.le
+      exact converse.relates with hy, hx, (Le.relates with le)
+    by_contra different
+    have separated := Injective.apply_ne with distinct, hi, hj, different
+    have total : Le(P, f(i), f(j)) ∨ Le(P, f(j), f(i)) := le_total with *
+    have alternatives := Less.trichotomy at i, j with *
+    rcases alternatives with below | equal | above
+    . cases total with forward | backward
+      . have step := rise.step at P, f, m * n + 1, i, j with
+          order, function, hi, hj, below, forward
+        rw coordinates.left at step
+        exact Less.irreflexive at rise(P, f, j) with step
+      . have dualLe := dualOf with f(i), fiIn, f(j), fjIn, backward
+        have step := rise.step at dual(P), f, m * n + 1, i, j with
+          dualOrder, dualFunction, hi, hj, below, dualLe
+        rw coordinates.right at step
+        exact Less.irreflexive at rise(dual(P), f, j) with step
+    . exact different with equal
+    . cases total with forward | backward
+      . have dualLe := dualOf with f(j), fjIn, f(i), fiIn, forward
+        have step := rise.step at dual(P), f, m * n + 1, j, i with
+          dualOrder, dualFunction, hj, hi, above, dualLe
+        rw coordinates.right at step
+        exact Less.irreflexive at rise(dual(P), f, j) with step
+      . have step := rise.step at P, f, m * n + 1, j, i with
+          order, function, hj, hi, above, backward
+        rw coordinates.left at step
+        exact Less.irreflexive at rise(P, f, j) with step
+  have finiteLabels := Finite.product with (positives.finite at m),
+    (positives.finite at n)
+  have more : cardinality(positives(m) × positives(n)) < cardinality(m * n + 1)
+    have count := cardinality.product_count with (positives.finite at m),
+      (positives.finite at n)
+    rw [count, positives.count, positives.count, cardinality.natural]
+    arith
+  exact pigeonhole.not_injective with labels, finiteLabels, more, injective

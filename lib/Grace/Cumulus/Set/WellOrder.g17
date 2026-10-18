@@ -1,0 +1,329 @@
+-- Well-orders: least elements, initial segments below a point, restriction
+-- to a subset, and the rigidity of order embeddings
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Set.WellOrder
+import Order
+
+-- The initial segment of A below a.
+def segment (A r a : Set) : Set := { x ∈ A | relates(r, x, a) }
+
+-- The order r restricted to the subset B.
+def restrictOrder (r B : Set) : Set := r ∩ (B × B)
+
+theorem segment.membership (A r a x : Set)
+  shows x ∈ segment(A, r, a) ↔ x ∈ A ∧ relates(r, x, a)
+proof
+  simp [segment]
+
+theorem segment.subset (A r a : Set)
+  shows segment(A, r, a) ⊆ A
+proof
+  intros x hx
+  simp [segment.membership] at hx
+  exact hx.left
+
+theorem restrictOrder.relates (r B x y : Set)
+  shows relates(restrictOrder(r, B), x, y) ↔ relates(r, x, y) ∧ x ∈ B ∧ y ∈ B
+proof
+  constructor
+  . intro h
+    have member : (x, y) ∈ restrictOrder(r, B) := h
+    simp [restrictOrder, intersection.membership] at member
+    have coordinates := product.pair_membership.forward with member.right
+    constructor
+    . exact member.left
+    . exact coordinates
+  . intro h
+    have pairIn : (x, y) ∈ B × B := product.pair with h.right.left, h.right.right
+    have inR : (x, y) ∈ r := h.left
+    have member : (x, y) ∈ restrictOrder(r, B) by simp [restrictOrder, intersection.membership, inR, pairIn]
+    exact member
+
+-- Least elements
+
+theorem WellOrder.least (A r S : Set)
+  requires order : WellOrder(A, r)
+  requires hS : S ⊆ A
+  requires nonempty : S ≠ ∅
+  shows ∃ m ∈ S, ∀ x ∈ S, x ≠ m → relates(r, m, x)
+proof
+  have founded := WellOrder.well_founded with order
+  have bounded : subset(S, A)
+    intros x hx
+    exact hS with x, hx
+  obtain ⟨m, hm, minimal⟩ := founded with S, ⟨bounded, nonempty⟩
+  have connected := StrictLinearOrder.connected with (WellOrder.strict_linear with order)
+  witness m
+  constructor
+  . exact hm
+  . intros x hx different
+    have differentBack : m ≠ x
+      intro same
+      apply different
+      rw same
+      rfl
+    have cases := connected with m, (hS with m, hm), x, (hS with x, hx), differentBack
+    cases cases with below | above
+    . exact below
+    . exfalso
+      exact minimal with x, hx, above
+
+theorem WellOrder.least_unique (A r S m n : Set)
+  requires order : WellOrder(A, r)
+  requires hS : S ⊆ A
+  requires hm : m ∈ S
+  requires hn : n ∈ S
+  requires leastM : ∀ x ∈ S, x ≠ m → relates(r, m, x)
+  requires leastN : ∀ x ∈ S, x ≠ n → relates(r, n, x)
+  shows m = n
+proof
+  by_contra different
+  have differentBack : n ≠ m
+    intro same
+    apply different
+    rw same
+    rfl
+  have below := leastM with n, hn, differentBack
+  have above := leastN with m, hm, different
+  have irreflexive := StrictLinearOrder.irreflexive with (WellOrder.strict_linear with order)
+  have transitive := StrictLinearOrder.transitive with (WellOrder.strict_linear with order)
+  have loop := transitive with m, (hS with m, hm), n, (hS with n, hn), m, (hS with m, hm), below, above
+  exact irreflexive with m, (hS with m, hm), loop
+
+-- Initial segments below a point
+
+theorem segment.initial (A r a : Set)
+  requires order : StrictOrder(A, r)
+  requires ha : a ∈ A
+  shows InitialSegment(A, r, segment(A, r, a))
+proof
+  have transitive := StrictOrder.transitive with order
+  constructor
+  . exact segment.subset at A, r, a
+  . intros x hx y hy below
+    simp [segment.membership] at hx
+    simp [segment.membership]
+    constructor
+    . exact hy
+    . exact transitive with y, hy, x, hx.left, a, ha, below, hx.right
+
+theorem segment.absent (A r a : Set)
+  requires order : StrictOrder(A, r)
+  requires ha : a ∈ A
+  shows ¬(a ∈ segment(A, r, a))
+proof
+  intro h
+  simp [segment.membership] at h
+  have irreflexive := StrictOrder.irreflexive with order
+  exact irreflexive with a, ha, h.right
+
+theorem segment.proper (A r a : Set)
+  requires order : StrictOrder(A, r)
+  requires ha : a ∈ A
+  shows ProperInitialSegment(A, r, segment(A, r, a))
+proof
+  constructor
+  . exact segment.initial with order, ha
+  . intro equal
+    have absent := segment.absent with order, ha
+    rw equal at absent
+    exact absent with ha
+
+theorem segment.monotone (A r a b : Set)
+  requires order : StrictOrder(A, r)
+  requires ha : a ∈ A
+  requires hb : b ∈ A
+  requires below : relates(r, a, b)
+  shows segment(A, r, a) ⊆ segment(A, r, b)
+proof
+  have transitive := StrictOrder.transitive with order
+  intros x hx
+  simp [segment.membership] at hx
+  simp [segment.membership]
+  constructor
+  . exact hx.left
+  . exact transitive with x, hx.left, a, ha, b, hb, hx.right, below
+
+theorem segment.injective (A r a b : Set)
+  requires order : StrictLinearOrder(A, r)
+  requires ha : a ∈ A
+  requires hb : b ∈ A
+  requires equal : segment(A, r, a) = segment(A, r, b)
+  shows a = b
+proof
+  by_contra different
+  have connected := StrictLinearOrder.connected with order
+  have strict := StrictLinearOrder.strict with order
+  have cases := connected with a, ha, b, hb, different
+  cases cases with below | above
+  . have member : a ∈ segment(A, r, b) by simp [segment.membership, ha, below]
+    rw ← equal at member
+    exact segment.absent with strict, ha, member
+  . have member : b ∈ segment(A, r, a) by simp [segment.membership, hb, above]
+    rw equal at member
+    exact segment.absent with strict, hb, member
+
+theorem InitialSegment.cases (A r I : Set)
+  requires order : WellOrder(A, r)
+  requires initial : InitialSegment(A, r, I)
+  shows I = A ∨ ∃ a ∈ A, I = segment(A, r, a)
+proof
+  have included := InitialSegment.subset with initial
+  have strict := StrictLinearOrder.strict with (WellOrder.strict_linear with order)
+  have connected := StrictLinearOrder.connected with (WellOrder.strict_linear with order)
+  have irreflexive := StrictOrder.irreflexive with strict
+  have split : I = A ∨ I ≠ A by tauto
+  cases split with whole | proper
+  . left
+    exact whole
+  . right
+    have outside : A ∖ I ≠ ∅
+      intro empty
+      apply proper
+      apply Subset.antisymmetric
+      . exact included
+      . exact difference.eq_empty_iff.forward with empty
+    obtain ⟨a, haOut, leastA⟩ := WellOrder.least with order, (difference.subset_left at A, I), outside
+    simp [difference.membership] at haOut
+    witness a
+    constructor
+    . exact haOut.left
+    . ext x
+      constructor
+      . intro hx
+        have hxA : x ∈ A := included with x, hx
+        simp [segment.membership]
+        constructor
+        . exact hxA
+        . have different : x ≠ a
+            intro same
+            rw same at hx
+            exact haOut.right with hx
+          have cases := connected with x, hxA, a, haOut.left, different
+          cases cases with below | above
+          . exact below
+          . exfalso
+            exact haOut.right with (initial.right with x, hx, a, haOut.left, above)
+      . intro hx
+        simp [segment.membership] at hx
+        by_contra absent
+        have inOutside : x ∈ A ∖ I by simp [difference.membership, hx.left, absent]
+        have different : x ≠ a
+          intro same
+          rw same at hx
+          exact irreflexive with a, haOut.left, hx.right
+        have above := leastA with x, inOutside, different
+        have transitive := StrictOrder.transitive with strict
+        have loop := transitive with x, hx.left, a, haOut.left, x, hx.left, hx.right, above
+        exact irreflexive with x, hx.left, loop
+
+-- Restriction to a subset
+
+theorem restrictOrder.relation (r B : Set)
+  shows RelationBetween(restrictOrder(r, B), B, B)
+proof
+  intros p hp
+  simp [restrictOrder, intersection.membership] at hp
+  exact hp.right
+
+theorem restrictOrder.well_order (A r B : Set)
+  requires order : WellOrder(A, r)
+  requires hB : B ⊆ A
+  shows WellOrder(B, restrictOrder(r, B))
+proof
+  have strict := StrictLinearOrder.strict with (WellOrder.strict_linear with order)
+  have connected := StrictLinearOrder.connected with (WellOrder.strict_linear with order)
+  have irreflexive := StrictOrder.irreflexive with strict
+  have transitive := StrictOrder.transitive with strict
+  constructor
+  . constructor
+    . constructor
+      . exact restrictOrder.relation at r, B
+      . constructor
+        . intros x hx loop
+          have related := restrictOrder.relates.forward with loop
+          exact irreflexive with x, (hB with x, hx), related.left
+        . intros x hx y hy z hz first second
+          have firstR := restrictOrder.relates.forward with first
+          have secondR := restrictOrder.relates.forward with second
+          apply restrictOrder.relates.backward
+          constructor
+          . exact transitive with x, (hB with x, hx), y, (hB with y, hy), z, (hB with z, hz), firstR.left, secondR.left
+          . exact ⟨hx, hz⟩
+    . intros x hx y hy different
+      have cases := connected with x, (hB with x, hx), y, (hB with y, hy), different
+      cases cases with below | above
+      . left
+        apply restrictOrder.relates.backward
+        exact ⟨below, hx, hy⟩
+      . right
+        apply restrictOrder.relates.backward
+        exact ⟨above, hy, hx⟩
+  . intros S hS
+    have included : S ⊆ A
+      intros x hx
+      exact hB with x, (hS.left with x, hx)
+    obtain ⟨m, hm, leastM⟩ := WellOrder.least with order, included, hS.right
+    witness m
+    constructor
+    . exact hm
+    . intros y hy below
+      have related := restrictOrder.relates.forward with below
+      have different : y ≠ m
+        intro same
+        rw same at related
+        exact irreflexive with m, (included with m, hm), related.left
+      have above := leastM with y, hy, different
+      have loop := transitive with m, (included with m, hm), y, (included with y, hy), m, (included with m, hm), above, related.left
+      exact irreflexive with m, (included with m, hm), loop
+
+-- Rigidity of embeddings
+
+-- The points an embedding moves down.
+def descents (f A r : Set) : Set := { x ∈ A | relates(r, f(x), x) }
+
+theorem descents.membership (f A r x : Set)
+  shows x ∈ descents(f, A, r) ↔ x ∈ A ∧ relates(r, f(x), x)
+proof
+  simp [descents]
+
+theorem OrderEmbedding.not_below (f A r : Set)
+  requires order : WellOrder(A, r)
+  requires embedding : OrderEmbedding(f, A, r, A, r)
+  shows ∀ x ∈ A, ¬(relates(r, f(x), x))
+proof
+  have function := Injective.function with embedding.left
+  have strict := StrictLinearOrder.strict with (WellOrder.strict_linear with order)
+  have irreflexive := StrictOrder.irreflexive with strict
+  by_contra some
+  have descending : descents(f, A, r) ≠ ∅
+    intro empty
+    apply some
+    intros x hx below
+    have member : x ∈ descents(f, A, r) by simp [descents.membership, hx, below]
+    rw empty at member
+    exact set.empty with member
+  have descendingSubset : descents(f, A, r) ⊆ A
+    intros x hx
+    simp [descents.membership] at hx
+    exact hx.left
+  obtain ⟨m, hm, leastM⟩ := WellOrder.least with order, descendingSubset, descending
+  simp [descents.membership] at hm
+  have valueA := FunctionBetween.apply_closed with function, hm.left
+  have related := FunctionBetween.relates_apply with function, hm.left
+  have relatedValue := FunctionBetween.relates_apply with function, valueA
+  have preserved := embedding.right with f(m), valueA, m, hm.left, f(f(m)), (FunctionBetween.apply_closed with function, valueA), f(m), valueA, relatedValue, related
+  have lower := preserved.forward with hm.right
+  have inDescending : f(m) ∈ descents(f, A, r) by simp [descents.membership, valueA, lower]
+  have different : f(m) ≠ m
+    intro same
+    rw same at hm
+    exact irreflexive with m, hm.left, hm.right
+  have above := leastM with f(m), inDescending, different
+  have transitive := StrictOrder.transitive with strict
+  have loop := transitive with m, hm.left, f(m), valueA, m, hm.left, above, hm.right
+  exact irreflexive with m, hm.left, loop

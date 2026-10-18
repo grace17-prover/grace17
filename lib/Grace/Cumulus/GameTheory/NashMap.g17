@@ -1,0 +1,576 @@
+-- Nash's map on mixed strategy profiles: each player's expected payoff is the
+-- block sum of x(i)·V(i)(x) over their pure strategies, the gain of a pure
+-- strategy is the positive part of its payoff above the expected payoff, and
+-- every coordinate is shifted by its gain and renormalised by the block's
+-- total gain, giving a continuous self-map of the product of simplices
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GameTheory.NashMap
+import FixedPoint.WeightedSums
+import FixedPoint.BlockSimplex
+
+-- The payoff terms x(i)·V(i)(x), as a family of cube functions.
+defgraph payoffFamily (n V : Set) (i ∈ n) : functionSpace(unitCube(n), ℝ) := mulCube(n, coordinateCube(n, i), V(i))
+requires nNat : Nat(n)
+requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+proof
+  have coordinate := coordinateCube.continuous at n, i with member
+  have continuous := mulCube.continuous with coordinate, (family with member)
+  have function := CubeFunctionContinuous.function with continuous
+  have between : mulCube(n, coordinateCube(n, i), V(i)) : unitCube(n) → ℝ
+    exact CubeFunction.function with function
+  exact functionSpace.membership.backward with between
+
+theorem payoffFamily.continuous (n : Nat) (V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunctionContinuous(payoffFamily(n, V)(i), n)
+proof
+  intros i hi
+  have same := payoffFamily.value at n, V, i with *
+  have coordinate := coordinateCube.continuous with hi
+  rw same
+  exact mulCube.continuous with coordinate, (family with hi)
+
+theorem payoffFamily.functions (n : Nat) (V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunction(payoffFamily(n, V)(i), n)
+proof
+  intros i hi
+  have continuous := payoffFamily.continuous with family
+  exact CubeFunctionContinuous.function with (continuous with hi)
+
+theorem payoffFamily.term (n : Nat) (V x i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  requires hi : i ∈ n
+  shows payoffFamily(n, V)(i)(x) = (x(i):R) * (V(i)(x):R)
+proof
+  have same := payoffFamily.value at n, V, i with *
+  have coordinate := coordinateCube.continuous with hi
+  have coordinateFunction := CubeFunctionContinuous.function with coordinate
+  have componentFunction := CubeFunctionContinuous.function with (family with hi)
+  have product := mulCube.value with coordinateFunction, componentFunction, hx
+  have coordinateValue := coordinateCube.value with hi, hx
+  rw [same, product, coordinateValue]
+  rfl
+
+-- The expected payoff of the player who owns block p.
+def expectedPayoff (n blk V p : Set) : Set := weightedSum(n, blockSet(n, blk, p), payoffFamily(n, V))
+
+theorem expectedPayoff.definition (n blk V p : Set)
+  shows expectedPayoff(n, blk, V, p) = weightedSum(n, blockSet(n, blk, p), payoffFamily(n, V))
+proof
+  unfold expectedPayoff
+  rfl
+
+theorem expectedPayoff.continuous (n : Nat) (blk V p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeFunctionContinuous(expectedPayoff(n, blk, V, p), n)
+proof
+  have terms := payoffFamily.continuous with family
+  have same := expectedPayoff.definition at n, blk, V, p
+  rw same
+  exact weightedSum.continuous with terms
+
+theorem expectedPayoff.function (n : Nat) (blk V p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeFunction(expectedPayoff(n, blk, V, p), n)
+proof
+  exact CubeFunctionContinuous.function with (expectedPayoff.continuous at n, blk, V, p with family)
+
+theorem expectedPayoff.real (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows expectedPayoff(n, blk, V, p)(x) ∈ ℝ
+proof
+  exact CubeFunction.value with (expectedPayoff.function at n, blk, V, p with family), hx
+
+theorem expectedPayoff.value (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows expectedPayoff(n, blk, V, p)(x) = realPartialSum(maskedPoint(n, blockSet(n, blk, p), assembledPoint(n, payoffFamily(n, V), x)), n)
+proof
+  have functions := payoffFamily.functions with family
+  have same := expectedPayoff.definition at n, blk, V, p
+  rw same
+  exact weightedSum.value with functions, hx
+
+-- The gain of pure strategy i: its payoff above the owner's expected payoff,
+-- or zero.
+def gain (n blk V i : Set) : Set :=
+  maxCube(n, constantFunction(unitCube(n), ℝ, (0:R)), addCube(n, V(i), negCube(n, expectedPayoff(n, blk, V, blk(i)))))
+
+theorem gain.definition (n blk V i : Set)
+  shows gain(n, blk, V, i) = maxCube(n, constantFunction(unitCube(n), ℝ, (0:R)), addCube(n, V(i), negCube(n, expectedPayoff(n, blk, V, blk(i)))))
+proof
+  unfold gain
+  rfl
+
+theorem gain.continuous (n : Nat) (blk V i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  shows CubeFunctionContinuous(gain(n, blk, V, i), n)
+proof
+  have zeroIn : (0:R) ∈ ℝ by typecheck
+  have zero := constantCube.continuous with zeroIn
+  have payoff := expectedPayoff.continuous at n, blk, V, blk(i) with family
+  have negative := negCube.continuous with payoff
+  have difference := addCube.continuous with (family with hi), negative
+  have same := gain.definition at n, blk, V, i
+  rw same
+  exact maxCube.continuous with zero, difference
+
+theorem gain.function (n : Nat) (blk V i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  shows CubeFunction(gain(n, blk, V, i), n)
+proof
+  exact CubeFunctionContinuous.function with (gain.continuous at n, blk, V, i with family, hi)
+
+theorem gain.real (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows gain(n, blk, V, i)(x) ∈ ℝ
+proof
+  exact CubeFunction.value with (gain.function at n, blk, V, i with family, hi), hx
+
+theorem gain.value (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows gain(n, blk, V, i)(x) = realMax((0:R), (V(i)(x):R) + -(expectedPayoff(n, blk, V, blk(i))(x):R))
+proof
+  have zeroIn : (0:R) ∈ ℝ by typecheck
+  have zero := constantCube.continuous with zeroIn
+  have payoff := expectedPayoff.continuous at n, blk, V, blk(i) with family
+  have negative := negCube.continuous with payoff
+  have difference := addCube.continuous with (family with hi), negative
+  have zeroFunction := CubeFunctionContinuous.function with zero
+  have componentFunction := CubeFunctionContinuous.function with (family with hi)
+  have payoffFunction := CubeFunctionContinuous.function with payoff
+  have negativeFunction := CubeFunctionContinuous.function with negative
+  have differenceFunction := CubeFunctionContinuous.function with difference
+  have same := gain.definition at n, blk, V, i
+  have maxValue := maxCube.value with zeroFunction, differenceFunction, hx
+  have zeroValue := constantFunction.apply at unitCube(n), ℝ, x, (0:R) with hx
+  have differenceValue := addCube.value with componentFunction, negativeFunction, hx
+  have negativeValue := negCube.value with payoffFunction, hx
+  rw [same, maxValue, zeroValue, differenceValue, negativeValue]
+  rfl
+
+theorem gain.nonnegative (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows (0:R) ≤ (gain(n, blk, V, i)(x):R)
+proof
+  have value := gain.value at n, blk, V, i, x with family, hi, hx
+  have componentReal := CubeFunction.value with (CubeFunctionContinuous.function with (family with hi)), hx
+  have payoffReal := expectedPayoff.real at n, blk, V, blk(i), x with family, hx
+  rw value
+  exact realMax.ge_left
+
+theorem gain.ge_difference (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows (V(i)(x):R) + -(expectedPayoff(n, blk, V, blk(i))(x):R) ≤ (gain(n, blk, V, i)(x):R)
+proof
+  have value := gain.value at n, blk, V, i, x with family, hi, hx
+  have componentReal := CubeFunction.value with (CubeFunctionContinuous.function with (family with hi)), hx
+  have payoffReal := expectedPayoff.real at n, blk, V, blk(i), x with family, hx
+  rw value
+  exact realMax.ge_right
+
+-- The gains as a family, and each block's total gain.
+defgraph gainFamily (n blk V : Set) (i ∈ n) : functionSpace(unitCube(n), ℝ) := gain(n, blk, V, i)
+requires nNat : Nat(n)
+requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+proof
+  have function := gain.function at n, blk, V, i with family, member
+  have between : gain(n, blk, V, i) : unitCube(n) → ℝ by exact CubeFunction.function with function
+  exact functionSpace.membership.backward with between
+
+theorem gainFamily.term (n : Nat) (blk V i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  shows gainFamily(n, blk, V)(i) = gain(n, blk, V, i)
+proof
+  exact gainFamily.value at n, blk, V, i with *
+
+theorem gainFamily.continuous (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunctionContinuous(gainFamily(n, blk, V)(i), n)
+proof
+  intros i hi
+  have same := gainFamily.term at n, blk, V, i with family, hi
+  rw same
+  exact gain.continuous with family, hi
+
+theorem gainFamily.functions (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunction(gainFamily(n, blk, V)(i), n)
+proof
+  intros i hi
+  have continuous := gainFamily.continuous at n, blk, V with family
+  exact CubeFunctionContinuous.function with (continuous with hi)
+
+theorem gainFamily.nonnegative (n : Nat) (blk V x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows ∀ i ∈ n, (0:R) ≤ (gainFamily(n, blk, V)(i)(x):R)
+proof
+  intros i hi
+  have same := gainFamily.term at n, blk, V, i with family, hi
+  rw same
+  exact gain.nonnegative with family, hi, hx
+
+def totalGain (n blk V p : Set) : Set := weightedSum(n, blockSet(n, blk, p), gainFamily(n, blk, V))
+
+theorem totalGain.definition (n blk V p : Set)
+  shows totalGain(n, blk, V, p) = weightedSum(n, blockSet(n, blk, p), gainFamily(n, blk, V))
+proof
+  unfold totalGain
+  rfl
+
+theorem totalGain.continuous (n : Nat) (blk V p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeFunctionContinuous(totalGain(n, blk, V, p), n)
+proof
+  have terms := gainFamily.continuous at n, blk, V with family
+  have same := totalGain.definition at n, blk, V, p
+  rw same
+  exact weightedSum.continuous with terms
+
+theorem totalGain.function (n : Nat) (blk V p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeFunction(totalGain(n, blk, V, p), n)
+proof
+  exact CubeFunctionContinuous.function with (totalGain.continuous at n, blk, V, p with family)
+
+theorem totalGain.real (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows totalGain(n, blk, V, p)(x) ∈ ℝ
+proof
+  exact CubeFunction.value with (totalGain.function at n, blk, V, p with family), hx
+
+theorem totalGain.value (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows totalGain(n, blk, V, p)(x) = realPartialSum(maskedPoint(n, blockSet(n, blk, p), assembledPoint(n, gainFamily(n, blk, V), x)), n)
+proof
+  have functions := gainFamily.functions at n, blk, V with family
+  have same := totalGain.definition at n, blk, V, p
+  rw same
+  exact weightedSum.value with functions, hx
+
+theorem totalGain.nonnegative (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows (0:R) ≤ (totalGain(n, blk, V, p)(x):R)
+proof
+  have functions := gainFamily.functions at n, blk, V with family
+  have nonnegative := gainFamily.nonnegative at n, blk, V, x with family, hx
+  have same := totalGain.definition at n, blk, V, p
+  rw same
+  exact weightedSum.nonnegative with functions, hx, nonnegative
+
+theorem totalGain.ge_gain (n : Nat) (blk V x i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  requires hi : i ∈ n
+  shows (gain(n, blk, V, i)(x):R) ≤ (totalGain(n, blk, V, blk(i))(x):R)
+proof
+  have functions := gainFamily.functions at n, blk, V with family
+  have nonnegative := gainFamily.nonnegative at n, blk, V, x with family, hx
+  have inBlock := blockSet.own at n, blk, i with hi
+  have same := totalGain.definition at n, blk, V, blk(i)
+  have term := gainFamily.term at n, blk, V, i with family, hi
+  have bound := weightedSum.ge_term with functions, hx, nonnegative, hi, inBlock
+  rw term at bound
+  rwa same
+
+-- One plus the total gain, the renormalising denominator of a block.
+def denominator (n blk V p : Set) : Set := addCube(n, constantFunction(unitCube(n), ℝ, (1:R)), totalGain(n, blk, V, p))
+
+theorem denominator.definition (n blk V p : Set)
+  shows denominator(n, blk, V, p) = addCube(n, constantFunction(unitCube(n), ℝ, (1:R)), totalGain(n, blk, V, p))
+proof
+  unfold denominator
+  rfl
+
+theorem denominator.continuous (n : Nat) (blk V p : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeFunctionContinuous(denominator(n, blk, V, p), n)
+proof
+  have oneIn : (1:R) ∈ ℝ by typecheck
+  have one := constantCube.continuous with oneIn
+  have total := totalGain.continuous at n, blk, V, p with family
+  have same := denominator.definition at n, blk, V, p
+  rw same
+  exact addCube.continuous with one, total
+
+theorem denominator.value (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows denominator(n, blk, V, p)(x) = (1:R) + (totalGain(n, blk, V, p)(x):R)
+proof
+  have oneIn : (1:R) ∈ ℝ by typecheck
+  have one := constantCube.continuous with oneIn
+  have oneFunction := CubeFunctionContinuous.function with one
+  have totalFunction := totalGain.function at n, blk, V, p with family
+  have same := denominator.definition at n, blk, V, p
+  have sum := addCube.value with oneFunction, totalFunction, hx
+  have oneValue := constantFunction.apply at unitCube(n), ℝ, x, (1:R) with hx
+  rw [same, sum, oneValue]
+  rfl
+
+theorem denominator.real (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows denominator(n, blk, V, p)(x) ∈ ℝ
+proof
+  exact CubeFunction.value with (CubeFunctionContinuous.function with (denominator.continuous at n, blk, V, p with family)), hx
+
+theorem denominator.at_least_one (n : Nat) (blk V p x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows (1:R) ≤ (denominator(n, blk, V, p)(x):R)
+proof
+  have value := denominator.value at n, blk, V, p, x with family, hx
+  have total := totalGain.nonnegative at n, blk, V, p, x with family, hx
+  have totalReal := totalGain.real at n, blk, V, p, x with family, hx
+  rw value
+  linarith
+
+-- Coordinate i of Nash's map.
+def nashCoordinate (n blk V i : Set) : Set :=
+  mulCube(n, addCube(n, coordinateCube(n, i), gain(n, blk, V, i)), invCube(n, denominator(n, blk, V, blk(i))))
+
+theorem nashCoordinate.definition (n blk V i : Set)
+  shows nashCoordinate(n, blk, V, i) = mulCube(n, addCube(n, coordinateCube(n, i), gain(n, blk, V, i)), invCube(n, denominator(n, blk, V, blk(i))))
+proof
+  unfold nashCoordinate
+  rfl
+
+theorem nashCoordinate.continuous (n : Nat) (blk V i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  shows CubeFunctionContinuous(nashCoordinate(n, blk, V, i), n)
+proof
+  have coordinate := coordinateCube.continuous with hi
+  have gainContinuous := gain.continuous at n, blk, V, i with family, hi
+  have numerator := addCube.continuous with coordinate, gainContinuous
+  have scale := denominator.continuous at n, blk, V, blk(i) with family
+  have atLeastOne : ∀ x ∈ unitCube(n), (1:R) ≤ (denominator(n, blk, V, blk(i))(x):R)
+    intros x hx
+    exact denominator.at_least_one with family, hx
+  have inverse := invCube.continuous with scale, atLeastOne
+  have same := nashCoordinate.definition at n, blk, V, i
+  rw same
+  exact mulCube.continuous with numerator, inverse
+
+theorem nashCoordinate.value (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows nashCoordinate(n, blk, V, i)(x) = ((x(i):R) + (gain(n, blk, V, i)(x):R)) * realInvValue((denominator(n, blk, V, blk(i))(x):R))
+proof
+  have coordinate := coordinateCube.continuous with hi
+  have gainContinuous := gain.continuous at n, blk, V, i with family, hi
+  have numerator := addCube.continuous with coordinate, gainContinuous
+  have scale := denominator.continuous at n, blk, V, blk(i) with family
+  have atLeastOne : ∀ y ∈ unitCube(n), (1:R) ≤ (denominator(n, blk, V, blk(i))(y):R)
+    intros y hy
+    exact denominator.at_least_one with family, hy
+  have inverse := invCube.continuous with scale, atLeastOne
+  have coordinateFunction := CubeFunctionContinuous.function with coordinate
+  have gainFunction := CubeFunctionContinuous.function with gainContinuous
+  have numeratorFunction := CubeFunctionContinuous.function with numerator
+  have scaleFunction := CubeFunctionContinuous.function with scale
+  have inverseFunction := CubeFunctionContinuous.function with inverse
+  have same := nashCoordinate.definition at n, blk, V, i
+  have product := mulCube.value with numeratorFunction, inverseFunction, hx
+  have sum := addCube.value with coordinateFunction, gainFunction, hx
+  have coordinateValue := coordinateCube.value with hi, hx
+  have inverseValue := invCube.value with scaleFunction, hx
+  rw [same, product, sum, coordinateValue, inverseValue]
+  rfl
+
+theorem nashCoordinate.bounds (n : Nat) (blk V i x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  requires hx : x ∈ unitCube(n)
+  shows (0:R) ≤ (nashCoordinate(n, blk, V, i)(x):R) ∧ (nashCoordinate(n, blk, V, i)(x):R) ≤ (1:R)
+proof
+  have value := nashCoordinate.value at n, blk, V, i, x with family, hi, hx
+  have xInterval := unitCube.coordinate with hx, hi
+  obtain ⟨xReal, xLower, xUpper⟩ := closedInterval.membership.forward with xInterval
+  have gainReal := gain.real at n, blk, V, i, x with family, hi, hx
+  have gainNonneg := gain.nonnegative at n, blk, V, i, x with family, hi, hx
+  have gainLe := totalGain.ge_gain at n, blk, V, x, i with family, hx, hi
+  have totalReal := totalGain.real at n, blk, V, blk(i), x with family, hx
+  have scaleReal := denominator.real at n, blk, V, blk(i), x with family, hx
+  have scaleValue := denominator.value at n, blk, V, blk(i), x with family, hx
+  have scaleAtLeastOne := denominator.at_least_one at n, blk, V, blk(i), x with family, hx
+  obtain ⟨inversePositive, inverseLe⟩ := realInvValue.le_one with scaleAtLeastOne
+  have inverseNonneg := realLess.implies_le with inversePositive
+  have numeratorNonneg : (0:R) ≤ (x(i):R) + (gain(n, blk, V, i)(x):R) by linarith
+  have scaleNonzero : (denominator(n, blk, V, blk(i))(x):R) ≠ (0:R)
+    intro zero
+    rw zero at scaleAtLeastOne
+    linarith
+  have cancel := realInvValue.mul_right with scaleNonzero
+  have numeratorLe : (x(i):R) + (gain(n, blk, V, i)(x):R) ≤ (denominator(n, blk, V, blk(i))(x):R)
+    rw scaleValue
+    linarith
+  have scaled := realLe.mul_right_of_nonnegative with numeratorLe, inverseNonneg
+  rw cancel at scaled
+  rw value
+  constructor
+  . exact realMulValue.nonnegative with numeratorNonneg, inverseNonneg
+  . exact scaled
+
+-- The family of Nash coordinates and the assembled map.
+defgraph nashFamily (n blk V : Set) (i ∈ n) : functionSpace(unitCube(n), ℝ) := nashCoordinate(n, blk, V, i)
+requires nNat : Nat(n)
+requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+proof
+  have continuous := nashCoordinate.continuous at n, blk, V, i with family, member
+  have function := CubeFunctionContinuous.function with continuous
+  have between : nashCoordinate(n, blk, V, i) : unitCube(n) → ℝ
+    exact CubeFunction.function with function
+  exact functionSpace.membership.backward with between
+
+theorem nashFamily.coordinate (n : Nat) (blk V i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hi : i ∈ n
+  shows nashFamily(n, blk, V)(i) = nashCoordinate(n, blk, V, i)
+proof
+  exact nashFamily.value at n, blk, V, i with *
+
+theorem nashFamily.continuous (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunctionContinuous(nashFamily(n, blk, V)(i), n)
+proof
+  intros i hi
+  have same := nashFamily.coordinate at n, blk, V, i with family, hi
+  rw same
+  exact nashCoordinate.continuous with family, hi
+
+theorem nashFamily.functions (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, CubeFunction(nashFamily(n, blk, V)(i), n)
+proof
+  intros i hi
+  have continuous := nashFamily.continuous at n, blk, V with family
+  exact CubeFunctionContinuous.function with (continuous with hi)
+
+theorem nashFamily.bounds (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ i ∈ n, ∀ x ∈ unitCube(n), (0:R) ≤ (nashFamily(n, blk, V)(i)(x):R) ∧ (nashFamily(n, blk, V)(i)(x):R) ≤ (1:R)
+proof
+  intros i hi x hx
+  have same := nashFamily.coordinate at n, blk, V, i with family, hi
+  rw same
+  exact nashCoordinate.bounds with family, hi, hx
+
+def nashMap (n blk V : Set) : Set := assembledMap(n, nashFamily(n, blk, V))
+
+theorem nashMap.definition (n blk V : Set)
+  shows nashMap(n, blk, V) = assembledMap(n, nashFamily(n, blk, V))
+proof
+  unfold nashMap
+  rfl
+
+theorem nashMap.continuous (n : Nat) (blk V : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows CubeContinuous(nashMap(n, blk, V), n)
+proof
+  have continuous := nashFamily.continuous at n, blk, V with family
+  have bounds := nashFamily.bounds at n, blk, V with family
+  have same := nashMap.definition at n, blk, V
+  rw same
+  exact assembledMap.continuous with continuous, bounds
+
+theorem nashMap.in_cube (n : Nat) (blk V x : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  shows nashMap(n, blk, V)(x) ∈ unitCube(n)
+proof
+  have continuous := nashMap.continuous at n, blk, V with family
+  have map := continuous.left
+  have function := CubeMap.function with map
+  exact FunctionBetween.apply_closed with function, hx
+
+theorem nashMap.coordinate (n : Nat) (blk V x i : Set)
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ unitCube(n)
+  requires hi : i ∈ n
+  shows nashMap(n, blk, V)(x)(i) = ((x(i):R) + (gain(n, blk, V, i)(x):R)) * realInvValue((denominator(n, blk, V, blk(i))(x):R))
+proof
+  have functions := nashFamily.functions at n, blk, V with family
+  have bounds := nashFamily.bounds at n, blk, V with family
+  have same := nashMap.definition at n, blk, V
+  have assembled := assembledMap.coordinate with functions, bounds, hx, hi
+  have coordinate := nashFamily.coordinate at n, blk, V, i with family, hi
+  rw [same, assembled, coordinate]
+  exact nashCoordinate.value with family, hi, hx
+
+-- Nash's map keeps every block sum equal to one.
+theorem nashMap.block_sum (n : Nat) (m blk V x p : Set)
+  requires blkFunction : blk : n → m
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  requires hx : x ∈ simplexProduct(n, m, blk)
+  requires hp : p ∈ m
+  shows blockSum(n, blk, p)(nashMap(n, blk, V)(x)) = (1:R)
+proof
+  have xCube := simplexProduct.cube with hx
+  have sumOne := simplexProduct.block_sum with hx, hp
+  have image := nashMap.in_cube at n, blk, V, x with family, xCube
+  have functions := gainFamily.functions at n, blk, V with family
+  have gains := assembledPoint.function with functions, xCube
+  have shifted : ∀ j ∈ n, j ∈ blockSet(n, blk, p) → nashMap(n, blk, V)(x)(j) = ((x(j):R) + (assembledPoint(n, gainFamily(n, blk, V), x)(j):R)) * realInvValue((denominator(n, blk, V, p)(x):R))
+    intros j hj inBlock
+    have parts := blockSet.membership.forward with inBlock
+    have block := parts.right
+    have value := nashMap.coordinate at n, blk, V, x, j with family, xCube, hj
+    have gainValue := assembledPoint.value with functions, xCube, hj
+    have term := gainFamily.term at n, blk, V, j with family, hj
+    rw block at value
+    rwa [gainValue, term]
+  have sumSame := blockSum.definition at n, blk, p
+  have scaleReal := denominator.real at n, blk, V, p, x with family, xCube
+  have inverseReal := realInvValue.real at denominator(n, blk, V, p)(x)
+  have affine := sumCube.scaled_sum with xCube, image, gains, shifted
+  rw sumSame at affine
+  have totalValue := totalGain.value at n, blk, V, p, x with family, xCube
+  have scaleValue := denominator.value at n, blk, V, p, x with family, xCube
+  have scaleAtLeastOne := denominator.at_least_one at n, blk, V, p, x with family, xCube
+  have scaleNonzero : (denominator(n, blk, V, p)(x):R) ≠ (0:R)
+    intro zero
+    rw zero at scaleAtLeastOne
+    linarith
+  have cancel := realInvValue.mul_right with scaleNonzero
+  have numerator : (1:R) + (realPartialSum(maskedPoint(n, blockSet(n, blk, p), assembledPoint(n, gainFamily(n, blk, V), x)), n):R) = denominator(n, blk, V, p)(x)
+    rw [scaleValue, totalValue]
+    rfl
+  rwa [affine, sumOne, numerator]
+
+theorem nashMap.preserves (n : Nat) (m blk V : Set)
+  requires blkFunction : blk : n → m
+  requires family : ∀ i ∈ n, CubeFunctionContinuous(V(i), n)
+  shows ∀ x ∈ simplexProduct(n, m, blk), nashMap(n, blk, V)(x) ∈ simplexProduct(n, m, blk)
+proof
+  intros x hx
+  have xCube := simplexProduct.cube with hx
+  apply simplexProduct.membership.backward
+  constructor
+  . exact nashMap.in_cube with family, xCube
+  . intros p hp
+    exact nashMap.block_sum with blkFunction, family, hx, hp

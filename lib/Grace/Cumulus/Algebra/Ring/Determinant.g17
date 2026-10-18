@@ -1,0 +1,156 @@
+-- The Leibniz determinant over arbitrary commutative rings, using finite sums (ZF).
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.Determinant
+import FiniteProduct
+import Cardinal.Permutations
+import Group.Power
+
+-- Matrices are function graphs on the finite square of indices.
+predicate RingMatrix (I A M : Set) := FunctionBetween(M, I × I, A)
+
+notation scoped RingMatrix(I, R, M) => RingMatrix(I, R.carrier, M)
+
+theorem RingMatrix.entry (I A M i j : Set)
+  requires matrix : RingMatrix(I, A, M)
+  requires row : i ∈ I
+  requires column : j ∈ I
+  shows M[i, j] ∈ A
+proof
+  have pair := product.pair with row, column
+  unfold RingMatrix at matrix
+  exact FunctionBetween.apply_closed with matrix, pair
+
+theorem RingMatrix.ext (I A M N : Set)
+  requires first : RingMatrix(I, A, M)
+  requires second : RingMatrix(I, A, N)
+  requires entries : ∀ i ∈ I, ∀ j ∈ I, M[i, j] = N[i, j]
+  shows M = N
+proof
+  unfold RingMatrix at first
+  unfold RingMatrix at second
+  have values : ∀ p ∈ I × I, M(p) = N(p)
+    intros p hp
+    obtain ⟨bound, i, hi, j, hj, shape⟩ := product.membership.forward with hp
+    rw shape
+    exact entries with i, hi, j, hj
+  exact FunctionBetween.ext with first, second, values
+
+defgraph permutationEntries (I A M p : Set) (i ∈ I) : A := M[i, p(i)]
+requires matrix : RingMatrix(I, A, M)
+requires permutation : BijectiveBetween(p, I, I)
+proof
+  have injective := Bijective.injective with permutation
+  have function := Injective.function with injective
+  have image := FunctionBetween.apply_closed with function, assumption
+  have pair := product.pair at i, p(i), I, I with image
+  unfold RingMatrix at matrix
+  exact FunctionBetween.apply_closed with matrix, pair
+
+def permutationSign (I A add zero neg mul one p : Set) : Set :=
+  monoidPow(mul, one, neg(one), cardinality(inversions(I, p)))
+
+notation scoped permutationSign(I, R, p) => permutationSign(I, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p)
+
+section Rings
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem permutationSign.closed (I p : Set)
+  requires finite : Finite(I)
+  shows permutationSign(I, A, add, zero, neg, mul, one, p) ∈ R
+proof
+  have inversionsFinite := inversions.finite at I, p with finite
+  have count := cardinality.correct with inversionsFinite
+  have natural := count.left
+  have ordinary := IsCommRing.ring with ring
+  have multiplicative := IsRing.multiplicative with ordinary
+  have unitIn := IsMonoid.unit_in_carrier with multiplicative
+  have negative := IsRing.neg_closed with ordinary, unitIn
+  unfold permutationSign
+  exact monoidPow.closed with *
+
+theorem permutationSign.empty (p : Set)
+  shows permutationSign(∅, A, add, zero, neg, mul, one, p) = R[1]
+proof
+  have count : cardinality(∅) = (0 : Nat)
+    rw ← nat.zero
+    exact cardinality.natural with Naturals.constructor.zero
+  unfold permutationSign
+  rw [inversions.empty, count, monoidPow.zero]
+  rfl
+
+end Rings
+
+-- Explicit ring parameters let this graph be reused at every finite index set.
+defgraph determinantTerms (I A add zero neg mul one M : Set) (p ∈ permutations(I)) : A :=
+  call2(mul, permutationSign(I, A, add, zero, neg, mul, one, p), finiteRingProduct(I, A, add, zero, neg, mul, one, permutationEntries(I, A, M, p)))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires finite : Finite(I)
+requires matrix : RingMatrix(I, A, M)
+proof
+  have permutation := permutations.membership.forward at I, p with assumption
+  have entries := permutationEntries.function at I, A, M, p with *
+  have product := finiteRingProduct.closed at I, A, add, zero, neg, mul, one, permutationEntries(I, A, M, p) with *
+  have sign := permutationSign.closed at A, add, zero, neg, mul, one, I, p with *
+  have ordinary := IsCommRing.ring with ring
+  exact IsRing.mul_closed with ordinary, sign, product
+
+notation scoped determinantTerms(I, R, M) => determinantTerms(I, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, M)
+
+def determinant (n A add zero neg mul one M : Set) : Set :=
+  finiteRingSum(permutations(n), A, add, zero, neg, mul, one, determinantTerms(n, A, add, zero, neg, mul, one, M))
+
+notation scoped determinant(n, R, M) => determinant(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, M)
+
+section Determinants
+variable (A add zero neg mul one M : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem determinant.closed (n : Nat)
+  requires matrix : RingMatrix(n, R, M)
+  shows determinant(n, R, M) ∈ R
+proof
+  have finite := Finite.natural with *
+  have permutationsFinite := permutations.finite with finite
+  have weights := determinantTerms.function at n, A, add, zero, neg, mul, one, M with *
+  unfold determinant
+  exact finiteRingSum.closed with ring, permutationsFinite, weights
+
+theorem determinant.congr (n : Nat) (N : Set)
+  requires first : RingMatrix(n, R, M)
+  requires second : RingMatrix(n, R, N)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n, M[i, j] = N[i, j]
+  shows determinant(n, R, M) = determinant(n, R, N)
+proof
+  have equal := RingMatrix.ext with first, second, entries
+  rw equal
+  rfl
+
+theorem determinant.empty
+  requires matrix : RingMatrix(∅, R, M)
+  shows determinant(∅, R, M) = R[1]
+proof
+  have finite := Finite.empty
+  have weights := determinantTerms.function at ∅, A, add, zero, neg, mul, one, M with *
+  have singletonWeights := weights
+  rw permutations.empty at singletonWeights
+  have member : ∅ ∈ permutations(∅)
+    rw permutations.empty
+    simp
+  have permutation := permutations.membership.forward with member
+  have entries := permutationEntries.function at ∅, A, M, ∅ with *
+  have product := finiteRingProduct.empty with ring, entries
+  have sign := permutationSign.empty at A, add, zero, neg, mul, one, ∅ with *
+  have term := determinantTerms.value at ∅, A, add, zero, neg, mul, one, M, ∅ with *
+  have sum := finiteRingSum.singleton with ring, singletonWeights
+  unfold determinant
+  rw [permutations.empty, sum, term, product, sign]
+  ring
+
+end Determinants

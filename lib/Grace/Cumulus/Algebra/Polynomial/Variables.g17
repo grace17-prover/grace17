@@ -1,0 +1,130 @@
+-- The finite set of variables used by a sparse polynomial determines its evaluation.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Polynomial.Variables
+import Assignment
+import Cardinal.FiniteUnion
+import Cardinal.FiniteImage
+
+defgraph monomialVariableSets (I : Set) (m ∈ monomials(I)) : 𝒫(I) := functionSupport(m, I, 0)
+proof
+  have subset := functionSupport.subset at m, I, 0
+  exact powerset.membership_iff.backward at functionSupport(m, I, 0), I with subset
+
+def polynomialVariablesUsed (I A z p : Set) : Set :=
+  ⋃functionImage(monomialVariableSets(I), functionSupport(p, monomials(I), z), 𝒫(I))
+
+notation scoped polynomialVariablesUsed(I, R, p) => polynomialVariablesUsed(I, R.carrier, R.zero, p)
+
+theorem polynomialVariablesUsed.membership (I A z p i : Set)
+  shows i ∈ polynomialVariablesUsed(I, A, z, p) ↔ ∃ m ∈ functionSupport(p, monomials(I), z), i ∈ functionSupport(m, I, 0)
+proof
+  constructor
+  . intro member
+    unfold polynomialVariablesUsed at member
+    obtain ⟨S, image, inS⟩ := set.union.forward with member
+    obtain ⟨bound, m, support, equal⟩ := functionImage.membership.forward with image
+    have data := functionSupport.membership.forward with support
+    have value := monomialVariableSets.value with data.left
+    refine ⟨m, support, ?_⟩
+    have same : S = functionSupport(m, I, 0) by cc
+    rwa ← same
+  . intro witnesses
+    obtain ⟨m, support, member⟩ := witnesses
+    have data := functionSupport.membership.forward with support
+    have function := monomialVariableSets.function at I
+    have bounded := FunctionBetween.apply_closed with function, data.left
+    have value := monomialVariableSets.value with data.left
+    have image : monomialVariableSets(I)(m) ∈ functionImage(monomialVariableSets(I), functionSupport(p, monomials(I), z), 𝒫(I))
+      exact functionImage.membership.backward with ⟨bounded, m, support, rfl⟩
+    have inS : i ∈ monomialVariableSets(I)(m) by rwa value
+    unfold polynomialVariablesUsed
+    exact union.contains with image, inS
+
+theorem polynomialVariablesUsed.subset (I A z p : Set)
+  shows polynomialVariablesUsed(I, A, z, p) ⊆ I
+proof
+  intros i hi
+  obtain ⟨m, support, member⟩ := polynomialVariablesUsed.membership.forward with hi
+  have data := functionSupport.membership.forward with member
+  exact data.left
+
+theorem polynomialVariablesUsed.finite (I A z p : Set)
+  requires polynomial : p ∈ polynomials(I, A, z)
+  shows Finite(polynomialVariablesUsed(I, A, z, p))
+proof
+  have support := polynomials.finite_support with polynomial
+  have domain := functionSupport.subset at p, monomials(I), z
+  have function := monomialVariableSets.function at I
+  have finite := Finite.function_image with function, support, domain
+  have members : ∀ S ∈ functionImage(monomialVariableSets(I), functionSupport(p, monomials(I), z), 𝒫(I)), Finite(S)
+    intros S hS
+    obtain ⟨bound, m, hm, equal⟩ := functionImage.membership.forward with hS
+    have data := functionSupport.membership.forward with hm
+    have map := monomials.map with data.left
+    have finiteSupport := CoefficientMap.finite_support with map
+    have value := monomialVariableSets.value with data.left
+    rwa [equal, value]
+  unfold polynomialVariablesUsed
+  exact Finite.big_union with finite, members
+
+section Evaluation
+variable (I A add z neg mul one v w : Set)
+hypothesis ring : IsCommRing(A, add, z, neg, mul, one)
+hypothesis first : v : I → A
+hypothesis second : w : I → A
+
+theorem monomialEvaluate.agree_on_support (m : Set)
+  requires monomial : m ∈ monomials(I)
+  requires agreement : ∀ i ∈ functionSupport(m, I, 0), v(i) = w(i)
+  shows monomialEvaluate(I, A, add, z, neg, mul, one, v)(m) = monomialEvaluate(I, A, add, z, neg, mul, one, w)(m)
+proof
+  have domain := functionSupport.subset at m, I, 0
+  have map := monomials.map with monomial
+  have finite := CoefficientMap.finite_support with map
+  have left := monomialWeights.function at I, functionSupport(m, I, 0), A, add, z, neg, mul, one, v, m with *
+  have right := monomialWeights.function at I, functionSupport(m, I, 0), A, add, z, neg, mul, one, w, m with *
+  have values : ∀ i ∈ functionSupport(m, I, 0), monomialWeights(I, functionSupport(m, I, 0), A, add, z, neg, mul, one, v, m)(i) = monomialWeights(I, functionSupport(m, I, 0), A, add, z, neg, mul, one, w, m)(i)
+    intros i hi
+    have valueV := monomialWeights.value at I, functionSupport(m, I, 0), A, add, z, neg, mul, one, v, m, i with *
+    have valueW := monomialWeights.value at I, functionSupport(m, I, 0), A, add, z, neg, mul, one, w, m, i with *
+    have equal := agreement with i, hi
+    cc
+  have equal := finiteRingProduct.congr with ring, finite, left, right, values
+  have valueV := monomialEvaluate.value at I, A, add, z, neg, mul, one, v, m with *
+  have valueW := monomialEvaluate.value at I, A, add, z, neg, mul, one, w, m with *
+  cc
+
+theorem polynomialAt.agree_on_variables (p : Set)
+  requires polynomial : p ∈ polynomials(I, A, z)
+  requires agreement : ∀ i ∈ polynomialVariablesUsed(I, A, z, p), v(i) = w(i)
+  shows polynomialAt(I, A, add, z, neg, mul, one, v)(p) = polynomialAt(I, A, add, z, neg, mul, one, w)(p)
+proof
+  have domain := functionSupport.subset at p, monomials(I), z
+  have finite := polynomials.finite_support with polynomial
+  have valuesV := monomialEvaluate.function at I, A, add, z, neg, mul, one, v with *
+  have valuesW := monomialEvaluate.function at I, A, add, z, neg, mul, one, w with *
+  have left := polynomialEvaluationWeights.function at I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, v), p with *
+  have right := polynomialEvaluationWeights.function at I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, w), p with *
+  have values : ∀ m ∈ functionSupport(p, monomials(I), z), polynomialEvaluationWeights(I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, v), p)(m) = polynomialEvaluationWeights(I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, w), p)(m)
+    intros m hm
+    have data := functionSupport.membership.forward with hm
+    have same : ∀ i ∈ functionSupport(m, I, 0), v(i) = w(i)
+      intros i hi
+      have used : i ∈ polynomialVariablesUsed(I, A, z, p)
+        exact polynomialVariablesUsed.membership.backward with ⟨m, hm, hi⟩
+      exact agreement with i, used
+    have equal := monomialEvaluate.agree_on_support with ring, first, second, data.left, same
+    have valueV := polynomialEvaluationWeights.value at I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, v), p, m with *
+    have valueW := polynomialEvaluationWeights.value at I, functionSupport(p, monomials(I), z), A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, w), p, m with *
+    cc
+  have equal := finiteRingSum.congr with ring, finite, left, right, values
+  have valueV := polynomialEvaluate.value at I, A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, v), p with *
+  have valueW := polynomialEvaluate.value at I, A, add, z, neg, mul, one, monomialEvaluate(I, A, add, z, neg, mul, one, w), p with *
+  unfold polynomialAt
+  cc
+
+end Evaluation

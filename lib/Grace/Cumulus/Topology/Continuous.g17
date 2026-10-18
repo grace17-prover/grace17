@@ -1,0 +1,267 @@
+-- Continuous maps between bundled spaces: the guard f : X ⇒ Y, the
+-- identity, composition, constants, and restrictions, preimages of open and
+-- closed sets, the closure inclusion, convergent sequences under a
+-- continuous map, compact images, and homeomorphisms
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Continuous
+import Structure
+
+-- f : X ⇒ Y: a function between the carriers of two spaces under which the
+-- preimage of every open set is open. The form is a transparent guard, so
+-- a hypothesis f : X ⇒ Y also supplies the spaces X and Y and the binders
+-- (x : X) and (y : Y). ContinuousMap(f, A, T, B, S) remains the form over
+-- separate pieces, bridged below.
+predicate Continuous (f X Y : Set) :=
+  TopologicalSpace(X) ∧ TopologicalSpace(Y) ∧
+  ContinuousMap(f, X.carrier, X.opens, Y.carrier, Y.opens)
+
+notation guard "_ : _ ⇒ _" => Continuous
+
+theorem Continuous.mk (f X Y : Set)
+  requires source : TopologicalSpace(X)
+  requires target : TopologicalSpace(Y)
+  requires function : f : X.carrier → Y.carrier
+  requires preimages :
+    ∀ V ∈ Y.opens, functionPreimage(f, X.carrier, V) ∈ X.opens
+  shows f : X ⇒ Y
+proof
+  unfold Continuous
+  refine ⟨source, target, ?_⟩
+  unfold ContinuousMap
+  exact ⟨function, preimages⟩
+
+theorem Continuous.of_projections (f X Y : Set)
+  requires spaceX : TopologicalSpace(X)
+  requires spaceY : TopologicalSpace(Y)
+  requires continuous : ContinuousMap(f, X.carrier, X.opens, Y.carrier, Y.opens)
+  shows f : X ⇒ Y
+proof
+  unfold Continuous
+  exact ⟨spaceX, spaceY, continuous⟩
+
+theorem Continuous.of_parts (f A T B S : Set)
+  requires topologyA : IsTopology(A, T)
+  requires topologyB : IsTopology(B, S)
+  requires continuous : ContinuousMap(f, A, T, B, S)
+  shows f : TopologicalSpace.mk(A, T) ⇒ TopologicalSpace.mk(B, S)
+proof
+  have spaceA := TopologicalSpace.of_parts with topologyA
+  have spaceB := TopologicalSpace.of_parts with topologyB
+  unfold Continuous
+  refine ⟨spaceA, spaceB, ?_⟩
+  topology_projections
+
+section ContinuityLaws
+variable (f X Y : Set)
+hypothesis continuous : f : X ⇒ Y
+
+theorem Continuous.source
+  shows TopologicalSpace(X)
+proof
+  obtain ⟨source, rest⟩ := continuous
+  exact source
+
+theorem Continuous.target
+  shows TopologicalSpace(Y)
+proof
+  obtain ⟨source, target, rest⟩ := continuous
+  exact target
+
+-- The bridge to the form over separate pieces is an instance, so `with *`
+-- reads it off the guard.
+instance Continuous.parts
+  shows ContinuousMap(f, X.carrier, X.opens, Y.carrier, Y.opens)
+proof
+  obtain ⟨source, target, engine⟩ := continuous
+  exact engine
+
+theorem Continuous.function_between
+  shows f : X.carrier → Y.carrier
+proof
+  have engine := Continuous.parts with continuous
+  exact ContinuousMap.function with engine
+
+theorem Continuous.apply_mem (x : X)
+  shows f(x) ∈ Y
+proof
+  have function := Continuous.function_between with continuous
+  have xIn : x ∈ X by assumption
+  exact FunctionBetween.apply_closed with function, xIn
+
+theorem Continuous.preimage_open (V : Set)
+  requires open : Open(Y, V)
+  shows Open(X, functionPreimage(f, X.carrier, V))
+proof
+  have spaceX := Continuous.source with continuous
+  have engine := Continuous.parts with continuous
+  have member := Open.mem with open
+  exact Open.of_mem with spaceX, (ContinuousMap.preimage with engine, member)
+
+theorem Continuous.preimage_closed (C : Set)
+  requires closed : Closed(Y, C)
+  shows Closed(X, functionPreimage(f, X.carrier, C))
+proof
+  have spaceX := Continuous.source with continuous
+  have engine := Continuous.parts with continuous
+  have pieces := Closed.parts with closed
+  have closedPreimage := ContinuousMap.closed_preimage with engine, pieces
+  exact Closed.of_parts with spaceX, closedPreimage
+
+-- A continuous map sends the closure of A into the closure of its image.
+theorem Continuous.image_closure (A : Set)
+  requires hA : A ⊆ X
+  shows functionImage(f, closure(X, A), Y.carrier) ⊆
+    closure(Y, functionImage(f, A, Y.carrier))
+proof
+  have engine := Continuous.parts with continuous
+  rw [closure.parts, closure.parts]
+  exact ContinuousMap.image_closure with *
+
+-- A continuous map carries a convergent sequence to a convergent sequence.
+theorem Continuous.map_converges (u : Set) (x : X)
+  requires converges : u ⇝ x
+  shows compose(f, u, ℕ, X.carrier, Y.carrier) ⇝ f(x)
+proof
+  have function := Continuous.function_between with continuous
+  have sequence := Converges.sequence with converges
+  have point := Converges.limit_mem with converges
+  have composite := compose.function with sequence, function
+  have image := FunctionBetween.apply_closed with function, point
+  have eventually : ∀ V, Open(Y, V) → f(x) ∈ V →
+      ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n →
+        apply(compose(f, u, ℕ, X.carrier, Y.carrier), n) ∈ V
+    intros V open hfx
+    have preimageOpen := Continuous.preimage_open with continuous, open
+    have inPreimage : x ∈ functionPreimage(f, X.carrier, V)
+      apply functionPreimage.membership.backward
+      exact ⟨point, hfx⟩
+    have hit := Converges.eventually with converges, preimageOpen, inPreimage
+    obtain ⟨N, hN, tail⟩ := hit
+    witness N
+    refine ⟨hN, ?_⟩
+    intros n hn order
+    have term := tail with n, hn, order
+    have parts := functionPreimage.membership.forward with term
+    have value := compose.apply at f, u, ℕ, X.carrier, Y.carrier, n with *
+    rw value
+    exact parts.right
+  exact Converges.of_eventually with *
+
+-- The continuous image of a compact set is compact.
+theorem Compact.continuous_image (A : Set)
+  requires compact : Compact(X, A)
+  shows Compact(Y, functionImage(f, A, Y.carrier))
+proof
+  have engine := Continuous.parts with continuous
+  have pieces := Compact.parts with compact
+  exact Compact.of_parts with (IsCompact.image with engine, pieces)
+
+end ContinuityLaws
+
+theorem Continuous.id (X : Set)
+  requires space : TopologicalSpace(X)
+  shows identity(X.carrier) : X ⇒ X
+proof
+  unfold Continuous
+  refine ⟨space, space, ?_⟩
+  exact ContinuousMap.identity with *
+
+theorem Continuous.comp (f g X Y Z : Set)
+  requires first : f : X ⇒ Y
+  requires second : g : Y ⇒ Z
+  shows compose(g, f, X.carrier, Y.carrier, Z.carrier) : X ⇒ Z
+proof
+  have engineF := Continuous.parts with first
+  have engineG := Continuous.parts with second
+  unfold Continuous
+  have spaceX := Continuous.source with first
+  have spaceZ := Continuous.target with second
+  refine ⟨spaceX, spaceZ, ?_⟩
+  exact ContinuousMap.compose with engineF, engineG
+
+theorem Continuous.constant (X Y y : Set)
+  requires spaceX : TopologicalSpace(X)
+  requires spaceY : TopologicalSpace(Y)
+  requires hy : y ∈ Y
+  shows constantFunction(X.carrier, Y.carrier, y) : X ⇒ Y
+proof
+  unfold Continuous
+  refine ⟨spaceX, spaceY, ?_⟩
+  exact ContinuousMap.constant with *
+
+theorem Continuous.of_closed_preimages (f X Y : Set)
+  requires spaceX : TopologicalSpace(X)
+  requires spaceY : TopologicalSpace(Y)
+  requires function : f : X.carrier → Y.carrier
+  requires closed :
+    ∀ C, Closed(Y, C) → Closed(X, functionPreimage(f, X.carrier, C))
+  shows f : X ⇒ Y
+proof
+  have pieces : ∀ C, IsClosed(Y.carrier, Y.opens, C) →
+      IsClosed(X.carrier, X.opens, functionPreimage(f, X.carrier, C))
+    intros C closedC
+    exact Closed.parts with (closed with C, (Closed.of_parts with closedC))
+  unfold Continuous
+  refine ⟨spaceX, spaceY, ?_⟩
+  exact ContinuousMap.of_closed_preimages with *
+
+-- Homeomorphisms: continuous bijections with a continuous inverse.
+predicate Homeomorphism (f X Y : Set) :=
+  Continuous(f, X, Y) ∧ BijectiveBetween(f, X.carrier, Y.carrier) ∧
+  Continuous(converse(f, X.carrier, Y.carrier), Y, X)
+
+theorem Homeomorphism.continuous (f X Y : Set)
+  requires homeomorphism : Homeomorphism(f, X, Y)
+  shows f : X ⇒ Y
+proof
+  obtain ⟨continuous, rest⟩ := homeomorphism
+  exact continuous
+
+theorem Homeomorphism.bijective (f X Y : Set)
+  requires homeomorphism : Homeomorphism(f, X, Y)
+  shows BijectiveBetween(f, X.carrier, Y.carrier)
+proof
+  obtain ⟨continuous, bijective, inverse⟩ := homeomorphism
+  exact bijective
+
+instance Homeomorphism.parts (f X Y : Set)
+  requires homeomorphism : Homeomorphism(f, X, Y)
+  shows IsHomeomorphism(f, X.carrier, X.opens, Y.carrier, Y.opens)
+proof
+  obtain ⟨continuous, bijective, inverse⟩ := homeomorphism
+  have forward := Continuous.parts with continuous
+  have backward := Continuous.parts with inverse
+  unfold IsHomeomorphism
+  exact ⟨bijective, forward, backward⟩
+
+theorem Homeomorphism.of_parts (f X Y : Set)
+  requires spaceX : TopologicalSpace(X)
+  requires spaceY : TopologicalSpace(Y)
+  requires homeomorphism :
+    IsHomeomorphism(f, X.carrier, X.opens, Y.carrier, Y.opens)
+  shows Homeomorphism(f, X, Y)
+proof
+  obtain ⟨bijective, forward, backward⟩ := homeomorphism
+  have continuous : f : X ⇒ Y
+    unfold Continuous
+    exact ⟨spaceX, spaceY, forward⟩
+  have inverse : converse(f, X.carrier, Y.carrier) : Y ⇒ X
+    unfold Continuous
+    exact ⟨spaceY, spaceX, backward⟩
+  unfold Homeomorphism
+  exact ⟨continuous, bijective, inverse⟩
+
+theorem Homeomorphism.symm (f X Y : Set)
+  requires homeomorphism : Homeomorphism(f, X, Y)
+  shows Homeomorphism(converse(f, X.carrier, Y.carrier), Y, X)
+proof
+  have continuous := Homeomorphism.continuous with homeomorphism
+  have spaceX := Continuous.source with continuous
+  have spaceY := Continuous.target with continuous
+  have engine := Homeomorphism.parts with homeomorphism
+  apply Homeomorphism.of_parts with spaceY, spaceX
+  exact Continuity.IsHomeomorphism.inverse with engine

@@ -1,0 +1,276 @@
+-- A set with n elements has choose(n, k) subsets with k elements: the
+-- k + 1 element subsets of insert(x, A) split into those avoiding x and those
+-- containing it, and Pascal's rule counts the two halves
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Combinations
+import PowersetCount
+import Dominance
+import NumberTheory.Binomial
+
+def subsetsOfSize (A k : Set) : Set := { S ∈ 𝒫(A) | HasCardinality(S, k) }
+
+theorem subsetsOfSize.membership (S A k : Set)
+  shows S ∈ subsetsOfSize(A, k) ↔ S ∈ 𝒫(A) ∧ HasCardinality(S, k)
+proof
+  simp [subsetsOfSize]
+
+-- Only the empty set has no elements.
+theorem subsetsOfSize.zero (A : Set)
+  shows subsetsOfSize(A, 0) = {∅}
+proof
+  ext S
+  constructor
+  . intro h
+    have parts := subsetsOfSize.membership.forward with h
+    have empty := HasCardinality.empty_of_zero with parts.right
+    exact singleton.membership.backward with empty
+  . intro h
+    have equal := singleton.membership.forward with h
+    apply subsetsOfSize.membership.backward
+    rw equal
+    constructor
+    . exact powerset.membership_iff.backward with (empty.subset at A)
+    . exact HasCardinality.empty_set
+
+theorem subsetsOfSize.zero_cardinality (A : Set)
+  shows HasCardinality(subsetsOfSize(A, 0), 1)
+proof
+  have same := subsetsOfSize.zero at A
+  rw same
+  constructor
+  . exact Naturals.constructor.succ at 0 with Naturals.constructor.zero
+  . exact Equipotent.singleton_one at ∅
+
+-- The empty set has no nonempty subsets.
+theorem subsetsOfSize.empty_succ (j : Nat)
+  shows subsetsOfSize(∅, succ(j)) = ∅
+proof
+  ext S
+  constructor
+  . intro h
+    have parts := subsetsOfSize.membership.forward with h
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with parts.right
+    have subset := powerset.membership_iff.forward with parts.left
+    have inEmpty := subset with a, member
+    exfalso
+    exact set.empty with inEmpty
+  . intro h
+    exfalso
+    exact set.empty with h
+
+-- Removing a from a set of size j + 1 containing a leaves a set of size j.
+theorem HasCardinality.remove (S a : Set) (j : Nat)
+  requires counted : HasCardinality(S, succ(j))
+  requires member : a ∈ S
+  shows HasCardinality(S ∖ {a}, j)
+proof
+  have finite := Finite.from_cardinality with counted
+  have count := cardinality.eq_of_has with counted
+  have removal := cardinality.remove with finite, member
+  rw count at removal
+  have equal := Naturals.injective.succ with removal
+  have finiteRest := Finite.subset with finite, (difference.subset_left at S, {a})
+  have correct := cardinality.correct with finiteRest
+  rwa ← equal at correct
+
+theorem HasCardinality.insert_fresh (T a : Set) (j : Nat)
+  requires counted : HasCardinality(T, j)
+  requires fresh : ¬a ∈ T
+  shows HasCardinality(insert(a, T), succ(j))
+proof
+  have finite := Finite.from_cardinality with counted
+  have count := cardinality.eq_of_has with counted
+  have inserted := cardinality.insert with finite, fresh
+  rw count at inserted
+  have finiteInsert := Finite.insert at T, a with finite
+  have correct := cardinality.correct with finiteInsert
+  rwa inserted at correct
+
+-- Under the powerset split, the j + 1 element subsets of insert(a, B) go
+-- exactly onto the j + 1 element subsets of B and the j element subsets of B.
+theorem subsetsOfSize.insert_image (B a : Set) (j : Nat)
+  requires fresh : ¬a ∈ B
+  shows functionImage(powersetSplit(B, a), subsetsOfSize(insert(a, B), succ(j)), 𝒫(B) ⊎ 𝒫(B)) = subsetsOfSize(B, succ(j)) ⊎ subsetsOfSize(B, j)
+proof
+  have function := powersetSplit.function at B, a
+  ext v
+  constructor
+  . intro hv
+    have parts := functionImage.membership.forward with hv
+    obtain ⟨S, hS, shape⟩ := parts.right
+    have sParts := subsetsOfSize.membership.forward with hS
+    have sPower := sParts.left
+    have sCount := sParts.right
+    have sSubset := powerset.membership_iff.forward with sPower
+    have alternatives : a ∈ S ∨ ¬a ∈ S by tauto
+    cases alternatives with present | absent
+    . have related := powersetSplit.relates_present with sPower, present
+      have value := FunctionBetween.apply_value with function, sPower, related
+      rw value at shape
+      rw shape
+      apply disjointSum.right
+      apply subsetsOfSize.membership.backward
+      constructor
+      . exact powerset.membership_iff.backward with (subset.without at B, a, S with sSubset)
+      . exact HasCardinality.remove with sCount, present
+    . have related := powersetSplit.relates_absent with sPower, absent
+      have value := FunctionBetween.apply_value with function, sPower, related
+      rw value at shape
+      rw shape
+      apply disjointSum.left
+      apply subsetsOfSize.membership.backward
+      constructor
+      . exact powerset.membership_iff.backward with (subset.absent at B, a, S with sSubset, absent)
+      . exact sCount
+  . intro hv
+    have split := disjointSum.membership.forward with hv
+    cases split with leftCase | rightCase
+    . obtain ⟨T, hT, shape⟩ := leftCase
+      have tParts := subsetsOfSize.membership.forward with hT
+      have tSubset := powerset.membership_iff.forward with tParts.left
+      have absent : ¬a ∈ T
+        intro h
+        apply fresh
+        exact tSubset with a, h
+      have tPower : T ∈ 𝒫(insert(a, B))
+        apply powerset.membership_iff.backward
+        intros x hx
+        have inB := tSubset with x, hx
+        apply insert.membership.backward
+        right
+        exact inB
+      have inSized : T ∈ subsetsOfSize(insert(a, B), succ(j))
+        apply subsetsOfSize.membership.backward
+        exact ⟨tPower, tParts.right⟩
+      have related := powersetSplit.relates_absent with tPower, absent
+      have value := FunctionBetween.apply_value with function, tPower, related
+      apply functionImage.membership.backward
+      constructor
+      . rw shape
+        exact disjointSum.left with tParts.left
+      . witness T
+        constructor
+        . exact inSized
+        . rw [shape, value]
+          rfl
+    . obtain ⟨T, hT, shape⟩ := rightCase
+      have tParts := subsetsOfSize.membership.forward with hT
+      have tSubset := powerset.membership_iff.forward with tParts.left
+      have absent : ¬a ∈ T
+        intro h
+        apply fresh
+        exact tSubset with a, h
+      have counted := HasCardinality.insert_fresh with tParts.right, absent
+      have sPower : insert(a, T) ∈ 𝒫(insert(a, B))
+        apply powerset.membership_iff.backward
+        intros x hx
+        have where := insert.membership.forward with hx
+        apply insert.membership.backward
+        cases where with same | inT
+        . left
+          exact same
+        . right
+          exact tSubset with x, inT
+      have inSized : insert(a, T) ∈ subsetsOfSize(insert(a, B), succ(j))
+        apply subsetsOfSize.membership.backward
+        exact ⟨sPower, counted⟩
+      have present := insert.self at a, T
+      have related := powersetSplit.relates_present with sPower, present
+      have value := FunctionBetween.apply_value with function, sPower, related
+      have removed := insert.remove_fresh with absent
+      rw removed at value
+      apply functionImage.membership.backward
+      constructor
+      . rw shape
+        exact disjointSum.right with tParts.left
+      . witness insert(a, T)
+        constructor
+        . exact inSized
+        . rw [shape, value]
+          rfl
+
+theorem subsetsOfSize.insert_equipotent (B a : Set) (j : Nat)
+  requires fresh : ¬a ∈ B
+  shows subsetsOfSize(insert(a, B), succ(j)) ≃ subsetsOfSize(B, succ(j)) ⊎ subsetsOfSize(B, j)
+proof
+  have injective := powersetSplit.injective at B, a
+  have function := powersetSplit.function at B, a
+  have subset : subsetsOfSize(insert(a, B), succ(j)) ⊆ 𝒫(insert(a, B))
+    intros S hS
+    have parts := subsetsOfSize.membership.forward with hS
+    exact parts.left
+  have restricted := restrict.injective with injective, subset
+  have equipotent := Equipotent.image with restricted
+  have sameImage := functionImage.restrict with function, subset
+  have image := subsetsOfSize.insert_image with fresh
+  rwa [sameImage, image] at equipotent
+
+theorem subsetsOfSize.insert_cardinality (B a : Set) (j p q : Nat)
+  requires fresh : ¬a ∈ B
+  requires countSucc : HasCardinality(subsetsOfSize(B, succ(j)), p)
+  requires countJ : HasCardinality(subsetsOfSize(B, j), q)
+  shows HasCardinality(subsetsOfSize(insert(a, B), succ(j)), add(p, q))
+proof
+  obtain ⟨natural, equivalent⟩ := HasCardinality.disjointSum with countSucc, countJ
+  have split := subsetsOfSize.insert_equipotent at B, a, j with fresh
+  constructor
+  . exact natural
+  . exact Equipotent.transitive with split, equivalent
+
+-- Induction on the size of the set, following Pascal's rule.
+theorem subsetsOfSize.cardinality (n : Nat)
+  shows ∀ A, HasCardinality(A, n) → ∀ k, Nat(k) → HasCardinality(subsetsOfSize(A, k), choose(n, k))
+proof
+  induction n
+  | zero =>
+    intros A counted k kNat
+    have countedZero : HasCardinality(A, 0)
+      exact counted
+    have empty := HasCardinality.empty_of_zero at A with countedZero
+    rw empty
+    have split := natural.zero_or_successor at k
+    cases split with isZero | isSucc
+    . rw [isZero, choose.zero_right]
+      exact subsetsOfSize.zero_cardinality at ∅
+    . obtain ⟨j, jNat, shape⟩ := isSucc
+      rw [shape, choose.zero_left]
+      have none := subsetsOfSize.empty_succ at j
+      rw none
+      exact HasCardinality.empty_set
+  | succ(m) using ih =>
+    intros A counted k kNat
+    obtain ⟨a, member⟩ := HasCardinality.exists_member with counted
+    have rest := HasCardinality.remove at A, a, m with counted, member
+    have fresh : ¬a ∈ A ∖ {a} by simp [difference.membership, singleton.membership]
+    have restored := insert.restore with member
+    have split := natural.zero_or_successor at k
+    cases split with isZero | isSucc
+    . rw [isZero, choose.zero_right]
+      exact subsetsOfSize.zero_cardinality at A
+    . obtain ⟨j, jNat, shape⟩ := isSucc
+      rw [shape, choose.succ_succ]
+      have sjNat : Nat(succ(j)) by typecheck
+      have forRest := ih with A ∖ {a}, rest
+      have forSucc := forRest with succ(j), sjNat
+      have forJ := forRest with j, jNat
+      have combined := subsetsOfSize.insert_cardinality at A ∖ {a}, a, j, choose(m, succ(j)), choose(m, j) with fresh, forSucc, forJ
+      rw restored at combined
+      have commute : add(choose(m, succ(j)), choose(m, j)) = choose(m, j) + choose(m, succ(j)) by ring
+      rw commute at combined
+      exact combined
+
+-- The number of k element subsets of a finite set.
+theorem combinations.count (A : Set) (k : Nat)
+  requires finite : Finite(A)
+  shows cardinality(subsetsOfSize(A, k)) = choose(cardinality(A), k)
+proof
+  have counted := cardinality.correct with finite
+  have natural := HasCardinality.natural with counted
+  have all := subsetsOfSize.cardinality at cardinality(A)
+  have forA := all with A, counted
+  have result := forA with k
+  exact cardinality.eq_of_has with result

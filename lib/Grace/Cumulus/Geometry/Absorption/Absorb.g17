@@ -1,0 +1,218 @@
+-- Absorbing a set into its forward orbit: for an action act : G ↷ X, a
+-- set D ⊆ X, and ρ ∈ G whose positive powers carry D off itself, the
+-- forward orbit U = ⋃ₙ ρⁿ(D) satisfies ρ(U) = U ∖ D, so X and X ∖ D are
+-- equidecomposable with the two pieces U and X ∖ U
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Geometry.Absorption.Absorb
+import Algebra.Group.Action
+import Algebra.Group.Pow
+
+-- The image of a set under the action of one group element.
+def actImage (act g A : Set) : Set := { call2(act, g, x) | x ∈ A }
+
+theorem actImage.membership (act g A y : Set)
+  shows y ∈ actImage(act, g, A) ↔ ∃ x ∈ A, call2(act, g, x) = y
+proof
+  simp [actImage]
+
+-- The stages ρⁿ(D) and their union, the forward orbit of D under ρ.
+def orbitStages (act G ρ D : Set) : Set :=
+  { actImage(act, groupPow(G, ρ, n), D) | n ∈ ℕ }
+def forwardOrbit (act G ρ D : Set) : Set := ⋃(orbitStages(act, G, ρ, D))
+
+theorem orbitStages.membership (act G ρ D A : Set)
+  shows A ∈ orbitStages(act, G, ρ, D) ↔
+    ∃ n ∈ ℕ, actImage(act, groupPow(G, ρ, n), D) = A
+proof
+  simp [orbitStages]
+
+theorem forwardOrbit.graph (act G ρ D : Set)
+  shows forwardOrbit(act, G, ρ, D) = ⋃(orbitStages(act, G, ρ, D))
+proof
+  simp [forwardOrbit]
+
+theorem forwardOrbit.membership (act G ρ D y : Set)
+  shows y ∈ forwardOrbit(act, G, ρ, D) ↔
+    ∃ n ∈ ℕ, y ∈ actImage(act, groupPow(G, ρ, n), D)
+proof
+  rw forwardOrbit.graph
+  constructor
+  . intro h
+    obtain ⟨A, hA, inA⟩ := union.membership.forward with h
+    obtain ⟨n, hn, shape⟩ := orbitStages.membership.forward with hA
+    refine ⟨n, hn, ?_⟩
+    rw shape
+    exact inA
+  . intro h
+    obtain ⟨n, hn, inStage⟩ := h
+    have stageIn : actImage(act, groupPow(G, ρ, n), D) ∈ orbitStages(act, G, ρ, D)
+      apply orbitStages.membership.backward
+      exact ⟨n, hn, rfl⟩
+    exact union.contains with stageIn, inStage
+
+section Absorption
+variable (act G X : Set)
+hypothesis action : act : G ↷ X
+
+theorem actImage.subset (g : G) (A : Set)
+  requires subset : A ⊆ X
+  shows actImage(act, g, A) ⊆ X
+proof
+  intros y hy
+  obtain ⟨x, hx, shape⟩ := actImage.membership.forward with hy
+  have xIn := subset with x, hx
+  have moved : g ·ₐ x ∈ X := Action.act_mem with action, xIn
+  rw ← shape
+  exact moved
+
+theorem actImage.contains (g : G) (A x : Set)
+  requires hx : x ∈ A
+  shows g ·ₐ x ∈ actImage(act, g, A)
+proof
+  exact actImage.membership.backward with ⟨x, hx, rfl⟩
+
+theorem forwardOrbit.subset (ρ : G) (D : Set)
+  requires subset : D ⊆ X
+  shows forwardOrbit(act, G, ρ, D) ⊆ X
+proof
+  have group := Action.group with action
+  intros y hy
+  obtain ⟨n, hn, inStage⟩ := forwardOrbit.membership.forward with hy
+  have natural := omega.natural with hn
+  have powerIn : ρ ^ n ∈ G := Group.pow_mem with group
+  have bounded : actImage(act, ρ ^ n, D) ⊆ X := actImage.subset with *
+  exact bounded with y, inStage
+
+theorem forwardOrbit.contains (ρ : G) (D : Set)
+  requires subset : D ⊆ X
+  shows D ⊆ forwardOrbit(act, G, ρ, D)
+proof
+  have group := Action.group with action
+  intros d hd
+  have dIn := subset with d, hd
+  have unit : ρ ^ 0 = G.one := pow_zero with group
+  have fixed : G.one ·ₐ d = d := one_act with action, dIn
+  have zeroIn : 0 ∈ ℕ by typecheck
+  apply forwardOrbit.membership.backward
+  refine ⟨0, zeroIn, ?_⟩
+  apply actImage.membership.backward
+  refine ⟨d, hd, ?_⟩
+  rw unit
+  exact fixed
+
+-- The forward orbit is carried by ρ onto itself minus D: ρ(ρⁿ(D)) is
+-- ρⁿ⁺¹(D), and the stages beyond the first are the ones off D.
+theorem forwardOrbit.image (ρ : G) (D : Set)
+  requires subset : D ⊆ X
+  requires separated : ∀ n ∈ ℕ, Disjoint(actImage(act, ρ ^ (n + 1), D), D)
+  shows actImage(act, ρ, forwardOrbit(act, G, ρ, D)) =
+    forwardOrbit(act, G, ρ, D) ∖ D
+proof
+  have group := Action.group with action
+  ext y
+  constructor
+  . intro hy
+    apply difference.membership.backward
+    obtain ⟨x, hx, shape⟩ := actImage.membership.forward with hy
+    obtain ⟨n, hn, inStage⟩ := forwardOrbit.membership.forward with hx
+    have natural := omega.natural with hn
+    obtain ⟨d, hd, moved⟩ := actImage.membership.forward with inStage
+    have dIn := subset with d, hd
+    have powerIn : ρ ^ n ∈ G := Group.pow_mem with group
+    have step : ρ ^ (n + 1) = ρ * ρ ^ n := pow_succ_left with group
+    have composed : (ρ * ρ ^ n) ·ₐ d = ρ ·ₐ ρ ^ n ·ₐ d := mul_act with action, dIn
+    have nextShape : y = ρ ^ (n + 1) ·ₐ d
+      rw [step, composed, moved, shape]
+      rfl
+    have nextIn : y ∈ actImage(act, ρ ^ (n + 1), D)
+      rw nextShape
+      exact actImage.contains with hd
+    have succIn : n + 1 ∈ ℕ by typecheck
+    constructor
+    . exact forwardOrbit.membership.backward with ⟨n + 1, succIn, nextIn⟩
+    . have disjoint := separated with n, natural
+      have apart := Disjoint.iff.forward with disjoint
+      exact apart with y, nextIn
+  . intro hy
+    obtain ⟨inOrbit, notInD⟩ := difference.membership.forward with hy
+    obtain ⟨n, hn, inStage⟩ := forwardOrbit.membership.forward with inOrbit
+    have natural := omega.natural with hn
+    obtain ⟨d, hd, moved⟩ := actImage.membership.forward with inStage
+    have dIn := subset with d, hd
+    have cases := natural.zero_or_successor at n with natural
+    cases cases with zero | positive
+    . exfalso
+      have unit : ρ ^ 0 = G.one := pow_zero with group
+      have fixed : G.one ·ₐ d = d := one_act with action, dIn
+      rw [zero, unit, fixed] at moved
+      rw ← moved at notInD
+      exact notInD with hd
+    . obtain ⟨k, naturalK, shape⟩ := positive
+      have powerIn : ρ ^ k ∈ G := Group.pow_mem with group
+      have step : ρ ^ (k + 1) = ρ * ρ ^ k := pow_succ_left with group
+      have succForm : k + 1 = succ(k) := add.right_one at k
+      rw succForm at step
+      have composed : (ρ * ρ ^ k) ·ₐ d = ρ ·ₐ ρ ^ k ·ₐ d := mul_act with action, dIn
+      have earlier : ρ ^ k ·ₐ d ∈ actImage(act, ρ ^ k, D) := actImage.contains with hd
+      have kIn : k ∈ ℕ by typecheck
+      have earlierInOrbit : ρ ^ k ·ₐ d ∈ forwardOrbit(act, G, ρ, D) :=
+        forwardOrbit.membership.backward with ⟨k, kIn, earlier⟩
+      have lifted : ρ ·ₐ ρ ^ k ·ₐ d ∈ actImage(act, ρ, forwardOrbit(act, G, ρ, D)) :=
+        actImage.contains with earlierInOrbit
+      have shapeY : y = ρ ·ₐ ρ ^ k ·ₐ d
+        rw [← moved, shape, step, composed]
+        rfl
+      rw shapeY
+      exact lifted
+
+-- The absorption theorem: X and X ∖ D are equidecomposable with two
+-- pieces, U carried by ρ and X ∖ U carried by the identity.
+theorem absorption (ρ : G) (D : Set)
+  requires subset : D ⊆ X
+  requires separated : ∀ n ∈ ℕ, Disjoint(actImage(act, ρ ^ (n + 1), D), D)
+  shows ∃ U ∈ 𝒫(X), Disjoint(U, X ∖ U) ∧ U ∪ (X ∖ U) = X ∧
+    Disjoint(actImage(act, ρ, U), X ∖ U) ∧
+    actImage(act, ρ, U) ∪ (X ∖ U) = X ∖ D
+proof
+  have orbitSubset : forwardOrbit(act, G, ρ, D) ⊆ X := forwardOrbit.subset with *
+  have orbitContains : D ⊆ forwardOrbit(act, G, ρ, D) := forwardOrbit.contains with *
+  have carried := forwardOrbit.image with action, subset, separated
+  have inPower := powerset.membership_iff.backward with orbitSubset
+  refine ⟨forwardOrbit(act, G, ρ, D), inPower, ?_, ?_, ?_, ?_⟩
+  . exact Disjoint.difference_right at X, forwardOrbit(act, G, ρ, D)
+  . exact difference.union2_of_subset with orbitSubset
+  . rw carried
+    apply Disjoint.iff.backward
+    intros y hy hy2
+    obtain ⟨inOrbit, notInD⟩ := difference.membership.forward with hy
+    obtain ⟨inX, notInOrbit⟩ := difference.membership.forward with hy2
+    exact notInOrbit with inOrbit
+  . rw carried
+    ext y
+    constructor
+    . intro hy
+      have sides := union2.membership.forward with hy
+      cases sides with inLeft | inRight
+      . obtain ⟨inOrbit, notInD⟩ := difference.membership.forward with inLeft
+        have inX := orbitSubset with y, inOrbit
+        exact difference.membership.backward with ⟨inX, notInD⟩
+      . obtain ⟨inX, notInOrbit⟩ := difference.membership.forward with inRight
+        have notInD : ¬(y ∈ D)
+          intro inD
+          exact notInOrbit with (orbitContains with y, inD)
+        exact difference.membership.backward with ⟨inX, notInD⟩
+    . intro hy
+      obtain ⟨inX, notInD⟩ := difference.membership.forward with hy
+      have cases : y ∈ forwardOrbit(act, G, ρ, D) ∨ ¬(y ∈ forwardOrbit(act, G, ρ, D)) by tauto
+      apply union2.membership.backward
+      cases cases with inOrbit | notInOrbit
+      . left
+        exact difference.membership.backward with ⟨inOrbit, notInD⟩
+      . right
+        exact difference.membership.backward with ⟨inX, notInOrbit⟩
+
+end Absorption

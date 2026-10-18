@@ -1,0 +1,286 @@
+-- The center of a group and centralizers of subsets: both are subgroups,
+-- the center is a normal abelian subgroup, and it is the whole group
+-- exactly when the group is abelian
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Group.Center
+import Generated
+
+-- The elements commuting with everything in S, and with everything.
+def centralizer (G S : Set) : Set := { z ∈ G.carrier | ∀ x ∈ S, G.mul(z, x) = G.mul(x, z) }
+def center (G : Set) : Set := centralizer(G, G.carrier)
+
+theorem centralizer.membership (G S z : Set)
+  shows z ∈ centralizer(G, S) ↔ z ∈ G.carrier ∧ (∀ x ∈ S, G.mul(z, x) = G.mul(x, z))
+proof
+  simp [centralizer]
+
+theorem center.membership (G z : Set)
+  shows z ∈ center(G) ↔ z ∈ G.carrier ∧ (∀ x ∈ G.carrier, G.mul(z, x) = G.mul(x, z))
+proof
+  simp [center, centralizer]
+
+theorem centralizer.subset (G S : Set)
+  shows centralizer(G, S) ⊆ G.carrier
+proof
+  intros z hz
+  have parts := centralizer.membership.forward with hz
+  exact parts.left
+
+theorem center.subset (G : Set)
+  shows center(G) ⊆ G.carrier
+proof
+  intros z hz
+  have parts := center.membership.forward with hz
+  exact parts.left
+
+theorem center.eq_centralizer (G : Set)
+  shows center(G) = centralizer(G, G.carrier)
+proof
+  simp [center]
+
+theorem centralizer.antitone (G S T : Set)
+  requires included : S ⊆ T
+  shows centralizer(G, T) ⊆ centralizer(G, S)
+proof
+  intros z hz
+  have parts := centralizer.membership.forward with hz
+  apply centralizer.membership.backward
+  refine ⟨parts.left, ?_⟩
+  intros x hx
+  have xT := included with x, hx
+  exact parts.right with x, xT
+
+theorem center.subset_centralizer (G S : Set)
+  requires bounded : S ⊆ G.carrier
+  shows center(G) ⊆ centralizer(G, S)
+proof
+  rw center.eq_centralizer
+  exact centralizer.antitone at G, S, G.carrier with bounded
+
+theorem centralizer.empty (G : Set)
+  shows centralizer(G, ∅) = G.carrier
+proof
+  apply Subset.antisymmetric with (centralizer.subset at G, ∅)
+  intros z hz
+  apply centralizer.membership.backward
+  refine ⟨hz, ?_⟩
+  intros x hx
+  exfalso
+  exact set.empty with hx
+
+theorem centralizer.singleton_mem (G x : Set)
+  requires hx : x ∈ G.carrier
+  shows x ∈ centralizer(G, {x})
+proof
+  apply centralizer.membership.backward
+  refine ⟨hx, ?_⟩
+  intros y hy
+  have equal := singleton.membership.forward with hy
+  rw equal
+  rfl
+
+section CenterLaws
+variable (G : Set)
+hypothesis group : Group(G)
+
+theorem centralizer.commute (S z : Set) (x : G)
+  requires hz : z ∈ centralizer(G, S)
+  requires hx : x ∈ S
+  shows z * x = x * z
+proof
+  have parts := centralizer.membership.forward with hz
+  exact parts.right with x, hx
+
+theorem center.commute (z : Set) (x : G)
+  requires hz : z ∈ center(G)
+  shows z * x = x * z
+proof
+  have parts := center.membership.forward with hz
+  have xIn : x ∈ G by assumption
+  exact parts.right with x, xIn
+
+theorem centralizer.one_mem (S : Set)
+  requires bounded : S ⊆ G
+  shows G.one ∈ centralizer(G, S)
+proof
+  apply centralizer.membership.backward
+  refine ⟨(Group.one_mem with group), ?_⟩
+  intros x hx
+  have xIn := bounded with x, hx
+  rw [one_mul, mul_one]
+  rfl
+
+theorem centralizer.subgroup (S : Set)
+  requires bounded : S ⊆ G
+  shows Subgroup(centralizer(G, S), G)
+proof
+  have unitIn := centralizer.one_mem with group, bounded
+  apply Subgroup.mk with group, (centralizer.subset at G, S), unitIn
+  . intros z hz w hw
+    have pz := centralizer.membership.forward with hz
+    have pw := centralizer.membership.forward with hw
+    have zIn := pz.left
+    have wIn := pw.left
+    apply centralizer.membership.backward
+    refine ⟨(Group.mul_mem with *), ?_⟩
+    intros x hx
+    have xIn := bounded with x, hx
+    have commuteZ := pz.right with x, hx
+    have commuteW := pw.right with x, hx
+    rw [mul_assoc, commuteW, ← mul_assoc, commuteZ, mul_assoc]
+    rfl
+  . intros z hz
+    have pz := centralizer.membership.forward with hz
+    have zIn := pz.left
+    apply centralizer.membership.backward
+    refine ⟨(Group.inv_mem with *), ?_⟩
+    intros x hx
+    have xIn := bounded with x, hx
+    have commute := pz.right with x, hx
+    have criterion : z⁻¹ * x = x * z⁻¹ ↔ x = z * (x * z⁻¹) := inv_mul_eq_iff_eq_mul with *
+    apply criterion.backward
+    rw [← mul_assoc, commute, mul_inv_cancel_right]
+    rfl
+
+theorem center.subgroup
+  shows Subgroup(center(G), G)
+proof
+  rw center.eq_centralizer
+  exact centralizer.subgroup with group, (Subset.reflexive at G.carrier)
+
+theorem center.normal
+  shows NormalSubgroup(center(G), G)
+proof
+  have subgroup := center.subgroup with group
+  apply NormalSubgroup.mk with subgroup
+  intros g hg z hz
+  have zIn : z ∈ G := Subgroup.mem_carrier with *
+  have commute : z * g = g * z := center.commute with *
+  have swapped : g * z = z * g by cc
+  have fixed : conjugate(G, g, z) = z := conjugate.of_commute with *
+  rwa fixed
+
+theorem center.commutative
+  shows Commutative(center(G), G.mul)
+proof
+  intros z hz w hw
+  have wIn := center.subset at G with w, hw
+  exact center.commute with *
+
+theorem center.eq_carrier_iff
+  shows center(G) = G.carrier ↔ Commutative(G.carrier, G.mul)
+proof
+  constructor
+  . intros equal x hx y hy
+    have xCenter : x ∈ center(G) by rwa equal
+    exact center.commute with *
+  . intro commutative
+    apply Subset.antisymmetric with (center.subset at G)
+    intros x hx
+    apply center.membership.backward
+    refine ⟨hx, ?_⟩
+    intros y hy
+    exact commutative with x, hx, y, hy
+
+theorem centralizer.self_mem_iff (S : Set)
+  requires bounded : S ⊆ G
+  shows S ⊆ centralizer(G, S) ↔ Commutative(S, G.mul)
+proof
+  constructor
+  . intros included x hx y hy
+    have xCentral := included with x, hx
+    have yIn := bounded with y, hy
+    exact centralizer.commute with *
+  . intros commutative x hx
+    have xIn := bounded with x, hx
+    apply centralizer.membership.backward
+    refine ⟨xIn, ?_⟩
+    intros y hy
+    exact commutative with x, hx, y, hy
+
+theorem centralizer.pow_mem (x : G) (n : Nat)
+  shows x ^ n ∈ centralizer(G, {x})
+proof
+  have bounded : {x} ⊆ G
+    intros y hy
+    have equal := singleton.membership.forward with hy
+    rwa equal
+  have subgroup := centralizer.subgroup at G, {x} with group, bounded
+  have member : x ∈ centralizer(G, {x}) := centralizer.singleton_mem with *
+  exact Subgroup.pow_mem with *
+
+theorem centralizer.generated_subset (S : Set)
+  requires bounded : S ⊆ G
+  shows generatedSubgroup(G, S) ⊆ centralizer(G, centralizer(G, S))
+proof
+  have subgroup := centralizer.subgroup at G, centralizer(G, S) with group, (centralizer.subset at G, S)
+  have included : S ⊆ centralizer(G, centralizer(G, S))
+    intros x hx
+    have xIn := bounded with x, hx
+    apply centralizer.membership.backward
+    refine ⟨xIn, ?_⟩
+    intros z hz
+    have commute : z * x = x * z := centralizer.commute with *
+    symm
+    exact commute
+  exact generatedSubgroup.least with subgroup, included
+
+instance center.inv_mem (z : Set)
+  requires hz : z ∈ center(G)
+  shows z⁻¹ ∈ center(G)
+proof
+  have subgroup := center.subgroup with group
+  exact Subgroup.inv_mem with *
+
+instance center.mul_mem (z w : Set)
+  requires hz : z ∈ center(G)
+  requires hw : w ∈ center(G)
+  shows z * w ∈ center(G)
+proof
+  have subgroup := center.subgroup with group
+  exact Subgroup.mul_mem with *
+
+theorem center.conjugate_fixed (g : G) (z : Set)
+  requires hz : z ∈ center(G)
+  shows conjugate(G, g, z) = z
+proof
+  have zIn := center.subset at G with z, hz
+  have commute : z * g = g * z := center.commute with *
+  have swapped : g * z = z * g by cc
+  exact conjugate.of_commute with *
+
+end CenterLaws
+
+theorem center.of_abelian (G : Set)
+  requires abelian : AbelianGroup(G)
+  shows center(G) = G.carrier
+proof
+  have group := AbelianGroup.to_group with abelian
+  have commutative := IsAbelianGroup.commutative with (AbelianGroup.parts with abelian)
+  have criterion := center.eq_carrier_iff with group
+  exact criterion.backward with commutative
+
+theorem center.image_subset (f G H : Set)
+  requires hom : f : G →* H
+  requires surjective : SurjectiveBetween(f, G.carrier, H.carrier)
+  shows functionImage(f, center(G), H.carrier) ⊆ center(H)
+proof
+  have group := GroupHom.source with hom
+  have target := GroupHom.target with hom
+  have function := GroupHom.function with hom
+  intros y hy
+  obtain ⟨yIn, z, hz, yEq⟩ := functionImage.membership.forward with hy
+  have zIn := center.subset at G with z, hz
+  apply center.membership.backward
+  refine ⟨yIn, ?_⟩
+  intros w hw
+  obtain ⟨x, hx, edge⟩ := surjective.right with w, hw
+  have wEq := FunctionBetween.apply_value with function, hx, edge
+  have commute : z * x = x * z := center.commute with *
+  have first : f(z * x) = f(z) * f(x) := GroupHom.map_mul with *
+  have second : f(x * z) = f(x) * f(z) := GroupHom.map_mul with *
+  cc

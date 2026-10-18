@@ -1,0 +1,351 @@
+-- The sign of a composite permutation is the product of the signs: a
+-- permutation with no inversions is the identity, an inversion yields an
+-- adjacent descent, exchanging at a descent removes exactly one inversion,
+-- and induction on the number of inversions does the rest
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Ring.PermutationSignCompose
+import PermutationSign
+import DeterminantIdentity
+import Combinatorics.Permutations
+
+-- The points a function moves.
+def movedPoints (n q : Set) : Set := { i ∈ n | q(i) ≠ i }
+
+theorem movedPoints.membership (n q i : Set)
+  shows i ∈ movedPoints(n, q) ↔ i ∈ n ∧ q(i) ≠ i
+proof
+  simp [movedPoints]
+
+-- A least moved point i is sent upward, and the point sent onto i lies
+-- beyond i: together they form an inversion.
+theorem permutations.least_moved (n : Nat) (q i : Set)
+  requires permutation : q ∈ permutations(n)
+  requires iIn : i ∈ n
+  requires moved : q(i) ≠ i
+  requires least : ∀ j ∈ n, j < i → q(j) = j
+  shows Nonempty(inversions(n, q))
+proof
+  have positions := natural.member at n
+  have iNat := positions with i, iIn
+  have vIn := permutations.apply_closed with permutation, iIn
+  have vNat := positions with q(i), vIn
+  have order := Less.trichotomy at q(i), i with vNat, iNat
+  rcases order with below | rest
+  . have fixedV := least with q(i), vIn, below
+    have cancel := permutations.apply_cancel at n, q, q(i), i
+      with permutation, vIn, iIn, fixedV
+    exfalso
+    exact moved with cancel
+  . rcases rest with same | above
+    . exfalso
+      exact moved with same
+    . obtain ⟨j, jIn, hit⟩ := permutations.apply_surjective at n, q, i
+        with permutation, iIn
+      have jNat := positions with j, jIn
+      have orderJ := Less.trichotomy at j, i with jNat, iNat
+      rcases orderJ with jBelow | restJ
+      . have fixedJ := least with j, jIn, jBelow
+        rw fixedJ at hit
+        rw hit at jBelow
+        have irreflexive := Less.irreflexive at i
+        exfalso
+        exact irreflexive with jBelow
+      . rcases restJ with jSame | jAbove
+        . rw jSame at hit
+          exfalso
+          exact moved with hit
+        . have ruleIJ := membership.of_Less at i, j with iNat, jNat
+          have iInJ := ruleIJ with jAbove
+          have ruleIV := membership.of_Less at i, q(i) with iNat, vNat
+          have iInV := ruleIV with above
+          have reversed : q(j) ∈ q(i)
+            rw hit
+            exact iInV
+          have pair := inversions.pair.backward at n, q, i, j
+            with ⟨iIn, jIn, iInJ, reversed⟩
+          witness (i, j)
+          exact pair
+
+-- A permutation with no inversions is the identity.
+theorem permutations.identity_of_no_inversions (n : Nat) (q : Set)
+  requires permutation : q ∈ permutations(n)
+  requires empty : inversions(n, q) = ∅
+  shows q = identity(n)
+proof
+  have function := permutations.function with permutation
+  have idFunction := identity.function at n
+  have positions := natural.member at n
+  have naturals : movedPoints(n, q) ⊆ ℕ
+    intros i hi
+    have parts := movedPoints.membership.forward with hi
+    have iNat := positions with i, parts.left
+    exact nat.omega.forward with iNat
+  have noMoved : ¬Nonempty(movedPoints(n, q))
+    intro inhabited
+    have member := leastNatural.member at movedPoints(n, q) with inhabited, naturals
+    obtain ⟨iIn, moved⟩ := movedPoints.membership.forward with member
+    have least : ∀ j ∈ n, j < leastNatural(movedPoints(n, q)) → q(j) = j
+      intros j jIn below
+      have jNat := positions with j, jIn
+      by_contra
+      have jMoved : j ∈ movedPoints(n, q) :=
+        movedPoints.membership.backward with ⟨jIn, this⟩
+      have bound := leastNatural.least at movedPoints(n, q), j
+        with inhabited, naturals, jMoved
+      have separation := Less.iff_not_LessEqual at j, leastNatural(movedPoints(n, q))
+      have notBound := separation.forward with below
+      exact notBound with bound
+    have inversionsInhabited := permutations.least_moved at n, q,
+      leastNatural(movedPoints(n, q)) with permutation, iIn, moved, least
+    rw empty at inversionsInhabited
+    obtain ⟨x, hx⟩ := inversionsInhabited
+    exact set.empty with hx
+  have same : ∀ x ∈ n, q(x) = identity(n)(x)
+    intros x hx
+    have idValue := identity.apply at x, n with hx
+    rw idValue
+    by_contra
+    have xMoved : x ∈ movedPoints(n, q) :=
+      movedPoints.membership.backward with ⟨hx, this⟩
+    exact noMoved with ⟨x, xMoved⟩
+  exact FunctionBetween.ext with function, idFunction, same
+
+-- Between the ends of an inversion lies an adjacent descent.
+theorem inversions.descent_within (n : Nat) (q : Set) (d : Nat)
+  requires permutation : q ∈ permutations(n)
+  shows ∀ i, Nat(i) → ∀ j, Nat(j) → i ∈ n → j ∈ n → j = i + 1 + d →
+    q(j) ∈ q(i) → ∃ a, Nat(a) ∧ a ∈ n ∧ succ(a) ∈ n ∧ q(succ(a)) ∈ q(a)
+proof
+  induction d
+  | zero =>
+    intros i iNat j jNat iIn jIn gap reversed
+    have plusOne : i + 1 = succ(i) := add.right_one at i
+    have jSucc : j = succ(i)
+      rw [← plusOne, gap]
+      arith
+    rw jSucc at jIn
+    rw jSucc at reversed
+    refine ⟨i, iNat, iIn, jIn, reversed⟩
+  | succ(k) using ih =>
+    intros i iNat j jNat iIn jIn gap reversed
+    have positions := natural.member at n
+    have mNat : Nat(succ(i)) by typecheck
+    have plusOne : i + 1 = succ(i) := add.right_one at i
+    have plusOneK : k + 1 = succ(k) := add.right_one at k
+    have shifted : j = succ(i) + 1 + k
+      rw ← plusOneK at gap
+      rw [← plusOne, gap]
+      ring
+    have mBelowJ : succ(i) < j
+      rw shifted
+      arith
+    have ruleJN := Less.of_membership at j, n
+    have jBelowN := ruleJN with jIn
+    have mBelowN := Less.transitive at succ(i), j, n with mBelowJ, jBelowN
+    have ruleMN := membership.of_Less at succ(i), n with mNat, assumption
+    have mIn := ruleMN with mBelowN
+    have qmIn := permutations.apply_closed with permutation, mIn
+    have qiIn := permutations.apply_closed with permutation, iIn
+    have qjIn := permutations.apply_closed with permutation, jIn
+    have qmNat := positions with q(succ(i)), qmIn
+    have qiNat := positions with q(i), qiIn
+    have qjNat := positions with q(j), qjIn
+    have order := Less.trichotomy at q(succ(i)), q(i) with qmNat, qiNat
+    rcases order with descent | rest
+    . have rule := membership.of_Less at q(succ(i)), q(i) with qmNat, qiNat
+      have mem := rule with descent
+      refine ⟨i, iNat, iIn, mIn, mem⟩
+    . rcases rest with same | ascent
+      . have cancel := permutations.apply_cancel at n, q, succ(i), i
+          with permutation, mIn, iIn, same
+        rw ← plusOne at cancel
+        exfalso
+        arith
+      . have ruleJI := Less.of_membership at q(j), q(i)
+        have below := ruleJI with reversed
+        have chain := Less.transitive at q(j), q(i), q(succ(i)) with below, ascent
+        have ruleJM := membership.of_Less at q(j), q(succ(i)) with qjNat, qmNat
+        have mem := ruleJM with chain
+        exact ih with succ(i), mNat, j, jNat, mIn, jIn, shifted, mem
+
+-- A permutation with an inversion has an adjacent descent.
+theorem inversions.adjacent_descent (n : Nat) (q : Set)
+  requires permutation : q ∈ permutations(n)
+  requires inhabited : Nonempty(inversions(n, q))
+  shows ∃ a, Nat(a) ∧ a ∈ n ∧ succ(a) ∈ n ∧ q(succ(a)) ∈ q(a)
+proof
+  obtain ⟨pair, member⟩ := inhabited
+  obtain ⟨bound, i, iIn, j, jIn, shape, ordered, reversed⟩ :=
+    inversions.membership.forward with member
+  have positions := natural.member at n
+  have iNat := positions with i, iIn
+  have jNat := positions with j, jIn
+  have rule := Less.of_membership at i, j
+  have below := rule with ordered
+  have gapRule := Less.gap at i, j
+  have atLeast := gapRule.forward with below
+  obtain ⟨d, dNat, gap⟩ := LessEqual.exists_add at i + 1, j with atLeast
+  exact inversions.descent_within at n, q, d
+    with permutation, i, iNat, j, jNat, iIn, jIn, gap, reversed
+
+-- Exchanging at an adjacent descent removes exactly one inversion.
+theorem inversions.descent_count (n a : Nat) (q : Set)
+  requires ha : a ∈ n
+  requires hb : succ(a) ∈ n
+  requires permutation : q ∈ permutations(n)
+  requires descent : (a, succ(a)) ∈ inversions(n, q)
+  shows cardinality(inversions(n, q)) =
+    succ(cardinality(inversions(n, permutationExchange(n, a, succ(a))(q))))
+proof
+  have finite := inversions.finite at n, q with (Finite.natural at n)
+  have remove := cardinality.remove at inversions(n, q), (a, succ(a)) with finite, descent
+  have off := inversions.adjacent_count_off_pair at n, a, q with ha, hb, permutation
+  have self := bootstrap.succ.self at a
+  have rule := Less.of_membership at a, succ(a)
+  have ordered := rule with self
+  have distinguished := inversions.exchange_distinguished at n, a, succ(a), q
+    with ha, hb, ordered, permutation
+  have absent : ¬((a, succ(a)) ∈ inversions(n, permutationExchange(n, a, succ(a))(q)))
+    intro present
+    have contradiction := distinguished.forward with present
+    exact contradiction with descent
+  have disjoint : inversions(n, permutationExchange(n, a, succ(a))(q)) ∩ {(a, succ(a))} = ∅
+    ext x
+    constructor
+    . intro hx
+      have parts := intersection.membership.forward with hx
+      have equal := singleton.membership.forward with parts.right
+      rw equal at parts
+      exfalso
+      exact absent with parts.left
+    . intro hx
+      exfalso
+      exact set.empty with hx
+  have same := difference.eq_self_iff_disjoint at
+    inversions(n, permutationExchange(n, a, succ(a))(q)), {(a, succ(a))}
+  have unchanged := same.backward with disjoint
+  rw [remove, off, unchanged]
+  rfl
+
+-- The sign of a composite, by induction on the number of inversions of
+-- the right factor.
+theorem permutationSign.compose_induction (A add zero neg mul one : Set) (n k : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  shows ∀ q ∈ permutations(n), cardinality(inversions(n, q)) = k →
+    ∀ p ∈ permutations(n),
+      permutationSign(n, A, add, zero, neg, mul, one, compose(p, q, n, n, n)) =
+        call2(mul, permutationSign(n, A, add, zero, neg, mul, one, p),
+          permutationSign(n, A, add, zero, neg, mul, one, q))
+proof
+  induction k
+  | zero =>
+    intros q hq count p hp
+    have finiteN := Finite.natural at n
+    have finite := inversions.finite at n, q with finiteN
+    have criterion := cardinality.eq_zero_iff at inversions(n, q) with finite
+    have empty := criterion.forward with count
+    have isIdentity := permutations.identity_of_no_inversions at n, q with hq, empty
+    have composed := permutations.compose_identity_right at n, p with hp
+    have signOne := permutationSign.identity at A, add, zero, neg, mul, one, n with ring
+    have signP := permutationSign.closed at A, add, zero, neg, mul, one, n, p
+      with ring, finiteN
+    have ordinary := IsCommRing.ring with ring
+    have multiplicative := IsRing.multiplicative with ordinary
+    have unit := IsMonoid.right_identity at A, mul, one,
+      permutationSign(n, A, add, zero, neg, mul, one, p) with multiplicative, signP
+    rw [isIdentity, composed, signOne, unit]
+    rfl
+  | succ(m) using ih =>
+    intros q hq count p hp
+    have finiteN := Finite.natural at n
+    have finite := inversions.finite at n, q with finiteN
+    have inhabited : Nonempty(inversions(n, q))
+      have criterion := Nonempty.iff_ne_empty at inversions(n, q)
+      apply criterion.backward
+      intro empty
+      have zeroCount := cardinality.eq_zero_iff at inversions(n, q) with finite
+      have isZero := zeroCount.backward with empty
+      rw isZero at count
+      arith
+    obtain ⟨a, aNat, ha, hb, descentValue⟩ :=
+      inversions.adjacent_descent at n, q with hq, inhabited
+    have self := bootstrap.succ.self at a
+    have descent := inversions.pair.backward at n, q, a, succ(a)
+      with ⟨ha, hb, self, descentValue⟩
+    have exchangeFunction := permutationExchange.function at n, a, succ(a) with ha, hb
+    have hqExchanged := FunctionBetween.apply_closed with exchangeFunction, hq
+    have countRule := inversions.descent_count at n, a, q with ha, hb, hq, descent
+    rw countRule at count
+    have countExchanged := Naturals.injective.succ with count
+    have composedIn := permutations.compose at n, permutationExchange(n, a, succ(a))(q), p
+      with hqExchanged, hp
+    have inner := ih with permutationExchange(n, a, succ(a))(q), hqExchanged, countExchanged, p, hp
+    have involution := permutationExchange.involution at n, a, succ(a) with ha, hb
+    have restore := involution.right with q, hq
+    have value := permutationExchange.value at n, a, succ(a),
+      permutationExchange(n, a, succ(a))(q) with ha, hb, hqExchanged
+    have associative := permutations.compose_associative at n, transposition(n, a, succ(a)),
+      permutationExchange(n, a, succ(a))(q), p
+    have composedValue := permutationExchange.value at n, a, succ(a),
+      compose(p, permutationExchange(n, a, succ(a))(q), n, n, n) with ha, hb, composedIn
+    have distinct : a ≠ succ(a)
+      intro equal
+      have plusOne : a + 1 = succ(a) := add.right_one at a
+      rw ← plusOne at equal
+      arith
+    have signExchange := permutationSign.exchange at A, add, zero, neg, mul, one, n, a, succ(a),
+      compose(p, permutationExchange(n, a, succ(a))(q), n, n, n)
+      with ring, ha, hb, distinct, composedIn
+    have signQ := permutationSign.exchange at A, add, zero, neg, mul, one, n, a, succ(a),
+      permutationExchange(n, a, succ(a))(q) with ring, ha, hb, distinct, hqExchanged
+    have signP := permutationSign.closed at A, add, zero, neg, mul, one, n, p
+      with ring, finiteN
+    have signExchanged := permutationSign.closed at A, add, zero, neg, mul, one, n,
+      permutationExchange(n, a, succ(a))(q) with ring, finiteN
+    have ordinary := IsCommRing.ring with ring
+    have negClosed := IsRing.neg_closed at A, add, zero, neg, mul, one,
+      permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q))
+      with ordinary, signExchanged
+    have commutative := IsCommRing.commutative with ring
+    unfold Commutative at commutative
+    have swapNeg := commutative with
+      permutationSign(n, A, add, zero, neg, mul, one, p), signP,
+      neg(permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q))),
+      negClosed
+    have swap := commutative with
+      permutationSign(n, A, add, zero, neg, mul, one, p), signP,
+      permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q)),
+      signExchanged
+    have negLeft := IsRing.neg_mul at A, add, zero, neg, mul, one,
+      permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q)),
+      permutationSign(n, A, add, zero, neg, mul, one, p) with ordinary, signExchanged, signP
+    have negation : call2(mul, permutationSign(n, A, add, zero, neg, mul, one, p),
+        neg(permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q)))) =
+        neg(call2(mul, permutationSign(n, A, add, zero, neg, mul, one, p),
+          permutationSign(n, A, add, zero, neg, mul, one, permutationExchange(n, a, succ(a))(q))))
+      rw [swapNeg, negLeft, swap]
+      rfl
+    rw restore at signQ
+    rw restore at value
+    rw [signQ, negation, ← inner, ← signExchange, composedValue, ← associative, ← value]
+    rfl
+
+-- The sign of a composite permutation is the product of the signs.
+theorem permutationSign.compose (A add zero neg mul one : Set) (n : Nat) (p q : Set)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires hp : p ∈ permutations(n)
+  requires hq : q ∈ permutations(n)
+  shows permutationSign(n, A, add, zero, neg, mul, one, compose(p, q, n, n, n)) =
+    call2(mul, permutationSign(n, A, add, zero, neg, mul, one, p),
+      permutationSign(n, A, add, zero, neg, mul, one, q))
+proof
+  have finite := inversions.finite at n, q with (Finite.natural at n)
+  have countNat := cardinality.nat at inversions(n, q) with finite
+  have rule := permutationSign.compose_induction at A, add, zero, neg, mul, one, n,
+    cardinality(inversions(n, q)) with ring
+  have same : cardinality(inversions(n, q)) = cardinality(inversions(n, q)) by rfl
+  exact rule with q, hq, same, p, hp

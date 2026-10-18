@@ -1,0 +1,475 @@
+-- Dominance between sets by injections, and the Cantor–Schröder–Bernstein
+-- theorem: mutual injections yield a bijection
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Cardinal.Dominance
+import Finite
+import ListSupport
+import Set
+
+-- A set is infinite when it is not finite, and Dedekind-infinite when it
+-- injects into itself without covering itself.
+predicate Infinite (A : Set) := ¬Finite(A)
+predicate DedekindInfinite (A : Set) :=
+  ∃ f, InjectiveBetween(f, A, A) ∧ ¬SurjectiveBetween(f, A, A)
+
+-- An injection is a bijection onto its image.
+theorem Equipotent.image (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  shows A ≃ functionImage(f, A, B)
+proof
+  witness f
+  constructor
+  . exact Injective.corestrict with injective
+  . exact functionImage.surjective with (Injective.function with injective)
+
+predicate Dominated (A B : Set) := ∃ f, InjectiveBetween(f, A, B)
+notation infix 50 "≼" => Dominated
+
+-- A set dominated by a finite set is finite.
+theorem Finite.of_dominated (A B : Set)
+  requires finite : Finite(B)
+  requires dominated : A ≼ B
+  shows Finite(A)
+proof
+  obtain ⟨f, injective⟩ := dominated
+  have imageFinite := Finite.subset with finite, (functionImage.subset at f, A, B)
+  have equipotent := Equipotent.image with injective
+  exact Finite.of_equipotent with imageFinite, (Equipotent.symmetric with equipotent)
+
+theorem Dominated.of_injective (f A B : Set)
+  requires h : InjectiveBetween(f, A, B)
+  shows A ≼ B
+proof
+  witness f
+  exact h
+
+theorem Dominated.reflexive (A : Set)
+  shows A ≼ A
+proof
+  witness identity(A)
+  exact identity.injective
+
+theorem Dominated.of_equipotent (A B : Set)
+  requires h : A ≃ B
+  shows A ≼ B
+proof
+  obtain ⟨f, hf⟩ := h
+  witness f
+  exact hf.left
+
+theorem Dominated.transitive (A B C : Set)
+  requires hAB : A ≼ B
+  requires hBC : B ≼ C
+  shows A ≼ C
+proof
+  obtain ⟨f, hf⟩ := hAB
+  obtain ⟨g, hg⟩ := hBC
+  witness compose(g, f, A, B, C)
+  exact compose.injective with hf, hg
+
+theorem Dominated.of_subset (A B : Set)
+  requires h : A ⊆ B
+  shows A ≼ B
+proof
+  witness identity(A)
+  have function := identity.function at A
+  have widened : identity(A) : A → B
+    apply FunctionBetween.codomain_of_values with function
+    intros x hx
+    have fixed := identity.apply with hx
+    rw fixed
+    exact h with x, hx
+  constructor
+  . exact widened
+  . intros x hx y hy z hz hxz hyz
+    have valueX := FunctionBetween.apply_value with function, hx, hxz
+    have valueY := FunctionBetween.apply_value with function, hy, hyz
+    have fixedX := identity.apply with hx
+    have fixedY := identity.apply with hy
+    rw fixedX at valueX
+    rw fixedY at valueY
+    rw [valueX, valueY]
+    rfl
+
+-- The back-and-forth chain. Stage zero holds the points of A outside the
+-- image of g; each later stage is the image under g ∘ f of the one before.
+
+def chainStage (f g A B : Set, n : Nat) → Set
+  | f, g, A, B, zero => A ∖ functionImage(g, B, A)
+  | f, g, A, B, succ(k) => functionImage(g, functionImage(f, chainStage(f, g, A, B, k), B), A)
+
+def chainStages (f g A B : Set) : Set := { chainStage(f, g, A, B, n) | n ∈ ℕ }
+
+def chain (f g A B : Set) : Set := ⋃(chainStages(f, g, A, B))
+
+-- The bijection: f on the chain, the inverse of g off it.
+def bernsteinMap (f g A B : Set) : Set :=
+  restrict(f, chain(f, g, A, B)) ∪ restrict(converse(g, B, A), A ∖ chain(f, g, A, B))
+
+theorem chainStage.zero (f g A B : Set)
+  shows chainStage(f, g, A, B, 0) = A ∖ functionImage(g, B, A)
+proof
+  simp [chainStage]
+
+theorem chainStage.succ (f g A B : Set, k : Nat)
+  shows chainStage(f, g, A, B, succ(k)) = functionImage(g, functionImage(f, chainStage(f, g, A, B, k), B), A)
+proof
+  simp [chainStage]
+
+theorem chainStage.subset (f g A B : Set, n : Nat)
+  shows chainStage(f, g, A, B, n) ⊆ A
+proof
+  induction n
+  | zero =>
+    rw chainStage.zero
+    exact difference.subset_left at A, functionImage(g, B, A)
+  | succ(k) using ih =>
+    rw chainStage.succ
+    exact functionImage.subset at g, functionImage(f, chainStage(f, g, A, B, k), B), A
+
+theorem chain.membership (f g A B x : Set)
+  shows x ∈ chain(f, g, A, B) ↔ ∃ n ∈ ℕ, x ∈ chainStage(f, g, A, B, n)
+proof
+  constructor
+  . intro h
+    simp [chain, set.union] at h
+    obtain ⟨S, hS, hx⟩ := h
+    simp [chainStages] at hS
+    obtain ⟨n, hn, shape⟩ := hS
+    witness n
+    constructor
+    . exact hn
+    . rw ← shape at hx
+      exact hx
+  . intro h
+    obtain ⟨n, hn, hx⟩ := h
+    have stageIn : chainStage(f, g, A, B, n) ∈ chainStages(f, g, A, B) by simp [chainStages]
+    simp [chain]
+    exact union.contains with stageIn, hx
+
+theorem chain.subset (f g A B : Set)
+  shows chain(f, g, A, B) ⊆ A
+proof
+  intros x hx
+  obtain ⟨n, hn, inStage⟩ := chain.membership.forward with hx
+  exact chainStage.subset at f, g, A, B, n with x, inStage
+
+theorem chain.stage_zero (f g A B x : Set)
+  requires hx : x ∈ A
+  requires outside : ¬(x ∈ functionImage(g, B, A))
+  shows x ∈ chain(f, g, A, B)
+proof
+  apply chain.membership.backward
+  witness 0
+  constructor
+  . exact Naturals.constructor.zero
+  . rw chainStage.zero
+    simp [difference.membership]
+
+theorem chain.closed (f g A B x : Set)
+  requires fFunction : f : A → B
+  requires gFunction : g : B → A
+  requires hx : x ∈ chain(f, g, A, B)
+  shows g(f(x)) ∈ chain(f, g, A, B)
+proof
+  obtain ⟨n, hn, inStage⟩ := chain.membership.forward with hx
+  apply chain.membership.backward
+  witness succ(n)
+  constructor
+  . exact Naturals.constructor.succ at n with hn
+  . rw chainStage.succ
+    have hxA : x ∈ A := chainStage.subset at f, g, A, B, n with x, inStage
+    have valueB := FunctionBetween.apply_closed with fFunction, hxA
+    have inImage : f(x) ∈ functionImage(f, chainStage(f, g, A, B, n), B) by simp [functionImage.membership]
+    have valueA := FunctionBetween.apply_closed with gFunction, valueB
+    simp [functionImage.membership]
+    exact ⟨valueA, f(x), inImage, rfl⟩
+
+theorem chain.off_in_image (f g A B x : Set)
+  requires hx : x ∈ A
+  requires outside : ¬(x ∈ chain(f, g, A, B))
+  shows x ∈ functionImage(g, B, A)
+proof
+  by_contra absent
+  exact outside with (chain.stage_zero with hx, absent)
+
+-- A point of the chain that g reaches is reached from a point of the chain
+-- through f.
+theorem chain.preimage (f g A B y : Set)
+  requires fFunction : f : A → B
+  requires gInjective : InjectiveBetween(g, B, A)
+  requires hy : y ∈ B
+  requires inChain : g(y) ∈ chain(f, g, A, B)
+  shows ∃ x ∈ chain(f, g, A, B), f(x) = y
+proof
+  have gFunction := gInjective.left
+  obtain ⟨n, hn, inStage⟩ := chain.membership.forward with inChain
+  have valueA := FunctionBetween.apply_closed with gFunction, hy
+  have inImage : g(y) ∈ functionImage(g, B, A) by simp [functionImage.membership]
+  have cases := natural.zero_or_successor at n
+  cases cases with zero | successor
+  . exfalso
+    rw [zero, chainStage.zero] at inStage
+    simp [difference.membership] at inStage
+    exact inStage.right with inImage
+  . obtain ⟨k, hk, shape⟩ := successor
+    rw [shape, chainStage.succ] at inStage
+    simp [functionImage.membership] at inStage
+    obtain ⟨inA, z, hz, equation⟩ := inStage
+    simp [functionImage.membership] at hz
+    obtain ⟨inB, x, hx, shapeZ⟩ := hz
+    have hxA : x ∈ A := chainStage.subset at f, g, A, B, k with x, hx
+    have same : y = z := Injective.apply_cancel with gInjective, hy, inB, equation
+    witness x
+    constructor
+    . exact chain.membership.backward with ⟨k, hk, hx⟩
+    . rw [same, shapeZ]
+      rfl
+
+-- The map relates x to y exactly when either x lies on the chain and f
+-- carries x to y, or x lies off the chain and g carries y to x.
+theorem bernsteinMap.relates (f g A B x y : Set)
+  shows relates(bernsteinMap(f, g, A, B), x, y) ↔
+    (x ∈ chain(f, g, A, B) ∧ relates(f, x, y)) ∨
+    (x ∈ A ∧ ¬(x ∈ chain(f, g, A, B)) ∧ y ∈ B ∧ relates(g, y, x))
+proof
+  constructor
+  . intro h
+    have member : (x, y) ∈ bernsteinMap(f, g, A, B) := h
+    simp [bernsteinMap, union2.membership] at member
+    cases member with onChain | offChain
+    . left
+      exact restrict.relates.forward at f, chain(f, g, A, B), x, y with onChain
+    . right
+      obtain ⟨inDifference, flipped⟩ := restrict.relates.forward at converse(g, B, A), A ∖ chain(f, g, A, B), x, y with offChain
+      simp [difference.membership] at inDifference
+      obtain ⟨hxA, outside⟩ := inDifference
+      have flippedMember : (x, y) ∈ converse(g, B, A) := flipped
+      simp [converse.membership] at flippedMember
+      obtain ⟨bound, b, hb, a, ha, equation, back⟩ := flippedMember
+      have coordinates := orderedPair.injective with equation
+      rw [coordinates.left, coordinates.right]
+      rw coordinates.left at outside
+      exact ⟨ha, outside, hb, back⟩
+  . intro h
+    cases h with onChain | offChain
+    . have related := restrict.relates.backward with onChain
+      have member : (x, y) ∈ restrict(f, chain(f, g, A, B)) := related
+      have inUnion : (x, y) ∈ bernsteinMap(f, g, A, B) by simp [bernsteinMap, union2.membership, member]
+      exact inUnion
+    . obtain ⟨hxA, outside, hyB, back⟩ := offChain
+      have flipped := converse.relates with hyB, hxA, back
+      have inDifference : x ∈ A ∖ chain(f, g, A, B) by simp [difference.membership, hxA, outside]
+      have related := restrict.relates.backward at converse(g, B, A), A ∖ chain(f, g, A, B), x, y with ⟨inDifference, flipped⟩
+      have member : (x, y) ∈ restrict(converse(g, B, A), A ∖ chain(f, g, A, B)) := related
+      have inUnion : (x, y) ∈ bernsteinMap(f, g, A, B) by simp [bernsteinMap, union2.membership, member]
+      exact inUnion
+
+theorem bernsteinMap.function (f g A B : Set)
+  requires fFunction : f : A → B
+  requires gInjective : InjectiveBetween(g, B, A)
+  shows bernsteinMap(f, g, A, B) : A → B
+proof
+  have gFunction := gInjective.left
+  constructor
+  . intros p hp
+    simp [bernsteinMap, union2.membership] at hp
+    cases hp with onChain | offChain
+    . have inF := restrict.subset at f, chain(f, g, A, B) with p, onChain
+      have included : f ⊆ A × B := fFunction.left
+      exact included with p, inF
+    . have inConverse := restrict.subset at converse(g, B, A), A ∖ chain(f, g, A, B) with p, offChain
+      have included : converse(g, B, A) ⊆ A × B := converse.relation at g, B, A
+      exact included with p, inConverse
+  . constructor
+    . intros x y hxy z hxz
+      have first := bernsteinMap.relates.forward with hxy
+      have second := bernsteinMap.relates.forward with hxz
+      cases first with onChain | offChain
+      . cases second with onChain2 | offChain2
+        . exact Functional.unique with fFunction.right.left, onChain.right, onChain2.right
+        . exfalso
+          exact offChain2.right.left with onChain.left
+      . cases second with onChain2 | offChain2
+        . exfalso
+          exact offChain.right.left with onChain2.left
+        . have valueY := FunctionBetween.apply_value with gFunction, offChain.right.right.left, offChain.right.right.right
+          have valueZ := FunctionBetween.apply_value with gFunction, offChain2.right.right.left, offChain2.right.right.right
+          apply Injective.apply_cancel with gInjective, offChain.right.right.left, offChain2.right.right.left
+          rw [valueY, valueZ]
+          rfl
+    . intros x hx
+      have split : x ∈ chain(f, g, A, B) ∨ ¬(x ∈ chain(f, g, A, B)) by tauto
+      cases split with onChain | offChain
+      . witness f(x)
+        constructor
+        . exact FunctionBetween.apply_closed with fFunction, hx
+        . apply bernsteinMap.relates.backward
+          left
+          constructor
+          . exact onChain
+          . exact FunctionBetween.relates_apply with fFunction, hx
+      . have inImage := chain.off_in_image with hx, offChain
+        simp [functionImage.membership] at inImage
+        obtain ⟨inA, y, hy, shape⟩ := inImage
+        witness y
+        constructor
+        . exact hy
+        . apply bernsteinMap.relates.backward
+          right
+          have back := FunctionBetween.relates_apply with gFunction, hy
+          rw ← shape at back
+          exact ⟨hx, offChain, hy, back⟩
+
+theorem bernsteinMap.injective (f g A B : Set)
+  requires fInjective : InjectiveBetween(f, A, B)
+  requires gInjective : InjectiveBetween(g, B, A)
+  shows InjectiveBetween(bernsteinMap(f, g, A, B), A, B)
+proof
+  have fFunction := fInjective.left
+  have gFunction := gInjective.left
+  constructor
+  . exact bernsteinMap.function with fFunction, gInjective
+  . intros x hx y hy z hz hxz hyz
+    have first := bernsteinMap.relates.forward with hxz
+    have second := bernsteinMap.relates.forward with hyz
+    cases first with onChain | offChain
+    . cases second with onChain2 | offChain2
+      . exact Injective.cancel with fInjective, hx, hy, hz, onChain.right, onChain2.right
+      . exfalso
+        have valueZ := FunctionBetween.apply_value with fFunction, hx, onChain.right
+        have valueY := FunctionBetween.apply_value with gFunction, hz, offChain2.right.right.right
+        have closed := chain.closed with fFunction, gFunction, onChain.left
+        rw [valueZ, valueY] at closed
+        exact offChain2.right.left with closed
+    . cases second with onChain2 | offChain2
+      . exfalso
+        have valueZ := FunctionBetween.apply_value with fFunction, hy, onChain2.right
+        have valueX := FunctionBetween.apply_value with gFunction, hz, offChain.right.right.right
+        have closed := chain.closed with fFunction, gFunction, onChain2.left
+        rw [valueZ, valueX] at closed
+        exact offChain.right.left with closed
+      . exact Functional.unique with gFunction.right.left, offChain.right.right.right, offChain2.right.right.right
+
+theorem bernsteinMap.surjective (f g A B : Set)
+  requires fInjective : InjectiveBetween(f, A, B)
+  requires gInjective : InjectiveBetween(g, B, A)
+  shows SurjectiveBetween(bernsteinMap(f, g, A, B), A, B)
+proof
+  have fFunction := fInjective.left
+  have gFunction := gInjective.left
+  constructor
+  . exact bernsteinMap.function with fFunction, gInjective
+  . intros y hy
+    have valueA := FunctionBetween.apply_closed with gFunction, hy
+    have split : g(y) ∈ chain(f, g, A, B) ∨ ¬(g(y) ∈ chain(f, g, A, B)) by tauto
+    cases split with onChain | offChain
+    . obtain ⟨x, hx, shape⟩ := chain.preimage with fFunction, gInjective, hy, onChain
+      have hxA : x ∈ A := chain.subset at f, g, A, B with x, hx
+      witness x
+      constructor
+      . exact hxA
+      . apply bernsteinMap.relates.backward
+        left
+        constructor
+        . exact hx
+        . have related := FunctionBetween.relates_apply with fFunction, hxA
+          rwa shape at related
+    . witness g(y)
+      constructor
+      . exact valueA
+      . apply bernsteinMap.relates.backward
+        right
+        exact ⟨valueA, offChain, hy, (FunctionBetween.relates_apply with gFunction, hy)⟩
+
+-- Cantor–Schröder–Bernstein: mutual injections give a bijection.
+theorem Equipotent.of_mutual_dominance (A B : Set)
+  requires hAB : A ≼ B
+  requires hBA : B ≼ A
+  shows A ≃ B
+proof
+  obtain ⟨f, hf⟩ := hAB
+  obtain ⟨g, hg⟩ := hBA
+  witness bernsteinMap(f, g, A, B)
+  constructor
+  . exact bernsteinMap.injective with hf, hg
+  . exact bernsteinMap.surjective with hf, hg
+
+theorem Dominated.antisymmetric (A B : Set)
+  requires hAB : A ≼ B
+  requires hBA : B ≼ A
+  shows A ≃ B
+proof
+  exact Equipotent.of_mutual_dominance with hAB, hBA
+
+-- Cantor: the power set strictly dominates.
+
+defgraph singletonMap (A : Set) (x ∈ A) : 𝒫(A) := {x}
+proof
+  apply powerset.membership_iff.backward
+  exact singleton.subset_iff.backward with member
+
+theorem singletonMap.injective (A : Set)
+  shows InjectiveBetween(singletonMap(A), A, 𝒫(A))
+proof
+  have function := singletonMap.function at A
+  constructor
+  . exact function
+  . intros x hx y hy z hz hxz hyz
+    have valueX := FunctionBetween.apply_value with function, hx, hxz
+    have valueY := FunctionBetween.apply_value with function, hy, hyz
+    have shownX := singletonMap.value with hx
+    have shownY := singletonMap.value with hy
+    rw shownX at valueX
+    rw shownY at valueY
+    apply singleton.injective
+    rw [valueX, valueY]
+    rfl
+
+theorem Dominated.powerset (A : Set)
+  shows A ≼ 𝒫(A)
+proof
+  witness singletonMap(A)
+  exact singletonMap.injective
+
+-- The points of A that g sends outside their own preimage set.
+def cantorDiagonalOf (g A : Set) : Set := { x ∈ A | ∃ X ∈ 𝒫(A), g(X) = x ∧ ¬(x ∈ X) }
+
+theorem cantorDiagonalOf.membership (g A x : Set)
+  shows x ∈ cantorDiagonalOf(g, A) ↔ x ∈ A ∧ ∃ X ∈ 𝒫(A), g(X) = x ∧ ¬(x ∈ X)
+proof
+  simp [cantorDiagonalOf]
+
+theorem Cantor.powerset_not_dominated (A : Set)
+  shows ¬(𝒫(A) ≼ A)
+proof
+  intro h
+  obtain ⟨g, injective⟩ := h
+  have function := injective.left
+  have diagonalIn : cantorDiagonalOf(g, A) ∈ 𝒫(A)
+    apply powerset.membership_iff.backward
+    intros x hx
+    simp [cantorDiagonalOf.membership] at hx
+    exact hx.left
+  have valueA := FunctionBetween.apply_closed with function, diagonalIn
+  have split : g(cantorDiagonalOf(g, A)) ∈ cantorDiagonalOf(g, A) ∨ ¬(g(cantorDiagonalOf(g, A)) ∈ cantorDiagonalOf(g, A)) by tauto
+  cases split with inside | outside
+  . have member := cantorDiagonalOf.membership.forward with inside
+    obtain ⟨inA, X, hX, equation, absent⟩ := member
+    have same : X = cantorDiagonalOf(g, A) := Injective.apply_cancel with injective, hX, diagonalIn, equation
+    rw same at absent
+    exact absent with inside
+  . apply outside
+    apply cantorDiagonalOf.membership.backward
+    constructor
+    . exact valueA
+    . witness cantorDiagonalOf(g, A)
+      constructor
+      . exact diagonalIn
+      . constructor
+        . rfl
+        . exact outside

@@ -1,0 +1,359 @@
+-- The Ramsey chain: from an infinite set S and a colouring of its
+-- (n + 1)-subsets, a descending sequence of infinite stages Sᵢ ⊆ S with
+-- distinguished points aᵢ ∈ Sᵢ ∖ Sᵢ₊₁, where every n-subset T of Sᵢ₊₁
+-- gives insert(aᵢ, T) one colour cᵢ. Each stage is chosen among the
+-- homogeneous subsets that the Ramsey property for n provides.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.RamseyChain
+import RamseyPigeonhole
+import Set.Choice
+
+-- Every colouring of the n-subsets of an infinite set with colours in K has
+-- an infinite homogeneous subset.
+predicate RamseyProperty (n K : Set) :=
+  ∀ S, ∀ C, Infinite(S) → FunctionBetween(C, subsetsOfSize(S, n), K) →
+    ∃ H, H ⊆ S ∧ Infinite(H) ∧
+      ∃ c ∈ K, ∀ U ∈ subsetsOfSize(H, n), C(U) = c
+
+-- The colouring of the n-subsets of Y obtained from a colouring C of the
+-- (n + 1)-subsets of S by adjoining a point a of S outside Y.
+defgraph inducedColouring (C S Y a K : Set, n : Nat) (T ∈ subsetsOfSize(Y, n)) : K :=
+  C(insert(a, T))
+requires colouring : C : subsetsOfSize(S, n + 1) → K
+requires subset : Y ⊆ S
+requires ha : a ∈ S
+requires fresh : ¬a ∈ Y
+proof
+  have memberS := subsetsOfSize.member_of_subset with subset, member
+  have tSubset := subsetsOfSize.subset with member
+  have freshT : ¬a ∈ T
+    intro inT
+    exact fresh with (tSubset with a, inT)
+  have inserted := subsetsOfSize.insert_member with memberS, ha, freshT
+  exact FunctionBetween.apply_closed with colouring, inserted
+
+-- The infinite subsets of Y on whose n-subsets D is constant.
+def homogeneousSubsets (D K Y : Set, n : Nat) : Set :=
+  { Z ∈ 𝒫(Y) | Infinite(Z) ∧
+      ∃ c ∈ K, ∀ U ∈ subsetsOfSize(Z, n), D(U) = c }
+
+theorem homogeneousSubsets.membership (Z D K Y : Set, n : Nat)
+  shows Z ∈ homogeneousSubsets(D, K, Y, n) ↔
+    Z ∈ 𝒫(Y) ∧ Infinite(Z) ∧
+      ∃ c ∈ K, ∀ U ∈ subsetsOfSize(Z, n), D(U) = c
+proof
+  simp [homogeneousSubsets]
+
+-- A chosen infinite subset of Y homogeneous for the induced colouring.
+def homogeneousChoice (C S Y a K : Set, n : Nat) : Set :=
+  choose(homogeneousSubsets(inducedColouring(C, S, Y, a, K, n), K, Y, n))
+
+theorem homogeneousChoice.value (C S Y a K : Set, n : Nat)
+  shows homogeneousChoice(C, S, Y, a, K, n) =
+    choose(homogeneousSubsets(inducedColouring(C, S, Y, a, K, n), K, Y, n))
+proof
+  simp [homogeneousChoice]
+
+theorem homogeneousChoice.properties (C S Y a K : Set, n : Nat)
+  requires ramsey : RamseyProperty(n, K)
+  requires colouring : C : subsetsOfSize(S, n + 1) → K
+  requires subset : Y ⊆ S
+  requires ha : a ∈ S
+  requires fresh : ¬a ∈ Y
+  requires infinite : Infinite(Y)
+  shows homogeneousChoice(C, S, Y, a, K, n) ⊆ Y ∧
+    Infinite(homogeneousChoice(C, S, Y, a, K, n)) ∧
+    ∃ c ∈ K,
+      ∀ T ∈ subsetsOfSize(homogeneousChoice(C, S, Y, a, K, n), n),
+        C(insert(a, T)) = c
+proof
+  have induced := inducedColouring.function at C, S, Y, a, K, n with
+    colouring, subset, ha, fresh
+  obtain ⟨H, hH, hInfinite, c, hc, homogeneous⟩ :=
+    ramsey with Y, inducedColouring(C, S, Y, a, K, n), infinite, induced
+  have candidate : H ∈ homogeneousSubsets(inducedColouring(C, S, Y, a, K, n), K, Y, n)
+    have power := powerset.membership_iff.backward with hH
+    apply homogeneousSubsets.membership.backward
+    exact ⟨power, hInfinite, c, hc, homogeneous⟩
+  have inhabited : Nonempty(homogeneousSubsets(inducedColouring(C, S, Y, a, K, n), K, Y, n)) :=
+    ⟨H, candidate⟩
+  have selected := choose.member with inhabited
+  rw ← homogeneousChoice.value at selected
+  obtain ⟨power, chosenInfinite, d, hd, chosenHomogeneous⟩ :=
+    homogeneousSubsets.membership.forward with selected
+  have chosenSubset := powerset.membership_iff.forward with power
+  refine ⟨chosenSubset, chosenInfinite, d, hd, ?_⟩
+  intros T hT
+  have memberY := subsetsOfSize.member_of_subset with chosenSubset, hT
+  have value := inducedColouring.value at C, S, Y, a, K, n, T with
+    colouring, subset, ha, fresh, memberY
+  rw ← value
+  exact chosenHomogeneous with T, hT
+
+-- One step of the chain: remove the chosen point of X and pass to a
+-- homogeneous infinite subset of what remains.
+def ramseyStep (C S K X : Set, n : Nat) : Set :=
+  homogeneousChoice(C, S, X ∖ {choose(X)}, choose(X), K, n)
+
+theorem ramseyStep.value (C S K X : Set, n : Nat)
+  shows ramseyStep(C, S, K, X, n) =
+    homogeneousChoice(C, S, X ∖ {choose(X)}, choose(X), K, n)
+proof
+  simp [ramseyStep]
+
+theorem ramseyStep.properties (C S K X : Set, n : Nat)
+  requires ramsey : RamseyProperty(n, K)
+  requires colouring : C : subsetsOfSize(S, n + 1) → K
+  requires subset : X ⊆ S
+  requires infinite : Infinite(X)
+  shows ramseyStep(C, S, K, X, n) ⊆ X ∖ {choose(X)} ∧
+    Infinite(ramseyStep(C, S, K, X, n)) ∧
+    ∃ c ∈ K, ∀ T ∈ subsetsOfSize(ramseyStep(C, S, K, X, n), n),
+      C(insert(choose(X), T)) = c
+proof
+  have chosen := choose.member with (Infinite.nonempty with infinite)
+  have inS := subset with choose(X), chosen
+  have restSubset : X ∖ {choose(X)} ⊆ S :=
+    Subset.transitive with (difference.subset_left at X, {choose(X)}), subset
+  have restInfinite := Infinite.remove at X, choose(X) with infinite
+  have fresh : ¬choose(X) ∈ X ∖ {choose(X)} by
+    simp [difference.membership, singleton.membership]
+  have parts := homogeneousChoice.properties with
+    ramsey, colouring, restSubset, inS, fresh, restInfinite
+  simpa [ramseyStep.value] using parts
+
+-- The stages and their points.
+
+def ramseyStage (C S K : Set, n : Nat, i : Nat) → Set
+  | C, S, K, n, zero => S
+  | C, S, K, n, succ(k) => ramseyStep(C, S, K, ramseyStage(C, S, K, n, k), n)
+
+theorem ramseyStage.zero (C S K : Set, n : Nat)
+  shows ramseyStage(C, S, K, n, 0) = S
+proof
+  simp [ramseyStage]
+
+theorem ramseyStage.succ (C S K : Set, n : Nat, k : Nat)
+  shows ramseyStage(C, S, K, n, k + 1) =
+    ramseyStep(C, S, K, ramseyStage(C, S, K, n, k), n)
+proof
+  have one : k + 1 = succ(k) := add.right_one with *
+  rw one
+  simp [ramseyStage]
+
+def ramseyPoint (C S K : Set, n : Nat, i : Nat) : Set :=
+  choose(ramseyStage(C, S, K, n, i))
+
+theorem ramseyPoint.value (C S K : Set, n : Nat, i : Nat)
+  shows ramseyPoint(C, S, K, n, i) = choose(ramseyStage(C, S, K, n, i))
+proof
+  simp [ramseyPoint]
+
+section RamseyChain
+variable (C S K : Set) (n : Nat)
+hypothesis ramsey : RamseyProperty(n, K)
+hypothesis colouring : FunctionBetween(C, subsetsOfSize(S, n + 1), K)
+hypothesis infinite : Infinite(S)
+
+theorem ramseyStage.invariant (i : Nat)
+  shows ramseyStage(C, S, K, n, i) ⊆ S ∧
+    Infinite(ramseyStage(C, S, K, n, i))
+proof
+  induction i
+  | zero =>
+    rw ramseyStage.zero
+    exact ⟨Subset.reflexive at S, infinite⟩
+  | k + 1 using ih =>
+    rw ramseyStage.succ
+    obtain ⟨subsetK, infiniteK⟩ := ih
+    obtain ⟨next, nextInfinite, _⟩ := ramseyStep.properties at
+      C, S, K, ramseyStage(C, S, K, n, k), n with
+      ramsey, colouring, subsetK, infiniteK
+    have rest := difference.subset_left at
+      ramseyStage(C, S, K, n, k), {choose(ramseyStage(C, S, K, n, k))}
+    have nextSubset : ramseyStep(C, S, K, ramseyStage(C, S, K, n, k), n) ⊆ S :=
+      Subset.transitive with (Subset.transitive with next, rest), subsetK
+    exact ⟨nextSubset, nextInfinite⟩
+
+theorem ramseyStage.subset (i : Nat)
+  shows ramseyStage(C, S, K, n, i) ⊆ S
+proof
+  have parts := ramseyStage.invariant at C, S, K, n, i with *
+  exact parts.left
+
+theorem ramseyStage.infinite (i : Nat)
+  shows Infinite(ramseyStage(C, S, K, n, i))
+proof
+  have parts := ramseyStage.invariant at C, S, K, n, i with *
+  exact parts.right
+
+theorem ramseyPoint.member (i : Nat)
+  shows ramseyPoint(C, S, K, n, i) ∈ ramseyStage(C, S, K, n, i)
+proof
+  have stageInfinite := ramseyStage.infinite at C, S, K, n, i with *
+  rw ramseyPoint.value
+  exact choose.member with (Infinite.nonempty with stageInfinite)
+
+theorem ramseyPoint.in_set (i : Nat)
+  shows ramseyPoint(C, S, K, n, i) ∈ S
+proof
+  have stageSubset := ramseyStage.subset at C, S, K, n, i with *
+  have member := ramseyPoint.member at C, S, K, n, i with *
+  exact stageSubset with ramseyPoint(C, S, K, n, i), member
+
+theorem ramseyStage.step (i : Nat)
+  shows ramseyStage(C, S, K, n, i + 1) ⊆
+      ramseyStage(C, S, K, n, i) ∖ {ramseyPoint(C, S, K, n, i)} ∧
+    ∃ c ∈ K, ∀ T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n),
+      C(insert(ramseyPoint(C, S, K, n, i), T)) = c
+proof
+  have stageSubset := ramseyStage.subset at C, S, K, n, i with *
+  have stageInfinite := ramseyStage.infinite at C, S, K, n, i with *
+  obtain ⟨next, _, c, hc, homogeneous⟩ := ramseyStep.properties at
+    C, S, K, ramseyStage(C, S, K, n, i), n with
+    ramsey, colouring, stageSubset, stageInfinite
+  constructor
+  . rw [ramseyStage.succ, ramseyPoint.value]
+    exact next
+  . refine ⟨c, hc, ?_⟩
+    intros T hT
+    rw ramseyStage.succ at hT
+    rw ramseyPoint.value
+    exact homogeneous with T, hT
+
+theorem ramseyStage.succ_subset (i : Nat)
+  shows ramseyStage(C, S, K, n, i + 1) ⊆
+    ramseyStage(C, S, K, n, i) ∖ {ramseyPoint(C, S, K, n, i)}
+proof
+  have parts := ramseyStage.step at C, S, K, n, i with *
+  exact parts.left
+
+theorem ramseyStage.succ_homogeneous (i : Nat)
+  shows ∃ c ∈ K, ∀ T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n),
+    C(insert(ramseyPoint(C, S, K, n, i), T)) = c
+proof
+  have parts := ramseyStage.step at C, S, K, n, i with *
+  exact parts.right
+
+theorem ramseyStage.antitone (i d : Nat)
+  shows ramseyStage(C, S, K, n, i + d) ⊆ ramseyStage(C, S, K, n, i)
+proof
+  induction d
+  | zero =>
+    have same : i + 0 = i by ring
+    rw same
+    exact Subset.reflexive at ramseyStage(C, S, K, n, i)
+  | k + 1 using ih =>
+    have shape : i + (k + 1) = (i + k) + 1 by ring
+    rw shape
+    have step := ramseyStage.succ_subset at C, S, K, n, i + k with
+      ramsey, colouring, infinite
+    have rest := difference.subset_left at
+      ramseyStage(C, S, K, n, i + k), {ramseyPoint(C, S, K, n, i + k)}
+    exact Subset.transitive with (Subset.transitive with step, rest), ih
+
+theorem ramseyStage.monotone (i j : Nat)
+  requires le : i ≤ j
+  shows ramseyStage(C, S, K, n, j) ⊆ ramseyStage(C, S, K, n, i)
+proof
+  obtain ⟨d, dNat, shape⟩ := le
+  rw ← shape
+  exact ramseyStage.antitone at C, S, K, n, i, d with *
+
+-- Later points lie in every earlier successor stage, so the points are
+-- pairwise distinct.
+theorem ramseyPoint.later_member (i j : Nat)
+  requires below : i < j
+  shows ramseyPoint(C, S, K, n, j) ∈ ramseyStage(C, S, K, n, i + 1)
+proof
+  have le := Less.gap.forward with below
+  have nested := ramseyStage.monotone at C, S, K, n, i + 1, j with *
+  have member := ramseyPoint.member at C, S, K, n, j with *
+  exact nested with ramseyPoint(C, S, K, n, j), member
+
+theorem ramseyPoint.distinct (i j : Nat)
+  requires below : i < j
+  shows ramseyPoint(C, S, K, n, i) ≠ ramseyPoint(C, S, K, n, j)
+proof
+  intro same
+  have later := ramseyPoint.later_member at C, S, K, n, i, j with *
+  have excluded := ramseyStage.succ_subset at C, S, K, n, i with *
+  have inRest := excluded with ramseyPoint(C, S, K, n, j), later
+  have parts := difference.singleton_membership.forward with inRest
+  apply parts.right
+  symm
+  exact same
+
+theorem ramseyPoint.injective_on (i j : Nat)
+  requires same : ramseyPoint(C, S, K, n, i) = ramseyPoint(C, S, K, n, j)
+  shows i = j
+proof
+  have alternatives := Less.trichotomy at i, j with *
+  rcases alternatives with below | equal | above
+  . exfalso
+    have distinct := ramseyPoint.distinct at C, S, K, n, i, j with *
+    exact distinct with same
+  . exact equal
+  . exfalso
+    have distinct := ramseyPoint.distinct at C, S, K, n, j, i with *
+    apply distinct
+    symm
+    exact same
+
+end RamseyChain
+
+-- The colour of stage i: the colour that every n-subset T of Sᵢ₊₁
+-- gives to insert(aᵢ, T).
+def ramseyColours (C S K : Set, n : Nat, i : Nat) : Set :=
+  { c ∈ K | ∀ T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n),
+      C(insert(ramseyPoint(C, S, K, n, i), T)) = c }
+
+theorem ramseyColours.membership (c C S K : Set, n : Nat, i : Nat)
+  shows c ∈ ramseyColours(C, S, K, n, i) ↔ c ∈ K ∧
+    ∀ T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n),
+      C(insert(ramseyPoint(C, S, K, n, i), T)) = c
+proof
+  simp [ramseyColours]
+
+def ramseyColour (C S K : Set, n : Nat, i : Nat) : Set :=
+  choose(ramseyColours(C, S, K, n, i))
+
+section RamseyColour
+variable (C S K : Set) (n : Nat)
+hypothesis ramsey : RamseyProperty(n, K)
+hypothesis colouring : FunctionBetween(C, subsetsOfSize(S, n + 1), K)
+hypothesis infinite : Infinite(S)
+
+theorem ramseyColour.properties (i : Nat)
+  shows ramseyColour(C, S, K, n, i) ∈ K ∧
+    ∀ T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n),
+      C(insert(ramseyPoint(C, S, K, n, i), T)) = ramseyColour(C, S, K, n, i)
+proof
+  obtain ⟨c, hc, law⟩ :=
+    ramseyStage.succ_homogeneous at C, S, K, n, i with *
+  have candidate : c ∈ ramseyColours(C, S, K, n, i) :=
+    ramseyColours.membership.backward with ⟨hc, law⟩
+  have inhabited : Nonempty(ramseyColours(C, S, K, n, i)) := ⟨c, candidate⟩
+  have selected : ramseyColour(C, S, K, n, i) ∈ ramseyColours(C, S, K, n, i)
+    unfold ramseyColour
+    exact choose.member with inhabited
+  exact ramseyColours.membership.forward with selected
+
+theorem ramseyColour.member (i : Nat)
+  shows ramseyColour(C, S, K, n, i) ∈ K
+proof
+  have parts := ramseyColour.properties at C, S, K, n, i with *
+  exact parts.left
+
+theorem ramseyColour.law (T : Set) (i : Nat)
+  requires hT : T ∈ subsetsOfSize(ramseyStage(C, S, K, n, i + 1), n)
+  shows C(insert(ramseyPoint(C, S, K, n, i), T)) = ramseyColour(C, S, K, n, i)
+proof
+  have parts := ramseyColour.properties at C, S, K, n, i with *
+  exact parts.right with T, hT
+
+end RamseyColour
