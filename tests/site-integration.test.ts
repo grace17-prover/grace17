@@ -29,17 +29,27 @@ test('service-worker install resolves shell and editor assets inside its hosting
     const listeners: any = {}, assets: string[] = [], deleted: string[] = [];
     const origin = 'https://grace17.org';
     let pending: Promise<void>;
-    const cache = { addAll: async (urls: string[]) => assets.push(...urls), put: async () => {} };
+    // The worker installs with Request objects that bypass the HTTP cache;
+    // the sandbox records their URLs and cache modes.
+    class FakeRequest { url: string; cache: string; constructor(url: string, init: { cache?: string } = {}) { this.url = url; this.cache = init.cache ?? 'default'; } }
+    const modes: string[] = [];
+    const cache = {
+      addAll: async (entries: (string | FakeRequest)[]) => entries.forEach(entry => { assets.push(typeof entry === 'string' ? entry : entry.url); modes.push(typeof entry === 'string' ? 'default' : entry.cache); }),
+      put: async () => {},
+    };
     vm.runInNewContext(code, {
-      URL, self: { location: new URL(`${origin}${pathname}service-worker.js`), addEventListener: (n: string, f: any) => listeners[n] = f, skipWaiting() {}, clients: { claim() {} } },
+      URL, Request: FakeRequest,
+      self: { location: new URL(`${origin}${pathname}service-worker.js`), addEventListener: (n: string, f: any) => listeners[n] = f, skipWaiting() {}, clients: { claim() {} } },
       caches: { open: async () => cache, keys: async () => [`grace17-workbench-${pathname}-old`, 'unrelated-site-cache'], delete: async (key: string) => deleted.push(key) },
-      fetch: async (url: string) => {
+      fetch: async (request: string | FakeRequest) => {
+        const url = typeof request === 'string' ? request : request.url;
         assert.equal(url, `${origin}${pathname}generated/monaco-assets.json`);
         return { clone() { return this; }, json: async () => ['/generated/monaco/vs/editor/editor.main.js'] };
       },
     });
     listeners.install({ waitUntil(p: Promise<void>) { pending = p; } }); await pending!;
     assert(assets.length > 20); assert(assets.every(url => url.startsWith(origin + pathname)));
+    assert(modes.every(mode => mode === 'reload'));
     listeners.activate({ waitUntil(p: Promise<void>) { pending = p; } }); await pending!;
     assert.deepEqual(deleted, [`grace17-workbench-${pathname}-old`]);
     let intercepted = false;
