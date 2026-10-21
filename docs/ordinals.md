@@ -191,7 +191,8 @@ theorem V.limit_membership (x λ : Set)
 
 ### The rank argument
 
-Now the theorem that places every set in the hierarchy, in full:
+Now we can prove that every set lies in the hierarchy, at the stage given
+by its rank:
 
 <!-- cumulus-source: lib/Grace/Cumulus/Set/Hierarchy.g17 -->
 ```g17
