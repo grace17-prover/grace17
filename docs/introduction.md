@@ -61,7 +61,8 @@ like fun, I welcome your contributions.
 Mathematics is better for having many foundations, tools, and habits
 of thought. Grace17 welcomes mathematicians new to formal proof as well as
 users of Lean, Mizar, ACL2, Isabelle, Rocq, PVS, Agda, Metamath, HOL Light,
-HOL4, Naproche, and others to contribute and help us improve the system.
+HOL4, ProofPower, Naproche, and others to contribute and help us improve the
+system.
 Experience in any of those communities is useful here, and I hope ideas and
 examples travel in both directions.
 
@@ -79,7 +80,8 @@ Paulson, Natarajan Shankar, Sam Owre, Paul Jackson, Wenda Li, Marijn Heule,
 Yves Bertot, Assia Mahboubi, Bas Spitters, André Platzer, Larry Wos, Michael
 Beeson, Yuri Gurevich, Nikolaj Bjorner, Denis Ignatovich, András Salamon,
 Christoph Wintersteiger, Simon Cruanes, Thomas Forster, Peter Koepke, Norm
-Megill, John Harrison, Mike Gordon, Robin Milner, and many others. My design
+Megill, John Harrison, Mike Gordon, Rob Arthan, Roger Bishop Jones, Robin
+Milner, and many others. My design
 decisions would not be the same without their work and ideas (though I must
 take credit for all decisions they would disagree with! :-)).
 
