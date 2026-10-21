@@ -367,6 +367,7 @@ const declarationWords = new Set([
   "module", "import", "open", "def", "defgraph", "defchoose", "defunique", "predicate", "class", "theorem", "lemma", "instance",
   "requires", "shows", "proof", "notation", "infix", "infixl", "infixr", "tactic",
   "noncomputable", "transfinite", "foundation", "well-founded", "define", "datatype", "structure", "mixfix", "prefix", "postfix", "scoped", "guard", "binder", "namespace", "section", "variable", "hypothesis", "end", "where",
+  "eval", "export", "self", "uniqueness", "descends", "over", "ordered", "certified",
 ]);
 const tacticWords = new Set([
   "intro", "intros", "exact", "assumption", "rfl", "reflexivity", "apply", "have", "calc", "specialize",
