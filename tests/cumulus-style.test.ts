@@ -60,6 +60,7 @@ test("Cumulus reserves maplets for function-like graph entries", () => {
   const expected = new Map<string, number>([
     ["lib/Grace/Cumulus/Cardinal/Finite.g17", 2],
     ["lib/Grace/Cumulus/Cardinal/Hartogs.g17", 3],
+    ["lib/Grace/Cumulus/Cardinal/LeastCode.g17", 2],
     ["lib/Grace/Cumulus/Cardinal/Product.g17", 6],
     ["lib/Grace/Cumulus/Cardinal/Sum.g17", 6],
     ["lib/Grace/Cumulus/Algebra/Field/Core.g17", 2],
@@ -83,7 +84,6 @@ test("Cumulus reserves maplets for function-like graph entries", () => {
     ["lib/Grace/Cumulus/Set/Hierarchy.g17", 11],
     ["lib/Grace/Cumulus/Set/Ordinal/Arithmetic.g17", 4],
     ["lib/Grace/Cumulus/Topology/CantorBendixson/Iterate.g17", 2],
-    ["lib/Grace/Cumulus/Topology/CantorBendixson/Selection.g17", 2],
     ["lib/Grace/Cumulus/Topology/CantorBendixson/Stabilise.g17", 2],
     ["lib/Grace/Cumulus/Topology/CantorBendixson/Theorem.g17", 2],
   ]);

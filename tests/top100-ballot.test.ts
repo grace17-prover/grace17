@@ -61,7 +61,7 @@ proof
 test("ballot problem: the sequences are the lists over 2 of length a + b with a zeros whose nonempty prefixes hold more zeros than ones", () => {
   const statements = check(`theorem ballotMembership (a b : Nat) (xs : Set)
   shows xs ∈ ballotSequences(a, b) ↔
-    xs ∈ ballots(a + b) ∧ zeros(xs) = a ∧ AlwaysAhead(xs)
+    xs ∈ ballots(a + b) ∧ zeroVotes(xs) = a ∧ AlwaysAhead(xs)
 proof
   exact ballotSequences.membership at a, b, xs
 
@@ -72,7 +72,7 @@ proof
 
 theorem alwaysAhead (xs : Set)
   shows AlwaysAhead(xs) ↔
-    ∀ ys, List(2, ys) → ListPrefix(2, ys, xs) → ys ≠ [] → ones(ys) < zeros(ys)
+    ∀ ys, List(2, ys) → ListPrefix(2, ys, xs) → ys ≠ [] → oneVotes(ys) < zeroVotes(ys)
 proof
   constructor
   . intro ahead
@@ -83,11 +83,11 @@ proof
     exact ahead
 `);
   assert.equal(statements.get("ballotMembership"),
-    "∀ a b : ℕ, ∀ xs, xs ∈ ballotSequences(a, b) ↔ xs ∈ ballots(a + b) ∧ zeros(xs) = a ∧ AlwaysAhead(xs)");
+    "∀ a b : ℕ, ∀ xs, xs ∈ ballotSequences(a, b) ↔ xs ∈ ballots(a + b) ∧ zeroVotes(xs) = a ∧ AlwaysAhead(xs)");
   assert.equal(statements.get("ballotsMembership"),
     "∀ n : ℕ, ∀ xs, xs ∈ ballots(n) ↔ List(2, xs) ∧ length(2, xs) = n");
   assert.equal(statements.get("alwaysAhead"),
-    "∀ xs, AlwaysAhead(xs) ↔ ∀ ys, List(2, ys) → ListPrefix(2, ys, xs) → ys ≠ [] → ones(ys) < zeros(ys)");
+    "∀ xs, AlwaysAhead(xs) ↔ ∀ ys, List(2, ys) → ListPrefix(2, ys, xs) → ys ≠ [] → oneVotes(ys) < zeroVotes(ys)");
 });
 
 test("ballot problem, probability form: A stays ahead with probability (a − b)/(a + b)", () => {

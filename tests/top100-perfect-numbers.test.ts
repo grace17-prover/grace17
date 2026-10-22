@@ -38,25 +38,25 @@ proof
   exact sigma.definition at n
 
 theorem perfectDefinition (n : Nat)
-  shows Perfect(n) ↔ 0 < n ∧ sigma(n) = 2 * n
+  shows PerfectNumber(n) ↔ 0 < n ∧ sigma(n) = 2 * n
 proof
-  simp [Perfect]
+  simp [PerfectNumber]
 
 theorem six
-  shows Perfect(6)
+  shows PerfectNumber(6)
 proof
   have prime : Prime(2 ^ 2 - 1)
     have three : 2 ^ 2 - 1 = 3 by compute
     rw three
     exact Prime.three
-  have euclid := perfect.of_mersenne with prime
+  have euclid := perfectNumber.of_mersenne with prime
   have value : 2 ^ (2 - 1) * (2 ^ 2 - 1) = 6 by compute
   rw value at euclid
   exact euclid
 `);
   assert.equal(statements.get("sigmaDefinition"), "∀ n : ℕ, sigma(n) = natSum(divisors(n), identity(ℕ))");
-  assert.equal(statements.get("perfectDefinition"), "∀ n : ℕ, Perfect(n) ↔ 0 < n ∧ sigma(n) = 2 * n");
-  assert.equal(statements.get("six"), "Perfect(6)");
+  assert.equal(statements.get("perfectDefinition"), "∀ n : ℕ, PerfectNumber(n) ↔ 0 < n ∧ sigma(n) = 2 * n");
+  assert.equal(statements.get("six"), "PerfectNumber(6)");
 });
 
 test("σ is multiplicative on coprime arguments, σ(p) = p + 1 characterises primes, and σ(2^k) = 2^(k+1) − 1", () => {
@@ -100,34 +100,34 @@ proof
 test("Euclid: 2^(p−1)(2^p − 1) is perfect when 2^p − 1 is prime; Euler: every even perfect number has this form", () => {
   const statements = check(`theorem euclid (p : Nat)
   requires prime : Prime(2 ^ p - 1)
-  shows Perfect(2 ^ (p - 1) * (2 ^ p - 1))
+  shows PerfectNumber(2 ^ (p - 1) * (2 ^ p - 1))
 proof
-  exact perfect.of_mersenne with *
+  exact perfectNumber.of_mersenne with *
 
 theorem euler (n : Nat)
-  requires perfect : Perfect(n)
+  requires perfect : PerfectNumber(n)
   requires even : Even(n)
   shows ${euclidForm}
 proof
-  exact perfect.even_form with *
+  exact perfectNumber.even_form with *
 
 theorem evenIff (n : Nat)
   requires even : Even(n)
-  shows Perfect(n) ↔ ${euclidForm}
+  shows PerfectNumber(n) ↔ ${euclidForm}
 proof
-  exact perfect.even_iff with *
+  exact perfectNumber.even_iff with *
 `);
-  assert.equal(statements.get("euclid"), "∀ p : ℕ, Prime(2 ^ p - 1) → Perfect(2 ^ (p - 1) * (2 ^ p - 1))");
-  assert.equal(statements.get("euler"), `∀ n : ℕ, Perfect(n) → Even(n) → ${euclidForm}`);
-  assert.equal(statements.get("evenIff"), `∀ n : ℕ, Even(n) → (Perfect(n) ↔ ${euclidForm})`);
+  assert.equal(statements.get("euclid"), "∀ p : ℕ, Prime(2 ^ p - 1) → PerfectNumber(2 ^ (p - 1) * (2 ^ p - 1))");
+  assert.equal(statements.get("euler"), `∀ n : ℕ, PerfectNumber(n) → Even(n) → ${euclidForm}`);
+  assert.equal(statements.get("evenIff"), `∀ n : ℕ, Even(n) → (PerfectNumber(n) ↔ ${euclidForm})`);
 });
 
 test("Euler's direction needs evenness: without it the restatement is rejected", () => {
   assert.throws(() => check(`theorem oddCase (n : Nat)
-  requires perfect : Perfect(n)
+  requires perfect : PerfectNumber(n)
   shows ${euclidForm}
 proof
-  exact perfect.even_form with *
+  exact perfectNumber.even_form with *
 `));
 });
 
@@ -137,9 +137,9 @@ test("the perfect number modules are admission-free ZF", t => {
   const modules = loadModuleSourceGraph(kernel, [{ file, source: readFileSync(file, "utf8") }], ["lib"]);
   assert.equal(modules.flatMap(m => m.sorries).length, 0);
   const names = [...kernel.theorems.keys()].filter(name =>
-    /^Grace\.Cumulus\.NumberTheory\.(NaturalSums|DivisorSum|PerfectNumbers)\./.test(name));
+    /^Grace\.Cumulus\.(Cardinal\.NaturalSumLaws|NumberTheory\.(DivisorSum|PerfectNumbers))\./.test(name));
   for (const expected of ["natSum.reindex", "natSum.product", "sigma.multiplicative", "sigma.prime",
-    "sigma.prime_iff", "sigma.two_pow", "perfect.of_mersenne", "perfect.even_form", "perfect.even_iff"]) {
+    "sigma.prime_iff", "sigma.two_pow", "perfectNumber.of_mersenne", "perfectNumber.even_form", "perfectNumber.even_iff"]) {
     assert.ok(names.some(name => name.endsWith(`.${expected}`)), expected);
   }
   for (const name of names) {

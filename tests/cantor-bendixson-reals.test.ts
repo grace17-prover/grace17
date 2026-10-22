@@ -3,8 +3,9 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-// Cantor–Bendixson on the real line (Topology/Real): the open intervals
-// with rational endpoints form a countable basis of the real line, and the
+// Cantor–Bendixson on the real line (Topology/Real): ℚ is dense in ℝ
+// (Real/Embedding), open intervals are open (Topology/Real), the open
+// intervals with rational endpoints form a countable basis of the line, and the
 // general theorem at that basis says that every closed set of reals is the
 // disjoint union of a perfect set and a countable set, with a countable
 // rank. The modules are checked through the machine interface's check
@@ -17,6 +18,8 @@ import { callMachineMethod } from "../src/index.ts";
 
 const prefix = "Grace.Cumulus.";
 const modules = [
+  "Real/Embedding",
+  "Topology/Real",
   "Topology/Real/RationalBase",
   "Topology/Real/CantorBendixson",
 ];
@@ -81,9 +84,9 @@ test("the real-line Cantor–Bendixson modules check with every theorem proved",
 
 test("the statements print as written", () => {
   const expected: Record<string, string> = {
-    "Topology.Real.RationalBase.rationalCut.between":
+    "Real.Embedding.rationalCut.between":
       "∀ x y : ℝ, x < y → ∃ q ∈ ℚ, x < rationalCut(q) ∧ rationalCut(q) < y",
-    "Topology.Real.RationalBase.openInterval.open":
+    "Topology.Real.openInterval.open":
       "∀ A B : ℝ, openInterval(A, B) ∈ realTopology",
     "Topology.Real.RationalBase.rationalIntervals.membership":
       "∀ W, W ∈ rationalIntervals ↔ W ∈ 𝒫(ℝ) ∧ ∃ p ∈ ℚ, ∃ q ∈ ℚ, p < q ∧ W = openInterval(rationalCut(p), rationalCut(q))",
@@ -109,7 +112,7 @@ test("the statements print as written", () => {
 
 test("the rational basis and the real-line theorem are theorems of ZF", t => {
   for (const name of [
-    "Topology.Real.RationalBase.rationalCut.between",
+    "Real.Embedding.rationalCut.between",
     "Topology.Real.RationalBase.rationalIntervals.basis",
     "Topology.Real.RationalBase.rationalIntervals.countable",
     "Topology.Real.CantorBendixson.reals.cantorBendixson",

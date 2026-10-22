@@ -12,7 +12,8 @@
 // check method with the audit attached: every theorem is proved, the four
 // theorems and the three recursion laws print as written, and the audit of
 // each Cantor–Bendixson theorem names the ZF axioms and nothing else, since
-// every choice in the proof is the least index under an explicit injection.
+// every choice in the proof is the least code under an explicit injection
+// (Cardinal/LeastCode).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +23,6 @@ const prefix = "Grace.Cumulus.Topology.CantorBendixson.";
 const modules = [
   "Topology/CantorBendixson/Derived",
   "Topology/CantorBendixson/Iterate",
-  "Topology/CantorBendixson/Selection",
   "Topology/CantorBendixson/Stabilise",
   "Topology/CantorBendixson/Theorem",
   "Topology/CantorBendixson",
