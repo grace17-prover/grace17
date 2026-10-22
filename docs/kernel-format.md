@@ -1,8 +1,6 @@
 # Grace17 kernel and G17M format
 
-This document tells an implementer what a Grace17 proof checker must do. It
-uses direct prose and integer layouts. It does not describe parsing, tactics,
-type inference, or proof search, because none of those belong in a checker.
+This document tells an implementer what a Grace17 proof checker must do.
 
 The current portable proof format is G17M version 4. Complete, independent
 implementations are in `checkers/python/g17check.py`, `checkers/ocaml`, and
