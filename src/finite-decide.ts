@@ -202,13 +202,13 @@ export function decideFiniteSet(goal: Formula, names: FiniteNames, taken: Readon
     }
     if (fn === names.intersection) {
       const [a, b] = [args[0]!, args[1]!];
-      return [`apply intersection.membership.backward at ${X}, ${show(a)}, ${show(b)}`, "constructor",
+      return [`apply intersection.membership.backward at ${show(a)}, ${show(b)}, ${X}`, "constructor",
         ...bullet(memberOf(x, a)), ...bullet(memberOf(x, b))];
     }
     if (fn === names.difference) {
       const [a, b] = [args[0]!, args[1]!];
       const h = fresh("h");
-      return [`apply difference.membership.backward at ${X}, ${show(a)}, ${show(b)}`, "constructor",
+      return [`apply difference.membership.backward at ${show(a)}, ${show(b)}, ${X}`, "constructor",
         ...bullet(memberOf(x, a)), ...bullet([`intro ${h}`, ...refute(h, x, b)])];
     }
     if (fn === names.powerset) {
@@ -318,7 +318,7 @@ export function decideFiniteSet(goal: Formula, names: FiniteNames, taken: Readon
       const [a, b] = [args[0]!, args[1]!];
       const [d, l, r] = [fresh("d"), fresh("l"), fresh("r")];
       const right = evaluate(b);
-      return [`have ${d} := intersection.membership.forward at ${z}, ${show(a)}, ${show(b)} with ${h}`, `rcases ${d} with ⟨${l}, ${r}⟩`,
+      return [`have ${d} := intersection.membership.forward at ${show(a)}, ${show(b)}, ${z} with ${h}`, `rcases ${d} with ⟨${l}, ${r}⟩`,
         ...eliminate(l, z, a, (candidate, equation) => memberHF(evaluate(candidate), right)
           ? next(candidate, equation)
           : [`rw ${equation} at ${r}`, "exfalso", ...refute(r, candidate, b)])];
@@ -327,7 +327,7 @@ export function decideFiniteSet(goal: Formula, names: FiniteNames, taken: Readon
       const [a, b] = [args[0]!, args[1]!];
       const [d, l, r] = [fresh("d"), fresh("l"), fresh("r")];
       const right = evaluate(b);
-      return [`have ${d} := difference.membership.forward at ${z}, ${show(a)}, ${show(b)} with ${h}`, `rcases ${d} with ⟨${l}, ${r}⟩`,
+      return [`have ${d} := difference.membership.forward at ${show(a)}, ${show(b)}, ${z} with ${h}`, `rcases ${d} with ⟨${l}, ${r}⟩`,
         ...eliminate(l, z, a, (candidate, equation) => memberHF(evaluate(candidate), right)
           ? [`rw ${equation} at ${r}`, "exfalso", `apply ${r}`, ...memberOf(candidate, b)]
           : next(candidate, equation))];

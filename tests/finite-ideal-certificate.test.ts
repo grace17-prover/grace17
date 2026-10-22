@@ -13,7 +13,7 @@ test("arbitrary finite sums and generated-ideal certificates are public and choi
   const names = [
     ...["ringScale.closed", "ringSum.nil", "ringSum.cons", "IsIdeal.sum_mem", "ringSum.closed", "ringSum.append", "ringSum.scale", "IsRingHom.sum"]
       .map(n => `Grace.Cumulus.Algebra.Ring.FiniteSum.${n}`),
-    ...["idealProducts.membership", "idealProducts.subset", "finiteIdealSums.membership", "idealProducts.scale",
+    ...["idealProducts.subset", "idealProducts.scale",
       "idealProducts.contains", "finiteIdealSums.zero", "finiteIdealSums.contains", "finiteIdealSums.add", "finiteIdealSums.scale",
       "finiteIdealSums.ideal", "idealProducts.subset_span", "idealSpan.eq_finite_sums", "idealSpan.finite_certificate",
       "idealSpan.unit_iff_finite_certificate", "idealSpan.finite_certificate_obstructs_vanishing"]

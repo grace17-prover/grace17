@@ -12,7 +12,7 @@ test("finite supports, coefficient operations, and their example have complete Z
   loadModuleGraph(kernel, ["lib/Grace/Cumulus/Cardinal.g17", "examples/FiniteSupportCoefficients.g17"], ["lib"]);
   const prefixes = ["Grace.Cumulus.Cardinal.ListSupport.", "Grace.Cumulus.Algebra.Coefficients.", "FiniteSupportCoefficients."];
   const names = [...kernel.theorems.keys()].filter(n => prefixes.some(p => n.startsWith(p)));
-  assert.ok(names.length >= 53, `expected the new public proofs, got ${names.length}`);
+  assert.ok(names.length >= 52, `expected the new public proofs, got ${names.length}`);
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

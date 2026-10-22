@@ -298,7 +298,8 @@ theorem withConjunctionAt (x A B : Set)
   requires notInjective : ¬(x ∈ B)
   shows x ∈ A ∖ B
 proof
-  have member := difference.membership.backward at x, A, B with inSpace, notInjective
+  have member := difference.membership.backward at
+    A, B, x with inSpace, notInjective
   exact member
 `);
   const message = failure(main + `

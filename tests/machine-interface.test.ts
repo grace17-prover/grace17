@@ -337,7 +337,7 @@ theorem both (x A B : Set)
   requires h : x ∈ A ∩ B
   shows x ∈ A
 proof
-  have split := intersection.membership at x, A, B
+  have split := intersection.membership at A, B, x
   rw split at h
   exact h.left
 `;
@@ -363,7 +363,7 @@ test("check --imports notes every declaration used only through a transitive imp
   const notes = audited.diagnostics.filter(item => item.severity === "note");
   assert.ok(notes.length >= 1, JSON.stringify(audited.diagnostics));
   assert.ok(notes.every(item => item.kind === "transitive-import" && item.file === "Indirect.g17" && item.theorem === "Indirect.both"));
-  const membership = notes.find(item => item.declaration === "Grace.Cumulus.Set.Basic.Set.intersection.membership")!;
+  const membership = notes.find(item => item.declaration === "Grace.Cumulus.Set.Basic.Set.intersection")!;
   assert.ok(membership, JSON.stringify(notes));
   assert.equal(membership.module, "Grace.Cumulus.Set.Basic");
   assert.equal(membership.via, "Grace.Cumulus.Set.Core");
@@ -371,7 +371,7 @@ test("check --imports notes every declaration used only through a transitive imp
   assert.equal(membership.path!.at(-1), "Grace.Cumulus.Set.Basic");
   assert.equal(membership.line, 4);
   assert.equal(membership.message,
-    "Grace.Cumulus.Set.Basic.Set.intersection.membership is declared in Grace.Cumulus.Set.Basic, which Indirect reaches only through its import Grace.Cumulus.Set.Core; import Grace.Cumulus.Set.Basic directly");
+    "Grace.Cumulus.Set.Basic.Set.intersection is declared in Grace.Cumulus.Set.Basic, which Indirect reaches only through its import Grace.Cumulus.Set.Core; import Grace.Cumulus.Set.Basic directly");
   // A declaration of a direct import, of the module itself, or of the core is never noted.
   assert.ok(notes.every(item => !["Grace.Cumulus.Set.Core", "Indirect"].includes(item.module!) && !/^Grace\.Core(\.|$)/.test(item.module!)));
   // Each declaration once.
@@ -448,7 +448,7 @@ test("g17 check --imports, check --continue --quiet, and g17 closure print their
     const g17 = (...args: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "bin/g17.ts", ...args], { cwd: project, encoding: "utf8" });
     const audited = g17("check", "--imports", "--module-root", "lib", indirect);
     assert.equal(audited.status, 0, audited.stderr);
-    assert.match(audited.stdout, /^note: .*Indirect\.g17:4: Grace\.Cumulus\.Set\.Basic\.Set\.intersection\.membership is declared in Grace\.Cumulus\.Set\.Basic/m);
+    assert.match(audited.stdout, /^note: .*Indirect\.g17:4: Grace\.Cumulus\.Set\.Basic\.Set\.intersection is declared in Grace\.Cumulus\.Set\.Basic/m);
     assert.match(audited.stdout, /^\d+ transitive-import notes?$/m);
     const json = g17("check", "--json", "--imports", "--module-root", "lib", indirect);
     assert.equal(json.status, 0, json.stderr);

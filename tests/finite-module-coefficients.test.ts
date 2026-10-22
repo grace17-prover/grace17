@@ -20,7 +20,7 @@ test("finite span coefficients and annihilator certificates have complete ZF aud
   const names = [...kernel.theorems.keys()].filter(name =>
     /^Grace.Cumulus.Algebra.(SpanInsert|SpanCoefficients|SpanAnnihilator)\./.test(name)
     || name.startsWith("FiniteModuleCoefficients."));
-  assert.ok(names.length >= 26);
+  assert.ok(names.length >= 25, `expected the span and annihilator proofs, got ${names.length}`);
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

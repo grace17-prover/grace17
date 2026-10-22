@@ -1192,7 +1192,7 @@ obtain ⟨function, onto⟩ := surjective
 have diagonalIn := cantorDiagonal.in_powerset at f, A
 obtain ⟨d, dInA, hits⟩ := onto with cantorDiagonal(f, A), diagonalIn
 have value := FunctionBetween.apply_value with function, dInA, hits
-have shape := cantorDiagonal.membership at d, f, A
+have shape := cantorDiagonal.membership at f, A, d
 have split : d ∈ cantorDiagonal(f, A) ∨ d ∉ cantorDiagonal(f, A) by tauto
 cases split with inside | outside
 . sorry
@@ -1202,7 +1202,7 @@ obtain ⟨function, onto⟩ := surjective
 have diagonalIn := cantorDiagonal.in_powerset at f, A
 obtain ⟨d, dInA, hits⟩ := onto with cantorDiagonal(f, A), diagonalIn
 have value := FunctionBetween.apply_value with function, dInA, hits
-have shape := cantorDiagonal.membership at d, f, A
+have shape := cantorDiagonal.membership at f, A, d
 have split : d ∈ cantorDiagonal(f, A) ∨ d ∉ cantorDiagonal(f, A) by tauto
 cases split with inside | outside
 . have facts := shape.forward with inside
