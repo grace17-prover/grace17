@@ -189,7 +189,9 @@ function resetLevel() {
   if (!current) return;
   $("editor").value = current.level.starter;
   delete progress.drafts[current.id];
+  delete progress.solved[current.id];
   saveProgress();
+  renderWorlds();
   updateWorkbenchLink();
   void check({ silent: true });
 }

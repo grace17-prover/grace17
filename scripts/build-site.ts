@@ -59,10 +59,15 @@ const navItems = [["docs/introduction.html", "Introduction"], ["docs/", "Docs"],
 // source was last edited. Uncommitted edits count as today.
 const editDates = new Map<string, string>();
 {
+  // The root commit is the squashed release and carries no edit history of
+  // its own, so a file it alone touches is dated by the build instead.
+  const rootCommit = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: root, encoding: "utf8" }).trim().split("\n")[0] ?? "";
   let date = "";
-  for (const line of execFileSync("git", ["log", "--format=%cs", "--name-only"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 }).split("\n")) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(line)) date = line;
-    else if (line && !editDates.has(line)) editDates.set(line, date);
+  let skipping = false;
+  for (const line of execFileSync("git", ["log", "--format=%H %cs", "--name-only"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 }).split("\n")) {
+    const commit = /^([0-9a-f]{40}) (\d{4}-\d{2}-\d{2})$/.exec(line);
+    if (commit) { date = commit[2]!; skipping = commit[1] === rootCommit; }
+    else if (line && !skipping && !editDates.has(line)) editDates.set(line, date);
   }
   for (const line of execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).split("\n")) {
     const path = line.slice(3).split(" -> ").at(-1);
