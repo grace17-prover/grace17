@@ -20,6 +20,23 @@ for (const link of document.querySelectorAll(".site-nav a, .sidebar a")) {
 // Collapse the documentation sidebar on narrow screens; it is a toggle there.
 const sidebarDetails = document.querySelector(".sidebar details");
 if (sidebarDetails && window.matchMedia("(max-width: 860px)").matches) sidebarDetails.open = false;
+// The sidebar keeps its scroll position from page to page within a visit,
+// and on a fresh visit it scrolls so that the current page's entry is in
+// view, so following a link never throws the list back to the top.
+if (sidebarDetails) {
+  const key = "grace17.sidebarScroll";
+  let saved = null;
+  try { saved = sessionStorage.getItem(key); } catch { /* storage unavailable */ }
+  const current = sidebarDetails.querySelector('a[aria-current="page"]');
+  if (saved !== null) sidebarDetails.scrollTop = Number(saved);
+  else if (current) {
+    const offset = current.getBoundingClientRect().top - sidebarDetails.getBoundingClientRect().top;
+    sidebarDetails.scrollTop = Math.max(0, offset - sidebarDetails.clientHeight / 2);
+  }
+  sidebarDetails.addEventListener("scroll", () => {
+    try { sessionStorage.setItem(key, String(sidebarDetails.scrollTop)); } catch { /* storage unavailable */ }
+  }, { passive: true });
+}
 
 // Hover cards for inline code that names a library declaration.
 import { highlightGrace17 } from "./workbench/tactics-guide.js";
