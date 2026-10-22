@@ -2,10 +2,14 @@
 
 This document tells an implementer what a Grace17 proof checker must do.
 
-The current portable proof format is G17M version 4. Complete, independent
-implementations are in `checkers/python/g17check.py`, `checkers/ocaml`, and
-`checkers/rust`, each with a strict G17C v3 library checker beside it
-(`g17c_check`). See `checkers/README.md`.
+There are two portable formats, with separate version numbers. A G17M
+proof tape, version 4, carries one theorem's proof as a sequence of
+opcodes over an environment. A G17C module, version 3, carries a compiled
+library module: its definitions, admissions, and computations, replayed
+from the axioms. Complete, independent implementations of both are in
+`checkers/python/g17check.py`, `checkers/ocaml`, and `checkers/rust`, each
+with a strict G17C library checker beside it (`g17c_check`). See
+`checkers/README.md`.
 
 For loading compiled libraries, use the checker-constructed foundation in
 `foundation-bootstrap.md` and the checked G17C event format specified in
