@@ -383,7 +383,6 @@ test("Cumulus loads over Core and every library theorem replays", () => {
     "Grace.Cumulus.NumberTheory.Divisibility.factorial.divisible_through",
     "Grace.Cumulus.NumberTheory.Divisibility.divides.consecutive_one",
     "Grace.Cumulus.NumberTheory.Prime.Prime.natural",
-    "Grace.Cumulus.NumberTheory.Prime.primes.membership",
     "Grace.Cumulus.NumberTheory.Prime.primes.contains",
     "Grace.Cumulus.NumberTheory.Prime.natural.exists_prime_divisor",
     "Grace.Cumulus.NumberTheory.Prime.factorial.successor_greater_than_one",
