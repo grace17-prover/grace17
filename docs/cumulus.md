@@ -403,11 +403,11 @@ lemmas; the coordinate identities behind them stay in a helper layer.
 `Grace.Cumulus.Geometry.BanachTarski` proves that the closed unit ball of ℝ³
 is paradoxical under the orientation-preserving isometries: `banachTarski`
 gives two disjoint subsets of the ball, each equidecomposable with the whole
-ball under the motions of ℝ³, `banachTarski.two_balls_part` a part of the
-ball equidecomposable with the disjoint union of the ball and a translate of
-it, and `banachTarski.two_balls` the strong form: the ball itself is
-equidecomposable with that disjoint union of two balls, by the
-Banach–Schröder–Bernstein theorem of
+ball under the motions of ℝ³, and `banachTarski.two_balls_part` a part of
+the ball equidecomposable with the disjoint union of the ball and a
+translate of it. `Geometry.BanachTarski.Strong` proves the strong form,
+`banachTarski.two_balls`: the ball itself is equidecomposable with that
+disjoint union of two balls, by the Banach–Schröder–Bernstein theorem of
 `Algebra.Group.Paradox.SchroederBernstein` (mutual embeddings by
 equidecomposable subsets give equidecomposability, through the piece maps
 of `Algebra.Group.Paradox.PieceMaps` and the back-and-forth chain of

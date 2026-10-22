@@ -53,8 +53,8 @@ test("Cumulus uses bounded quantifiers for set-sized membership guards", () => {
 });
 
 test("Cumulus source headers stay approachable", () => {
-  const cumulusFiles = g17Files(fileURLToPath(new URL("../lib/Grace/Cumulus", import.meta.url)));
-  for (const file of cumulusFiles) {
+  const subjectRoot = fileURLToPath(new URL("../lib/Grace/Cumulus", import.meta.url));
+  for (const file of g17Files(subjectRoot)) {
     const source = readFileSync(file, "utf8");
     const imports = source.match(/^import /gm)?.length ?? 0;
     const localOpens = source.match(/^open /gm)?.length ?? 0;
@@ -63,9 +63,11 @@ test("Cumulus source headers stay approachable", () => {
     const synthesisLimit = file.endsWith("/Algebra/MatrixAnnihilator.g17") ? 4
       : file.endsWith("/Algebra/Polynomial/Nullstellensatz.g17") ? 8 : 3;
     const limit = file.includes("/Real/Analysis/") ? 8 : synthesisLimit;
-    // Subject entrypoints only aggregate modules; the separate root-file test
-    // prohibits implementations there. Keep the import budget on proof modules.
-    const entrypoint = existsSync(file.slice(0, -4)) && statSync(file.slice(0, -4)).isDirectory();
+    // Subject entrypoints only aggregate modules: a top-level file, which the
+    // separate root-file test keeps free of implementations, or a file that
+    // names a subject directory. Keep the import budget on proof modules.
+    const entrypoint = dirname(file) === subjectRoot
+      || (existsSync(file.slice(0, -4)) && statSync(file.slice(0, -4)).isDirectory());
     if (!entrypoint) {
       assert.ok(imports <= limit, `${file}: expected at most ${limit} imports, found ${imports}`);
     }

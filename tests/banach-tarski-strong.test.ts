@@ -25,6 +25,7 @@ const modules = [
   "Algebra/Group/Paradox/PieceMaps.g17",
   "Algebra/Group/Paradox/SchroederBernstein.g17",
   "Geometry/BanachTarski.g17",
+  "Geometry/BanachTarski/Strong.g17",
 ];
 const files = modules.map(name => ({ name, source: readFileSync(`lib/Grace/Cumulus/${name}`, "utf8") }));
 
@@ -57,7 +58,7 @@ const expected: Record<string, string> = {
     "Embeds(act, G, X, B, A) → Equidecomposable(act, G, X, A, B)",
   "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls_part":
     "∃ C, C ⊆ unitBall ∧ Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
-  "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls":
+  "Grace.Cumulus.Geometry.BanachTarski.Strong.banachTarski.two_balls":
     "Equidecomposable(motionAction, Motions, ℝ³, unitBall, unitBall ∪ shiftedBall)",
 };
 
@@ -116,11 +117,11 @@ test("the audit of the Banach–Schröder–Bernstein theorem names only ZF axio
 
 test("the audit of the strong form names the choice axiom and nothing beyond ZF", t => {
   const result = callMachineMethod("check", {
-    files: [{ name: "lib/Grace/Cumulus/Geometry/BanachTarski.g17" }],
+    files: [{ name: "lib/Grace/Cumulus/Geometry/BanachTarski/Strong.g17" }],
     audit: true,
   }) as CheckResult;
   assert.equal(result.status, "checked");
-  const name = "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls";
+  const name = "Grace.Cumulus.Geometry.BanachTarski.Strong.banachTarski.two_balls";
   const theorem = result.theorems.find(item => item.name === name);
   assert.ok(theorem, `${name} is the strong form of the paradox`);
   assert.equal(theorem.status, "proved");
