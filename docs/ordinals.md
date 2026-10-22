@@ -120,6 +120,123 @@ supremum used by `rank(x)`, and monotonicity proves the checked theorem
 `rank.membership : x ∈ V(rank(x))`. So `CumulativeUniverse.eq_Universe` is
 an unconditional theorem; no axiom or extra recursion principle is involved.
 
+## Ordinal arithmetic
+
+Addition, multiplication, and exponentiation of ordinals are three more
+transfinite recursions, each on its right argument, with the union of the
+earlier values at a limit:
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Arithmetic.g17 -->
+```g17
+noncomputable transfinite def ordinalAdd (α : Ordinal, β : Ordinal) : Set
+  | 0 => α
+  | succ γ => next(ordinalAdd(α, γ))
+  | limit λ => ⋃(Relation.range(history))
+
+noncomputable transfinite def ordinalMul (α : Ordinal, β : Ordinal) : Set
+  | 0 => ∅
+  | succ γ => ordinalAdd(ordinalMul(α, γ), α)
+  | limit λ => ⋃(Relation.range(history))
+
+noncomputable transfinite def ordinalPow (α : Ordinal, β : Ordinal) : Set
+  | 0 => 1
+  | succ γ => ordinalMul(ordinalPow(α, γ), α)
+  | limit λ => ⋃(Relation.range(history))
+```
+
+Under `(α β : Ordinal)` the operators print and parse as `+`, `*`, and `^`.
+The laws that hold are proved by transfinite induction on the right
+argument, in the same way as the stage properties of `V`:
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/ArithmeticLaws.g17 -->
+```g17
+theorem ordinalAdd.associative (α β : Ordinal, γ : Set)
+  shows γ ∈ Ordinal → (α + β) + γ = α + (β + γ)
+```
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/ArithmeticLaws.g17 -->
+```g17
+theorem ordinalMul.distributive (α β : Ordinal, γ : Set)
+  shows γ ∈ Ordinal → α * (β + γ) = α * β + α * γ
+```
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/ArithmeticLaws.g17 -->
+```g17
+theorem ordinalPow.add (α β : Ordinal, γ : Set)
+  requires positive : ∅ ∈ α
+  shows γ ∈ Ordinal → α ^ (β + γ) = α ^ β * α ^ γ
+```
+
+The hypothesis `∅ ∈ α` on the power law is not a convenience: with the
+recursion as written, `0 ^ ω` is the union of `1, 0, 0, …`, which is `1`,
+so `0 ^ (1 + ω) ≠ 0 ^ 1 * 0 ^ ω`. Addition is strictly monotone and
+cancellative on the right (`ordinalAdd.monotone`, `ordinalAdd.cancel`), and
+so are multiplication and exponentiation by an ordinal above `0` and `1`
+respectively; every ordinal is zero, a successor, or a limit:
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Monotone.g17 -->
+```g17
+theorem Ordinal.zero_successor_or_limit (α : Ordinal)
+  shows α = 0 ∨ (∃ β, β ∈ Ordinal ∧ α = next(β)) ∨ Limit(α)
+```
+
+What fails is commutativity, and the failures are the first thing anyone
+learns about the ordinals. Adding one finite step before ω is absorbed:
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Omega.g17 -->
+```g17
+theorem ordinalAdd.one_omega
+  shows 1 + ω = ω
+proof
+  exact ordinalAdd.natural_omega at 1
+```
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Omega.g17 -->
+```g17
+theorem ordinalAdd.not_commutative
+  shows 1 + ω ≠ ω + 1
+proof
+  intro equal
+  have ωOrdinal := Ordinal.omega
+  rw [ordinalAdd.one_omega, ordinalAdd.one] at equal
+  have self := next.contains at ω
+  rw ← equal at self
+  exact Ordinal.not_member_self with self
+```
+
+The proof of the inequality is the whole story: `1 + ω` is `ω` by
+absorption and `ω + 1` is `next(ω)`, which contains `ω`, so equality would
+make `ω` a member of itself. Multiplication and exponentiation behave the
+same way (`ordinalMul.two_omega`, `ordinalMul.not_commutative`,
+`ordinalPow.two_omega`):
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Omega.g17 -->
+```g17
+theorem ordinalMul.two_omega
+  shows 2 * ω = ω
+proof
+  have positive : ∅ ∈ 2
+    apply membership.two.backward
+    left
+    symm
+    exact nat.zero
+  exact ordinalMul.natural_omega at 2 with positive
+```
+
+<!-- cumulus-source: lib/Grace/Cumulus/Set/Ordinal/Omega.g17 -->
+```g17
+theorem ordinalPow.two_omega
+  shows 2 ^ ω = ω
+proof
+  have above : 1 ∈ 2
+    apply membership.two.backward
+    right
+    rfl
+  exact ordinalPow.natural_omega at 2 with above
+```
+
+Every theorem in these modules audits as ZF alone.
+
 ## Every set has a rank
 
 The stages of the hierarchy exhaust the universe: every set lies in some

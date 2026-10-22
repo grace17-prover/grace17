@@ -65,7 +65,8 @@ breadth matters more than cold-start cost.
 `npm run check:cumulus` checks the complete import graph and stops at the
 first failing module; `npm run check:cumulus -- --continue` goes on past a
 failure, skips the modules that import the failed one, and lists every
-failure and skipped module at the end, with exit status 1 when anything
+failure and skipped module at the end (add `--quiet` to print only those
+and the summary), with exit status 1 when anything
 failed. The command line and the Workbench need only the module root `lib/`. The files in `examples/` are
 clients of the library: short, runnable developments that show a subject's
 public interface in use. How files, imports, namespaces, and sections fit
@@ -402,9 +403,15 @@ lemmas; the coordinate identities behind them stay in a helper layer.
 `Grace.Cumulus.Geometry.BanachTarski` proves that the closed unit ball of ℝ³
 is paradoxical under the orientation-preserving isometries: `banachTarski`
 gives two disjoint subsets of the ball, each equidecomposable with the whole
-ball under the motions of ℝ³, and `banachTarski.two_balls` a part of the
+ball under the motions of ℝ³, `banachTarski.two_balls_part` a part of the
 ball equidecomposable with the disjoint union of the ball and a translate of
-it. `Algebra.Group.Words` and `Algebra.Group.FreeGroup` build the free group
+it, and `banachTarski.two_balls` the strong form: the ball itself is
+equidecomposable with that disjoint union of two balls, by the
+Banach–Schröder–Bernstein theorem of
+`Algebra.Group.Paradox.SchroederBernstein` (mutual embeddings by
+equidecomposable subsets give equidecomposability, through the piece maps
+of `Algebra.Group.Paradox.PieceMaps` and the back-and-forth chain of
+`Cardinal.Dominance`). `Algebra.Group.Words` and `Algebra.Group.FreeGroup` build the free group
 on two generators as reduced words; `Rotation.Freeness` proves
 Swierczkowski's theorem that two rotations generate it freely, by integer
 vectors modulo 5; `Geometry.Hausdorff` proves Hausdorff's paradox on the
