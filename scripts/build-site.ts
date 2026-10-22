@@ -71,10 +71,11 @@ const editDates = new Map<string, string>();
   }
   for (const line of execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).split("\n")) {
     const path = line.slice(3).split(" -> ").at(-1);
-    if (path) editDates.set(path, new Date().toISOString().slice(0, 10));
+    if (path) editDates.set(path, new Date().toLocaleDateString("en-CA"));
   }
 }
-const today = new Date().toISOString().slice(0, 10);
+// The build date in the local calendar, as the commit dates are.
+const today = new Date().toLocaleDateString("en-CA");
 function editedOn(...paths: string[]): string {
   const dates = paths.map(path => editDates.get(path) ?? today);
   const latest = dates.sort().at(-1)!;
