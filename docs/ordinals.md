@@ -439,6 +439,30 @@ theorem closed.countable_or_perfect_part (A : Set)
     (∃ P, Nonempty(P) ∧ Perfect(ℝ, realTopology, P) ∧ P ⊆ A)
 ```
 
+A nonempty perfect set of reals is uncountable, by Cantor's nested
+intervals: around a point of the set, every interval meets the set again,
+so a shrinking sequence of closed intervals can be chosen that stays in
+the set and avoids each enumerated point in turn, and its common point is
+in the set but in no position of the enumeration. The choice of intervals
+is where the axiom of choice enters, and it is the only place.
+
+<!-- cumulus-source: lib/Grace/Cumulus/Topology/Real/PerfectSets.g17 -->
+```g17
+theorem perfect.uncountable (P : Set)
+  requires perfect : Perfect(ℝ, realTopology, P)
+  requires nonempty : Nonempty(P)
+  shows ¬Countable(P)
+```
+
+<!-- cumulus-source: lib/Grace/Cumulus/Topology/Real/PerfectSets.g17 -->
+```g17
+theorem closed.countable_or_uncountable_perfect (A : Set)
+  requires closed : IsClosed(ℝ, realTopology, A)
+  shows Countable(A) ∨
+    (∃ P, Nonempty(P) ∧ Perfect(ℝ, realTopology, P) ∧ P ⊆ A ∧
+      ¬Countable(P))
+```
+
 This is Cantor's beautiful conclusion, obtained with the power of the
 ordinals: a closed set of reals is countable or contains a nonempty perfect
 set. You might find it as thrilling as I do to click "Open in Workbench" on
