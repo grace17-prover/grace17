@@ -1,0 +1,453 @@
+-- Nested closed intervals chosen by a choice function: each stage centres
+-- an interval at a point of a set, shrinks it below 1/(n + 1), keeps it
+-- inside the previous one, and keeps out the point of code n
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Topology.Real.NestedChoice
+import Real.Analysis.ArchimedeanLimits
+import Set.ChoiceFunctions
+
+-- Section: CenteredIntervals
+-- The closed interval of radius E around C.
+def centeredInterval (C E : Real) : Set := closedInterval(C - E, C + E)
+
+theorem centeredInterval.membership (X : Set) (C E : Real)
+  shows X ∈ centeredInterval(C, E) ↔
+    X ∈ ℝ ∧ C - E ≤ X ∧ X ≤ C + E
+proof
+  unfold centeredInterval
+  exact closedInterval.membership at X, C - E, C + E
+
+theorem centeredInterval.dist_membership (X : Set) (C E : Real)
+  shows X ∈ centeredInterval(C, E) ↔ X ∈ ℝ ∧ dist(X, C) ≤ E
+proof
+  constructor
+  . intro member
+    obtain ⟨realX, lower, upper⟩ :=
+      centeredInterval.membership.forward with member
+    have differenceReal : X - C ∈ ℝ by typecheck
+    refine ⟨realX, ?_⟩
+    unfold dist
+    have split : (0:R) ≤ X - C ∨ ¬((0:R) ≤ X - C) by tauto
+    cases split with nonnegative | negative
+    . have absolute := abs.of_nonnegative with nonnegative
+      rw absolute
+      linarith
+    . have below := realLess.of_not_le with negative
+      have nonpositive := realLess.implies_le with below
+      have absolute := abs.of_nonpositive with nonpositive
+      rw absolute
+      linarith
+  . intro near
+    obtain ⟨realX, within⟩ := near
+    have differenceReal : X - C ∈ ℝ by typecheck
+    have upper := abs.upper at X - C
+    have lower := abs.upper_neg at X - C
+    unfold dist at within
+    apply centeredInterval.membership.backward
+    refine ⟨realX, ?_, ?_⟩
+    . linarith
+    . linarith
+
+theorem centeredInterval.subset_reals (C E : Real)
+  shows centeredInterval(C, E) ⊆ ℝ
+proof
+  unfold centeredInterval
+  exact closedInterval.subset_reals at C - E, C + E
+
+-- An interval around a nearer centre with a smaller radius stays inside.
+theorem centeredInterval.nested (C E D R : Real)
+  requires inside : dist(D, C) + R ≤ E
+  shows centeredInterval(D, R) ⊆ centeredInterval(C, E)
+proof
+  intros X hX
+  obtain ⟨realX, near⟩ := centeredInterval.dist_membership.forward with hX
+  have triangle := dist.triangle at X, D, C
+  have distXD := dist.real at X, D
+  have distDC := dist.real at D, C
+  have distXC := dist.real at X, C
+  apply centeredInterval.dist_membership.backward
+  refine ⟨realX, ?_⟩
+  linarith
+
+-- The endpoints of a nonempty closed interval inside another lie between
+-- the endpoints of the larger one.
+theorem closedInterval.subset_bounds (A B C D : Real)
+  requires ordered : A ≤ B
+  requires inside : closedInterval(A, B) ⊆ closedInterval(C, D)
+  shows C ≤ A ∧ B ≤ D
+proof
+  have leftIn := closedInterval.left_mem with ordered
+  have rightIn := closedInterval.right_mem with ordered
+  obtain ⟨realA, lowerA, upperA⟩ :=
+    closedInterval.membership.forward with (inside with A, leftIn)
+  obtain ⟨realB, lowerB, upperB⟩ :=
+    closedInterval.membership.forward with (inside with B, rightIn)
+  exact ⟨lowerA, upperB⟩
+
+theorem product.projections (q A B : Set)
+  requires hq : q ∈ A × B
+  shows fst(q) ∈ A ∧ snd(q) ∈ B
+proof
+  obtain ⟨bound, x, hx, y, hy, shape⟩ := product.membership.forward with hq
+  rw [shape, fst.pair, snd.pair]
+  exact ⟨hx, hy⟩
+
+-- Section: Candidates
+-- A candidate pair is a centre with a radius.
+def candidateInterval (q : Set) : Set := centeredInterval(fst(q), snd(q))
+
+-- The candidates at stage n inside the region I: a centre in P, a positive
+-- radius at most 1/(n + 1), an interval inside I, and no point of P of
+-- code n in the interval.
+def shrinkCandidates (P f I : Set, n : Nat) : Set :=
+  { q ∈ ℝ × ℝ | fst(q) ∈ P ∧ (0:R) < (snd(q):R) ∧
+    (snd(q):R) ≤ harmonicTerms(n) ∧ candidateInterval(q) ⊆ I ∧
+    (∀ y ∈ P, y ∈ candidateInterval(q) → f(y) ≠ n) }
+
+theorem shrinkCandidates.membership (q P f I : Set, n : Nat)
+  shows q ∈ shrinkCandidates(P, f, I, n) ↔
+    q ∈ ℝ × ℝ ∧ fst(q) ∈ P ∧ (0:R) < (snd(q):R) ∧
+    (snd(q):R) ≤ harmonicTerms(n) ∧ candidateInterval(q) ⊆ I ∧
+    (∀ y ∈ P, y ∈ candidateInterval(q) → f(y) ≠ n)
+proof
+  simp [shrinkCandidates]
+
+theorem shrinkCandidates.subset (P f I : Set, n : Nat)
+  shows shrinkCandidates(P, f, I, n) ⊆ ℝ × ℝ
+proof
+  intros q hq
+  have parts := shrinkCandidates.membership.forward with hq
+  exact parts.left
+
+theorem shrinkCandidates.pair (P f I : Set, n : Nat) (C E : Real)
+  requires centre : C ∈ P
+  requires positive : 0 < E
+  requires small : E ≤ harmonicTerms(n)
+  requires inside : centeredInterval(C, E) ⊆ I
+  requires avoids : ∀ y ∈ P, y ∈ centeredInterval(C, E) → f(y) ≠ n
+  shows (C, E) ∈ shrinkCandidates(P, f, I, n)
+proof
+  have realC : C ∈ ℝ by typecheck
+  have realE : E ∈ ℝ by typecheck
+  have pairIn : (C, E) ∈ ℝ × ℝ := product.pair with realC, realE
+  have same : candidateInterval((C, E)) = centeredInterval(C, E)
+    simp [candidateInterval, fst.pair, snd.pair]
+  apply shrinkCandidates.membership.backward
+  rw [fst.pair, snd.pair, same]
+  refine ⟨pairIn, centre, positive, small, inside, ?_⟩
+  intros y hy hIn
+  rw same at hIn
+  exact avoids with y, hy, hIn
+
+-- Section: Stages
+-- The stages: a choice function on the pairs of reals picks a candidate
+-- inside the interval of the previous stage; stage zero lives in the line.
+def shrinkStage (P f c : Set, n : Nat) → Set
+  | P, f, c, zero => c(shrinkCandidates(P, f, ℝ, 0))
+  | P, f, c, succ(k) => c(shrinkCandidates(P, f,
+      candidateInterval(shrinkStage(P, f, c, k)), succ(k)))
+
+def shrinkRegion (P f c : Set, n : Nat) → Set
+  | P, f, c, zero => ℝ
+  | P, f, c, succ(k) => candidateInterval(shrinkStage(P, f, c, k))
+
+def shrinkCentre (P f c : Set, n : Nat) : Set := fst(shrinkStage(P, f, c, n))
+def shrinkRadius (P f c : Set, n : Nat) : Set := snd(shrinkStage(P, f, c, n))
+def shrinkInterval (P f c : Set, n : Nat) : Set :=
+  candidateInterval(shrinkStage(P, f, c, n))
+
+theorem shrinkInterval.centered (P f c : Set, n : Nat)
+  shows shrinkInterval(P, f, c, n) =
+    centeredInterval(shrinkCentre(P, f, c, n), shrinkRadius(P, f, c, n))
+proof
+  simp [shrinkInterval, candidateInterval, shrinkCentre, shrinkRadius]
+
+theorem shrinkStage.equation (P f c : Set, n : Nat)
+  shows shrinkStage(P, f, c, n) =
+    c(shrinkCandidates(P, f, shrinkRegion(P, f, c, n), n))
+proof
+  induction n
+  | zero =>
+    simp [shrinkStage, shrinkRegion]
+  | succ(k) using ih =>
+    simp [shrinkStage, shrinkRegion]
+
+theorem shrinkRegion.succ (P f c : Set, k : Nat)
+  shows shrinkRegion(P, f, c, succ(k)) = shrinkInterval(P, f, c, k)
+proof
+  simp [shrinkRegion, shrinkInterval]
+
+-- The step hypotheses: candidates exist at stage zero in the line, and at
+-- every later stage inside any interval around a point of P.
+predicate ShrinkSteps (P f : Set) :=
+  Nonempty(shrinkCandidates(P, f, ℝ, 0)) ∧
+  (∀ n ∈ ℕ, ∀ C ∈ P, ∀ E ∈ ℝ, (0:R) < E →
+    Nonempty(shrinkCandidates(P, f, centeredInterval(C, E), succ(n))))
+
+-- Every stage is a candidate of its region.
+theorem shrinkStage.member (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkStage(P, f, c, n) ∈
+    shrinkCandidates(P, f, shrinkRegion(P, f, c, n), n)
+proof
+  induction n
+  | zero =>
+    have region : shrinkRegion(P, f, c, 0) = ℝ by simp [shrinkRegion]
+    have equation := shrinkStage.equation at P, f, c, 0
+    rw [equation, region]
+    have inhabited := steps.left
+    have subset := shrinkCandidates.subset at P, f, ℝ, 0
+    exact SubsetChoice.member with choice, subset, inhabited
+  | succ(k) using ih =>
+    obtain ⟨pairIn, centre, positive, small, inside, avoids⟩ :=
+      shrinkCandidates.membership.forward with ih
+    have realParts := product.projections with pairIn
+    have kNatural : k ∈ ℕ by simp [Nat]
+    have inhabited := steps.right with k, kNatural,
+      fst(shrinkStage(P, f, c, k)), centre,
+      snd(shrinkStage(P, f, c, k)), realParts.right, positive
+    have region : shrinkRegion(P, f, c, succ(k)) =
+        centeredInterval(fst(shrinkStage(P, f, c, k)),
+          snd(shrinkStage(P, f, c, k)))
+      simp [shrinkRegion, candidateInterval]
+    have equation := shrinkStage.equation at P, f, c, succ(k)
+    rw [equation, region]
+    have subset := shrinkCandidates.subset at P, f,
+      centeredInterval(fst(shrinkStage(P, f, c, k)),
+        snd(shrinkStage(P, f, c, k))), succ(k)
+    exact SubsetChoice.member with choice, subset, inhabited
+
+theorem shrinkStage.pair (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkStage(P, f, c, n) ∈ ℝ × ℝ
+proof
+  have member := shrinkStage.member with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  exact parts.left
+
+theorem shrinkCentre.member (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkCentre(P, f, c, n) ∈ P
+proof
+  have member := shrinkStage.member with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  unfold shrinkCentre
+  exact parts.right.left
+
+theorem shrinkCentre.real (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkCentre(P, f, c, n) ∈ ℝ
+proof
+  have pairIn := shrinkStage.pair with choice, steps
+  have parts := product.projections with pairIn
+  unfold shrinkCentre
+  exact parts.left
+
+theorem shrinkRadius.real (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkRadius(P, f, c, n) ∈ ℝ
+proof
+  have pairIn := shrinkStage.pair with choice, steps
+  have parts := product.projections with pairIn
+  unfold shrinkRadius
+  exact parts.right
+
+theorem shrinkRadius.positive (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows (0:R) < (shrinkRadius(P, f, c, n):R)
+proof
+  have member := shrinkStage.member with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  unfold shrinkRadius
+  exact parts.right.right.left
+
+theorem shrinkRadius.small (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows (shrinkRadius(P, f, c, n):R) ≤ harmonicTerms(n)
+proof
+  have member := shrinkStage.member with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  unfold shrinkRadius
+  exact parts.right.right.right.left
+
+theorem shrinkInterval.nested (P f c : Set, k : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkInterval(P, f, c, succ(k)) ⊆ shrinkInterval(P, f, c, k)
+proof
+  have member := shrinkStage.member at P, f, c, succ(k) with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  have inside := parts.right.right.right.right.left
+  have region := shrinkRegion.succ at P, f, c, k
+  rw region at inside
+  unfold shrinkInterval
+  exact inside
+
+theorem shrinkInterval.avoids (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows ∀ y ∈ P, y ∈ shrinkInterval(P, f, c, n) → f(y) ≠ n
+proof
+  have member := shrinkStage.member with choice, steps
+  have parts := shrinkCandidates.membership.forward with member
+  unfold shrinkInterval
+  exact parts.right.right.right.right.right
+
+-- Section: Endpoints
+-- The endpoints of the stage intervals, as real sequences.
+defgraph shrinkLeft (P f c : Set) (n ∈ ℕ) : ℝ :=
+  (shrinkCentre(P, f, c, n):R) - (shrinkRadius(P, f, c, n):R)
+requires choice : SubsetChoice(c, ℝ × ℝ)
+requires steps : ShrinkSteps(P, f)
+proof
+  have typedN := nat.omega.backward with member
+  have realCentre := shrinkCentre.real at P, f, c, n with choice, steps
+  have realRadius := shrinkRadius.real at P, f, c, n with choice, steps
+  typecheck
+
+defgraph shrinkRight (P f c : Set) (n ∈ ℕ) : ℝ :=
+  (shrinkCentre(P, f, c, n):R) + (shrinkRadius(P, f, c, n):R)
+requires choice : SubsetChoice(c, ℝ × ℝ)
+requires steps : ShrinkSteps(P, f)
+proof
+  have typedN := nat.omega.backward with member
+  have realCentre := shrinkCentre.real at P, f, c, n with choice, steps
+  have realRadius := shrinkRadius.real at P, f, c, n with choice, steps
+  typecheck
+
+theorem shrinkInterval.endpoints (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkInterval(P, f, c, n) =
+    closedInterval(shrinkLeft(P, f, c)[n], shrinkRight(P, f, c)[n])
+proof
+  have nNatural : n ∈ ℕ by simp [Nat]
+  have left := shrinkLeft.value at P, f, c, n with *
+  have right := shrinkRight.value at P, f, c, n with *
+  rw [left, right]
+  simp [shrinkInterval, candidateInterval, centeredInterval,
+    shrinkCentre, shrinkRadius]
+
+theorem shrinkLeft.le_right (P f c : Set, n : Nat)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows shrinkLeft(P, f, c)[n] ≤ shrinkRight(P, f, c)[n]
+proof
+  have nNatural : n ∈ ℕ by simp [Nat]
+  have realCentre := shrinkCentre.real with choice, steps
+  have realRadius := shrinkRadius.real with choice, steps
+  have positive := shrinkRadius.positive with choice, steps
+  have left := shrinkLeft.value at P, f, c, n with *
+  have right := shrinkRight.value at P, f, c, n with *
+  rw [left, right]
+  linarith
+
+-- The stage intervals are nested closed intervals.
+theorem shrink.nested (P f c : Set)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows NestedClosedIntervals(shrinkLeft(P, f, c), shrinkRight(P, f, c))
+proof
+  have leftSequence : RealSequence(shrinkLeft(P, f, c)) :=
+    shrinkLeft.function with choice, steps
+  have rightSequence : RealSequence(shrinkRight(P, f, c)) :=
+    shrinkRight.function with choice, steps
+  have bounds : ∀ n ∈ ℕ,
+      shrinkLeft(P, f, c)[n] ≤ shrinkLeft(P, f, c)[succ(n)] ∧
+      shrinkRight(P, f, c)[succ(n)] ≤ shrinkRight(P, f, c)[n]
+    intros n hn
+    have typedN := nat.omega.backward with hn
+    have nested := shrinkInterval.nested at P, f, c, n with choice, steps
+    have endpointsN := shrinkInterval.endpoints at P, f, c, n with
+      choice, steps
+    have endpointsS := shrinkInterval.endpoints at P, f, c, succ(n) with
+      choice, steps
+    rw [endpointsN, endpointsS] at nested
+    have ordered := shrinkLeft.le_right at P, f, c, succ(n) with
+      choice, steps
+    have realLeftN := RealSequence.value at shrinkLeft(P, f, c), n with
+      leftSequence
+    have realRightN := RealSequence.value at shrinkRight(P, f, c), n with
+      rightSequence
+    have realLeftS := RealSequence.value at shrinkLeft(P, f, c), succ(n)
+      with leftSequence
+    have realRightS := RealSequence.value at shrinkRight(P, f, c), succ(n)
+      with rightSequence
+    exact closedInterval.subset_bounds with ordered, nested
+  refine ⟨leftSequence, rightSequence, ?_, ?_, ?_⟩
+  . apply StepwiseNondecreasing.nondecreasing with leftSequence
+    intros n hn
+    have both := bounds with n, hn
+    exact realLe.characterization.forward with both.left
+  . apply StepwiseNonincreasing.nonincreasing with rightSequence
+    intros n hn
+    have both := bounds with n, hn
+    exact realLe.characterization.forward with both.right
+  . intros n hn
+    have typedN := nat.omega.backward with hn
+    have ordered := shrinkLeft.le_right at P, f, c, n with choice, steps
+    exact realLe.characterization.forward with ordered
+
+-- Cantor's common point of the stage intervals.
+theorem shrink.common_point (P f c : Set)
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  shows ∃ L ∈ ℝ, ∀ n ∈ ℕ, L ∈ shrinkInterval(P, f, c, n)
+proof
+  have nested := shrink.nested with choice, steps
+  obtain ⟨L, realL, inside⟩ :=
+    NestedClosedIntervals.nonempty_intersection with nested
+  witness L
+  refine ⟨realL, ?_⟩
+  intros n hn
+  have typedN := nat.omega.backward with hn
+  have endpoints := shrinkInterval.endpoints at P, f, c, n with choice, steps
+  rw endpoints
+  exact inside with n, hn
+
+-- A point of every stage interval is not in P: its code m would have been
+-- kept out at stage m.
+theorem shrink.escapes (P f c L : Set)
+  requires function : f : P → ℕ
+  requires choice : SubsetChoice(c, ℝ × ℝ)
+  requires steps : ShrinkSteps(P, f)
+  requires inside : ∀ n ∈ ℕ, L ∈ shrinkInterval(P, f, c, n)
+  shows ¬L ∈ P
+proof
+  intro member
+  have code := FunctionBetween.apply_closed with function, member
+  have typedCode := nat.omega.backward with code
+  have avoids := shrinkInterval.avoids at P, f, c, f(L) with choice, steps
+  have atCode := inside with f(L), code
+  have distinct := avoids with L, member, atCode
+  apply distinct
+  rfl
+
+-- Section: Archimedes
+-- The reciprocals 1/(n + 1) fall below any positive bound.
+theorem harmonicTerms.below (E : Real)
+  requires positive : 0 < E
+  shows ∃ n ∈ ℕ, harmonicTerms(n) < E
+proof
+  have converges := harmonicTerms.converges_zero
+  obtain ⟨N, hN, tail⟩ := ConvergesTo.eventually with converges, positive
+  have typedN := nat.omega.backward with hN
+  have reflexive := LessEqual.reflexive at N
+  have near := tail with N, hN, reflexive
+  have sequence := harmonicTerms.sequence
+  have termReal := RealSequence.value at harmonicTerms, N with sequence
+  obtain ⟨lower, upper⟩ := openBall.order_characterization.forward with near
+  witness N
+  refine ⟨hN, ?_⟩
+  linarith
