@@ -20,8 +20,7 @@ Four layers are inside the trusted boundary:
 Everything else is an untrusted proof producer: parsing, elaboration, tactics,
 proof search, soft-type inference, proof maps, library search, and the
 Workbench. Their output must pass a checker above before a theorem is
-admitted. A broken or hostile tactic can fail or produce a rejected proof. It
-cannot prove a false statement.
+admitted.
 
 The [kernel format](kernel-format.md) is the normative, language-independent
 specification of the proof language. A conforming checker computes each
