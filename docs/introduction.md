@@ -597,8 +597,9 @@ theorem Chain.exists_maximal (A r : Set)
 
 The axiom of choice has a famous consequence: the closed unit ball of ℝ³ can
 be cut into finitely many pieces that reassemble, by rotations and
-translations, into two balls. Cumulus proves it in the form of a paradoxical
-decomposition. Under an action of a group `G` on a set `X`, two subsets are
+translations, into two balls. Cumulus proves it first as a paradoxical
+decomposition and then in that strong form. Under an action of a group `G`
+on a set `X`, two subsets are
 equidecomposable when finitely many pieces of one are carried onto a
 partition of the other by elements of `G`, and `X` is paradoxical when two
 disjoint subsets are each equidecomposable with all of `X`:
@@ -648,7 +649,10 @@ proof
 
 The axiom audit of `banachTarski` names the ZF axioms and the axiom of
 choice, which is used exactly once, to pick one point in each orbit of the
-free group.
+free group. The strong form follows by the Schröder–Bernstein argument
+carried out for equidecomposability, `Equidecomposable.of_embeddings`:
+`banachTarski.two_balls` says that the ball is equidecomposable with the
+disjoint union of the ball and a translate of it.
 
 ### A few Top 100 milestones
 
