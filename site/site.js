@@ -23,19 +23,33 @@ if (sidebarDetails && window.matchMedia("(max-width: 860px)").matches) sidebarDe
 // The sidebar keeps its scroll position from page to page within a visit,
 // and on a fresh visit it scrolls so that the current page's entry is in
 // view, so following a link never throws the list back to the top.
+// The sidebar is sticky: once the page is scrolled it is pinned near the
+// top of the viewport, while on a freshly loaded page it sits below the
+// site header. The remembered position is therefore taken relative to the
+// pinned position, so the entries stay where they were on screen when a
+// link is followed from a scrolled page.
 if (sidebarDetails) {
   const key = "grace17.sidebarScroll";
+  const slack = () => {
+    const style = getComputedStyle(sidebarDetails);
+    if (style.position !== "sticky") return 0;
+    const pinnedTop = parseFloat(style.top) || 0;
+    return Math.max(0, sidebarDetails.getBoundingClientRect().top - pinnedTop);
+  };
   let saved = null;
   try { saved = sessionStorage.getItem(key); } catch { /* storage unavailable */ }
   const current = sidebarDetails.querySelector('a[aria-current="page"]');
-  if (saved !== null) sidebarDetails.scrollTop = Number(saved);
+  if (saved !== null) sidebarDetails.scrollTop = Number(saved) + slack();
   else if (current) {
     const offset = current.getBoundingClientRect().top - sidebarDetails.getBoundingClientRect().top;
     sidebarDetails.scrollTop = Math.max(0, offset - sidebarDetails.clientHeight / 2);
   }
-  sidebarDetails.addEventListener("scroll", () => {
-    try { sessionStorage.setItem(key, String(sidebarDetails.scrollTop)); } catch { /* storage unavailable */ }
-  }, { passive: true });
+  const remember = () => {
+    const position = Math.max(0, sidebarDetails.scrollTop - slack());
+    try { sessionStorage.setItem(key, String(position)); } catch { /* storage unavailable */ }
+  };
+  sidebarDetails.addEventListener("scroll", remember, { passive: true });
+  window.addEventListener("pagehide", remember);
 }
 
 // Hover cards for inline code that names a library declaration.
