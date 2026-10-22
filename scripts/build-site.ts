@@ -123,7 +123,9 @@ function sidebar(toDocs = "", toRoot = "../"): string {
       html += `<li><a href="${escape(fix(rewriteHref(link[2], docsContext)))}">${escape(label)}</a></li>`;
     }
   }
-  return html + "</ul></nav></details></aside>";
+  // Restore the sidebar's scroll offset before the first paint; site.js keeps it.
+  const restore = '<script>(function(){try{var d=document.querySelector(".sidebar details");var s=sessionStorage.getItem("grace17.sidebarScroll");if(d&&s!==null)d.scrollTop=Number(s);}catch(e){}})();</script>';
+  return html + "</ul></nav></details></aside>" + restore;
 }
 const docsSidebar = sidebar();
 const rootSidebar = sidebar("docs/", "./");

@@ -23,30 +23,28 @@ if (sidebarDetails && window.matchMedia("(max-width: 860px)").matches) sidebarDe
 // The sidebar keeps its scroll position from page to page within a visit,
 // and on a fresh visit it scrolls so that the current page's entry is in
 // view, so following a link never throws the list back to the top.
-// The sidebar is sticky: once the page is scrolled it is pinned near the
-// top of the viewport, while on a freshly loaded page it sits below the
-// site header. The remembered position is therefore taken relative to the
-// pinned position, so the entries stay where they were on screen when a
-// link is followed from a scrolled page.
+// The header is sticky and the sidebar sits under it at a fixed height, so
+// its place on screen does not depend on how far the page is scrolled. The
+// sidebar's own scroll offset is restored exactly (an inline script after the
+// sidebar already did so before the first paint) and remembered on the way out.
+const headerHeight = () => {
+  const header = document.querySelector(".site-header");
+  if (header) document.documentElement.style.setProperty("--header-height", `${header.offsetHeight}px`);
+};
+headerHeight();
+window.addEventListener("resize", headerHeight);
 if (sidebarDetails) {
   const key = "grace17.sidebarScroll";
-  const slack = () => {
-    const style = getComputedStyle(sidebarDetails);
-    if (style.position !== "sticky") return 0;
-    const pinnedTop = parseFloat(style.top) || 0;
-    return Math.max(0, sidebarDetails.getBoundingClientRect().top - pinnedTop);
-  };
   let saved = null;
   try { saved = sessionStorage.getItem(key); } catch { /* storage unavailable */ }
   const current = sidebarDetails.querySelector('a[aria-current="page"]');
-  if (saved !== null) sidebarDetails.scrollTop = Number(saved) + slack();
+  if (saved !== null) sidebarDetails.scrollTop = Number(saved);
   else if (current) {
     const offset = current.getBoundingClientRect().top - sidebarDetails.getBoundingClientRect().top;
     sidebarDetails.scrollTop = Math.max(0, offset - sidebarDetails.clientHeight / 2);
   }
   const remember = () => {
-    const position = Math.max(0, sidebarDetails.scrollTop - slack());
-    try { sessionStorage.setItem(key, String(position)); } catch { /* storage unavailable */ }
+    try { sessionStorage.setItem(key, String(sidebarDetails.scrollTop)); } catch { /* storage unavailable */ }
   };
   sidebarDetails.addEventListener("scroll", remember, { passive: true });
   window.addEventListener("pagehide", remember);
