@@ -16,7 +16,7 @@ test("synthetic division, finite roots, and nonvanishing have complete hereditar
   const names = [...kernel.theorems.keys()].filter(n =>
     /^Grace.Cumulus.Algebra.Polynomial.(Horner|HornerRoots)\./.test(n)
     || n === "Grace.Core.List.List.cases" || n.startsWith("PolynomialRoots."));
-  assert.equal(names.length, 19); // Includes two checked generalized-induction auxiliaries.
+  assert.equal(names.length, 18); // Includes two checked generalized-induction auxiliaries.
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

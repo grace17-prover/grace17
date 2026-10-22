@@ -18,7 +18,7 @@ test('complex disk compactness and norm limits have complete hereditary ZF proof
   const kernel = load(source);
   const names = [...kernel.theorems.keys()].filter(n =>
     n.startsWith('Grace.Cumulus.Complex.Compactness.') || n.startsWith('ComplexCompactnessExample.'));
-  assert.equal(names.length, 37);
+  assert.equal(names.length, 36);
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

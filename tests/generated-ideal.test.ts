@@ -11,7 +11,7 @@ test("generated ideals and unit certificate soundness are checked in ZF", () => 
   const kernel = createZfKernel();
   loadModuleGraph(kernel, ["examples/NullstellensatzCertificate.g17"], ["lib"]);
   for (const name of [
-    ...["membership", "subset", "contains", "least", "ideal", "mono", "eq_of_ideal", "idempotent", "unit_iff", "unit_of_linear_combination2", "unit_obstructs_vanishing"]
+    ...["subset", "contains", "least", "ideal", "mono", "eq_of_ideal", "idempotent", "unit_iff", "unit_of_linear_combination2", "unit_obstructs_vanishing"]
       .map(n => `Grace.Cumulus.Algebra.Ring.GeneratedIdeal.idealSpan.${n}`),
     "NullstellensatzCertificate.unit_certificate", "NullstellensatzCertificate.no_common_zero",
   ]) {

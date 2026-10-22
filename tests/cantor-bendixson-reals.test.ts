@@ -88,8 +88,6 @@ test("the statements print as written", () => {
       "∀ x y : ℝ, x < y → ∃ q ∈ ℚ, x < rationalCut(q) ∧ rationalCut(q) < y",
     "Topology.Real.openInterval.open":
       "∀ A B : ℝ, openInterval(A, B) ∈ realTopology",
-    "Topology.Real.RationalBase.rationalIntervals.membership":
-      "∀ W, W ∈ rationalIntervals ↔ W ∈ 𝒫(ℝ) ∧ ∃ p ∈ ℚ, ∃ q ∈ ℚ, p < q ∧ W = openInterval(rationalCut(p), rationalCut(q))",
     "Topology.Real.RationalBase.rationalIntervals.open": "rationalIntervals ⊆ realTopology",
     "Topology.Real.RationalBase.rationalIntervals.basis": "Basis(ℝ, realTopology, rationalIntervals)",
     "Topology.Real.RationalBase.rationalIntervals.countable": "Countable(rationalIntervals)",

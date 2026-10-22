@@ -57,7 +57,7 @@ test("set-valued relation infrastructure is available without primitive relation
   loadModuleGraph(kernel, [setLibrary], [root]);
   assert.equal(kernel.definitions.get("Grace.Cumulus.Set.Relation.product")?.kind, "separation");
   assert.equal(kernel.definitions.get("Grace.Cumulus.Set.Relation.domain")?.kind, "separation");
-  assert.ok(kernel.theorems.has("Grace.Cumulus.Set.Relation.restrict.membership"));
+  assert.ok(kernel.definitions.get("Grace.Cumulus.Set.Relation.restrict")?.properties.has("membership"));
 });
 
 test("the cumulative hierarchy is a conservative noncomputable transfinite recursion", () => {

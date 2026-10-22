@@ -118,8 +118,8 @@ test("the ballot counting module is admission-free ZF", t => {
   const modules = loadModuleSourceGraph(kernel, [{ file, source: readFileSync(file, "utf8") }], ["lib"]);
   assert.equal(modules.flatMap(m => m.sorries).length, 0);
   const names = [...kernel.theorems.keys()].filter(name => /^Grace\.Cumulus\.Combinatorics\.Ballot\./.test(name));
-  for (const expected of ["ballot.count", "ballotSequences.count_succ", "ballotSequences.membership",
-    "ballots.membership", "leadSequences.closed_form", "orderings.count"]) {
+  for (const expected of ["ballot.count", "ballotSequences.count_succ", "leadSequences.closed_form",
+    "orderings.count"]) {
     assert.ok(names.some(name => name.endsWith(`.${expected}`)), expected);
   }
   for (const name of names) {

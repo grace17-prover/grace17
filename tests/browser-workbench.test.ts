@@ -113,9 +113,9 @@ test("Real/Addition cursor ranges stay aligned after instance declarations", asy
   const downward = result.theorems.find((theorem: { name: string }) => theorem.name.endsWith("realAddCut.downward"));
   const noGreatest = result.theorems.find((theorem: { name: string }) => theorem.name.endsWith("realAddCut.no_greatest"));
   const zeroInstance = result.symbols.find((symbol: { name: string }) => symbol.name.endsWith("realZero.of_nat"));
-  assert.deepEqual([downward?.lineStart, downward?.lineEnd], [94, 118]);
-  assert.deepEqual([noGreatest?.lineStart, noGreatest?.lineEnd], [120, 145]);
-  assert.equal(noGreatest?.steps[0]?.line, 126);
+  assert.deepEqual([downward?.lineStart, downward?.lineEnd], [87, 111]);
+  assert.deepEqual([noGreatest?.lineStart, noGreatest?.lineEnd], [113, 138]);
+  assert.equal(noGreatest?.steps[0]?.line, 119);
   assert.equal(noGreatest?.steps[0]?.after.goals.length, 1);
   assert.equal(zeroInstance?.kind, "theorem");
   assert.equal(zeroInstance?.line, 29);

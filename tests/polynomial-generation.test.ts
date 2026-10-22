@@ -85,7 +85,7 @@ end Maps
 `;
  const kernel=load(maps+"hypothesis onto : SurjectiveBetween(g, B, C)\n"+theorem);
  const names=[...kernel.theorems.keys()].filter(n=>n.startsWith("Grace.Cumulus.Algebra.Image.")||n==="Maps.image");
- assert.ok(names.length>=8);
+ assert.ok(names.length>=7, `expected the image proofs, got ${names.length}`);
  for(const name of names) {
   const audit=auditTheoremAxioms(kernel,name);
   assert.equal(audit.complete,true,name);

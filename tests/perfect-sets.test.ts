@@ -85,9 +85,6 @@ test("the statements print as written", () => {
   const expected: Record<string, string> = {
     "NestedChoice.centeredInterval.dist_membership":
       "∀ X, ∀ C E : ℝ, X ∈ centeredInterval(C, E) ↔ X ∈ ℝ ∧ dist(X, C) ≤ E",
-    "NestedChoice.shrinkCandidates.membership":
-      "∀ q P f I, ∀ n : ℕ, q ∈ shrinkCandidates(P, f, I, n) ↔ q ∈ ℝ × ℝ ∧ fst(q) ∈ P ∧ 0 < snd(q) ∧ " +
-      "snd(q) ≤ harmonicTermsₙ ∧ candidateInterval(q) ⊆ I ∧ ∀ y ∈ P, y ∈ candidateInterval(q) → f(y) ≠ n",
     "NestedChoice.shrinkStage.equation":
       "∀ P f c, ∀ n : ℕ, shrinkStage(P, f, c, n) = c(shrinkCandidates(P, f, shrinkRegion(P, f, c, n), n))",
     "NestedChoice.shrinkStage.member":

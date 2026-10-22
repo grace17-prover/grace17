@@ -31,7 +31,7 @@ test('minimum attainment is admission-free and explicitly records Global Choice'
   const kernel = load(extreme, true);
   const names = [...kernel.theorems.keys()].filter(n =>
     n.startsWith('Grace.Cumulus.Complex.ExtremeValue.') || n.startsWith('ComplexPolynomialExtremeValueExample.'));
-  assert.equal(names.length, 19);
+  assert.equal(names.length, 18);
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

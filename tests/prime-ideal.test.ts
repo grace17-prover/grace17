@@ -11,7 +11,7 @@ test("colon ideals, maximal implies prime, and the zero-ideal characterization a
   const kernel = createZfKernel();
   loadModuleGraph(kernel, ["examples/PrimeIdealStarter.g17"], ["lib"]);
   for (const name of [
-    ...["colonIdeal.membership", "colonIdeal.contains", "colonIdeal.ideal", "colonIdeal.proper",
+    ...["colonIdeal.contains", "colonIdeal.ideal", "colonIdeal.proper",
       "IsMaximalIdeal.is_prime", "IsPrimeIdeal.proper", "IsPrimeIdeal.left_of_mul", "IsPrimeIdeal.colon_eq",
       "IsIntegralDomain.zero_prime", "IsPrimeIdeal.zero_iff_domain"].map(n => `Grace.Cumulus.Algebra.Ring.PrimeIdealCore.${n}`),
     ...["maximal_is_prime", "cancel_outside_factor", "zero_prime_iff_domain"].map(n => `PrimeIdealStarter.${n}`),

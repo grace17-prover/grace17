@@ -13,7 +13,7 @@ test("Dickson, finite monomial ideals, and the finite-slice proof have complete 
   const prefixes = ["Grace.Cumulus.Algebra.Polynomial.Divisibility.", "Grace.Cumulus.Algebra.Polynomial.Dickson.", "Grace.Cumulus.Algebra.Polynomial.MonomialIdeal.", "Grace.Cumulus.Algebra.Polynomial.monomialIdealPolynomials.", "DicksonExamples."];
   const names = [...kernel.theorems.keys()].filter(n => prefixes.some(p => n.startsWith(p)));
   names.push("Grace.Cumulus.Nat.Order.Less.successor_upper");
-  assert.ok(names.length >= 50, `expected all new proof boundaries, got ${names.length}`);
+  assert.ok(names.length >= 46, `expected all new proof boundaries, got ${names.length}`);
   for (const name of names) {
     assert.ok(kernel.theorems.has(name), name);
     const audit = auditTheoremAxioms(kernel, name);
