@@ -263,7 +263,7 @@ comparing them with its own von Neumann formulas.
 
 ## Cantor's derived sets
 
-The ordinals were born in 1872, in Cantor's study of the sets on which a
+The ordinals were discovered in 1872, in Cantor's study of the sets on which a
 trigonometric series can fail to determine its coefficients. The derived
 set of a set of reals is the set of its limit points; the derived set of
 the derived set is a smaller set again; and Cantor saw that the iteration
@@ -280,7 +280,7 @@ and [Topology/Real/CantorBendixson](../lib/Grace/Cumulus/Topology/Real/CantorBen
 
 `derivedSet(X, T, A)` is `limitPoints(X, T, A)`, the points of `X` every
 open neighbourhood of which meets `A` elsewhere. The stages are a
-transfinite recursion, with intersection at limits where `V` has union:
+transfinite recursion, with intersection at limits:
 
 <!-- cumulus-source: lib/Grace/Cumulus/Topology/CantorBendixson/Iterate.g17 -->
 ```g17
@@ -290,9 +290,9 @@ noncomputable transfinite def derived (X T A : Set, α : Ordinal) : Set
   | limit λ => ⋂(Relation.range(history))
 ```
 
-The three laws `derived.zero`, `derived.next`, and `derived.limit` read off
-the clauses, and at a limit a point survives exactly when it survives every
-earlier stage:
+The three laws `derived.zero`, `derived.next`, and `derived.limit` state
+the three clauses as equations, and at a limit a point survives exactly
+when it survives every earlier stage:
 
 <!-- cumulus-source: lib/Grace/Cumulus/Topology/CantorBendixson/Iterate.g17 -->
 ```g17
@@ -439,5 +439,7 @@ theorem closed.countable_or_perfect_part (A : Set)
     (∃ P, Nonempty(P) ∧ Perfect(ℝ, realTopology, P) ∧ P ⊆ A)
 ```
 
-This is Cantor's own conclusion: a closed set of reals is countable or
-contains a nonempty perfect set.
+This is Cantor's beautiful conclusion, obtained with the power of the
+ordinals: a closed set of reals is countable or contains a nonempty perfect
+set. You might find it as thrilling as I do to click "Open in Workbench" on
+any of the snippets above to follow the argument yourself!
