@@ -17,9 +17,10 @@ There are two ways in:
   on one file costs a fraction of a second per call after the first.
 - **Subcommands** run one method and exit: `g17 check --json`, `g17 goal`,
   `g17 suggest`, `g17 search`, `g17 declaration`, `g17 signature`,
-  `g17 elaborate`, `g17 audit`, `g17 library`, and `g17 notations`. They
-  print the same result objects. Every method subcommand prints JSON;
-  `--text` asks `search` and `goal` for their readable rendering, and
+  `g17 elaborate`, `g17 audit`, `g17 library`, `g17 notations`, and
+  `g17 closure`. They print the same result objects. Every method
+  subcommand prints JSON; `--text` asks `search`, `goal`, and `closure`
+  for their readable rendering, and
   `--json` is accepted everywhere as a no-op, so a tool can pass it
   uniformly. `g17 --help`, or `--help` after any subcommand, prints the
   usage. A one-shot subcommand loads the environment each time it runs
@@ -70,7 +71,7 @@ that is not JSON, or not an object with a string `method`, answers with
 | `bad_query` | The search query does not parse |
 | `unknown_declaration`, `ambiguous_name` | `declaration` or `signature` found no name, or several (`candidates` lists them, `modules` their modules, `declarations` each candidate with its `module`, `file`, and `line`); an `import` detail names the module that declares the name's prefix |
 | `unknown_theorem` | `audit` names no theorem in the environment |
-| `unknown_module` | `library` names no module |
+| `unknown_module` | `library` or `closure` names no module, or `closure`'s `from` is not in the closure |
 | `surface`, `kernel`, `internal` | An unexpected elaboration, kernel, or program error |
 
 A proof that does not check is not an error of the protocol: `check`
@@ -127,8 +128,8 @@ one-line description each, and the foundation profiles.
 Request: a workspace, and optionally `audit: true` to add each theorem's
 axiom audit, `dependencies: false` to skip each theorem's dependency lists,
 `kernel: true` to add the kernel derivation of each theorem, `symbols: true`
-to add the symbol table the hover uses, and `digest: true` to add the
-environment digest.
+to add the symbol table the hover uses, `digest: true` to add the
+environment digest, and `imports: true` to audit the imports (see below).
 
 ```json
 {"id": 2, "method": "check",
@@ -212,6 +213,23 @@ The shape:
 - `diagnostics` carries one entry per error and one warning per `sorry`,
   each with `file`, `line`, `column`, `endColumn`, `message`, and the
   `theorem` it falls in. The column span is the one the editor underlines.
+  Two further kinds never fail a check. A `warning` of kind
+  `shadowed-property`, once per reported module, says that theorems of the
+  module restate generated properties of its definitions under the same
+  name (a theorem `rationalCut.membership` beside the definition
+  `rationalCut`, whose record already carries `membership`): the name then
+  resolves to the theorem and hides the property. It stands at the first
+  such theorem and lists every one in `theorems`, with the first's
+  `definition`. With `imports: true`, a `note` of kind `transitive-import`
+  for every declaration a reported module uses whose module is neither
+  the module itself, one of its direct imports, nor the core
+  (`Grace.Core` and the bootstrap): `declaration`, its `module`, the direct
+  import `via` which that module is reached, and the import `path` from
+  that import to it, at the first theorem that uses it. Such a use breaks
+  when an unrelated module drops the import it travels through; the message
+  names the module to import directly. The audit reads each theorem's
+  own certificate and statement, not the dependencies of the theorems it
+  cites.
 - `checked` summarizes every loaded module, dependencies included: `file`,
   `module`, and the names of its `definitions` and `theorems`. `modules`
   is the module report of the environment, `notations` its notation table,
@@ -220,7 +238,11 @@ The shape:
 
 `g17 check --json file...` prints the same object, with `ok: true`,
 `version`, and `operation: "check"` added, over the checker's own loader:
-it honors `--foundation`, `--module-root`, `--artifacts`, and `--audit`.
+it honors `--foundation`, `--module-root`, `--artifacts`, `--audit`, and
+`--imports`. Without `--json`, `--imports` prints each note as
+`note: <file>:<line>: <message>` and a count, and a shadowed-property
+warning prints as `warning: <file>:<line>: <message>`; neither changes the
+exit status.
 On failure it prints the checker's failure object (`ok: false`, `kind`,
 `message`, `line`, `file`) with `status`, `diagnostics`, `theorems`
 (completed, then failed), and `milliseconds` added, to standard output
@@ -244,9 +266,11 @@ when anything failed. With `--json` the result carries `failures` (each a
 diagnostic with `module` and `file`), `skipped` (`module`, `file`,
 `because`), the `diagnostics` and partial-trace `theorems` of every
 failure, and `status: "failed"`; without it, `failed ...` and
-`skipped ...` lines and a count follow the checked modules. The flag takes
-no `--artifacts`: it elaborates from source. `npm run check:cumulus --
---continue` is the whole library in one run.
+`skipped ...` lines and a count follow the checked modules. With
+`--quiet`, only the failures, the skipped modules, and the final count are
+printed, each failure once, without the per-module `checked` and `eval`
+lines. The flag takes no `--artifacts`: it elaborates from source.
+`npm run check:cumulus -- --continue` is the whole library in one run.
 
 ### goal
 
@@ -483,6 +507,12 @@ further:
   ```
 - A name declared in several modules is `ambiguous_name`, with
   `candidates` and `modules`.
+- A theorem whose name is also a generated property of a definition
+  (`rationalCut.membership` declared as a theorem beside the definition
+  `rationalCut`) answers with the theorem and carries `shadows`, an array
+  holding the generated property's record as the first case describes it,
+  so a caller sees both and knows the name resolves to the theorem.
+  `check` warns once per module about such names.
 
 ### signature
 
@@ -715,6 +745,41 @@ dependency; `enabled: false` releases them, and `capabilities` reports
 The pin covers the dependency closure of a single active file (the
 incremental path); a workspace checked without an `activeFile` and with
 several files reads its dependencies from disk each time.
+
+### closure
+
+Request: `module`, a module name or a unique suffix of one such as
+`Topology.Tube`, or `file`, a `.g17` file; optionally `moduleRoots` as for
+a workspace, and `from`, a dependency named the same way.
+
+```json
+{"id": 13, "method": "closure",
+ "params": {"module": "Grace.Cumulus.Topology.Tube", "from": "Set.Choice"}}
+```
+
+Result: the import closure read from the sources without elaboration,
+dependencies before dependents and the module itself last, each with its
+resolved `imports` and whether it is `choiceFree`, that is, reaches none of
+`Grace.Cumulus.Set.Choice`, `Grace.Cumulus.Set.ChoiceFunctions`, and
+`Grace.Cumulus.Set.WellOrdering`; `choice` lists those of them in the
+closure. With `from`, `chain` is the shortest import chain from the module
+to that dependency, both included. A `from` outside the closure is
+`unknown_module`.
+
+```json
+{"module": "Grace.Cumulus.Topology.Tube",
+ "file": "lib/Grace/Cumulus/Topology/Tube.g17",
+ "choiceFree": false, "count": 61, "choice": ["Grace.Cumulus.Set.Choice"],
+ "modules": [{"module": "Grace.Cumulus.Set.Basic",
+   "file": "lib/Grace/Cumulus/Set/Basic.g17", "imports": [],
+   "choiceFree": true}, ...],
+ "from": "Grace.Cumulus.Set.Choice",
+ "chain": ["Grace.Cumulus.Topology.Tube", "Grace.Cumulus.Set.Choice"]}
+```
+
+`g17 closure Topology.Tube --from Set.Choice` prints it; `--text` prints
+one line per module, `choice-free` or `choice` first, and the chain.
+A module that is choice-free loads under `--foundation ZF`.
 
 ## A session
 

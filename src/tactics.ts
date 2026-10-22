@@ -7,7 +7,7 @@ import { app, not, or, formulaCanonical, formulaEquals, freeFormulaVariables, fr
 import type { Kernel } from "./kernel.ts";
 import { formatFormula, formatTerm } from "./pretty.ts";
 import { proveCongruence, proveGround } from "./decision-procedures.ts";
-import { isTransparentPredicate, openGuardFact, prepareRefinementProver, proveRefinement, proveSoftType, tauRelievable, type RefinementProver, type ScopeVisibility } from "./type-system.ts";
+import { isTransparentPredicate, openGuardFact, prepareRefinementProver, proveLiteralDistinctnessGoal, proveRefinement, proveSoftType, refuteLiteralEquation, tauRelievable, type RefinementProver, type ScopeVisibility } from "./type-system.ts";
 import {
   andElimLeft, andElimRight, andIntro, assume, at, calc, congr, dne, eqElim, existsElim, existsIntro, falseElim, forallElim, forallIntro, iffElimLeft, iffElimRight,
   iffIntro, impElim, impIntro, orElim, orIntroLeft, orIntroRight, refl, symm, type Proof,
@@ -583,6 +583,13 @@ export function settle(kernel: Kernel, goal: Formula, options: SimpOptions): Pro
     formula: kernel.checkProof(proof, assumptions), proof,
   })), options.visibility);
   const facts: AvailableFact[] = [...assumptionFacts, ...suppliedFacts];
+  // A fact equating distinct literals refutes the goal outright.
+  const refuted = refuteLiteralEquation(kernel, facts);
+  if (refuted) {
+    const result = falseElim(goal, refuted);
+    if (!formulaEquals(kernel.checkProof(result, assumptions), goal)) throw new Error("settle produced a proof of the wrong goal");
+    return result;
+  }
   const explicitRewrites = Array.isArray(options.using)
     ? indexRules(options.using.flatMap(proof => {
         const rule = compileRule(kernel, proof, assumptions, false);
@@ -952,6 +959,12 @@ function settleLogical(
     if (direct) return direct.proof;
     const absurdity = available.find(fact => fact.formula.tag === "bottom");
     if (absurdity) return falseElim(wanted, absurdity.proof);
+    // Distinct natural literals are distinct: `2 ≠ 5` closes, and a fact
+    // `2 = 5` refutes any goal, in every module.
+    const literals = proveLiteralDistinctnessGoal(kernel, wanted);
+    if (literals) return literals;
+    const refuted = refuteLiteralEquation(kernel, available);
+    if (refuted) return wanted.tag === "bottom" ? refuted : falseElim(wanted, refuted);
     if (wanted.tag === "eq" && termCanonical(wanted.left) === termCanonical(wanted.right)) return refl(wanted.left);
     const grounded = tryGround(wanted, context, available.map(fact => fact.proof));
     if (grounded) return grounded;

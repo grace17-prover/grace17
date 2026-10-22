@@ -3,10 +3,11 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { pred, app, canonical, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
+import { pred, app, canonical, eq, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
 import type { Kernel } from "./kernel.ts";
 import { eqElim,
-  andElimLeft, andElimRight, andIntro, at, axiom, definition, iffElimLeft, iffElimRight, impElim, theorem, type Proof,
+  andElimLeft, andElimRight, andIntro, assume, at, axiom, definition, iffElimLeft, iffElimRight, impElim, impIntro, symm, theorem,
+  type Proof,
 } from "./proof.ts";
 
 interface TypePremise {
@@ -1239,4 +1240,54 @@ function matchTerm(pattern: Term, target: Term, variables: ReadonlySet<string>, 
   if (pattern.tag !== "app" || target.tag !== "app") return false;
   return pattern.fn === target.fn && pattern.args.length === target.args.length &&
     pattern.args.every((argument, index) => matchTerm(argument, target.args[index]!, variables, substitution));
+}
+
+// Distinct natural literals are distinct: a core refinement rule available
+// as soon as the bootstrap's zero/successor laws are, in any module. `m ≠ n`
+// for literals m < n descends through successor injectivity to `0 ≠ n - m`,
+// which is the disjointness of zero and successor; the other order is the
+// symmetric equation.
+const ZERO_SUCC_DISJOINT = "Naturals.disjoint.zero.succ";
+const SUCC_INJECTIVE = "Naturals.injective.succ";
+const LITERAL_DISTINCTNESS_DEPTH = 1_024n;
+
+/**
+ * A proof of `left = right → ⊥` when both terms are natural literals with
+ * different values, or undefined when they are not, when they are equal, or
+ * when the bootstrap laws are not yet in the kernel.
+ */
+export function proveLiteralDisequality(kernel: Kernel, left: Term, right: Term): Proof | undefined {
+  const m = naturalValue(left);
+  const n = naturalValue(right);
+  if (m === undefined || n === undefined || m === n) return undefined;
+  if (!kernel.theorems.has(ZERO_SUCC_DISJOINT) || !kernel.theorems.has(SUCC_INJECTIVE)) return undefined;
+  const smaller = m < n ? m : n;
+  if (smaller > LITERAL_DISTINCTNESS_DEPTH) return undefined;
+  // `ascending(k)` proves nat(small + k) = nat(large + k) → ⊥, built from
+  // the base `0 ≠ large - small` outward, so the nesting is the smaller value.
+  const gap = m < n ? n - m : m - n;
+  let ascending: Proof = at(theorem(ZERO_SUCC_DISJOINT), nat(gap - 1n));
+  for (let k = 1n; k <= smaller; k += 1n) {
+    const equal = eq(nat(k), nat(k + gap));
+    const injective = at(theorem(SUCC_INJECTIVE), nat(k - 1n), nat(k + gap - 1n));
+    ascending = impIntro(equal, impElim(ascending, impElim(injective, assume(equal))));
+  }
+  const goal = eq(left, right);
+  return m < n ? impIntro(goal, impElim(ascending, assume(goal))) : impIntro(goal, impElim(ascending, symm(assume(goal))));
+}
+
+/** The literal-distinctness proof of a goal `m ≠ n` (that is, `m = n → ⊥`), when it is one. */
+export function proveLiteralDistinctnessGoal(kernel: Kernel, goal: Formula): Proof | undefined {
+  if (goal.tag !== "imp" || goal.right.tag !== "bottom" || goal.left.tag !== "eq") return undefined;
+  return proveLiteralDisequality(kernel, goal.left.left, goal.left.right);
+}
+
+/** A proof of ⊥ from a fact `m = n` between distinct literals, when one of the facts is such an equation. */
+export function refuteLiteralEquation(kernel: Kernel, facts: readonly { readonly formula: Formula; readonly proof: Proof }[]): Proof | undefined {
+  for (const fact of facts) {
+    if (fact.formula.tag !== "eq") continue;
+    const distinct = proveLiteralDisequality(kernel, fact.formula.left, fact.formula.right);
+    if (distinct) return impElim(distinct, fact.proof);
+  }
+  return undefined;
 }

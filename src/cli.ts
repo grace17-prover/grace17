@@ -18,7 +18,9 @@ import {
 import { resolveImportName } from "./module-names.ts";
 import {
   callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface,
+  shadowedPropertyWarnings, transitiveImportNotes,
 } from "./machine-interface.ts";
+import { shadowedProperties } from "./workbench.ts";
 import { buildModuleStore, createStoreKernel, declaredModule, loadModuleStore } from "./module-store.ts";
 import { scanModule } from "./module-source-loader.ts";
 
@@ -46,7 +48,9 @@ export function runCli(args: readonly string[]): void {
   };
   const optionNames = new Set(["--theorem", "--out", "--machine", "--environment", "--foundation", "--module-root", "--function", "--args", "--artifacts",
     "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables"]);
-  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin"]);
+  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet"]);
+  const optionNames2 = ["--from"];
+  optionNames2.forEach(name => optionNames.add(name));
   const modules: string[] = [];
   for (let index = 1; index < args.length; index += 1) {
     if (optionNames.has(args[index]!)) { index += 1; continue; }
@@ -64,6 +68,10 @@ export function runCli(args: readonly string[]): void {
   } else {
     let kernel: Kernel | undefined;
     const continuing = command === "check" && (args.includes("--continue") || args.includes("--all"));
+    // --quiet keeps the per-module lines off the terminal: the failures and
+    // the summary alone are printed, each failure once.
+    const quiet = args.includes("--quiet");
+    const importAudit = command === "check" && args.includes("--imports");
     let continued: ContinuedCheck | undefined;
     const started = performance.now();
     try {
@@ -109,7 +117,7 @@ export function runCli(args: readonly string[]): void {
           checked = [...loaded.loaded, ...loadModuleGraph(kernel, workspace, roots)];
         }
       } else if (continuing) {
-        continued = checkContinuing(kernel, modules, roots, json ? undefined : line => console.error(line));
+        continued = checkContinuing(kernel, modules, roots, json || quiet ? undefined : line => console.error(line));
         kernel = continued.kernel;
         checked = continued.loaded;
       } else {
@@ -162,9 +170,11 @@ export function runCli(args: readonly string[]): void {
           const sources: WorkbenchFile[] = entries.map(name => ({ name, source: readFileSync(name, "utf8") }));
           const rendered = renderCheckedWorkspace(kernel, checked, sources, profile, entries.filter(name => checked.some(item => item.file === name)), {
             includeKernelDetails: false, includeDependencies: true, includeEnvironmentDigest: true, includeReports: true, moduleRoots: roots,
+            includeDirectDependencies: importAudit,
           });
           const checkedKernel = kernel;
           const presented = presentCheckedWorkspace(rendered, {
+            imports: importAudit,
             ...(args.includes("--audit") ? { audit: (name: string) => auditTheoremAxioms(checkedKernel, name) } : {}),
           });
           // Under --continue every failure is a diagnostic, each with the
@@ -183,12 +193,33 @@ export function runCli(args: readonly string[]): void {
           };
           console.log(JSON.stringify(result));
         } else {
-          for (const item of checked) {
-            console.log(`checked ${item.file || item.module || "<unnamed>"}${item.module && item.file ? ` [${item.module}]` : ""} (${item.definitions.length} definitions, ${item.theorems.length} theorems, ${item.evaluations.length} evaluations)`);
-            item.evaluations.forEach(evaluation => console.log(`  eval ${evaluation.expression} ⇒ ${evaluation.value} (${evaluation.kind === "proposition" ? "checked proof" : `${evaluation.stats.reductions.toLocaleString()} reductions`})`));
-            item.sorries.forEach(sorry => console.log(`  warning: sorry at ${item.file}:${sorry.line} admits ${sorry.axiom}`));
+          if (!quiet) {
+            for (const item of checked) {
+              console.log(`checked ${item.file || item.module || "<unnamed>"}${item.module && item.file ? ` [${item.module}]` : ""} (${item.definitions.length} definitions, ${item.theorems.length} theorems, ${item.evaluations.length} evaluations)`);
+              item.evaluations.forEach(evaluation => console.log(`  eval ${evaluation.expression} ⇒ ${evaluation.value} (${evaluation.kind === "proposition" ? "checked proof" : `${evaluation.stats.reductions.toLocaleString()} reductions`})`));
+              item.sorries.forEach(sorry => console.log(`  warning: sorry at ${item.file}:${sorry.line} admits ${sorry.axiom}`));
+            }
           }
-          console.log(`foundation ${kernel.foundationReport().profile}; environment ${kernel.digest()}`);
+          // The entries' own modules: a theorem restating a generated
+          // property under its name is warned about once per module, and
+          // with --imports every declaration used through a transitive
+          // import is noted.
+          const entries = modules.filter(entry => entry.endsWith(".g17")).map(entry => resolve(entry));
+          const own = checked.filter(item => entries.includes(item.file));
+          for (const warning of shadowedPropertyWarnings(shadowedProperties(kernel, own))) {
+            console.log(`warning: ${warning.file}:${warning.line}: ${warning.message}`);
+          }
+          if (importAudit) {
+            const sources: WorkbenchFile[] = entries.map(name => ({ name, source: readFileSync(name, "utf8") }));
+            const rendered = renderCheckedWorkspace(kernel, checked, sources, profile, own.map(item => item.file), {
+              includeKernelDetails: false, includeDependencies: false, includeEnvironmentDigest: false, includeReports: true, moduleRoots: roots,
+              includeDirectDependencies: true,
+            });
+            const notes = transitiveImportNotes(rendered);
+            for (const note of notes) console.log(`note: ${note.file}:${note.line}: ${note.message}`);
+            console.log(`${notes.length} transitive-import ${notes.length === 1 ? "note" : "notes"}`);
+          }
+          if (!quiet) console.log(`foundation ${kernel.foundationReport().profile}; environment ${kernel.digest()}`);
           const sorryCount = checked.reduce((count, item) => count + item.sorries.length, 0);
           if (sorryCount) console.log(`warning: ${sorryCount} ${sorryCount === 1 ? "proof obligation was" : "proof obligations were"} admitted with sorry`);
           if (continued) {
@@ -364,7 +395,7 @@ function checkContinuing(initial: Kernel, entries: readonly string[], roots: rea
   return { kernel, loaded, failures, skipped };
 }
 
-const machineCommands = new Set(["serve", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations"]);
+const machineCommands = new Set(["serve", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations", "closure"]);
 
 /**
  * One method of the machine interface as a subcommand. Each prints the
@@ -408,6 +439,11 @@ function runMachineCommand(
       }
       : command === "library" ? { ...(option("--area") ? { area: option("--area") } : {}), ...(option("--module") ? { module: option("--module") } : {}), ...(flag("--declarations") ? { declarations: true } : {}) }
       : command === "notations" ? { ...(option("--module") ? { module: option("--module") } : {}), ...(positional.length ? workspace(positional) : {}) }
+      : command === "closure" ? {
+        ...(positional[0]?.endsWith(".g17") ? { file: positional[0] } : { module: positional[0] ?? "" }),
+        ...(options("--module-root").length ? { moduleRoots: options("--module-root") } : {}),
+        ...(option("--from") ? { from: option("--from") } : {}),
+      }
       : command === "audit" ? { ...workspace(positional), ...(options("--theorem").length > 1 ? { theorems: options("--theorem") } : { theorem: option("--theorem") ?? "" }) }
       : command === "goal" ? { ...workspace(positional), ...(positional.length === 1 ? { file: positional[0] } : {}), ...position() }
       : { ...workspace(positional), ...(positional.length === 1 ? { file: positional[0] } : {}), ...position(), tactic: option("--tactic") ?? "" };
@@ -418,8 +454,15 @@ function runMachineCommand(
     process.exitCode = 1;
     return;
   }
-  if (json || (command !== "search" && command !== "goal")) { console.log(JSON.stringify(response)); return; }
+  if (json || (command !== "search" && command !== "goal" && command !== "closure")) { console.log(JSON.stringify(response)); return; }
   const result = response.result as Record<string, unknown>;
+  if (command === "closure") {
+    const listed = result.modules as readonly { module: string; file: string; choiceFree: boolean }[];
+    console.log(`${result.module}: ${listed.length} modules, ${result.choiceFree ? "choice-free" : `uses ${(result.choice as string[]).join(", ")}`}`);
+    for (const item of listed) console.log(`${item.choiceFree ? "choice-free" : "choice     "}  ${item.module}  ${item.file}`);
+    if (Array.isArray(result.chain)) console.log(`chain: ${(result.chain as string[]).join(" → ")}`);
+    return;
+  }
   if (command === "search") {
     const hits = result.results as readonly { name: string; kind: string; module: string; file: string; line: number }[];
     console.log(`${result.total} results, ${result.indexed} declarations indexed`);
@@ -458,7 +501,7 @@ function safeName(name: string): string {
 function usage(print: (line: string) => void): void {
   print("usage:");
   print("  g17 axiom-audit [--json] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] <module.g17> --theorem <qualified-name>");
-  print("  g17 check [--json] [--audit] [--continue] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] <module.g17> [...]");
+  print("  g17 check [--json] [--audit] [--imports] [--continue [--quiet]] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] <module.g17> [...]");
   print("  g17 build [--json] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] [--verify] <Module.Name|module.g17> [...]");
   print("  g17 run [--json] [--module-root dir ...] <module.g17> --function <name> --args <naturals>");
   print("  g17 export [--json] <module.g17> [...] --theorem <name> [--out proof.g17proof.json]");
@@ -476,5 +519,6 @@ function usage(print: (line: string) => void): void {
   print("  g17 audit [--foundation F] [--module-root dir ...] [--active file] <file.g17> [...] --theorem <qualified-name> [--theorem ...]");
   print("  g17 library [--area Area] [--module Module.Name] [--declarations]");
   print("  g17 notations [--module Module.Name] [file.g17 ...]");
+  print("  g17 closure [--text] [--module-root dir ...] <Module.Name|file.g17> [--from Module.Name]");
   print("  g17 --help                                 this text");
 }

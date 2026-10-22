@@ -17,7 +17,8 @@ import { compute,
 import { CARRIER_ARGUMENT_FUNCTIONS, formatFormula, formatTerm, fromSuperscript, registerStructureMember, ringNumeralValue, structureMember, structureProjection as structureFieldSymbol, type CarrierNotation, type FunctionNotation, type OperationNotation, type PredicateNotation, type PrettyOptions, type RingNotation, type RingPiece, type ScopedArgument } from "./pretty.ts";
 import { evaluateNative, nativeValueToTerm } from "./runtime.ts";
 import { InstanceResolutionError, InstanceResolutionLimitError, prepareInstanceProver, prepareRefinementProver, proveRefinement, type InstanceProver, type InstanceSynthesisResult, type RefinementProver, forkTypeIndex, moveTypeIndex,
-  functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, registerGuardPredicate, type GuardFact, type ScopeVisibility,
+  functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, proveLiteralDistinctnessGoal, refuteLiteralEquation, registerGuardPredicate,
+  type GuardFact, type ScopeVisibility,
 } from "./type-system.ts";
 import { createSimpSession, prepareRewrites, rewriteFact, rewriteGoal, RewriteMismatch, settle, simplifyEqualityFact, simplifyEqualityGoal, simplifyFormulaFact, simplifyFormulaGoal, type GoalRewrite, type PreparedRewrites, type SettleStats } from "./tactics.ts";
 import { excludedMiddle, proveCongruence, proveTautology } from "./decision-procedures.ts";
@@ -5759,6 +5760,9 @@ function elaborateTacticTheorem(
       continue;
     }
     if (command === "typecheck") {
+      // `m ≠ n` between distinct literals is a core refinement fact.
+      const distinctLiterals = proveLiteralDistinctnessGoal(kernel, current.goal);
+      if (distinctLiterals) { close(line, distinctLiterals); continue; }
       if (current.goal.tag !== "pred" || current.goal.args.length === 0) {
         throw new SurfaceError(line.number, "typecheck requires a soft-type or refinement goal");
       }
@@ -7469,6 +7473,13 @@ function elaborateTacticTheorem(
       catch (error) { if (!(error instanceof SurfaceError)) throw error; throw direct; }
     }
     if (command === "arith" && current.goal.tag === "bottom") {
+      // An equation between distinct literals, `1 = 0`, refutes by itself,
+      // without the order theory.
+      const refuted = refuteLiteralEquation(kernel, [
+        ...current.locals.values(),
+        ...current.assumptions.map(formula => ({ formula, proof: assume(formula) })),
+      ]);
+      if (refuted) { close(line, refuted); continue; }
       if (!resolveOptional("Less.irreflexive", scope, candidate => kernel.theorems.has(candidate))) {
         throw new SurfaceError(line.number, "arith on a ⊥ goal needs Less.irreflexive; import Grace.Cumulus.Nat.Order");
       }

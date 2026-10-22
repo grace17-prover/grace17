@@ -10,7 +10,7 @@
 // newline-delimited JSON; the command line offers each method as a
 // subcommand. See docs/machine-interface.md.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Formula, Term } from "./ast.ts";
@@ -19,6 +19,8 @@ import {
   LibrarySearchWorkspace, moduleDocument, moduleNameOf, parseDeclarationHeader, parseHeaderBinders, scanSearchDeclarations,
   type SearchDeclaration,
 } from "./library-search.ts";
+import { moduleNameFromPath, resolveImportName } from "./module-names.ts";
+import { scanModule } from "./module-source-loader.ts";
 import { projectRoot } from "./project-root.ts";
 import { sha256Hex } from "./hash.ts";
 import { SurfaceError } from "./surface.ts";
@@ -81,6 +83,7 @@ export const MACHINE_METHODS: readonly { readonly name: string; readonly descrip
   { name: "library", description: "The library's modules and their declarations, optionally by area or module." },
   { name: "notations", description: "The notation table and tactic macros in scope for a workspace or module." },
   { name: "pin", description: "Pin the dependency sources this process has read, so later requests keep answering over them." },
+  { name: "closure", description: "The import closure of a module in dependency order, each module marked choice-free or not, and the import chain to a named dependency." },
 ];
 
 const FOUNDATIONS: readonly WorkbenchFoundation[] = ["ZF", "ZFC", "ZFG"];
@@ -202,9 +205,11 @@ interface CheckOptions {
   readonly kernel: boolean;
   readonly digest: boolean;
   readonly dependencies: boolean;
+  /** Audit the imports: note every declaration a module uses only through a transitive import. */
+  readonly imports: boolean;
 }
 
-const plainCheck: CheckOptions = { kernel: false, digest: false, dependencies: false };
+const plainCheck: CheckOptions = { kernel: false, digest: false, dependencies: false, imports: false };
 
 const workspaceMemo = new Map<string, RawCheck>();
 
@@ -231,7 +236,7 @@ function rawCheck(workspace: Workspace, options: CheckOptions): RawCheck {
   try {
     raw = { ok: true, result: checkWorkbenchFiles(workspace.files, workspace.profile, workspace.entry, {
       includeKernelDetails: options.kernel, includeEnvironmentDigest: options.digest, includeDependencies: options.dependencies,
-      includeReports: true, moduleRoots: workspace.moduleRoots,
+      includeDirectDependencies: options.imports, includeReports: true, moduleRoots: workspace.moduleRoots,
     }) };
   } catch (error) {
     if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
@@ -251,7 +256,7 @@ function checkFailed(raw: RawCheck & { readonly ok: false }, fallbackFile: strin
 }
 
 export interface MachineDiagnostic {
-  readonly severity: "error" | "warning";
+  readonly severity: "error" | "warning" | "note";
   readonly kind: string;
   readonly file: string;
   readonly line: number;
@@ -259,6 +264,101 @@ export interface MachineDiagnostic {
   readonly endColumn: number;
   readonly message: string;
   readonly theorem?: string;
+  /** A transitive-import note: the declaration, its module, the direct import it is reached through, and the import path. */
+  readonly declaration?: string;
+  readonly module?: string;
+  readonly via?: string;
+  readonly path?: readonly string[];
+  /** A shadowed-property warning: the definition whose generated property the first theorem restates, and every such theorem of the module. */
+  readonly definition?: string;
+  readonly theorems?: readonly string[];
+}
+
+/** The bootstrap and the core modules are the foundation every module stands on; their declarations are never import notes. */
+const CORE_MODULE = /^Grace\.Core(?:\.|$)/;
+
+/**
+ * The import audit of a checked result: for every reported module, each
+ * declaration its theorems use whose module is neither the module itself,
+ * one of its direct imports, nor the core, with the direct import through
+ * which that module is reached. A later change to that import's own imports
+ * would break the module; the note names the import to add.
+ */
+export function transitiveImportNotes(result: WorkbenchCheckResult): MachineDiagnostic[] {
+  const loaded = result.loaded ?? [];
+  const owner = new Map<string, string>();
+  for (const item of loaded) {
+    if (!item.module) continue;
+    for (const name of [...item.definitions, ...item.theorems]) owner.set(name, item.module);
+  }
+  // A generated name, `add.equation.0` or `List.inductive.injective.cons`,
+  // belongs to the definition that is its longest declared prefix.
+  const moduleOf = (name: string): string | undefined => {
+    for (let cursor = name; ; cursor = cursor.slice(0, cursor.lastIndexOf("."))) {
+      const found = owner.get(cursor);
+      if (found) return found;
+      if (!cursor.includes(".")) return undefined;
+    }
+  };
+  const imports = new Map((result.moduleReport ?? []).map(record => [record.name, record.imports]));
+  const reported = new Set(result.checkedFiles);
+  const notes: MachineDiagnostic[] = [];
+  for (const item of loaded) {
+    if (!item.module || !reported.has(item.file)) continue;
+    const direct = imports.get(item.module) ?? [];
+    // Every module reachable from a direct import, with the first direct
+    // import that reaches it and the path from that import.
+    const reach = new Map<string, { readonly via: string; readonly path: readonly string[] }>();
+    for (const start of direct) {
+      const queue: { readonly module: string; readonly path: readonly string[] }[] = [{ module: start, path: [start] }];
+      while (queue.length) {
+        const { module, path } = queue.shift()!;
+        if (reach.has(module)) continue;
+        reach.set(module, { via: start, path });
+        for (const next of imports.get(module) ?? []) if (!reach.has(next)) queue.push({ module: next, path: [...path, next] });
+      }
+    }
+    const seen = new Set<string>();
+    for (const theorem of result.theorems) {
+      if (theorem.file !== item.file || !theorem.uses) continue;
+      const used = [...theorem.uses.theorems, ...theorem.uses.definitions, ...theorem.uses.symbols];
+      for (const name of used) {
+        const module = moduleOf(name);
+        if (!module || module === item.module || direct.includes(module) || CORE_MODULE.test(module) || seen.has(name)) continue;
+        seen.add(name);
+        const route = reach.get(module);
+        const through = route ? `only through its import ${route.via}` : "through no import of its own";
+        notes.push({
+          severity: "note", kind: "transitive-import", file: item.file, line: theorem.lineStart, column: 1, endColumn: 1,
+          message: `${name} is declared in ${module}, which ${item.module} reaches ${through}; import ${module} directly`,
+          theorem: theorem.name, declaration: name, module, ...(route ? { via: route.via, path: route.path } : {}),
+        });
+      }
+    }
+  }
+  return notes;
+}
+
+/**
+ * One warning per module that restates generated properties of its
+ * definitions as theorems of the same name, at the first such theorem,
+ * naming every one: such a name resolves to the theorem and hides the
+ * property.
+ */
+export function shadowedPropertyWarnings(shadowed: readonly WorkbenchCheckResult["shadowed"][number][]): MachineDiagnostic[] {
+  const byFile = new Map<string, typeof shadowed[number][]>();
+  for (const item of shadowed) byFile.set(item.file, [...(byFile.get(item.file) ?? []), item]);
+  return [...byFile.values()].map(items => {
+    const first = items.reduce((best, item) => item.line < best.line ? item : best);
+    const names = items.map(item => item.theorem.slice((item.module?.length ?? -1) + 1));
+    const count = items.length === 1 ? "a generated property" : `${items.length} generated properties`;
+    return {
+      severity: "warning" as const, kind: "shadowed-property", file: first.file, line: first.line, column: 1, endColumn: 1,
+      message: `${first.module ?? first.file} restates ${count} as a theorem of the same name: ${names.join(", ")}; such a name resolves to the theorem and hides the property`,
+      theorem: first.theorem, declaration: first.theorem, definition: first.definition, ...(first.module ? { module: first.module } : {}),
+      theorems: items.map(item => item.theorem),
+    };
+  });
 }
 
 export type MachineTheoremStatus = "proved" | "admitted" | "failed";
@@ -340,7 +440,7 @@ function presentCheck(workspace: Workspace, raw: RawCheck, options: CheckOptions
     };
   }
   return presentCheckedWorkspace(raw.result, {
-    kernel: options.kernel, symbols: options.symbols,
+    kernel: options.kernel, symbols: options.symbols, imports: options.imports,
     ...(options.audit ? { audit: (name: string) => audit(workspace, name) } : {}),
   });
 }
@@ -351,14 +451,18 @@ function presentCheck(workspace: Workspace, raw: RawCheck, options: CheckOptions
  * theorem's axiom audit.
  */
 export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
-  readonly kernel?: boolean; readonly symbols?: boolean; readonly audit?: (theorem: string) => unknown;
+  readonly kernel?: boolean; readonly symbols?: boolean; readonly imports?: boolean; readonly audit?: (theorem: string) => unknown;
 } = {}) {
   const theorems = result.theorems.map(theorem => ({
     ...stripKernel(theorem, options.kernel ?? false),
     status: (theorem.sorries.length ? "admitted" : "proved") as MachineTheoremStatus,
     ...(options.audit ? { audit: options.audit(theorem.name) } : {}),
   }));
-  const diagnostics: MachineDiagnostic[] = result.sorries.map(sorryDiagnostic);
+  const diagnostics: MachineDiagnostic[] = [
+    ...result.sorries.map(sorryDiagnostic),
+    ...shadowedPropertyWarnings(result.shadowed ?? []),
+    ...(options.imports ? transitiveImportNotes(result) : []),
+  ];
   const reported = new Set(result.checkedFiles);
   return {
     status: "checked" as const,
@@ -390,6 +494,7 @@ function checkOptions(params: Params): CheckOptions & { readonly audit: boolean;
     kernel: booleanParam(params, "kernel", false),
     digest: booleanParam(params, "digest", false),
     dependencies: booleanParam(params, "dependencies", true),
+    imports: booleanParam(params, "imports", false),
     audit: booleanParam(params, "audit", false),
     symbols: booleanParam(params, "symbols", false),
   };
@@ -834,24 +939,33 @@ function describeSymbol(symbol: EnvironmentSymbol, files: readonly WorkbenchFile
 function resolveInEnvironment(workspace: Workspace, environment: CheckedEnvironment, name: string, files: readonly WorkbenchFile[], records: readonly SearchDeclaration[], contextModule: string | undefined) {
   const symbols = environment.symbols;
   const symbol = resolveSymbolCandidate(symbols, name, { module: contextModule, file: workspace.activeFile });
-  if (symbol) return describeSymbol(symbol, files);
+  const generated = (wanted: string) => {
+    const property = describeWorkbenchProperty(workspace.files, wanted, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots });
+    if ("candidates" in property && property.candidates.length > 1) throw new MachineError("ambiguous_name", `${wanted} names several generated facts`, { candidates: property.candidates });
+    if (!("name" in property)) return undefined;
+    const owner = resolveSymbolCandidate(symbols, property.definition) ?? resolveSymbolCandidate(symbols, property.definition.replace(/\.inductive$/, ""));
+    const ownerRecord = owner?.file ? sourceRecord(owner.file, libraryOrWorkspaceSource(files, owner.file), owner.line) : undefined;
+    return {
+      elaborated: true as const, generated: true as const,
+      name: property.name, short: property.property, kind: "property", info: property.statement, statement: property.statement,
+      canonical: property.canonical, definition: property.definition, definitionKind: property.definitionKind, property: property.property,
+      ...(ownerRecord ? { module: ownerRecord.module } : {}),
+      ...(owner?.file ? { file: owner.file } : {}),
+      ...(owner?.line ? { line: owner.line } : {}),
+    };
+  };
+  if (symbol) {
+    const described = describeSymbol(symbol, files);
+    // A theorem named like a generated property of a definition hides it:
+    // the answer carries both and marks the theorem as the one that shadows.
+    const hidden = described.kind === "theorem" ? generated(symbol.name) : undefined;
+    return hidden ? { ...described, shadows: [hidden] } : described;
+  }
   const candidates = symbols.filter(item => item.short === name || item.name.endsWith(`.${name}`));
   if (candidates.length) throw ambiguousSymbols(environment, records, name, candidates);
   // A generated fact of a definition, such as a datatype's
   // disjoint.false.true, lives on the definition's record in the kernel.
-  const property = describeWorkbenchProperty(workspace.files, name, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots });
-  if ("candidates" in property && property.candidates.length > 1) throw new MachineError("ambiguous_name", `${name} names several generated facts`, { candidates: property.candidates });
-  if (!("name" in property)) return undefined;
-  const owner = resolveSymbolCandidate(symbols, property.definition) ?? resolveSymbolCandidate(symbols, property.definition.replace(/\.inductive$/, ""));
-  const ownerRecord = owner?.file ? sourceRecord(owner.file, libraryOrWorkspaceSource(files, owner.file), owner.line) : undefined;
-  return {
-    elaborated: true as const, generated: true as const,
-    name: property.name, short: property.property, kind: "property", info: property.statement, statement: property.statement,
-    canonical: property.canonical, definition: property.definition, definitionKind: property.definitionKind, property: property.property,
-    ...(ownerRecord ? { module: ownerRecord.module } : {}),
-    ...(owner?.file ? { file: owner.file } : {}),
-    ...(owner?.line ? { line: owner.line } : {}),
-  };
+  return generated(name);
 }
 
 function declaration(params: Params) {
@@ -1210,6 +1324,122 @@ function pin(params: Params) {
   return { pinned: enabled, files };
 }
 
+/** The modules whose import brings the axiom of choice into a closure. */
+const CHOICE_MODULES: readonly string[] = ["Grace.Cumulus.Set.Choice", "Grace.Cumulus.Set.ChoiceFunctions", "Grace.Cumulus.Set.WellOrdering"];
+
+interface ClosureModule {
+  readonly module: string;
+  readonly file: string;
+  readonly imports: readonly string[];
+}
+
+/**
+ * The import closure of a module, read from the sources without
+ * elaboration: dependencies before dependents, each module with its
+ * resolved imports and whether it is choice-free, that is, reaches none of
+ * the choice modules. `from` names a dependency and adds the import chain
+ * from the module to it.
+ */
+function closure(params: Params) {
+  const roots = [...(rootsParam(params) ?? []).map(root => resolve(root)), join(projectRoot, "lib")];
+  const fileOf = (name: string): string | undefined => {
+    const relativePath = `${name.split(".").join("/")}.g17`;
+    return roots.map(root => resolve(root, relativePath)).find(candidate => existsSync(candidate));
+  };
+  const nameOf = (file: string): string | undefined => moduleNameFromPath(file, roots);
+  const moduleParam = stringParam(params, "module");
+  const fileParam = stringParam(params, "file");
+  if (!moduleParam && !fileParam) throw new MachineError("invalid_params", "closure takes a module name or a file");
+  let entryFile: string;
+  if (fileParam) {
+    entryFile = resolve(fileParam);
+    if (!existsSync(entryFile)) throw new MachineError("unknown_file", `cannot read ${fileParam}`, { file: fileParam });
+  } else {
+    const file = fileOf(moduleParam!) ?? librarySuffixMatch(moduleParam!, roots);
+    if (!file) throw new MachineError("unknown_module", `no module named ${moduleParam}`, { module: moduleParam });
+    entryFile = file;
+  }
+  const modules = new Map<string, ClosureModule>();
+  const ordered: ClosureModule[] = [];
+  const visiting = new Set<string>();
+  const exists = (name: string): boolean => modules.has(name) || fileOf(name) !== undefined;
+  const visit = (file: string, written?: string): string => {
+    const source = readFileSync(file, "utf8");
+    const scanned = scanModule(source, file, nameOf);
+    const name = scanned.name ?? written ?? file;
+    const known = modules.get(name);
+    if (known) return name;
+    if (visiting.has(name)) throw new MachineError("surface", `cyclic module import involving ${name}`);
+    visiting.add(name);
+    const imports = scanned.imports.map(raw => resolveImportName(scanned.name, raw, exists) ?? raw);
+    const resolved: string[] = [];
+    for (const imported of imports) {
+      const target = fileOf(imported);
+      if (!target) throw new MachineError("unknown_module", `${file}: cannot locate imported module ${imported}`, { module: imported });
+      resolved.push(visit(target, imported));
+    }
+    visiting.delete(name);
+    const record = { module: name, file: displayPath(file), imports: resolved };
+    modules.set(name, record);
+    ordered.push(record);
+    return name;
+  };
+  const entry = visit(entryFile, moduleParam);
+  // Dependencies come first, so a module's choice-freedom is its imports'.
+  const choiceFree = new Map<string, boolean>();
+  for (const item of ordered) {
+    choiceFree.set(item.module, !CHOICE_MODULES.includes(item.module) && item.imports.every(name => choiceFree.get(name) !== false));
+  }
+  const listed = ordered.map(item => ({ ...item, choiceFree: choiceFree.get(item.module)! }));
+  const fromParam = stringParam(params, "from");
+  let chain: readonly string[] | undefined;
+  if (fromParam) {
+    const target = modules.has(fromParam) ? fromParam : [...modules.keys()].filter(name => name.endsWith(`.${fromParam}`));
+    const name = typeof target === "string" ? target : target.length === 1 ? target[0]! : undefined;
+    if (!name) {
+      if (Array.isArray(target) && target.length > 1) throw new MachineError("ambiguous_name", `${fromParam} names several modules of the closure`, { candidates: target });
+      throw new MachineError("unknown_module", `${fromParam} is not in the import closure of ${entry}`, { module: fromParam });
+    }
+    chain = importChain(modules, entry, name);
+  }
+  return {
+    module: entry, file: modules.get(entry)!.file, choiceFree: choiceFree.get(entry)!,
+    count: listed.length, choice: listed.filter(item => CHOICE_MODULES.includes(item.module)).map(item => item.module),
+    modules: listed, ...(chain ? { from: chain.at(-1), chain } : {}),
+  };
+}
+
+/** The shortest import chain from a module to a dependency, both included. */
+function importChain(modules: ReadonlyMap<string, ClosureModule>, start: string, target: string): readonly string[] {
+  const previous = new Map<string, string | undefined>([[start, undefined]]);
+  const queue = [start];
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (current === target) {
+      const path: string[] = [];
+      for (let cursor: string | undefined = current; cursor !== undefined; cursor = previous.get(cursor)) path.unshift(cursor);
+      return path;
+    }
+    for (const next of modules.get(current)?.imports ?? []) {
+      if (!previous.has(next)) { previous.set(next, current); queue.push(next); }
+    }
+  }
+  return [start, target];
+}
+
+/** The one library file whose module name ends with the written name, when exactly one does. */
+function librarySuffixMatch(name: string, roots: readonly string[]): string | undefined {
+  const matches = [...standardLibraryFiles().keys()].map(key => join(projectRoot, key))
+    .filter(file => moduleNameFromPath(file, roots)?.endsWith(`.${name}`));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** A path under the repository as the library records write it, otherwise as resolved. */
+function displayPath(file: string): string {
+  const relativePath = relative(projectRoot, file).replaceAll("\\", "/");
+  return relativePath.startsWith("..") ? file : relativePath;
+}
+
 function capabilities() {
   return {
     protocol: MACHINE_PROTOCOL_VERSION, grace17: grace17Version, methods: MACHINE_METHODS, foundations: FOUNDATIONS,
@@ -1218,7 +1448,7 @@ function capabilities() {
 }
 
 const handlers: Record<string, (params: Params) => unknown> = {
-  capabilities, check, goal, suggest, search, declaration, signature, elaborate, audit: auditMethod, library, notations, pin,
+  capabilities, check, goal, suggest, search, declaration, signature, elaborate, audit: auditMethod, library, notations, pin, closure,
 };
 
 /** Run one method; errors are thrown as MachineError. */

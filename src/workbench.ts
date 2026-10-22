@@ -97,6 +97,8 @@ export interface WorkbenchTheorem {
   readonly proofNodes: number;
   readonly judgments: number;
   readonly dependencies: { readonly axioms: readonly string[]; readonly theorems: readonly string[]; readonly definitions: readonly string[] };
+  /** The declarations the proof cites and the statement mentions directly, without their own dependencies. */
+  readonly uses?: WorkbenchDirectUses;
   readonly proofMap: readonly { readonly line: number; readonly indent: number; readonly kind: "heading" | "note"; readonly text: string }[];
   readonly initial?: WorkbenchState;
   /** The names bound outside the proof that its lines can refer to, with their binding lines. */
@@ -634,6 +636,93 @@ export interface WorkbenchCheckOptions extends WorkbenchWorkspaceOptions {
   readonly includeDependencies?: boolean;
   /** Also report the kernel's foundation and module reports and a summary of every loaded module. */
   readonly includeReports?: boolean;
+  /** Add each theorem's `uses`: the declarations its proof and statement name directly. */
+  readonly includeDirectDependencies?: boolean;
+}
+
+export interface WorkbenchDirectUses {
+  readonly axioms: readonly string[];
+  readonly theorems: readonly string[];
+  readonly definitions: readonly string[];
+  /** The function and predicate symbols of the statement. */
+  readonly symbols: readonly string[];
+}
+
+/**
+ * The declarations a theorem names directly: the axioms, theorems, and
+ * definition properties its own certificate cites (not those of the
+ * theorems it cites), and the symbols of its statement.
+ */
+export function directTheoremUses(kernel: ReturnType<typeof createSetTheoryKernel>, name: string): WorkbenchDirectUses {
+  const axioms = new Set<string>();
+  const theorems = new Set<string>();
+  const definitions = new Set<string>();
+  const visited = new Set<object>();
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    const record = value as Record<string, unknown>;
+    if (typeof record.rule === "string") {
+      if (record.rule === "axiom") axioms.add(String(record.name));
+      else if (record.rule === "theorem") { if (record.name !== name) theorems.add(String(record.name)); return; }
+      else if (record.rule === "definition") definitions.add(String(record.name));
+      else if (record.rule === "compute" && Array.isArray(record.definitions)) record.definitions.forEach(item => definitions.add(String(item)));
+    }
+    Object.entries(record).forEach(([key, child]) => { if (key !== "rule") visit(child); });
+  };
+  visit(kernel.theoremProofs.get(name));
+  const symbols = new Set<string>();
+  const walkTerm = (term: Term): void => {
+    if (term.tag !== "app") return;
+    symbols.add(term.fn);
+    term.args.forEach(walkTerm);
+  };
+  const walk = (formula: Formula): void => {
+    switch (formula.tag) {
+      case "bottom": return;
+      case "eq": walkTerm(formula.left); walkTerm(formula.right); return;
+      case "pred": symbols.add(formula.pred); formula.args.forEach(walkTerm); return;
+      case "imp": case "and": case "or": case "iff": walk(formula.left); walk(formula.right); return;
+      case "forall": case "exists": walk(formula.body); return;
+    }
+  };
+  const statement = kernel.theorems.get(name);
+  if (statement) walk(statement);
+  const sorted = (items: Set<string>): string[] => [...items].sort();
+  return { axioms: sorted(axioms), theorems: sorted(theorems), definitions: sorted(definitions), symbols: sorted(symbols) };
+}
+
+export interface WorkbenchShadowedProperty {
+  readonly theorem: string;
+  readonly definition: string;
+  readonly property: string;
+  readonly module?: string;
+  readonly file: string;
+  readonly line: number;
+}
+
+/**
+ * The theorems of the loaded modules whose name is also a generated
+ * property of a definition (`rationalCut.membership` as a theorem beside
+ * the definition `rationalCut` with its `membership` property): a name that
+ * then resolves to the theorem and hides the property.
+ */
+export function shadowedProperties(kernel: ReturnType<typeof createSetTheoryKernel>, loaded: readonly LoadedModule[]): WorkbenchShadowedProperty[] {
+  const result: WorkbenchShadowedProperty[] = [];
+  for (const item of loaded) {
+    const lines = new Map(item.theoremLocations?.map(location => [location.name, location.lineStart]));
+    for (const theorem of item.theorems) {
+      for (let cut = theorem.lastIndexOf("."); cut > 0; cut = theorem.lastIndexOf(".", cut - 1)) {
+        const definition = theorem.slice(0, cut);
+        const property = theorem.slice(cut + 1);
+        if (!kernel.definitions.get(definition)?.properties.has(property)) continue;
+        result.push({ theorem, definition, property, ...(item.module ? { module: item.module } : {}), file: item.file, line: lines.get(theorem) ?? 1 });
+        break;
+      }
+    }
+  }
+  return result;
 }
 
 export function checkWorkbenchFiles(
@@ -779,6 +868,7 @@ function renderWorkbenchCheck(
       admittedSorries: new Set(theorems.filter(theorem => theorem.file === file.name)
         .flatMap(theorem => theorem.sorries.map(sorry => sorry.axiom))).size })),
     theorems,
+    shadowed: shadowedProperties(kernel, workspaceModules),
     ...reports,
   };
 }
@@ -800,6 +890,7 @@ function renderTheorem(
     ? { axioms: [], theorems: [], definitions: [] } as const
     : theoremDependencies(kernel, name);
   const theoremSorries = sorries.filter(sorry => dependencies.axioms.includes(sorry.axiom));
+  const uses = options.includeDirectDependencies ? { uses: directTheoremUses(kernel, name) } : {};
   const steps: WorkbenchStep[] = tactics?.steps.map(step => ({
     line: step.line,
     columnStart: step.columnStart,
@@ -817,6 +908,7 @@ function renderTheorem(
     proofNodes: 0,
     judgments: 0,
     dependencies,
+    ...uses,
     proofMap: tactics?.narrative ?? [],
     ...(tactics ? { initial: displayState(tactics.initial, display) } : {}),
     ...(tactics?.scope ? { scope: tactics.scope } : {}),
@@ -832,6 +924,7 @@ function renderTheorem(
     proofNodes: exported.proof.nodes.length,
     judgments: exported.trace.nodes.length,
     dependencies: exported.dependencies,
+    ...uses,
     proofMap: tactics?.narrative ?? [],
     ...(tactics ? { initial: displayState(tactics.initial, display) } : {}),
     ...(tactics?.scope ? { scope: tactics.scope } : {}),

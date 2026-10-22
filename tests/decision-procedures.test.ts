@@ -9,6 +9,9 @@ import {
   app, assume, bottom, createZfgKernel, eq, formulaEquals, iff, imp, not, or, pred,
   proveCongruence, proveTautology, v, type Formula,
 } from "../src/index.ts";
+import { nat } from "../src/ast.ts";
+import { proveLiteralDisequality } from "../src/type-system.ts";
+import { checkWorkbenchFiles } from "../src/workbench.ts";
 
 test("tauto proves classical propositional consequences with checked proofs", () => {
   const kernel = createZfgKernel();
@@ -102,4 +105,64 @@ test("cc saturates deeply nested applications bottom-up", { timeout: 5_000 }, ()
   const goal = eq(left, right);
   const proof = proveCongruence(kernel, goal, [assumption]);
   assert.equal(formulaEquals(kernel.checkProof(proof, [assumption]), goal), true);
+});
+
+test("distinct natural literals are distinct from the zero and successor laws alone", () => {
+  const kernel = createZfgKernel();
+  for (const [left, right] of [[1n, 0n], [0n, 1n], [3n, 7n], [7n, 3n], [2n, 5n]] as const) {
+    const proof = proveLiteralDisequality(kernel, nat(left), nat(right));
+    assert.ok(proof, `${left} ≠ ${right}`);
+    assert.equal(formulaEquals(kernel.checkProof(proof), not(eq(nat(left), nat(right)))), true);
+  }
+  assert.equal(proveLiteralDisequality(kernel, nat(4n), nat(4n)), undefined);
+  assert.equal(proveLiteralDisequality(kernel, v("x"), nat(4n)), undefined);
+  // The successor form of a literal is the literal.
+  const successor = proveLiteralDisequality(kernel, app("succ", nat(0n)), nat(0n));
+  assert.ok(successor);
+  assert.equal(formulaEquals(kernel.checkProof(successor), not(eq(nat(1n), nat(0n)))), true);
+});
+
+test("settle, typecheck, and arith close literal disequalities in a module importing only the core", () => {
+  const source = `module Literals
+
+theorem one.settle
+  shows 1 ≠ 0
+proof
+  settle
+
+theorem one.typecheck
+  shows 1 ≠ 0
+proof
+  typecheck
+
+theorem one.arith
+  shows 1 ≠ 0
+proof
+  arith
+
+theorem three.seven
+  shows 3 ≠ 7
+proof
+  typecheck
+
+theorem seven.three
+  shows 7 ≠ 3
+proof
+  settle
+
+theorem two.five
+  shows ¬(2 = 5)
+proof
+  arith
+
+theorem refute (x : Set)
+  requires h : 4 = 9
+  shows x = x ∪ x
+proof
+  settle
+`;
+  const result = checkWorkbenchFiles([{ name: "Literals.g17", source }], "ZFG");
+  assert.equal(result.ok, true);
+  assert.equal(result.theorems.length, 7);
+  assert.deepEqual(result.theorems.flatMap(theorem => theorem.sorries), []);
 });

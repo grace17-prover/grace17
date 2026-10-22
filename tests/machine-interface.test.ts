@@ -6,7 +6,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { callMachineMethod, handleMachineRequest, MACHINE_METHODS, MACHINE_PROTOCOL_VERSION, type MachineCheckResult } from "../src/machine-interface.ts";
@@ -59,7 +60,7 @@ test("capabilities lists every method with the protocol version", () => {
   const result = ok(handleMachineRequest({ id: 1, method: "capabilities" }));
   assert.equal(result.protocol, MACHINE_PROTOCOL_VERSION);
   assert.deepEqual(result.methods.map((item: { name: string }) => item.name),
-    ["capabilities", "check", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations", "pin"]);
+    ["capabilities", "check", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations", "pin", "closure"]);
   assert.equal(result.methods.length, MACHINE_METHODS.length);
   assert.deepEqual(result.foundations, ["ZF", "ZFC", "ZFG"]);
 });
@@ -327,4 +328,148 @@ test("the Workbench's browser modules re-export the shared logic", async () => {
   assert.equal(editor.resolveSymbolCandidate, generatedNavigation.resolveSymbolCandidate);
   assert.equal(editor.diagnosticSpan, generatedNavigation.diagnosticSpan);
   assert.equal(generatedNavigation.tacticStepAtCursor([{ line: 9, columnStart: 3 }], 9, 3), tacticStepAtCursor([{ line: 9, columnStart: 3 }], 9, 3));
+});
+
+const indirectSource = `module Indirect
+import Grace.Cumulus.Set.Core
+
+theorem both (x A B : Set)
+  requires h : x ∈ A ∩ B
+  shows x ∈ A
+proof
+  have split := intersection.membership at x, A, B
+  rw split at h
+  exact h.left
+`;
+
+const shadowSource = `module Shadow
+import Grace.Cumulus.Set.Core
+
+def evens (A : Set) : Set := { x ∈ A | x = x }
+
+theorem evens.membership (x A : Set)
+  shows x ∈ evens(A) ↔ (x ∈ A ∧ x = x)
+proof
+  simp [evens]
+`;
+
+test("check --imports notes every declaration used only through a transitive import", () => {
+  const files = [{ name: "Indirect.g17", source: indirectSource }];
+  const plain = ok<MachineCheckResult>(handleMachineRequest({ id: 40, method: "check", params: { files, moduleRoots: ["lib"] } }));
+  assert.equal(plain.status, "checked");
+  assert.deepEqual(plain.diagnostics, []);
+  const audited = ok<MachineCheckResult>(handleMachineRequest({ id: 41, method: "check", params: { files, moduleRoots: ["lib"], imports: true } }));
+  assert.equal(audited.status, "checked");
+  const notes = audited.diagnostics.filter(item => item.severity === "note");
+  assert.ok(notes.length >= 1, JSON.stringify(audited.diagnostics));
+  assert.ok(notes.every(item => item.kind === "transitive-import" && item.file === "Indirect.g17" && item.theorem === "Indirect.both"));
+  const membership = notes.find(item => item.declaration === "Grace.Cumulus.Set.Basic.Set.intersection.membership")!;
+  assert.ok(membership, JSON.stringify(notes));
+  assert.equal(membership.module, "Grace.Cumulus.Set.Basic");
+  assert.equal(membership.via, "Grace.Cumulus.Set.Core");
+  assert.equal(membership.path![0], "Grace.Cumulus.Set.Core");
+  assert.equal(membership.path!.at(-1), "Grace.Cumulus.Set.Basic");
+  assert.equal(membership.line, 4);
+  assert.equal(membership.message,
+    "Grace.Cumulus.Set.Basic.Set.intersection.membership is declared in Grace.Cumulus.Set.Basic, which Indirect reaches only through its import Grace.Cumulus.Set.Core; import Grace.Cumulus.Set.Basic directly");
+  // A declaration of a direct import, of the module itself, or of the core is never noted.
+  assert.ok(notes.every(item => !["Grace.Cumulus.Set.Core", "Indirect"].includes(item.module!) && !/^Grace\.Core(\.|$)/.test(item.module!)));
+  // Each declaration once.
+  assert.equal(new Set(notes.map(item => item.declaration)).size, notes.length);
+});
+
+test("check warns once per module about a theorem restating a generated property, and declaration answers with both", () => {
+  const files = [{ name: "Shadow.g17", source: shadowSource }];
+  const result = ok<MachineCheckResult>(handleMachineRequest({ id: 42, method: "check", params: { files, moduleRoots: ["lib"] } }));
+  assert.equal(result.status, "checked");
+  assert.equal(result.theorems[0]!.status, "proved");
+  const warnings = result.diagnostics.filter(item => item.kind === "shadowed-property");
+  assert.equal(warnings.length, 1, JSON.stringify(result.diagnostics));
+  const warning = warnings[0]!;
+  assert.equal(warning.severity, "warning");
+  assert.equal(warning.line, 6);
+  assert.equal(warning.theorem, "Shadow.evens.membership");
+  assert.equal(warning.definition, "Shadow.evens");
+  assert.deepEqual(warning.theorems, ["Shadow.evens.membership"]);
+  assert.equal(warning.message,
+    "Shadow restates a generated property as a theorem of the same name: evens.membership; such a name resolves to the theorem and hides the property");
+  const declared = ok(handleMachineRequest({ id: 43, method: "declaration", params: { name: "evens.membership", files, moduleRoots: ["lib"] } }));
+  assert.equal(declared.kind, "theorem");
+  assert.equal(declared.name, "Shadow.evens.membership");
+  assert.equal(declared.shadows.length, 1);
+  assert.equal(declared.shadows[0].generated, true);
+  assert.equal(declared.shadows[0].kind, "property");
+  assert.equal(declared.shadows[0].definition, "Shadow.evens");
+  assert.equal(declared.shadows[0].property, "membership");
+  const plain = ok(handleMachineRequest({ id: 44, method: "declaration", params: { name: "Subset.transitive", module: "Grace.Cumulus.Set.Core" } }));
+  assert.equal("shadows" in plain, false);
+});
+
+test("closure lists the import closure in dependency order with choice-freedom and the chain to a dependency", () => {
+  const tube = ok(handleMachineRequest({ id: 45, method: "closure", params: { module: "Grace.Cumulus.Topology.Tube", from: "Set.Choice" } }));
+  assert.equal(tube.module, "Grace.Cumulus.Topology.Tube");
+  assert.equal(tube.file, "lib/Grace/Cumulus/Topology/Tube.g17");
+  assert.equal(tube.choiceFree, false);
+  assert.ok(tube.choice.includes("Grace.Cumulus.Set.Choice"));
+  assert.equal(tube.count, tube.modules.length);
+  assert.equal(tube.modules.at(-1).module, "Grace.Cumulus.Topology.Tube");
+  // Dependencies come before dependents.
+  const position = new Map(tube.modules.map((item: { module: string }, index: number) => [item.module, index]));
+  for (const item of tube.modules) for (const imported of item.imports) assert.ok(position.get(imported)! < position.get(item.module)!, `${imported} before ${item.module}`);
+  const choice = tube.modules.find((item: { module: string }) => item.module === "Grace.Cumulus.Set.Choice");
+  assert.equal(choice.choiceFree, false);
+  const basic = tube.modules.find((item: { module: string }) => item.module === "Grace.Cumulus.Set.Basic");
+  assert.equal(basic.choiceFree, true);
+  assert.equal(tube.from, "Grace.Cumulus.Set.Choice");
+  assert.equal(tube.chain[0], "Grace.Cumulus.Topology.Tube");
+  assert.equal(tube.chain.at(-1), "Grace.Cumulus.Set.Choice");
+  for (let index = 1; index < tube.chain.length; index += 1) {
+    assert.ok(tube.modules.find((item: { module: string }) => item.module === tube.chain[index - 1]).imports.includes(tube.chain[index]));
+  }
+  const natCore = ok(handleMachineRequest({ id: 46, method: "closure", params: { module: "Nat.Core" } }));
+  assert.equal(natCore.module, "Grace.Cumulus.Nat.Core");
+  assert.equal(natCore.choiceFree, true);
+  assert.deepEqual(natCore.choice, []);
+  assert.ok(natCore.modules.every((item: { choiceFree: boolean }) => item.choiceFree));
+  const byFile = ok(handleMachineRequest({ id: 47, method: "closure", params: { file: "lib/Grace/Cumulus/Nat/Core.g17" } }));
+  assert.deepEqual(byFile.modules.map((item: { module: string }) => item.module), natCore.modules.map((item: { module: string }) => item.module));
+  assert.equal(failed(handleMachineRequest({ id: 48, method: "closure", params: { module: "Nat.Core", from: "Set.Choice" } })).code, "unknown_module");
+  assert.equal(failed(handleMachineRequest({ id: 49, method: "closure", params: { module: "No.Such.Module" } })).code, "unknown_module");
+  assert.equal(failed(handleMachineRequest({ id: 50, method: "closure", params: {} })).code, "invalid_params");
+});
+
+test("g17 check --imports, check --continue --quiet, and g17 closure print their text forms", () => {
+  const directory = mkdtempSync(join(tmpdir(), "g17-imports-"));
+  try {
+    const indirect = join(directory, "Indirect.g17");
+    const failing = join(directory, "Failing.g17");
+    writeFileSync(indirect, indirectSource);
+    writeFileSync(failing, "module Failing\nimport Grace.Cumulus.Set.Core\n\ntheorem wrong (A : Set)\n  shows A = ∅\nproof\n  settle\n");
+    const g17 = (...args: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "bin/g17.ts", ...args], { cwd: project, encoding: "utf8" });
+    const audited = g17("check", "--imports", "--module-root", "lib", indirect);
+    assert.equal(audited.status, 0, audited.stderr);
+    assert.match(audited.stdout, /^note: .*Indirect\.g17:4: Grace\.Cumulus\.Set\.Basic\.Set\.intersection\.membership is declared in Grace\.Cumulus\.Set\.Basic/m);
+    assert.match(audited.stdout, /^\d+ transitive-import notes?$/m);
+    const json = g17("check", "--json", "--imports", "--module-root", "lib", indirect);
+    assert.equal(json.status, 0, json.stderr);
+    assert.ok(JSON.parse(json.stdout).diagnostics.some((item: { severity: string }) => item.severity === "note"));
+    const quiet = g17("check", "--continue", "--quiet", "--module-root", "lib", indirect, failing);
+    assert.equal(quiet.status, 1);
+    assert.equal(quiet.stderr.trim(), "");
+    const lines = quiet.stdout.trim().split("\n");
+    assert.equal(lines.filter(line => line.startsWith("failed ")).length, 1, quiet.stdout);
+    assert.equal(lines.filter(line => line.startsWith("checked ")).length, 0, quiet.stdout);
+    assert.match(lines.at(-1)!, /^\d+ modules checked, 1 failed, 0 skipped$/);
+    const loud = g17("check", "--continue", "--module-root", "lib", failing);
+    assert.ok(loud.stdout.split("\n").some(line => line.startsWith("checked ")));
+    const closure = g17("closure", "--text", "Topology.Tube", "--from", "Set.Choice");
+    assert.equal(closure.status, 0, closure.stderr);
+    assert.match(closure.stdout, /^Grace\.Cumulus\.Topology\.Tube: \d+ modules, uses Grace\.Cumulus\.Set\.Choice$/m);
+    assert.match(closure.stdout, /^choice-free  Grace\.Cumulus\.Set\.Basic  lib\/Grace\/Cumulus\/Set\/Basic\.g17$/m);
+    assert.match(closure.stdout, /^chain: Grace\.Cumulus\.Topology\.Tube → .*Grace\.Cumulus\.Set\.Choice$/m);
+    const asJson = g17("closure", "Nat.Core");
+    assert.equal(JSON.parse(asJson.stdout).result.choiceFree, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

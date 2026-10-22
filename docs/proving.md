@@ -721,6 +721,11 @@ canonical characters. These controls bound relief search only; soft typing,
 normalization fuel, forward propagation, and general logical closure have their
 own. `settle` is an older spelling of `simp` and is still accepted.
 
+Distinct natural literals are distinct in every module, including one that
+imports only the core: `settle`, `simp`, and `typecheck` close `1 ≠ 0`,
+`3 ≠ 7`, and `¬(2 = 5)`, and a hypothesis `4 = 9` refutes any goal, through
+the zero and successor laws of the bootstrap rather than the order theory.
+
 ### `simpa`
 
 `simpa [rules] using fact` combines a common three-line pattern: simplify a
@@ -1027,6 +1032,10 @@ theorem lower_bound (x y : Nat)
 proof
   arith
 ```
+
+A disequality of distinct literals, `1 ≠ 0` or `¬(2 = 5)`, and a hypothesis
+equating distinct literals are closed without the order theory, so `arith`
+proves them in a module that imports only the core.
 
 The procedure is complete for inconsistency of the resulting affine system
 over the nonnegative rationals, with Nat's unit gap for strict comparisons. It

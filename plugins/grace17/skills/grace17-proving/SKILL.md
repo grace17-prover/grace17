@@ -34,8 +34,14 @@ prints the usage.
    `import` to add; a generated name such as
    `Bool.inductive.disjoint.false.true` or a defgraph's `ident.value`
    resolves too; `--module` picks among same-named declarations, and an
-   `ambiguous_name` error lists `declarations` with their modules), and
-   `g17 library --area <Area>` for a module's declarations. Before writing
+   `ambiguous_name` error lists `declarations` with their modules; a
+   theorem named like a generated property answers with the theorem and
+   the property it hides in `shadows`), and
+   `g17 library --area <Area>` for a module's declarations.
+   `g17 closure <Module>` lists a module's import closure in dependency
+   order with each module marked `choiceFree`, and `--from <Module>` the
+   import chain to a dependency, so "what loads under ZF" has a direct
+   answer. Before writing
    `theorem at a, b with h1, h2`, ask `g17 signature <Name> --file <file>`:
    it lists `parameters` and `premises` in the order the `at` and `with`
    lists supply them, section variables and hypotheses first, from the
@@ -83,7 +89,13 @@ prints the usage.
    A `defgraph`'s codomain proof is a proof block like a theorem's, named
    `ident.closed`. `python3 scripts/all-errors.py <file>` lists the
    first error of every theorem in one run; `g17 check --continue` goes on
-   past a failing module and lists every failure at the end.
+   past a failing module and lists every failure at the end (`--quiet`
+   prints the failures and the summary alone). `g17 check --imports`
+   adds a `note` diagnostic for every declaration the module uses only
+   through a transitive import, with the `module` to import directly:
+   add that import, so an unrelated module dropping its own does not
+   break yours. A `warning` of kind `shadowed-property` says a theorem
+   restates a generated property under the same name; rename it.
 4. Read the goal where you are: `g17 goal --module-root lib <file> --line N
    --column C` returns `state.goals`, each with `goal` and `locals` (name
    and formula), as the Workbench goal pane shows them. It answers in a
