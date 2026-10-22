@@ -14,8 +14,11 @@
 // found whatever else is imported or loaded, a theorem outside the
 // import closure is reported with its module, a wrong step in a
 // defunique proof is reported at its line with the proof state reached,
-// and a numeral under an overloaded prefix is read by the sort of the
-// position it sits in.
+// a numeral under an overloaded prefix is read by the sort of the
+// position it sits in, a comparison of function values is read in the
+// sort their typing theorems give, `rfl` in a disjunction pattern
+// substitutes its equation, a substitution renames a capturing binder,
+// and membership induction names the Foundation lemmas in full.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -268,8 +271,18 @@ theorem outside (A : Real)
 proof
   exact realDiv.eq_mul_inv
 `);
-  assert.equal(library, "line 7: unknown proof realDiv.eq_mul_inv; the library declares realDiv.eq_mul_inv " +
+  assert.equal(library, "line 7: unknown proof realDiv.eq_mul_inv; the library declares it as realDiv.eq_mul_inv " +
     "in module Grace.Cumulus.Real.Inverse, which this module does not import");
+  // A bare name is not matched against the dotted declarations that end in
+  // it: `distinct` suggests nothing, and says that no fact has the name.
+  const bare = failure(`module Bare
+import Grace.Cumulus.Algebra.Ring.Core
+theorem probe
+  shows 1 = 1
+proof
+  exact distinct
+`);
+  assert.equal(bare, "line 6: unknown proof distinct; no local fact of this proof and no declaration in scope has this name");
   // A module loaded in the same environment but not imported is reported from the environment.
   const kernel = createZfKernel();
   loadModuleSourceGraph(kernel, [{ file: "Loaded.g17", source: "module Loaded\nimport Grace.Cumulus.Real.Inverse\n" }], ["lib"]);
@@ -283,7 +296,7 @@ proof
     assert.fail("the module should not check");
   } catch (error) {
     assert.ok(error instanceof SurfaceError, String(error));
-    assert.match(error.message, /unknown proof realDiv\.eq_mul_inv; Grace\.Cumulus\.Real\.Inverse\.realDiv\.eq_mul_inv is declared in module Grace\.Cumulus\.Real\.Inverse, which this module does not import/u);
+    assert.match(error.message, /unknown proof realDiv\.eq_mul_inv; it is declared as Grace\.Cumulus\.Real\.Inverse\.realDiv\.eq_mul_inv in module Grace\.Cumulus\.Real\.Inverse, which this module does not import/u);
   }
 });
 
@@ -411,4 +424,144 @@ proof
 `);
   assert.match(message, /cannot resolve notation - on the numeral 1: it could be the Integer, Rational, or Real one/);
   assert.match(message, /annotate it, as in \(-1:Z\), \(-1:Q\), or \(-1:R\)/);
+});
+
+const realCore = "module ProvingErgonomics\nimport Grace.Cumulus.Real.Core\n";
+
+test("a comparison of function values is read in the sort their typing theorem gives", () => {
+  // rationalCut.real types rationalCut(q) as a real, so the order is the
+  // real one in a premise and in a have type alike; before, both fell
+  // through to the natural order without a word.
+  check(realCore + `
+theorem cutOrder (p q : Rational)
+  requires h : rationalCut(p) < rationalCut(q)
+  shows (rationalCut(p):R) < (rationalCut(q):R)
+proof
+  have again : rationalCut(p) < rationalCut(q) := h
+  exact again
+`);
+  const message = failure(realCore + `
+theorem cutNatural (p q : Rational)
+  requires h : rationalCut(p) < rationalCut(q)
+  shows Less(rationalCut(p), rationalCut(q))
+proof
+  exact h
+`);
+  assert.match(message, /proof establishes relates\(realLess, rationalCut\(p\), rationalCut\(q\)\)/);
+});
+
+test("a numeral beside a typed function value is read in the value's sort", () => {
+  check("module ProvingErgonomics\nimport Grace.Cumulus.Real.Natural\n" + `
+theorem cutZero (p : Rational)
+  requires h : rationalCut(p) < 0
+  shows (rationalCut(p):R) < (0:R)
+proof
+  exact h
+`);
+});
+
+test("a function value typed in several carriers needs an annotation on a comparison", () => {
+  const message = failure(realCore + `
+def twice (q : Set) : Set := q
+
+theorem twice.real (q : Set)
+  requires h : Real(q)
+  shows Real(twice(q))
+proof
+  unfold twice
+  exact h
+
+theorem twice.rational (q : Set)
+  requires h : Rational(q)
+  shows Rational(twice(q))
+proof
+  unfold twice
+  exact h
+
+theorem loose (a b : Set)
+  requires h : twice(a) < twice(b)
+  shows twice(a) < twice(b)
+proof
+  exact h
+`);
+  assert.match(message, /cannot resolve notation < between twice\(a\) and twice\(b\): twice\(a\) could be the Rational one or the Real one/);
+  assert.match(message, /annotate it, as in \(twice\(a\):Q\) or \(twice\(a\):R\)/);
+});
+
+const sets = "module ProvingErgonomics\nimport Grace.Cumulus.Set\n";
+
+test("rfl in a disjunction pattern substitutes its equation", () => {
+  check(sets + `
+theorem alternatives (x y A : Set)
+  requires h : x = y ∨ ∃ z, z ∈ A ∧ x = z
+  shows x = y ∨ ∃ z, z ∈ A ∧ x = z
+proof
+  rcases h with rfl | ⟨z, hz, rfl⟩
+  . left
+    rfl
+  . right
+    witness z
+    exact ⟨hz, rfl⟩
+
+theorem twoWay (x y : Set)
+  requires h : x = y ∨ y = x
+  shows x = y
+proof
+  cases h with rfl | rfl
+  . rfl
+  . rfl
+
+theorem packed (a b c d : Set)
+  requires h : (a, b) = (c, d)
+  shows a = c ∧ b = d
+proof
+  obtain ⟨rfl, rfl⟩ := orderedPair.injective with h
+  exact ⟨rfl, rfl⟩
+`);
+  const message = failure(sets + `
+theorem noVariable (A B C : Set)
+  requires h : A ∪ B = B ∪ C ∨ A = B
+  shows A ∪ B = B ∪ C ∨ A = B
+proof
+  rcases h with rfl | rfl
+  . left
+    rfl
+  . right
+    rfl
+`);
+  assert.match(message, /rfl needs a variable to substitute, and neither side of A ∪ B = B ∪ C is one/);
+});
+
+test("a substitution renames a goal binder that would capture the replacement", () => {
+  // W := V under a binder named V used to be skipped without a word; the
+  // binder is renamed and the body substituted, by rfl and by rw under.
+  check(sets + `
+theorem captured (W V U B g : Set)
+  requires shape : (W, V) = (V, U)
+  requires h : ∀ V, V ∈ B → g(U) ⊆ g(V)
+  shows ∀ V, V ∈ B → g(W) ⊆ g(V)
+proof
+  obtain ⟨rfl, rfl⟩ := orderedPair.injective with shape
+  exact h
+
+theorem capturedRewrite (W V B g : Set)
+  requires same : W = V
+  requires h : ∀ U, U ∈ B → g(V) ⊆ g(U)
+  shows ∀ V, V ∈ B → g(W) ⊆ g(V)
+proof
+  rw under same
+  exact h
+`);
+});
+
+test("membership induction names the Foundation lemmas in full beside a topological closure", () => {
+  check("module ProvingErgonomics\nimport Grace.Cumulus.Set.Foundation\nimport Grace.Cumulus.Topology.Space\n" + `
+theorem notSelf (x : Set)
+  shows ¬x ∈ x
+proof
+  induction x using membership
+  intros current ih hSelf
+  have impossible := ih at current with hSelf, hSelf
+  exact impossible
+`);
 });

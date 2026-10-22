@@ -267,12 +267,12 @@ The ordinals were discovered in 1872, in Cantor's study of the sets on which a
 trigonometric series can fail to determine its coefficients. The derived
 set of a set of reals is the set of its limit points; the derived set of
 the derived set is a smaller set again; and Cantor saw that the iteration
-need not stop at any finite stage, which is where the transfinite
-indices come from. The theorem that grew out of this, the Cantor–Bendixson
+need not stop at any finite stage, which leads directly into the
+transfinite. The theorem that grew out of this, the Cantor–Bendixson
 theorem, says that every closed set of reals is a perfect set together with
 a countable set. Cumulus proves it for every space with a countable base,
-by the same two moves as the rank argument above: a transfinite recursion,
-and an induction along it. The modules are
+by effectively the same approach as the rank argument above: a transfinite
+recursion, and an induction along it. The modules are
 [Topology/CantorBendixson](../lib/Grace/Cumulus/Topology/CantorBendixson.g17)
 and [Topology/Real/CantorBendixson](../lib/Grace/Cumulus/Topology/Real/CantorBendixson.g17).
 

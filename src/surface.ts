@@ -17,7 +17,7 @@ import { compute,
 import { CARRIER_ARGUMENT_FUNCTIONS, formatFormula, formatTerm, fromSuperscript, registerStructureMember, ringNumeralValue, structureMember, structureProjection as structureFieldSymbol, type CarrierNotation, type FunctionNotation, type OperationNotation, type PredicateNotation, type PrettyOptions, type RingNotation, type RingPiece, type ScopedArgument } from "./pretty.ts";
 import { evaluateNative, nativeValueToTerm } from "./runtime.ts";
 import { InstanceResolutionError, InstanceResolutionLimitError, prepareInstanceProver, prepareRefinementProver, proveRefinement, type InstanceProver, type InstanceSynthesisResult, type RefinementProver, forkTypeIndex, moveTypeIndex,
-  isBindingPredicate, isTransparentPredicate, openGuardFact, registerGuardPredicate, type GuardFact, type ScopeVisibility,
+  functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, registerGuardPredicate, type GuardFact, type ScopeVisibility,
 } from "./type-system.ts";
 import { createSimpSession, prepareRewrites, rewriteFact, rewriteGoal, RewriteMismatch, settle, simplifyEqualityFact, simplifyEqualityGoal, simplifyFormulaFact, simplifyFormulaGoal, type GoalRewrite, type PreparedRewrites, type SettleStats } from "./tactics.ts";
 import { excludedMiddle, proveCongruence, proveTautology } from "./decision-procedures.ts";
@@ -4837,7 +4837,7 @@ function parseDestructurePattern(text: string, line: number): DestructurePattern
   return { tag: "bind", name: source };
 }
 
-function splitPatternItems(text: string): string[] {
+function splitPatternItems(text: string, separator = ","): string[] {
   const result: string[] = [];
   let depth = 0;
   let start = 0;
@@ -4845,7 +4845,7 @@ function splitPatternItems(text: string): string[] {
     const character = text[index];
     if (character === "(" || character === "{" || character === "[" || character === "⟨") depth += 1;
     else if (character === ")" || character === "}" || character === "]" || character === "⟩") depth -= 1;
-    else if (character === "," && depth === 0) {
+    else if (character === separator && depth === 0) {
       result.push(text.slice(start, index).trim());
       start = index + 1;
     }
@@ -5433,15 +5433,22 @@ function elaborateTacticTheorem(
     pending.unshift(...children);
   };
 
-  const destructureProof = (
+  /**
+   * The proof state a pattern leaves after taking a proved formula apart:
+   * the goal and facts with every `rfl` equation substituted, and the
+   * wrapper that rebuilds the proof of the original goal from a proof of
+   * the new one. Shared by `obtain`, `rcases`, and the alternatives of a
+   * disjunction pattern.
+   */
+  const destructureState = (
     line: SourceLine,
-    current: TacticGoal,
+    current: Pick<TacticGoal, "goal" | "assumptions" | "locals">,
     pattern: DestructurePattern,
     sourceFormula: Formula,
     sourceProof: Proof,
     replaceableName?: string,
     shadowLocals = false,
-  ): void => {
+  ): { goal: Formula; assumptions: Formula[]; locals: Map<string, LocalProof>; wrap: (proof: Proof) => Proof } => {
     let assumptions = [...current.assumptions];
     const locals = new Map(current.locals);
     let goal = current.goal;
@@ -5453,11 +5460,15 @@ function elaborateTacticTheorem(
         if (formula.tag !== "eq") {
           throw new SurfaceError(line.number, `rfl pattern needs an equality, not ${formatFormula(formula)}`);
         }
+        // A reflexive equation has nothing to substitute.
+        if (termEquals(formula.left, formula.right)) return;
         const leftVariable = formula.left.tag === "var" && !freeTermVariables(formula.right).has(formula.left.name);
         const rightVariable = formula.right.tag === "var" && !freeTermVariables(formula.left).has(formula.right.name);
         if (!leftVariable && !rightVariable) {
+          const options = goalDisplayOptions(kernel, scope, [...locals.values()].map(item => item.formula), [goal, formula]);
           throw new SurfaceError(line.number,
-            `rfl pattern needs an equality with a substitutable variable, not ${formatFormula(formula)}`);
+            `rfl needs a variable to substitute, and neither side of ${formatFormula(formula, options)} is one; ` +
+            `name the equation instead and rewrite with it`);
         }
         const reverse = !leftVariable && rightVariable;
         const eliminated = (leftVariable ? formula.left : formula.right) as Extract<Term, { tag: "var" }>;
@@ -5534,6 +5545,20 @@ function elaborateTacticTheorem(
     };
 
     match(pattern, sourceFormula, sourceProof);
+    return { goal, assumptions, locals, wrap };
+  };
+
+  const destructureProof = (
+    line: SourceLine,
+    current: TacticGoal,
+    pattern: DestructurePattern,
+    sourceFormula: Formula,
+    sourceProof: Proof,
+    replaceableName?: string,
+    shadowLocals = false,
+  ): void => {
+    const { goal, assumptions, locals, wrap } =
+      destructureState(line, current, pattern, sourceFormula, sourceProof, replaceableName, shadowLocals);
     replaceWith(line, [{ goal, assumptions, locals }], ([body]) => wrap(body!));
   };
 
@@ -6185,14 +6210,23 @@ function elaborateTacticTheorem(
       const plainHypothesis = forall(predecessorName, imp(memberPremise, predecessorMotive));
       const stepGoal = forall(currentName, imp(plainHypothesis, motive));
 
-      const closureName = resolveExisting("closure", scope,
-        candidate => kernel.functions.get(candidate) === 1, line.number, "transitive-closure function");
-      const membershipName = resolveExisting("membershipOn", scope,
-        candidate => kernel.functions.get(candidate) === 1, line.number, "restricted-membership relation");
-      const contains = resolveProof(kernel, "closure.contains", line.number, scope);
-      const transitive = resolveProof(kernel, "closure.transitive", line.number, scope);
-      const relates = resolveProof(kernel, "membershipOn.relates", line.number, scope);
-      const wellFounded = resolveProof(kernel, "membershipOn.wellFounded", line.number, scope);
+      // The expansion names the Foundation library's declarations in full:
+      // a module whose closure also declares a `closure`, as the topology
+      // library does, must not make the short names ambiguous.
+      const foundation = "Grace.Cumulus.Set.Foundation";
+      const foundationFunction = (short: string, kind: string): string =>
+        kernel.functions.get(`${foundation}.${short}`) === 1
+          ? `${foundation}.${short}`
+          : resolveExisting(short, scope, candidate => kernel.functions.get(candidate) === 1, line.number, kind);
+      const foundationProof = (short: string): Proof => kernel.theorems.has(`${foundation}.${short}`)
+        ? theorem(`${foundation}.${short}`)
+        : resolveProof(kernel, short, line.number, scope);
+      const closureName = foundationFunction("closure", "transitive-closure function");
+      const membershipName = foundationFunction("membershipOn", "restricted-membership relation");
+      const contains = foundationProof("closure.contains");
+      const transitive = foundationProof("closure.transitive");
+      const relates = foundationProof("membershipOn.relates");
+      const wellFounded = foundationProof("membershipOn.wellFounded");
       const domain = app(closureName, target);
       const relation = app(membershipName, domain);
       const inDomainCurrent = pred("in", currentTerm, domain);
@@ -6650,12 +6684,20 @@ function elaborateTacticTheorem(
       continue;
     }
     const disjunctionCases = /^(?:cases|rcases)\s+(\S+)\s+with\s+(.+\|.+)$/u.exec(command);
-    if (disjunctionCases) {
+    // Each alternative takes a name, or a pattern: `rfl` substitutes its
+    // equation and `⟨x, hx, rfl⟩` opens the alternative's data.
+    const alternativePatterns = disjunctionCases
+      ? splitPatternItems(disjunctionCases[2]!, "|") : [];
+    if (disjunctionCases && alternativePatterns.length >= 2) {
       const source = disjunctionCases[1]!;
-      const names = disjunctionCases[2]!.split("|").map(item => item.trim());
-      if (names.length < 2 || !names.every(name => SIMPLE_IDENTIFIER.test(name))) {
-        throw new SurfaceError(line.number, "malformed disjunction case names");
-      }
+      const patterns = alternativePatterns.map(item => {
+        try {
+          return parseDestructurePattern(item, line.number);
+        } catch {
+          throw new SurfaceError(line.number, "malformed disjunction case names");
+        }
+      });
+      const names = patterns.map(item => item.tag === "bind" ? item.name : "_");
       let local = current.locals.get(source);
       if (!local) throw new SurfaceError(line.number, `unknown local proof ${source}`);
       // A defined predicate splits through its definition.
@@ -6677,12 +6719,23 @@ function elaborateTacticTheorem(
         throw new SurfaceError(line.number,
           `cases has ${names.length} names but ${source} has ${alternatives.length} alternatives`);
       }
+      const wraps: ((proof: Proof) => Proof)[] = [];
       const specifications = alternatives.map((alternative, index) => {
-        const locals = new Map(current.locals);
-        locals.set(names[index]!, { formula: alternative, proof: assume(alternative) });
-        return { goal: current.goal, assumptions: [...current.assumptions, alternative], locals };
+        const pattern = patterns[index]!;
+        const assumptions = [...current.assumptions, alternative];
+        if (pattern.tag === "bind") {
+          const locals = new Map(current.locals);
+          if (pattern.name !== "_") locals.set(pattern.name, { formula: alternative, proof: assume(alternative) });
+          wraps.push(proof => proof);
+          return { goal: current.goal, assumptions, locals };
+        }
+        const state = destructureState(line, { goal: current.goal, assumptions, locals: current.locals },
+          pattern, alternative, assume(alternative), undefined, true);
+        wraps.push(state.wrap);
+        return { goal: state.goal, assumptions: state.assumptions, locals: state.locals };
       });
-      replaceWith(line, specifications, proofs => {
+      replaceWith(line, specifications, branches => {
+        const proofs = branches.map((proof, index) => wraps[index]!(proof!));
         if (names.length === 2) {
           if (local.formula.tag !== "or") throw new Error("malformed disjunction");
           return orElim(local.proof, proofs[0]!, proofs[1]!);
@@ -10593,22 +10646,27 @@ function describeUnknownProof(kernel: Kernel, rawName: string, scope: SurfaceSco
   const symbol = surfaceSymbol(rawName).replace(/\.(forward|backward)$/u, "");
   const base = `unknown proof ${rawName}`;
   const environment = surfaceEnvironments.get(kernel);
-  const declared = (name: string): boolean => name === symbol || name.endsWith(`.${symbol}`);
+  // A declaration is suggested only when the written name is what one
+  // would write for it: its name after the module prefix, or a dotted
+  // suffix of that when the written name is itself dotted. A bare `distinct`
+  // does not suggest every `Something.distinct` in the library.
+  const declared = (name: string, module: string): boolean => {
+    const local = name.startsWith(`${module}.`) ? name.slice(module.length + 1) : name;
+    return local === symbol || (symbol.includes(".") && local.endsWith(`.${symbol}`));
+  };
   const loaded = environment ? [...environment.modules.values()].flatMap(module =>
-    [...module.theorems, ...module.definitions].filter(declared).map(name => ({ module: module.name, name }))) : [];
+    [...module.theorems, ...module.definitions].filter(name => declared(name, module.name)).map(name => ({ module: module.name, name }))) : [];
   const visible = (module: string): boolean => module === scope.moduleName || Boolean(scope.visibleModules?.has(module));
+  const listed = (items: readonly { name: string; module: string }[]): string => {
+    const shown = items.slice(0, 3).map(item => `${item.name} in module ${item.module}`).join(", ");
+    return items.length > 3 ? `${shown}, and ${items.length - 3} more` : shown;
+  };
   const outside = loaded.filter(item => !visible(item.module));
-  if (outside.length) {
-    return `${base}; ${outside.map(item => `${item.name} is declared in module ${item.module}`).join(", ")}, ` +
-      `which this module does not import`;
-  }
-  if (loaded.length) return `${base}; did you mean ${loaded.map(item => item.name).join(" or ")}?`;
-  const library = libraryDeclarationLocator?.(symbol) ?? [];
-  if (library.length) {
-    return `${base}; the library declares ${library.map(item => `${item.name} in module ${item.module}`).join(", ")}, ` +
-      `which this module does not import`;
-  }
-  return base;
+  if (outside.length) return `${base}; it is declared as ${listed(outside)}, which this module does not import`;
+  if (loaded.length) return `${base}; did you mean ${loaded.slice(0, 3).map(item => item.name).join(" or ")}?`;
+  const library = (libraryDeclarationLocator?.(symbol) ?? []).filter(item => declared(item.name, item.module));
+  if (library.length) return `${base}; the library declares it as ${listed(library)}, which this module does not import`;
+  return `${base}; no local fact of this proof and no declaration in scope has this name`;
 }
 
 // A property is a suffix of one definition name: direct map probes replace
@@ -14137,8 +14195,42 @@ function parseFormula(
         const rightFits = rightTypes.has(rightType);
         return leftFits !== rightFits && (leftFits ? coerced(right, rightTypes, rightType) : coerced(left, leftTypes, leftType)) !== undefined;
       }) : [];
+      // Neither operand's sort is known, but one is the value of a function
+      // whose typing theorems give it a carrier: rationalCut(p) <
+      // rationalCut(q) is the real order by rationalCut.real, not the
+      // natural fallback, and a numeral beside such a value is read in the
+      // value's sort. A value typed in several carriers needs an annotation.
+      const numeral = (term: Term): boolean => naturalValue(term) !== undefined;
+      const sortsUnknown = (informativeLeft.size === 0 || numeral(left)) &&
+        (informativeRight.size === 0 || numeral(right));
+      const typedSorts = [...new Set(candidates.flatMap(item =>
+        notationOperandTypes(item).filter((type): type is string => type !== undefined)))];
+      const valueSorts = (term: Term): ReadonlySet<string> =>
+        sortsUnknown && exactTyped.length === 0 && term.tag === "app" && term.args.length > 0 && !numeral(term)
+          ? new Set(functionValueSorts(kernel, term.fn, typedSorts, scopeVisibility(kernel, scope)))
+          : new Set();
+      const leftValueSorts = valueSorts(left);
+      const rightValueSorts = valueSorts(right);
+      const valueTyped = leftValueSorts.size || rightValueSorts.size ? candidates.filter(item => {
+        const [leftType, rightType] = notationOperandTypes(item);
+        if (!leftType || !rightType) return false;
+        return (leftValueSorts.size === 0 || leftValueSorts.has(leftType)) &&
+          (rightValueSorts.size === 0 || rightValueSorts.has(rightType)) &&
+          (leftValueSorts.has(leftType) || rightValueSorts.has(rightType));
+      }) : [];
+      if (valueTyped.length > 1) {
+        const orList = (items: readonly string[]): string =>
+          items.length < 3 ? items.join(" or ") : `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
+        const sorts = [...new Set(valueTyped.map(notationTypeLabel))];
+        const valued = leftValueSorts.size ? left : right;
+        throw new SurfaceError(line,
+          `cannot resolve notation ${token} between ${formatTerm(left)} and ${formatTerm(right)}: ` +
+          `${formatTerm(valued)} could be ${orList(sorts.map(sort => `the ${sort} one`))}; annotate it, as in ` +
+          orList(sorts.map(sort => `(${formatTerm(valued)}:${annotationLabel(sort)})`)));
+      }
       const notation = candidates.length === 1 ? candidates[0]
         : exactTyped.length === 1 ? exactTyped[0]
+        : valueTyped.length === 1 ? valueTyped[0]
         : exactTyped.length === 0 && coercible.length === 1 ? coercible[0]
         : exactTyped.length === 0 && compatibleTyped.length === 1 ? compatibleTyped[0]
         : exactTyped.length === 0 && sidedTyped.length === 1 ? sidedTyped[0]
