@@ -1294,6 +1294,11 @@ function prepareActiveDependencies() {
   const generation = ++prepareGeneration;
   const fileId = file.id;
   const sourceRevision = file.source;
+  // Elaborating the import closure can take a while on a fresh page; say so
+  // rather than leaving the previous status on screen, and hold Check until
+  // the check that follows.
+  setStatus("Preparing dependencies…", "busy");
+  document.querySelector("#check").disabled = true;
   return requestWorkbench("prepare", {
     files: workspacePayload(), activeFile: file.name,
   }).then(data => {
@@ -1311,6 +1316,7 @@ function prepareThenCheckActive() {
   const sourceRevision = file.source;
   return prepareActiveDependencies().finally(() => {
     if (activeFile()?.id === fileId && activeFile()?.source === sourceRevision) check({ live: true });
+    else document.querySelector("#check").disabled = !activeFile();
   });
 }
 
@@ -1354,7 +1360,7 @@ async function check({ live = false } = {}) {
   } catch (error) {
     if (generation === checkGeneration) showError({ kind: "network", file: checkedFile, message: error.message });
   } finally {
-    if (!live && generation === checkGeneration) document.querySelector("#check").disabled = false;
+    if (generation === checkGeneration) document.querySelector("#check").disabled = false;
   }
 }
 
