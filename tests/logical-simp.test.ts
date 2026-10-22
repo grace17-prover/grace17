@@ -72,9 +72,18 @@ test("binder-independent simplification transports checked proofs without captur
   assert.ok(formulaEquals(simplified.formula, target));
   assert.ok(formulaEquals(kernel.checkProof(simplified.proof, options.assumptions), target));
   assert.throws(() => kernel.checkProof(simplified.proof, [source]));
-  for (const unsafe of [eq(a, x), eq(x, b)]) {
-    assert.throws(() => simplifyFormulaGoal(kernel, source, {
-      using: [assume(unsafe)], assumptions: [unsafe], underBinders: true,
-    }), /did not simplify/);
-  }
+  // A rule mentioning the bound name rewrites under a renamed binder rather
+  // than capturing: `a = x` turns `∃ x, x = a` into `∃ x_1, x_1 = x`, and the
+  // transported proof checks.
+  const renamed = simplifyFormulaGoal(kernel, source, {
+    using: [assume(eq(a, x))], assumptions: [eq(a, x)], underBinders: true,
+  });
+  assert.equal(renamed.goal.tag, "exists");
+  assert.notEqual((renamed.goal as { variable: string }).variable, "x");
+  assert.ok(formulaEquals(renamed.goal, exists((renamed.goal as { variable: string }).variable, eq(v((renamed.goal as { variable: string }).variable), x))));
+  assert.ok(formulaEquals(kernel.checkProof(renamed.lift(assume(renamed.goal)), [eq(a, x), renamed.goal]), source));
+  // A rule whose left side is the bound name has nothing free to rewrite.
+  assert.throws(() => simplifyFormulaGoal(kernel, source, {
+    using: [assume(eq(x, b))], assumptions: [eq(x, b)], underBinders: true,
+  }), /did not simplify/);
 });
