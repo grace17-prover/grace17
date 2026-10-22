@@ -4,7 +4,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   canonical, compileSeparateKernelModule, createZfgFoundationKernel,
@@ -15,8 +15,9 @@ import { standardDependencyCheckpoints } from "../workbench/generated/src/standa
 const name = process.argv[2] ?? "Grace.Cumulus.Real.Squares";
 const output = process.argv[3] ?? "build/browser-checkpoint";
 mkdirSync(dirname(output), { recursive: true });
-const checkpoint = standardDependencyCheckpoints.get(name);
-if (!checkpoint) throw Error(`No bundled checkpoint for ${name}`);
+const entry = standardDependencyCheckpoints.get(name);
+if (!entry) throw Error(`No bundled checkpoint for ${name}`);
+const checkpoint = { ...entry, ...JSON.parse(readFileSync(new URL(`../workbench/generated/${entry.file}`, import.meta.url), "utf8")) };
 // Browser prefixes start above the proof-checked bootstrap. Independent G17C
 // checkers start from primitive ZFG, so make that bootstrap an explicit checked
 // dependency. The bundled admission events and theorem programs are unchanged.

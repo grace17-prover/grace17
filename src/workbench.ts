@@ -15,9 +15,10 @@ import { createSetTheoryFoundationKernel, createSetTheoryKernel, SET_THEORY_BOOT
 import { loadModuleSourceGraph, moduleNameFromRoots, type LoadedModule, type ModuleSourceFile } from "./module-loader.ts";
 import { scanModule, type ModuleNameDeriver } from "./module-source-loader.ts";
 import { resolveImportName } from "./module-names.ts";
-import { classReport, elaborateModule, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
-import { replaySeparateKernelModuleExact } from "./compiled-module.ts";
-import { standardDependencyCheckpoints } from "./standard-checkpoints.ts";
+import { classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
+import { compileSeparateKernelModule, replaySeparateKernelModuleExact, type CompiledModuleDependency } from "./compiled-module.ts";
+import { installStandardCheckpoint, standardDependencyCheckpoints, type StandardDependencyCheckpoint } from "./standard-checkpoints.ts";
+export { installStandardCheckpoint };
 import { KernelError } from "./kernel.ts";
 import { sha256Hex } from "./hash.ts";
 import type { Formula, Term } from "./ast.ts";
@@ -278,6 +279,22 @@ interface DependencyCheckpoint {
   readonly kernel: ReturnType<typeof createSetTheoryKernel>;
   readonly loaded: readonly LoadedModule[];
   readonly sourceDigests: ReadonlyMap<string, string>;
+  /**
+   * What the elaborated part grew from, so it compiles as one module: the
+   * bare foundation, the kernel holding the replayed prefix (the foundation
+   * itself when nothing was replayed), the boundary there, the replayed
+   * modules as receipt-bearing dependencies, and the checkpoint that
+   * provided them.
+   */
+  readonly base: {
+    readonly foundation: ReturnType<typeof createSetTheoryKernel>;
+    readonly kernel: ReturnType<typeof createSetTheoryKernel>;
+    readonly mark: ReturnType<ReturnType<typeof createSetTheoryKernel>["admissionCheckpoint"]>;
+    readonly dependencies: readonly CompiledModuleDependency[];
+    readonly prefix?: string;
+  };
+  /** How many modules this checkpoint elaborated from source rather than replayed. */
+  readonly elaborated: number;
 }
 
 const incrementalBases = new Map<string, DependencyCheckpoint>();
@@ -491,12 +508,22 @@ function inspectDependencySource(file: string, source: string, roots: WorkspaceR
 }
 
 /** Build or reuse a checked dependency environment without admitting the edited leaf. */
-function dependencyCheckpoint(
+interface DependencyGraph {
+  readonly activeMetadata: ReturnType<typeof scanModule>;
+  readonly imports: readonly string[];
+  readonly dependencies: ReadonlyMap<string, ModuleSourceFile>;
+  readonly orderedSources: readonly (readonly [string, ModuleSourceFile])[];
+  readonly sourceDigests: ReadonlyMap<string, string>;
+  readonly key: string;
+}
+
+/** The active file's import closure with content digests, or undefined when it cannot be resolved. */
+function dependencyGraph(
   files: readonly WorkbenchFile[],
   active: WorkbenchFile,
   profile: WorkbenchFoundation,
   roots: WorkspaceRoots,
-): DependencyCheckpoint | undefined {
+): DependencyGraph | undefined {
   const activeMetadata = scanModule(active.source, active.name, roots.derive);
   if (!activeMetadata.name) return undefined;
   const workspaceModules = new Map<string, ModuleSourceFile>();
@@ -535,6 +562,56 @@ function dependencyCheckpoint(
   const sourceDigests = new Map(orderedSources.map(([name, source]) =>
     [name, inspectDependencySource(source.file, source.source, roots).pathDigest]));
   const key = sha256Hex(JSON.stringify({ profile, roots: roots.roots, imports: activeMetadata.imports, sources: [...sourceDigests] }));
+  const imports = activeMetadata.imports.map(raw => resolved(activeMetadata.name, raw));
+  return { activeMetadata, imports, dependencies, orderedSources, sourceDigests, key };
+}
+
+/** A checkpoint can be replayed once its payload, and its prefix's, are installed. */
+function replayable(entry: StandardDependencyCheckpoint | undefined): boolean {
+  if (!entry || !entry.compiled || !entry.surface || !entry.loaded) return false;
+  return entry.prefix === undefined || replayable(standardDependencyCheckpoints.get(entry.prefix));
+}
+
+/** Replay a checkpoint, after its prefix, onto a fresh foundation; the result holds its surface metadata. */
+function replayStandardCheckpoint(foundation: ReturnType<typeof createSetTheoryKernel>, entry: StandardDependencyCheckpoint) {
+  const dependencies: CompiledModuleDependency[] = [];
+  let kernel = foundation;
+  for (const stage of entry.prefix ? [standardDependencyCheckpoints.get(entry.prefix)!, entry] : [entry]) {
+    kernel = replaySeparateKernelModuleExact(kernel, stage.compiled!);
+    installSurfaceEnvironmentIndex(kernel, stage.surface!);
+    dependencies.push({ module: stage.compiled!.module, digest: stage.compiled!.digest });
+  }
+  return { kernel, dependencies };
+}
+
+/** Bundled or kept checkpoints whose exact sources all lie in the graph, largest first. */
+function matchingStandardCheckpoints(graph: DependencyGraph, profile: WorkbenchFoundation, roots: WorkspaceRoots): StandardDependencyCheckpoint[] {
+  return [...standardDependencyCheckpoints.values()]
+    .filter(candidate => (candidate.profile ?? "ZFG") === profile)
+    .filter(candidate => candidate.sources.every(([name, digest]) => {
+      const source = graph.dependencies.get(name);
+      if (!source) return false;
+      const info = inspectDependencySource(source.file, source.source, roots);
+      return (info.contentDigest ??= sha256Hex(source.source)) === digest;
+    }))
+    .sort((left, right) => right.sources.length - left.sources.length);
+}
+
+function rememberCheckpoint(checkpoint: DependencyCheckpoint): DependencyCheckpoint {
+  incrementalBases.set(checkpoint.key, checkpoint);
+  while (incrementalBases.size > maximumIncrementalBases) incrementalBases.delete(incrementalBases.keys().next().value!);
+  return checkpoint;
+}
+
+function dependencyCheckpoint(
+  files: readonly WorkbenchFile[],
+  active: WorkbenchFile,
+  profile: WorkbenchFoundation,
+  roots: WorkspaceRoots,
+): DependencyCheckpoint | undefined {
+  const graph = dependencyGraph(files, active, profile, roots);
+  if (!graph) return undefined;
+  const { key, imports, dependencies, orderedSources, sourceDigests } = graph;
   const exact = incrementalBases.get(key);
   if (exact) {
     incrementalBases.delete(key);
@@ -542,18 +619,11 @@ function dependencyCheckpoint(
     return exact;
   }
 
-  // Any authenticated bundled checkpoint whose exact sources form a subset
-  // of this dependency graph is a sound prefix.  Previously checkpoints were
-  // used only when the active file imported their root directly, which made
-  // later files in a long tower replay the same earlier sources from scratch.
-  const standard = profile === "ZFG" ? [...standardDependencyCheckpoints.values()]
-    .filter(candidate => candidate.sources.every(([name, digest]) => {
-      const source = dependencies.get(name);
-      if (!source) return false;
-      const info = inspectDependencySource(source.file, source.source, roots);
-      return (info.contentDigest ??= sha256Hex(source.source)) === digest;
-    }))
-    .sort((left, right) => right.sources.length - left.sources.length)[0] : undefined;
+  // Any authenticated checkpoint whose exact sources form a subset of this
+  // dependency graph is a sound prefix, bundled with the build or kept by
+  // this browser from an earlier elaboration. Only an installed payload can
+  // be replayed; the worker fetches the best candidate before asking.
+  const standard = matchingStandardCheckpoints(graph, profile, roots).find(replayable);
   // A smaller exact-source checkpoint is a sound prefix: it was constructed by
   // this kernel in this process, and every source contributing to it still has
   // the same content digest. Extend the largest compatible prefix.
@@ -563,9 +633,11 @@ function dependencyCheckpoint(
     .sort((left, right) => right.sourceDigests.size - left.sourceDigests.size)[0];
   if (standard && (!compatible || standard.sources.length > compatible.sourceDigests.size)) {
     const foundation = createSetTheoryKernel({ profile });
-    const kernel = replaySeparateKernelModuleExact(foundation, standard.compiled);
-    installSurfaceEnvironmentIndex(kernel, standard.surface);
-    const standardLoaded: LoadedModule[] = standard.loaded.map(item => ({
+    const replayed = replayStandardCheckpoint(foundation, standard);
+    const mark = replayed.kernel.admissionCheckpoint();
+    const kernel = replayed.kernel.fork();
+    forkSurfaceEnvironment(replayed.kernel, kernel);
+    const standardLoaded: LoadedModule[] = standard.loaded!.map(item => ({
       file: dependencies.get(item.module)!.file,
       module: item.module,
       definitions: item.definitions,
@@ -576,23 +648,108 @@ function dependencyCheckpoint(
     }));
     setSurfaceTraceCapture(kernel, false);
     const newlyLoaded = loadDisplayedModuleGraph(kernel,
-      orderedSources.map(([, source]) => source), roots.roots, [], activeMetadata.imports.map(raw => resolved(activeMetadata.name, raw)), roots.derive);
-    const loaded = [...standardLoaded, ...newlyLoaded];
-    const checkpoint = { key, profile, kernel, loaded, sourceDigests };
-    incrementalBases.set(key, checkpoint);
-    while (incrementalBases.size > maximumIncrementalBases) incrementalBases.delete(incrementalBases.keys().next().value!);
-    return checkpoint;
+      orderedSources.map(([, source]) => source), roots.roots, [], imports, roots.derive);
+    return rememberCheckpoint({ key, profile, kernel, loaded: [...standardLoaded, ...newlyLoaded], sourceDigests,
+      base: { foundation, kernel: replayed.kernel, mark, dependencies: replayed.dependencies, prefix: standard.rootModule },
+      elaborated: newlyLoaded.length });
   }
 
-  const kernel = compatible ? compatible.kernel.fork() : createSetTheoryKernel({ profile });
-  if (compatible) forkSurfaceEnvironment(compatible.kernel, kernel);
+  let base: DependencyCheckpoint["base"];
+  let kernel: ReturnType<typeof createSetTheoryKernel>;
+  if (compatible) {
+    base = compatible.base;
+    kernel = compatible.kernel.fork();
+    forkSurfaceEnvironment(compatible.kernel, kernel);
+  } else {
+    const foundation = createSetTheoryKernel({ profile });
+    base = { foundation, kernel: foundation, mark: foundation.admissionCheckpoint(), dependencies: [] };
+    kernel = foundation.fork();
+    forkSurfaceEnvironment(foundation, kernel);
+  }
   setSurfaceTraceCapture(kernel, false);
-  const newlyLoaded = loadDisplayedModuleGraph(kernel, orderedSources.map(([, source]) => source), roots.roots, [], activeMetadata.imports.map(raw => resolved(activeMetadata.name, raw)), roots.derive);
+  const newlyLoaded = loadDisplayedModuleGraph(kernel, orderedSources.map(([, source]) => source), roots.roots, [], imports, roots.derive);
   const loaded = compatible ? [...compatible.loaded, ...newlyLoaded] : newlyLoaded;
-  const checkpoint = { key, profile, kernel, loaded, sourceDigests };
-  incrementalBases.set(key, checkpoint);
-  while (incrementalBases.size > maximumIncrementalBases) incrementalBases.delete(incrementalBases.keys().next().value!);
-  return checkpoint;
+  return rememberCheckpoint({ key, profile, kernel, loaded, sourceDigests, base,
+    elaborated: (compatible?.elaborated ?? 0) + newlyLoaded.length });
+}
+
+/** What the active file's dependency prefix needs before a prepare or check, so a worker can fetch or recall it. */
+export interface DependencyCheckpointPlan {
+  readonly key: string;
+  readonly modules: number;
+  readonly sources: readonly (readonly [module: string, digest: string])[];
+  /** This exact dependency set is already prepared in this process. */
+  readonly exact: boolean;
+  /** Modules the prepared checkpoint elaborated from source; absent until it exists. */
+  readonly elaborated?: number;
+  /** The largest matching checkpoint whose payload is not installed yet. */
+  readonly standard?: { readonly rootModule: string; readonly file?: string };
+  /** Sources covered by the largest installed matching checkpoint. */
+  readonly installedPrefix: number;
+}
+
+export function dependencyCheckpointPlan(
+  files: readonly WorkbenchFile[],
+  profile: WorkbenchFoundation = "ZFG",
+  activeFile?: string,
+  options: WorkbenchWorkspaceOptions = {},
+): DependencyCheckpointPlan | undefined {
+  const active = files.find(file => file.name === (activeFile ?? files[0]?.name));
+  if (!active || bootstrapStage(active.name) >= 0) return undefined;
+  const roots = workspaceRoots(options.moduleRoots);
+  const graph = dependencyGraph(files, active, profile, roots);
+  if (!graph) return undefined;
+  const matching = matchingStandardCheckpoints(graph, profile, roots);
+  const best = matching[0];
+  const installed = matching.find(replayable);
+  const exact = incrementalBases.get(graph.key);
+  return {
+    key: graph.key,
+    modules: graph.dependencies.size,
+    sources: graph.orderedSources.map(([name, source]) =>
+      [name, inspectDependencySource(source.file, source.source, roots).contentDigest ??= sha256Hex(source.source)] as const),
+    exact: exact !== undefined,
+    ...(exact ? { elaborated: exact.elaborated } : {}),
+    ...(best && best !== installed ? { standard: { rootModule: best.rootModule, ...(best.file ? { file: best.file } : {}) } } : {}),
+    installedPrefix: installed?.sources.length ?? 0,
+  };
+}
+
+/**
+ * Compile the prepared dependency prefix of the active file into a
+ * self-contained checkpoint, in the form of a bundled one, so a browser can
+ * keep it and replay it on a later visit instead of elaborating again.
+ */
+export function exportDependencyCheckpoint(
+  files: readonly WorkbenchFile[],
+  profile: WorkbenchFoundation = "ZFG",
+  activeFile?: string,
+  options: WorkbenchWorkspaceOptions = {},
+): StandardDependencyCheckpoint | undefined {
+  const active = files.find(file => file.name === (activeFile ?? files[0]?.name));
+  if (!active || bootstrapStage(active.name) >= 0) return undefined;
+  const roots = workspaceRoots(options.moduleRoots);
+  const graph = dependencyGraph(files, active, profile, roots);
+  const checkpoint = graph && incrementalBases.get(graph.key);
+  if (!graph || !checkpoint) return undefined;
+  // A kept checkpoint stands on at most one bundled one, so that replaying
+  // it later needs only that bundled payload beside it.
+  const { base } = checkpoint;
+  if (base.prefix !== undefined && (base.dependencies.length !== 1 || standardDependencyCheckpoints.get(base.prefix)?.prefix !== undefined)) return undefined;
+  const module = `Grace.Checkpoint.Kept.${graph.key.slice(0, 16)}`;
+  const compiled = compileSeparateKernelModule(base.foundation, base.kernel, checkpoint.kernel, base.mark,
+    { module, sourceDigest: graph.key, dependencies: base.dependencies });
+  const surface = exportSurfaceEnvironmentIndex(checkpoint.kernel, module, compiled.digest);
+  return {
+    rootModule: `kept:${graph.key}`,
+    profile,
+    ...(base.prefix !== undefined ? { prefix: base.prefix } : {}),
+    sources: graph.orderedSources.map(([name, source]) =>
+      [name, inspectDependencySource(source.file, source.source, roots).contentDigest ??= sha256Hex(source.source)] as const),
+    compiled,
+    surface,
+    loaded: checkpoint.loaded.map(item => ({ module: item.module, definitions: item.definitions, theorems: item.theorems })),
+  };
 }
 
 /** Precheck an active file's imports so its first interactive check only elaborates the leaf. */

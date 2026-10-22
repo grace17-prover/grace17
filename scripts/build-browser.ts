@@ -4,7 +4,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,14 +47,45 @@ const libraryFiles = walk(join(project, "lib"))
 writeFileSync(join(shimOutput, "standard-library.js"),
   `export const standardLibrary = new Map(${JSON.stringify(libraryFiles)});\n`);
 
+// Roots whose exact closures are replayed instead of elaborated when a file
+// imports them. They were chosen by measured elaboration time so that most
+// library files have only a cheap tail left to elaborate; the first three
+// are the small ones the tests and docs examples rely on. Each payload is its own file, fetched by the
+// worker when a workspace first needs it, so the index below stays small.
+// GRACE17_CHECKPOINTS=minimal builds only the first three for quick local work.
 const checkpointRoots = [
   "Grace.Cumulus.Rat.Operations",
   "Grace.Cumulus.Real.Embedding",
   "Grace.Cumulus.Real.Squares",
-];
-const checkpoints = checkpointRoots.map(rootModule => buildCheckpoint(rootModule));
+  "Grace.Cumulus.Set.WellOrder.Isomorphism",
+  "Grace.Cumulus.Lattice.Lattice",
+  "Grace.Cumulus.Cardinal.Finite",
+  "Grace.Cumulus.Cardinal.ListSupport",
+  "Grace.Cumulus.Cardinal.NaturalSum",
+  "Grace.Cumulus.Cardinal",
+  "Grace.Cumulus.Int.Defs",
+  "Grace.Cumulus.Algebra.Coefficients",
+  "Grace.Cumulus.Algebra.Polynomial.Ring",
+  "Grace.Cumulus.Complex.PolynomialMinimum",
+  "Grace.Cumulus.Rotation.Freeness",
+  "Grace.Cumulus.Geometry.Sphere.Absorb",
+].slice(0, process.env.GRACE17_CHECKPOINTS === "minimal" ? 3 : undefined);
+const checkpointOutput = join(output, "checkpoints");
+rmSync(checkpointOutput, { recursive: true, force: true });
+mkdirSync(checkpointOutput, { recursive: true });
+const checkpointIndex = checkpointRoots.map(rootModule => {
+  const { compiled, surface, loaded, sources } = buildCheckpoint(rootModule);
+  const file = `checkpoints/${rootModule}.json`;
+  writeFileSync(join(output, file), JSON.stringify({ compiled, surface, loaded }));
+  return { rootModule, sources, file };
+});
 writeFileSync(join(sourceOutput, "standard-checkpoints.js"),
-  `export const standardDependencyCheckpoints = new Map(JSON.parse(${JSON.stringify(JSON.stringify(checkpoints.map(item => [item.rootModule, item])))}));\n`);
+  `export const standardDependencyCheckpoints = new Map(JSON.parse(${JSON.stringify(JSON.stringify(checkpointIndex.map(item => [item.rootModule, item])))}));
+export function installStandardCheckpoint(entry) {
+  const existing = standardDependencyCheckpoints.get(entry.rootModule);
+  standardDependencyCheckpoints.set(entry.rootModule, existing ? { ...existing, ...entry } : entry);
+}
+`);
 
 writeFileSync(join(shimOutput, "fs.js"), `import { standardLibrary } from "./standard-library.js";
 const key = path => [...standardLibrary.keys()].find(candidate => String(path).replaceAll("\\\\", "/").endsWith(candidate));
@@ -120,7 +151,7 @@ writeFileSync(join(shimOutput, "perf_hooks.js"), "export const performance = glo
 // so a page that must leave a stale build can refetch them past the HTTP
 // cache before it reloads.
 const generatedFiles = walk(output)
-  .filter(file => !file.includes(`${sep}monaco${sep}`) && !file.endsWith("manifest.json"))
+  .filter(file => !file.includes(`${sep}monaco${sep}`) && !file.includes(`${sep}checkpoints${sep}`) && !file.endsWith("manifest.json"))
   .map(file => relative(output, file).replaceAll("\\", "/")).sort();
 writeFileSync(join(output, "manifest.json"), JSON.stringify({
   version,

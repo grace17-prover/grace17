@@ -74,6 +74,15 @@ test("browser Workbench checks Set/Order.g17 against its embedded Cumulus depend
   assert.deepEqual(result.theorems.map(t => t.name), native.theorems.map(t => t.name));
 });
 
+// Bundled checkpoint payloads live beside the index and are fetched by the
+// worker on first use; here they are installed from disk the same way.
+async function installBundledCheckpoint(rootModule: string) {
+  const { standardDependencyCheckpoints, installStandardCheckpoint } = await import("../workbench/generated/src/standard-checkpoints.js");
+  const entry = standardDependencyCheckpoints.get(rootModule);
+  assert.ok(entry, `bundled checkpoint ${rootModule}`);
+  if (!entry.compiled) installStandardCheckpoint({ ...entry, ...JSON.parse(readFileSync(new URL(`../workbench/generated/${entry.file}`, import.meta.url), "utf8")) });
+}
+
 test("browser Workbench replays an authenticated rational dependency checkpoint", async () => {
   const browser = await import("../workbench/generated/src/workbench.js");
   const { standardLibrary } = await import("../workbench/generated/shims/standard-library.js");
@@ -82,6 +91,16 @@ test("browser Workbench replays an authenticated rational dependency checkpoint"
   const active = "lib/Grace/Cumulus/Rat/Density.g17";
   const source = standardLibrary.get(active);
   assert.ok(source);
+  // Before the payload is installed the plan names the bundled prefix to fetch;
+  // afterwards it is the installed prefix and nothing remains to load.
+  const before = browser.dependencyCheckpointPlan([{ name: active, source }], "ZFG", active);
+  assert.equal(before?.standard?.rootModule, "Grace.Cumulus.Rat.Operations");
+  assert.equal(before?.standard?.file, "checkpoints/Grace.Cumulus.Rat.Operations.json");
+  assert.equal(before?.installedPrefix, 0);
+  await installBundledCheckpoint("Grace.Cumulus.Rat.Operations");
+  const after = browser.dependencyCheckpointPlan([{ name: active, source }], "ZFG", active);
+  assert.equal(after?.standard, undefined);
+  assert.ok((after?.installedPrefix ?? 0) >= 30);
   const prepared = browser.prepareWorkbenchFiles([{ name: active, source }], "ZFG", active);
   assert.equal(prepared.ok, true);
   assert.ok(prepared.modules >= 30);
@@ -160,7 +179,7 @@ test("web workbench routes checking through its local worker rather than an HTTP
   assert.match(worker, /prepareWorkbenchFiles/);
   assert.match(app, /function prepareThenCheckActive\(\)[\s\S]*activeFile\(\)\?\.id === fileId && activeFile\(\)\?\.source === sourceRevision/);
   assert.match(app, /generation === prepareGeneration && activeFile\(\)\?\.id === fileId/);
-  assert.match(app, /if \(!live && generation === checkGeneration\)/);
+  assert.match(app, /if \(generation === checkGeneration\) document\.querySelector\("#check"\)\.disabled = false/);
   assert.match(app, /if \(activeId !== id\) \{[\s\S]*checkGeneration \+= 1;[\s\S]*prepareGeneration \+= 1;/);
 });
 
@@ -589,6 +608,7 @@ test("a larger checked prefix wins over a smaller bundled dependency checkpoint"
   const { Kernel } = await import("../workbench/generated/src/kernel.js");
   const { standardDependencyCheckpoints } = await import("../workbench/generated/src/standard-checkpoints.js");
   assert.ok(standardDependencyCheckpoints.has("Grace.Cumulus.Real.Squares"));
+  await installBundledCheckpoint("Grace.Cumulus.Real.Squares");
   const seed = { name: "PrefixSeed.g17", source: `module PrefixSeed
 import Grace.Cumulus.Real.Squares
 namespace PrefixSeed
@@ -637,4 +657,43 @@ test("a library module checks as a workspace file over forked imports", () => {
   const result = checkNative([{ name, source: readFileSync(name, "utf8") }], "ZFG", [name], { includeKernelDetails: false });
   assert.equal(result.ok, true, result.message);
   assert.ok(result.theorems.some(theorem => theorem.name.endsWith("FTC.continuous_derivative")));
+});
+
+test("a kept checkpoint exported by the browser replays as a prefix for a later workspace", async () => {
+  const browser = await import("../workbench/generated/src/workbench.js");
+  const { standardLibrary } = await import("../workbench/generated/shims/standard-library.js");
+  const active = "lib/Grace/Cumulus/Set/Hierarchy.g17";
+  const source = standardLibrary.get(active);
+  assert.ok(source);
+  const prepared = browser.prepareWorkbenchFiles([{ name: active, source }], "ZFG", active);
+  assert.ok(prepared.modules >= 5);
+  const plan = browser.dependencyCheckpointPlan([{ name: active, source }], "ZFG", active);
+  assert.equal(plan?.exact, true);
+  assert.equal(plan?.elaborated, prepared.modules);
+  const kept = browser.exportDependencyCheckpoint([{ name: active, source }], "ZFG", active);
+  assert.ok(kept);
+  assert.equal(kept.rootModule, `kept:${plan!.key}`);
+  assert.equal(kept.sources.length, prepared.modules);
+  // Round trip through JSON as storage would, then install it and prepare a
+  // file whose closure extends the kept one by the hierarchy module itself.
+  browser.installStandardCheckpoint(JSON.parse(JSON.stringify(kept)));
+  const extension = { name: "KeptSeed.g17", source: `module KeptSeed
+import Grace.Cumulus.Set.Hierarchy
+namespace KeptSeed
+theorem identity (x : Set)
+  shows x = x
+proof
+  rfl
+end KeptSeed
+` };
+  const extended = browser.dependencyCheckpointPlan([extension], "ZFG", extension.name);
+  assert.equal(extended?.installedPrefix, prepared.modules);
+  assert.equal(extended?.standard, undefined);
+  const preparedExtension = browser.prepareWorkbenchFiles([extension], "ZFG", extension.name);
+  assert.equal(preparedExtension.modules, prepared.modules + 1);
+  const checked = browser.checkWorkbenchFiles([extension], "ZFG", [extension.name], { includeKernelDetails: false });
+  assert.equal(checked.ok, true);
+  const identity = checked.theorems.find((theorem: { name: string }) => theorem.name.endsWith("KeptSeed.identity"));
+  assert.ok(identity, "the extension's theorem is checked over the kept prefix");
+  assert.deepEqual(identity.sorries, []);
 });

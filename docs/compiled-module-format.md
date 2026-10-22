@@ -201,9 +201,9 @@ independent checker should use strict replay.
 
 ### Surface-index sidecar
 
-`grace17.surface-index` version 3 is canonical JSON containing module scopes,
-declared namespace provenance, exported opens, soft classes, signatures, notation, tactic macros, and datatype
-presentation metadata. It is bound to both a version-3 module digest and the
+`grace17.surface-index` version 4 is canonical JSON containing module scopes,
+declared namespace provenance, exported opens, soft classes, signatures, notation, tactic macros, datatype
+presentation metadata, and each module's expression carrier annotations. It is bound to both a version-3 module digest and the
 exact reconstructed kernel environment. It may be installed only after that
 module receipt and environment match.
 

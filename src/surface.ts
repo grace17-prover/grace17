@@ -270,7 +270,7 @@ interface SurfaceClassDefinition {
 
 export interface SurfaceEnvironmentIndex {
   readonly format: "grace17.surface-index";
-  readonly version: 3;
+  readonly version: 4;
   readonly module: string;
   readonly moduleDigest: string;
   readonly kernelEnvironment: string;
@@ -299,6 +299,8 @@ export interface SurfaceEnvironmentIndex {
     readonly resultType?: string;
     readonly resultTypeArguments?: readonly Term[];
   }[];
+  /** Each module's expression carrier annotations after its elaboration, inherited and own. */
+  readonly annotations: readonly (readonly [module: string, entries: readonly (readonly [string, string])[]])[];
   readonly digest: string;
 }
 
@@ -611,7 +613,7 @@ export function exportSurfaceEnvironmentIndex(
   const environment = surfaceEnvironments.get(kernel) ?? emptySurfaceEnvironment();
   const body = {
     format: "grace17.surface-index" as const,
-    version: 3 as const,
+    version: 4 as const,
     module,
     moduleDigest,
     kernelEnvironment: kernel.digest(),
@@ -626,6 +628,11 @@ export function exportSurfaceEnvironmentIndex(
     datatypes: [...environment.datatypes.values()].sort((a, b) => a.name.localeCompare(b.name)),
     signatures: [...environment.signatures].map(([name, signature]) => ({ name, ...signature }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+    // A module elaborated over the installed index inherits the annotations
+    // of its imports from here, as it would after a fork of the same kernel.
+    annotations: [...(moduleAnnotations.get(kernel) ?? [])]
+      .map(([name, entries]) => [name, [...entries].sort(([left], [right]) => left.localeCompare(right))] as const)
+      .sort(([left], [right]) => left.localeCompare(right)),
   };
   return surfaceIndexFreeze({ ...body, digest: sha256Hex(canonical(body)) });
 }
@@ -670,6 +677,7 @@ export function installSurfaceEnvironmentIndex(kernel: Kernel, index: SurfaceEnv
     captureTacticTraces: false,
   });
   for (const item of index.datatypes) registerStructureNotation(item);
+  moduleAnnotations.set(kernel, new Map(index.annotations.map(([name, entries]) => [name, new Map(entries)])));
 }
 
 function emptySurfaceEnvironment(): SurfaceEnvironment {
@@ -832,9 +840,12 @@ function surfaceIndexContentsMalformed(value: Record<string, unknown>): boolean 
 }
 
 function validateSurfaceEnvironmentIndex(value: unknown): asserts value is SurfaceEnvironmentIndex {
-  if (!surfaceIndexRecord(value) || value.format !== "grace17.surface-index" || value.version !== 3 ||
+  if (!surfaceIndexRecord(value) || value.format !== "grace17.surface-index" || value.version !== 4 ||
       typeof value.module !== "string" || !value.module || !surfaceIndexDigest(value.moduleDigest) ||
-      !surfaceIndexDigest(value.kernelEnvironment) || !surfaceIndexDigest(value.digest)) {
+      !surfaceIndexDigest(value.kernelEnvironment) || !surfaceIndexDigest(value.digest) ||
+      !Array.isArray(value.annotations) || value.annotations.some(item => !Array.isArray(item) || item.length !== 2 ||
+        typeof item[0] !== "string" || !Array.isArray(item[1]) || item[1].some(pair => !Array.isArray(pair) ||
+          pair.length !== 2 || typeof pair[0] !== "string" || typeof pair[1] !== "string"))) {
     throw new KernelError("Malformed surface-index envelope");
   }
   if (surfaceIndexContentsMalformed(value)) throw new KernelError("Malformed surface-index contents");
