@@ -514,7 +514,7 @@ the recursive pattern abbreviates repeated conjunction elimination
 
 ### `obtain ⟨x, hx, rfl⟩ := fact`
 
-**Open data and substitute an equality immediately.** An rfl pattern consumes an equality that identifies a discovered variable, rewrites the goal and local facts, and keeps the representative equation out of the rest of the proof. It is equality elimination, used for unpacking structured objects.
+**Open data and substitute an equality immediately.** An rfl pattern consumes an equality that identifies a discovered variable, rewrites the goal and local facts, and keeps the representative equation out of the rest of the proof. It is equality elimination, used for unpacking structured objects. The side substituted is a variable not occurring in the other side; an equation with no such side is reported. A goal binder that would capture the replacement is renamed, not skipped.
 
 An `rfl` entry is equality elimination. If the packed data exposes `y = t` or `t = y`, the pattern substitutes away the discovered variable and rewrites the goal and local facts.
 
@@ -557,7 +557,7 @@ the branch hypotheses hp and hq are discharged
 
 ### `rcases h with hp | hq | hr`
 
-**Flatten a finite disjunction into named branches.** Nested disjunctions associate in either direction. Grace17 gives each leaf its own branch and reconstructs the nested ∨ elimination proof, so trichotomy reads as one three-way split.
+**Flatten a finite disjunction into named branches.** Nested disjunctions associate in either direction. Grace17 gives each leaf its own branch and reconstructs the nested ∨ elimination proof, so trichotomy reads as one three-way split. A leaf may be a pattern instead of a name: rfl substitutes the alternative's equation in its branch, and ⟨x, hx, rfl⟩ opens the alternative's data, as in rcases h with rfl | ⟨x, hx, rfl⟩.
 
 The written disjunction may associate to the left or to the right; Grace17 reconstructs the nested ∨-elimination proof in either case.
 
@@ -1380,7 +1380,7 @@ Rule schema:
 
 ### `induction x using membership`
 
-**Descend through the members of an arbitrary set.** Introduce the current set, then ih. The hypothesis proves the motive for every member of the current set. Revert assumptions that depend on x before starting.
+**Descend through the members of an arbitrary set.** Introduce the current set, then ih. The hypothesis proves the motive for every member of the current set. Revert assumptions that depend on x before starting. The expansion names the Foundation library's lemmas in full, so another closure in scope, as the topology library declares, is no ambiguity.
 
 The tactic builds the transitive closure of `x` by Replacement, proves membership on it well-founded from Foundation, and uses well-founded induction. An assumption that mentions `x` cannot stay fixed while `x` changes, so `revert` it first.
 

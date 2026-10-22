@@ -1662,13 +1662,23 @@ function replaceFormulaTerm(formula: Formula, source: Term, target: Term, underB
     case "and": return { tag: "and", left: replaceFormulaTerm(formula.left, source, target, underBinders), right: replaceFormulaTerm(formula.right, source, target, underBinders) };
     case "or": return { tag: "or", left: replaceFormulaTerm(formula.left, source, target, underBinders), right: replaceFormulaTerm(formula.right, source, target, underBinders) };
     case "iff": return { tag: "iff", left: replaceFormulaTerm(formula.left, source, target, underBinders), right: replaceFormulaTerm(formula.right, source, target, underBinders) };
-    case "forall": case "exists":
-      // Do not transport an equality that depends on this bound variable or
-      // capture a free variable of its replacement. The kernel checks the
-      // resulting equality elimination in either case.
-      if (!underBinders || freeTermVariables(source).has(formula.variable) ||
-          freeTermVariables(target).has(formula.variable)) return formula;
-      return { ...formula, body: replaceFormulaTerm(formula.body, source, target, true) };
+    case "forall": case "exists": {
+      // Do not transport an equality that depends on this bound variable.
+      // The kernel checks the resulting equality elimination either way.
+      if (!underBinders || freeTermVariables(source).has(formula.variable)) return formula;
+      // A binder that would capture a free variable of the replacement is
+      // renamed first, so that substituting W := V reaches a body bound by
+      // its own V instead of skipping it.
+      if (!freeTermVariables(target).has(formula.variable)) {
+        return { ...formula, body: replaceFormulaTerm(formula.body, source, target, true) };
+      }
+      const forbidden = new Set([...freeFormulaVariables(formula.body), ...boundFormulaVariables(formula.body),
+        ...freeTermVariables(source), ...freeTermVariables(target)]);
+      let renamed = formula.variable;
+      for (let index = 1; forbidden.has(renamed); index += 1) renamed = `${formula.variable}_${index}`;
+      const body = substituteFormula(formula.body, formula.variable, v(renamed));
+      return { ...formula, variable: renamed, body: replaceFormulaTerm(body, source, target, true) };
+    }
   }
 }
 

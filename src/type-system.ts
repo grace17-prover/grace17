@@ -987,6 +987,32 @@ export function inferSoftTypes(
   });
 }
 
+/**
+ * The sorts among `predicates` that a visible typing rule gives every
+ * value of the function `fn`: a rule `∀ x…, P₁(x₁) → … → S(fn(x…))` over
+ * distinct variable arguments whose premises are unary sorts of them, as
+ * `rationalCut.real` gives `Real(rationalCut(q))` from `Rational(q)`. The
+ * rule's premises are not checked here; the sort is a reading of the
+ * notation around the value, and its evidence is a proof obligation.
+ */
+export function functionValueSorts(
+  kernel: Kernel, fn: string, predicates: readonly string[], visibility?: ScopeVisibility,
+): string[] {
+  const index = typeIndex(kernel);
+  const typesValue = (rule: TypeRule): boolean => {
+    const [head] = rule.arguments;
+    if (!ruleVisible(rule, visibility) || rule.arguments.length !== 1 || head?.tag !== "app" ||
+        head.fn !== fn || head.args.length === 0) return false;
+    const seen = new Set<string>();
+    for (const argument of head.args) {
+      if (argument.tag !== "var" || !rule.variables.includes(argument.name) || seen.has(argument.name)) return false;
+      seen.add(argument.name);
+    }
+    return rule.premises.every(premise => premise.arguments.length === 1 && premise.arguments[0]!.tag === "var");
+  };
+  return predicates.filter(predicate => (index.byPredicate.get(predicate) ?? []).some(typesValue));
+}
+
 export function softTypeReport(kernel: Kernel): readonly SoftTypeRuleReport[] {
   return [...typeIndex(kernel).byPredicate.values()].flat().map(rule => ({
     name: rule.name,

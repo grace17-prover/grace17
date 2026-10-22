@@ -167,6 +167,16 @@ with `X` real reads a real. Only a numeral whose position fixes no sort, such
 as `-1 = -1` on its own with the integers, rationals, and reals all visible,
 is rejected, with the candidate sorts and the annotations that select them.
 
+A comparison whose operands carry no sort of their own, two values of a
+`Set`-valued function under `(p q : Rational)` binders, is read in the sort
+the function's typing theorem gives its values: `rationalCut(p) <
+rationalCut(q)` is the real order, by `rationalCut.real`, and `rationalCut(p)
+< 0` reads the real zero. A function whose values are typed in several
+carriers is rejected on such a comparison, with the candidates and the
+annotation that selects each, `(twice(a):Q)` or `(twice(a):R)`. Operands
+with no such function on either side keep the natural order, the library's
+default.
+
 ## Seeing the elaboration
 
 Hover the parentheses or comma of an ordered pair, or either brace of a finite

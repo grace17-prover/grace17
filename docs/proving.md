@@ -157,7 +157,13 @@ predicates, so there is no need to `unfold P at h` before
 An `rfl` entry in an `rcases` or `obtain` pattern is equality elimination. If
 packed data exposes `y = t` (or `t = y`), the pattern substitutes away the
 discovered variable and rewrites the goal and local facts, so representation
-equalities stay out of the rest of the proof.
+equalities stay out of the rest of the proof. The side substituted is the
+one that is a variable not occurring in the other; an equation with no such
+side is reported, since `rfl` needs a variable to substitute. A goal binder
+that would capture the replacement, `∀ V ∈ B, …` under `W = V`, is renamed
+rather than skipped. The entry also stands for a disjunct: `rcases h with
+rfl | ⟨x, hx, rfl⟩` substitutes the first alternative's equation in its
+branch and opens the second alternative's data in the other.
 
 Disjunction patterns may name every leaf at once:
 
@@ -825,7 +831,10 @@ proof
 An assumption that mentions `x` cannot stay fixed while `x` changes. Move it
 back into the goal first with `revert h`, then introduce it inside the
 induction body. The side condition prevents an unsound induction motive. The
-tactic is derived from Foundation through a set-sized transitive closure.
+tactic is derived from Foundation through a set-sized transitive closure,
+and its expansion names the Foundation library's lemmas in full, so a
+module that also sees another `closure`, as the topology library declares,
+is not asked to disambiguate them.
 
 ### Induction over a certified well-founded relation
 
