@@ -7,7 +7,8 @@
 // transfer between a set and an invariant subset, the motions of ℝ³ form
 // a group acting on ℝ³ with the rotations embedded, the pieces of the
 // sphere lift to cones in the punctured ball, the ball absorbs its center,
-// and the closed unit ball is paradoxical under the motions. The
+// the closed unit ball is paradoxical under the motions, and in the strong
+// form it is equidecomposable with two disjoint copies of itself. The
 // statements are pinned as the Workbench prints them, every proof checks
 // without admissions, and the audit of the final theorem names the choice
 // axiom and nothing beyond the ZF axioms: the global choice operator does
@@ -65,8 +66,10 @@ const expected: Record<string, string> = {
     "ℝ³, A, unitBall) ∧ Equidecomposable(motionAction, Motions, ℝ³, B, unitBall)",
   "Grace.Cumulus.Geometry.BanachTarski.banachTarski.restricted":
     "Paradoxical(restrictAction(motionAction, Motions, unitBall), Motions, unitBall)",
-  "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls":
+  "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls_part":
     "∃ C, C ⊆ unitBall ∧ Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
+  "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls":
+    "Equidecomposable(motionAction, Motions, ℝ³, unitBall, unitBall ∪ shiftedBall)",
 };
 
 interface Audit {
