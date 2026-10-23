@@ -355,8 +355,15 @@ function substituteTermFor(term: Term, variable: string, bit: number, replacemen
   if ((occurrences(term) & bit) === 0) return term;
   if (term.tag === "var") return term.name === variable ? replacement : term;
   if (term.tag === "nat" || term.args.length === 0) return term;
-  const args = term.args.map(arg => substituteTermFor(arg, variable, bit, replacement));
-  return args.every((arg, index) => arg === term.args[index]) ? term : app(term.fn, ...args);
+  // Allocate the new argument list only once an argument actually changes.
+  let args: Term[] | undefined;
+  for (let index = 0; index < term.args.length; index += 1) {
+    const before = term.args[index]!;
+    const after = substituteTermFor(before, variable, bit, replacement);
+    if (args) args.push(after);
+    else if (after !== before) { args = term.args.slice(0, index); args.push(after); }
+  }
+  return args ? app(term.fn, ...args) : term;
 }
 
 function fresh(base: string, forbidden: ReadonlySet<string>): string {
@@ -387,8 +394,14 @@ function substituteFormulaFor(formula: Formula, variable: string, bit: number, r
       return left === formula.left && right === formula.right ? formula : eq(left, right);
     }
     case "pred": {
-      const args = formula.args.map(arg => substituteTermFor(arg, variable, bit, replacement));
-      return args.every((arg, index) => arg === formula.args[index]) ? formula : pred(formula.pred, ...args);
+      let args: Term[] | undefined;
+      for (let index = 0; index < formula.args.length; index += 1) {
+        const before = formula.args[index]!;
+        const after = substituteTermFor(before, variable, bit, replacement);
+        if (args) args.push(after);
+        else if (after !== before) { args = formula.args.slice(0, index); args.push(after); }
+      }
+      return args ? pred(formula.pred, ...args) : formula;
     }
     case "imp": {
       const left = substituteFormulaFor(formula.left, variable, bit, replacement);
