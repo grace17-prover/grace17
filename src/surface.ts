@@ -32,11 +32,21 @@ export class SurfaceError extends Error {
   file?: string;
   partialTrace?: TacticTrace;
 
-  constructor(line: number, message: string, partialTrace?: TacticTrace) {
-    super(`line ${line}: ${message}`);
+  constructor(line: number, message: string | (() => string), partialTrace?: TacticTrace) {
+    super(typeof message === "string" ? `line ${line}: ${message}` : "");
     this.line = line;
     this.partialTrace = partialTrace;
     this.name = "SurfaceError";
+    // An error a caller may catch while trying an alternative reading pays
+    // for its explanation only when the explanation is read.
+    if (typeof message !== "string") {
+      let text: string | undefined;
+      Object.defineProperty(this, "message", {
+        configurable: true, enumerable: false,
+        get: () => text ??= `line ${line}: ${message()}`,
+        set: (value: string) => { text = value; },
+      });
+    }
   }
 }
 
@@ -10631,7 +10641,7 @@ function resolveProof(kernel: Kernel, rawName: string, line: number, scope: Surf
     const property = definitionProperty(kernel, name);
     if (property) return definition(property.definition, property.property);
   }
-  throw new SurfaceError(line, describeUnknownProof(kernel, rawName, scope));
+  throw new SurfaceError(line, () => describeUnknownProof(kernel, rawName, scope));
 }
 
 /** The note `ring` adds when the goal divides by a numeral, which it reads

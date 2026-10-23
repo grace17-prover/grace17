@@ -55,6 +55,9 @@ export class NameResolutionIndex {
   private plans = new Map<string, Map<string, CachedCandidates>>();
   readonly owners = new Map<string, string>();
   readonly namespaceOwners = new Map<string, Set<string>>();
+  // The owner of a name is asked for every visibility test of every
+  // resolution candidate; the answer changes only when a name is registered.
+  private ownerCache = new Map<string, string | undefined>();
 
   fork(): NameResolutionIndex {
     const copy = new NameResolutionIndex();
@@ -85,6 +88,7 @@ export class NameResolutionIndex {
 
   register(name: string, module?: string): void {
     if (this.roots.has(name)) return;
+    this.ownerCache.clear();
     this.roots.add(name);
     this.indexSuffixes(name);
     if (module) this.owners.set(name, module);
@@ -131,10 +135,14 @@ export class NameResolutionIndex {
   }
 
   owner(name: string): string | undefined {
+    if (this.ownerCache.has(name)) return this.ownerCache.get(name);
+    let owner: string | undefined;
     for (const prefix of prefixChain(name)) {
-      if (this.roots.has(prefix)) return this.owners.get(prefix);
+      if (this.roots.has(prefix)) { owner = this.owners.get(prefix); break; }
     }
-    return undefined;
+    if (this.ownerCache.size > 65_536) this.ownerCache.clear();
+    this.ownerCache.set(name, owner);
+    return owner;
   }
 
   private known(name: string): boolean {
