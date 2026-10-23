@@ -293,10 +293,58 @@ export function freeFormulaVariables(formula: Formula, into = new Set<string>())
   return into;
 }
 
+// Which variable names occur anywhere in a node, as a 32-bit set of name
+// hashes kept in a private field of the node: a name whose bit is absent
+// certainly does not occur, so a substitution for it is the identity and
+// returns the node itself without a walk, which is what the walk would have
+// returned. A present bit proves nothing and takes the walk. The field is
+// private, so canonical encodings, freezing, and enumeration never see it,
+// and a node built elsewhere, as from a compiled artifact, gets its mask the
+// first time it is asked.
+const nameBits = new Map<string, number>();
+function nameBit(name: string): number {
+  let bit = nameBits.get(name);
+  if (bit === undefined) {
+    let hash = 2166136261;
+    for (let index = 0; index < name.length; index += 1) hash = Math.imul(hash ^ name.charCodeAt(index), 16777619);
+    bit = 1 << (hash >>> 27);
+    if (nameBits.size > 65_536) nameBits.clear();
+    nameBits.set(name, bit);
+  }
+  return bit;
+}
+class Node { constructor(target: object) { return target; } }
+class Occurrences extends Node {
+  #names: number;
+  constructor(target: object, names: number) { super(target); this.#names = names; }
+  static of(target: object): number | undefined { return #names in target ? target.#names : undefined; }
+}
+function occurrences(node: Term | Formula): number {
+  const known = Occurrences.of(node);
+  if (known !== undefined) return known;
+  let names = 0;
+  switch (node.tag) {
+    case "var": names = nameBit(node.name); break;
+    case "nat": case "bottom": break;
+    case "app": for (const arg of node.args) names |= occurrences(arg); break;
+    case "pred": for (const arg of node.args) names |= occurrences(arg); break;
+    case "eq": names = occurrences(node.left) | occurrences(node.right); break;
+    case "imp": case "and": case "or": case "iff": names = occurrences(node.left) | occurrences(node.right); break;
+    case "forall": case "exists": names = nameBit(node.variable) | occurrences(node.body); break;
+  }
+  try { new Occurrences(node, names); } catch { /* an exotic node is walked again next time */ }
+  return names;
+}
+
 export function substituteTerm(term: Term, variable: string, replacement: Term): Term {
+  return substituteTermFor(term, variable, nameBit(variable), replacement);
+}
+
+function substituteTermFor(term: Term, variable: string, bit: number, replacement: Term): Term {
+  if ((occurrences(term) & bit) === 0) return term;
   if (term.tag === "var") return term.name === variable ? replacement : term;
   if (term.tag === "nat" || term.args.length === 0) return term;
-  const args = term.args.map(arg => substituteTerm(arg, variable, replacement));
+  const args = term.args.map(arg => substituteTermFor(arg, variable, bit, replacement));
   return args.every((arg, index) => arg === term.args[index]) ? term : app(term.fn, ...args);
 }
 
@@ -309,31 +357,37 @@ function fresh(base: string, forbidden: ReadonlySet<string>): string {
 }
 
 function termContainsVariable(term: Term, variable: string): boolean {
+  if ((occurrences(term) & nameBit(variable)) === 0) return false;
   return term.tag === "var" ? term.name === variable
     : term.tag === "app" && term.args.some(argument => termContainsVariable(argument, variable));
 }
 
 export function substituteFormula(formula: Formula, variable: string, replacement: Term): Formula {
+  return substituteFormulaFor(formula, variable, nameBit(variable), replacement);
+}
+
+function substituteFormulaFor(formula: Formula, variable: string, bit: number, replacement: Term): Formula {
+  if ((occurrences(formula) & bit) === 0) return formula;
   switch (formula.tag) {
     case "bottom": return formula;
     case "eq": {
-      const left = substituteTerm(formula.left, variable, replacement);
-      const right = substituteTerm(formula.right, variable, replacement);
+      const left = substituteTermFor(formula.left, variable, bit, replacement);
+      const right = substituteTermFor(formula.right, variable, bit, replacement);
       return left === formula.left && right === formula.right ? formula : eq(left, right);
     }
     case "pred": {
-      const args = formula.args.map(arg => substituteTerm(arg, variable, replacement));
+      const args = formula.args.map(arg => substituteTermFor(arg, variable, bit, replacement));
       return args.every((arg, index) => arg === formula.args[index]) ? formula : pred(formula.pred, ...args);
     }
     case "imp": {
-      const left = substituteFormula(formula.left, variable, replacement);
-      const right = substituteFormula(formula.right, variable, replacement);
+      const left = substituteFormulaFor(formula.left, variable, bit, replacement);
+      const right = substituteFormulaFor(formula.right, variable, bit, replacement);
       return left === formula.left && right === formula.right ? formula : imp(left, right);
     }
     case "forall": {
       if (formula.variable === variable) return formula;
       if (!termContainsVariable(replacement, formula.variable)) {
-        const body = substituteFormula(formula.body, variable, replacement);
+        const body = substituteFormulaFor(formula.body, variable, bit, replacement);
         return body === formula.body ? formula : forall(formula.variable, body);
       }
       if (!freeFormulaVariables(formula.body).has(variable)) return formula;
@@ -348,15 +402,15 @@ export function substituteFormula(formula: Formula, variable: string, replacemen
     case "and":
     case "or":
     case "iff": {
-      const left = substituteFormula(formula.left, variable, replacement);
-      const right = substituteFormula(formula.right, variable, replacement);
+      const left = substituteFormulaFor(formula.left, variable, bit, replacement);
+      const right = substituteFormulaFor(formula.right, variable, bit, replacement);
       if (left === formula.left && right === formula.right) return formula;
       return formula.tag === "and" ? and(left, right) : formula.tag === "or" ? or(left, right) : iff(left, right);
     }
     case "exists": {
       if (formula.variable === variable) return formula;
       if (!termContainsVariable(replacement, formula.variable)) {
-        const body = substituteFormula(formula.body, variable, replacement);
+        const body = substituteFormulaFor(formula.body, variable, bit, replacement);
         return body === formula.body ? formula : exists(formula.variable, body);
       }
       if (!freeFormulaVariables(formula.body).has(variable)) return formula;

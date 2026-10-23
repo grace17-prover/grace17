@@ -3,27 +3,36 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-// One registry of deeply frozen certificates shared by the kernel, the proof
+// One mark of deeply frozen certificates shared by the kernel, the proof
 // machine, and the artifact loaders, so checked data is walked once.
+//
+// The mark is a private field of a module-local class, installed on the
+// certificate through the constructor's return override. Code outside this
+// module can neither read nor forge it, as it could not a private weak set,
+// and testing it is a property lookup rather than an ephemeron-table probe:
+// a whole-library check spent nearly half its time in that table.
 
-const deeplyFrozenCertificates = new WeakSet<object>();
+class Certificate { constructor(target: object) { return target; } }
+class DeeplyFrozen extends Certificate {
+  #deeplyFrozen = true;
+  constructor(target: object) { super(target); }
+  static has(target: object): boolean { return #deeplyFrozen in target; }
+  /** Mark `target`; an exotic object that refuses the field is simply walked again next time. */
+  static mark(target: object): void { try { new DeeplyFrozen(target); } catch { /* unmarked */ } }
+}
 
 /**
  * Freeze a successfully checked certificate before retaining an identity
- * cache entry. Only objects with object-valued children are recorded in the
- * registry: a frozen container of primitives cannot change and is cheaper to
- * rescan than to keep as one of millions of weak entries, which otherwise
- * dominate garbage collection and rehashing when a whole library is compiled.
+ * cache entry. Only objects with object-valued children are marked: a frozen
+ * container of primitives cannot change and is cheaper to rescan than to
+ * carry a mark, and the arenas of a proof machine program hold millions.
  */
 export function deepFreeze(value: unknown): void {
-  if (value === null || typeof value !== "object" || deeplyFrozenCertificates.has(value)) return;
+  if (value === null || typeof value !== "object" || DeeplyFrozen.has(value)) return;
   Object.freeze(value);
-  // A container of primitives is frozen without touching the registry: the
-  // arenas of a proof machine program hold millions of them, and adding each
-  // only to drop it again keeps the weak table permanently rehashing.
   if (!hasObjectChild(value)) return;
-  // Register before descending, so a shared or cyclic structure stops here.
-  deeplyFrozenCertificates.add(value);
+  // Mark before descending, so a shared or cyclic structure stops here.
+  DeeplyFrozen.mark(value);
   if (Array.isArray(value)) {
     for (const child of value) deepFreeze(child);
   } else {
@@ -43,7 +52,7 @@ function hasObjectChild(value: object): boolean {
   return false;
 }
 
-/** Whether `value` is a registered deeply frozen container. */
+/** Whether `value` is a marked deeply frozen container. */
 export function isDeeplyFrozen(value: object): boolean {
-  return deeplyFrozenCertificates.has(value);
+  return DeeplyFrozen.has(value);
 }
