@@ -56,8 +56,10 @@ export class NameResolutionIndex {
   readonly owners = new Map<string, string>();
   readonly namespaceOwners = new Map<string, Set<string>>();
   // The owner of a name is asked for every visibility test of every
-  // resolution candidate; the answer changes only when a name is registered.
-  private ownerCache = new Map<string, string | undefined>();
+  // resolution candidate; an answer stands until a name is registered, which
+  // the serial records, so a burst of lookups between registrations is served
+  // from here.
+  private ownerCache = new Map<string, { serial: number; owner: string | undefined }>();
 
   fork(): NameResolutionIndex {
     const copy = new NameResolutionIndex();
@@ -88,7 +90,6 @@ export class NameResolutionIndex {
 
   register(name: string, module?: string): void {
     if (this.roots.has(name)) return;
-    this.ownerCache.clear();
     this.roots.add(name);
     this.indexSuffixes(name);
     if (module) this.owners.set(name, module);
@@ -135,13 +136,17 @@ export class NameResolutionIndex {
   }
 
   owner(name: string): string | undefined {
-    if (this.ownerCache.has(name)) return this.ownerCache.get(name);
+    const cached = this.ownerCache.get(name);
+    if (cached !== undefined && cached.serial === this.serial) return cached.owner;
     let owner: string | undefined;
     for (const prefix of prefixChain(name)) {
       if (this.roots.has(prefix)) { owner = this.owners.get(prefix); break; }
     }
-    if (this.ownerCache.size > 65_536) this.ownerCache.clear();
-    this.ownerCache.set(name, owner);
+    if (cached) { cached.serial = this.serial; cached.owner = owner; }
+    else {
+      if (this.ownerCache.size > 65_536) this.ownerCache.clear();
+      this.ownerCache.set(name, { serial: this.serial, owner });
+    }
     return owner;
   }
 

@@ -24,9 +24,20 @@ export type Formula =
 let nextAstId = 1;
 const astIds = new WeakMap<object, number>();
 
+class AstNode { constructor(target: object) { return target; } }
+class Identified extends AstNode {
+  #id: number;
+  constructor(target: object, id: number) { super(target); this.#id = id; }
+  static of(target: object): number | undefined { return #id in target ? target.#id : undefined; }
+}
 function astId(value: object): number {
+  const known = Identified.of(value);
+  if (known !== undefined) return known;
   let id = astIds.get(value);
-  if (id === undefined) { id = nextAstId++; astIds.set(value, id); }
+  if (id === undefined) {
+    id = nextAstId++;
+    try { new Identified(value, id); } catch { astIds.set(value, id); }
+  }
   return id;
 }
 

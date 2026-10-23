@@ -85,19 +85,43 @@ export interface KernelAdmissionCheckpoint {
 
 interface ContextTrieNode { readonly children: Map<number, ContextTrieNode>; token?: object }
 
+interface CachedCheck {
+  /** The cache the result belongs to, by its token; a replaced cache leaves every result behind. */
+  readonly token: object;
+  readonly context: object;
+  readonly formula: Formula;
+  others?: WeakMap<object, Formula>;
+}
+
+// A checked proof node carries its cached result in a private field: the
+// result is found by the node's identity exactly as it was in a weak map keyed
+// by the node, and the field, named only in this module, can be neither read
+// nor forged outside it. The weak map it replaces was an ephemeron table
+// holding millions of nodes, and probing it was most of the cost of a check.
+// An exotic node that refuses the field keeps its result in the table.
+class ProofNodeTarget { constructor(target: object) { return target; } }
+class CheckedProofNode extends ProofNodeTarget {
+  #checked: CachedCheck;
+  constructor(target: object, checked: CachedCheck) { super(target); this.#checked = checked; }
+  static of(target: object): CachedCheck | undefined { return #checked in target ? target.#checked : undefined; }
+  static install(target: object, checked: CachedCheck): boolean {
+    if (#checked in target) { target.#checked = checked; return true; }
+    try { new CheckedProofNode(target, checked); return true; } catch { return false; }
+  }
+}
+
 interface ProofCache {
+  /** Identity of this cache, held by every result it owns. */
+  readonly token: object;
   /**
-   * Proof identity -> canonical assumption-context identity -> derived formula.
+   * Proof identity -> canonical assumption-context identity -> derived formula,
+   * for nodes that cannot carry the result themselves.
    *
    * Equivalent contexts receive one interned token, so final theorem
    * admission can reuse subproofs already checked by the elaborator even though
    * implication introduction reconstructs the assumption arrays.
    */
-  readonly results: WeakMap<object, {
-    readonly context: object;
-    readonly formula: Formula;
-    others?: WeakMap<object, Formula>;
-  }>;
+  readonly results: WeakMap<object, CachedCheck>;
   readonly contextTokens: WeakMap<object, object>;
   /**
    * Canonical formula text -> small id, and the same id by formula identity
@@ -118,7 +142,7 @@ const closedAssumptions: readonly Formula[] = Object.freeze([]);
 
 function emptyProofCache(): ProofCache {
   return {
-    results: new WeakMap(), contextTokens: new WeakMap(), activeAssumptions: new WeakMap(),
+    token: {}, results: new WeakMap(), contextTokens: new WeakMap(), activeAssumptions: new WeakMap(),
     formulaIds: new Map(), formulaIdsByObject: new WeakMap(), contextTrie: { children: new Map() },
   };
 }
@@ -1500,7 +1524,8 @@ export class Kernel {
       context = node.token ??= {};
       cache.contextTokens.set(assumptions as object, context);
     }
-    const previous = cache.results.get(proof);
+    const carried = CheckedProofNode.of(proof);
+    const previous = carried?.token === cache.token ? carried : cache.results.get(proof);
     const cached = previous?.context === context ? previous.formula : previous?.others?.get(context);
     if (cached) {
       if (stats) stats.cacheHits += 1;
@@ -1517,7 +1542,11 @@ export class Kernel {
     if (previous) {
       previous.others ??= new WeakMap<object, Formula>();
       previous.others.set(context, result);
-    } else cache.results.set(proof, { context, formula: result });
+    } else {
+      const created: CachedCheck = { token: cache.token, context, formula: result };
+      // A node that carries another cache's result keeps it; this one goes to the table.
+      if (carried !== undefined || !CheckedProofNode.install(proof, created)) cache.results.set(proof, created);
+    }
     return result;
   }
 
