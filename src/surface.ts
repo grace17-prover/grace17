@@ -14026,6 +14026,32 @@ function parseFormula(
       ? forall(name, imp(sorts[index]!, imp(bounds[index]!, result)))
       : exists(name, and(sorts[index]!, and(bounds[index]!, result))), body);
   }
+  // `∀ X Y ⊆ V, φ` binds each variable as a subset of V, in scope for φ:
+  // `∀ X, X ⊆ V → φ`, and `∃ X ⊆ V, φ` is `∃ X, X ⊆ V ∧ φ`.
+  const subsetPrefix = /^(forall|exists|∀|∃)\s*((?:[\p{L}_][\p{L}\p{M}\p{N}_']*\s+)*[\p{L}_][\p{L}\p{M}\p{N}_']*)\s*⊆\s*(.+)$/u.exec(source);
+  if (subsetPrefix) {
+    const names = subsetPrefix[2]!.trim().split(/\s+/);
+    const comma = findTopLevel(subsetPrefix[3]!, ",");
+    if (comma < 0) throw new SurfaceError(line, "a subset-bounded quantifier needs a comma after its bound");
+    const boundSource = subsetPrefix[3]!.slice(0, comma).trim();
+    const bodySource = subsetPrefix[3]!.slice(comma + 1).trim();
+    if (!boundSource || !bodySource) throw new SurfaceError(line, "malformed subset-bounded quantifier");
+    const nestedVariables = new Set(variables);
+    const nestedTypes = new Map(scope.binderTypes ?? []);
+    for (const name of names) {
+      if (variables.has(name)) throw new SurfaceError(line, `${name} is already bound; a bounded quantifier binds a fresh variable`);
+      nestedVariables.add(name);
+      nestedTypes.set(name, { name, type: "Set" });
+    }
+    const nestedScope: SurfaceScope = { ...scope, binderTypes: nestedTypes };
+    const bounds = names.map(name => parseFormula(`${name} ⊆ ${boundSource}`, kernel, nestedVariables, line, nestedScope, classParameters));
+    const body = parseFormula(bodySource, kernel, nestedVariables, line,
+      { ...nestedScope, localFormulas: () => [...(scope.localFormulas?.() ?? []), ...bounds] }, classParameters);
+    const universal = subsetPrefix[1] === "forall" || subsetPrefix[1] === "∀";
+    return names.reduceRight<Formula>((result, name, index) => universal
+      ? forall(name, imp(bounds[index]!, result))
+      : exists(name, and(bounds[index]!, result)), body);
+  }
   // `∀ a b ∈ A, φ` binds each variable by membership in A, in scope for φ.
   const boundedPrefix = /^(forall|exists|∀|∃)\s*([^,]+?)\s+(?:in\s+|∈\s*)(.+)$/u.exec(source);
   if (boundedPrefix) {

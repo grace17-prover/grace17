@@ -1146,6 +1146,8 @@ function formatFormulaIn(formula: Formula, options: PrettyOptions | undefined, n
         const inner = withGuardSorts(options, { tag: "pred", pred: "in", args: [{ tag: "var", name: formula.variable }, bounded.bound] });
         return `∀ ${formula.variable} ∈ ${formatTerm(bounded.bound, options)}, ${formatFormulaIn(bounded.body, inner, false)}`;
       }
+      const subset = subsetQuantifier(formula.variable, formula.body, "forall");
+      if (subset) return `∀ ${formula.variable} ⊆ ${formatTerm(subset.bound, options)}, ${formatFormulaIn(subset.body, options, false)}`;
       const prefix = quantifierPrefix(formula, "forall", options);
       if (prefix) return `${prefix.text} ${formatFormulaIn(prefix.body, prefix.options, false)}`;
       return `∀ ${formula.variable}, ${formatFormulaIn(formula.body, options, false)}`;
@@ -1161,6 +1163,8 @@ function formatFormulaIn(formula: Formula, options: PrettyOptions | undefined, n
         const inner = withGuardSorts(options, { tag: "pred", pred: "in", args: [{ tag: "var", name: formula.variable }, bounded.bound] });
         return `∃ ${formula.variable} ∈ ${formatTerm(bounded.bound, options)}, ${formatFormulaIn(bounded.body, inner, false)}`;
       }
+      const subset = subsetQuantifier(formula.variable, formula.body, "exists");
+      if (subset) return `∃ ${formula.variable} ⊆ ${formatTerm(subset.bound, options)}, ${formatFormulaIn(subset.body, options, false)}`;
       const prefix = quantifierPrefix(formula, "exists", options);
       if (prefix) return `${prefix.text} ${formatFormulaIn(prefix.body, prefix.options, false)}`;
       return `∃ ${formula.variable}, ${formatFormulaIn(formula.body, options, false)}`;
@@ -1197,6 +1201,18 @@ function boundedQuantifier(
       body.left.args.length !== 2 || body.left.args[0]!.tag !== "var" ||
       body.left.args[0]!.name !== variable) return undefined;
   // `∀ x, x ∈ A → ⊥` reads as `∀ x, x ∉ A`, not as a bounded quantifier over ⊥.
+  if (kind === "forall" && body.right.tag === "bottom") return undefined;
+  return { bound: body.left.args[1]!, body: body.right };
+}
+
+/** `∀ X, X ⊆ V → φ` and `∃ X, X ⊆ V ∧ φ` print as subset-bounded binders. */
+function subsetQuantifier(
+  variable: string, body: Formula, kind: "forall" | "exists",
+): { readonly bound: Term; readonly body: Formula } | undefined {
+  const connective = kind === "forall" ? "imp" : "and";
+  if (body.tag !== connective || body.left.tag !== "pred" || !/(^|\.)Subset$/u.test(body.left.pred) ||
+      body.left.args.length !== 2 || body.left.args[0]!.tag !== "var" ||
+      body.left.args[0]!.name !== variable) return undefined;
   if (kind === "forall" && body.right.tag === "bottom") return undefined;
   return { bound: body.left.args[1]!, body: body.right };
 }
