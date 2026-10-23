@@ -3,7 +3,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { pred, app, canonical, eq, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
+import { pred, app, canonical, eq, formulaCanonical, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
 import type { Kernel } from "./kernel.ts";
 import { eqElim,
   andElimLeft, andElimRight, andIntro, assume, at, axiom, definition, iffElimLeft, iffElimRight, impElim, impIntro, symm, theorem,
@@ -55,9 +55,15 @@ function ruleVisible(rule: TypeRule, visibility: ScopeVisibility | undefined): b
   return visibility === undefined || rule.origin === undefined || visibility.declaration(rule.origin);
 }
 
-// Rules are immutable once indexed. Reuse their pattern-variable sets across
-// candidate matching and across successive refinement contexts.
+// Rules are immutable once indexed. Reuse their pattern-variable sets and
+// rigid-argument counts across candidate matching and refinement contexts.
 const ruleVariableSets = new WeakMap<TypeRule, ReadonlySet<string>>();
+const ruleRigidity = new WeakMap<TypeRule, number>();
+function rigidArguments(rule: TypeRule): number {
+  let rigid = ruleRigidity.get(rule);
+  if (rigid === undefined) { rigid = rule.arguments.filter(argument => argument.tag !== "var").length; ruleRigidity.set(rule, rigid); }
+  return rigid;
+}
 function ruleVariables(rule: TypeRule): ReadonlySet<string> {
   let variables = ruleVariableSets.get(rule);
   if (!variables) { variables = new Set(rule.variables); ruleVariableSets.set(rule, variables); }
@@ -73,6 +79,8 @@ interface TypeIndex {
   readonly processed: Set<string>;
   readonly byPredicate: Map<string, readonly TypeRule[]>;
   readonly byName: Map<string, TypeRule>;
+  /** Rules by predicate and argument head, kept in step with `byPredicate`; `null` once a predicate's rules disagree on arity. */
+  readonly heads: Map<string, readonly HeadIndexPosition[] | null>;
 }
 
 export interface SoftTypeResult {
@@ -291,8 +299,10 @@ export function forkTypeIndex(source: Kernel, target: Kernel): void {
       stamp: index.stamp, theoremCount: index.theoremCount, axiomCount: index.axiomCount,
       definitionCount: index.definitionCount, propertyCount: index.propertyCount,
       processed: new Set(index.processed), byName: new Map(index.byName),
-      // Buckets are extended in place, so a fork takes its own copies.
+      // Buckets and head tables are extended in place, so a fork takes its own copies.
       byPredicate: new Map([...index.byPredicate].map(([predicate, rules]) => [predicate, [...rules]])),
+      heads: new Map([...index.heads].map(([predicate, positions]) => [predicate, positions === null ? null :
+        positions.map(slot => ({ byHead: new Map([...slot.byHead].map(([head, rules]) => [head, new Set(rules)])), wildcard: new Set(slot.wildcard) }))])),
     });
   }
   const prepared = preparedInstanceRules.get(source);
@@ -349,7 +359,123 @@ export function prepareRefinementProver(
   visibility?: ScopeVisibility,
 ): RefinementProver {
   const index = typeIndex(kernel);
-  return prepareRuleProver(kernel, index.byPredicate, assumptions, facts, false, {}, undefined, visibility);
+  // The parser asks about every operand of an overloaded notation, and a
+  // tactic about every guard, in one unchanging context. A prover prepared
+  // for that context, with the proofs it has found, answers them all; the
+  // provers are forgotten when the environment gains declarations.
+  let cache = preparedRefinementProvers.get(kernel);
+  if (!cache || cache.stamp !== index.stamp) {
+    cache = { stamp: index.stamp, entries: new Map() };
+    preparedRefinementProvers.set(kernel, cache);
+  }
+  const key = `${visibility ? identityOf(visibilityIdentities, visibility) : ""}|${facts.map(fact => identityOf(factIdentities, fact)).join(",")}|${assumptions.map(formulaCanonical).join("\n")}`;
+  let prover = cache.entries.get(key);
+  if (prover) {
+    cache.entries.delete(key);
+    cache.entries.set(key, prover);
+    return prover;
+  }
+  prover = prepareRuleProver(kernel, index.byPredicate, assumptions, facts, false, {}, headIndexedCandidates(index), visibility) as RefinementProver;
+  cache.entries.set(key, prover);
+  while (cache.entries.size > maximumPreparedRefinementProvers) cache.entries.delete(cache.entries.keys().next().value!);
+  return prover;
+}
+
+const maximumPreparedRefinementProvers = 64;
+const preparedRefinementProvers = new WeakMap<Kernel, { readonly stamp: string; readonly entries: Map<string, RefinementProver> }>();
+const factIdentities = new WeakMap<Proof, number>();
+const visibilityIdentities = new WeakMap<ScopeVisibility, number>();
+let nextIdentity = 0;
+function identityOf<T extends object>(identities: WeakMap<T, number>, value: T): number {
+  let identity = identities.get(value);
+  if (identity === undefined) { identity = ++nextIdentity; identities.set(value, identity); }
+  return identity;
+}
+
+/**
+ * Rules of one predicate by the head of one argument: a function symbol with
+ * its arity, a numeral, or a free name; a pattern variable, or a successor
+ * pattern a numeral can match, is a wildcard that every head admits.
+ */
+interface HeadIndexPosition {
+  readonly byHead: Map<string, Set<TypeRule>>;
+  readonly wildcard: Set<TypeRule>;
+}
+
+function headToken(term: Term, variables: ReadonlySet<string>): string | undefined {
+  if (term.tag === "var") return variables.has(term.name) ? undefined : `var:${term.name}`;
+  const value = naturalValue(term);
+  if (value !== undefined) return `nat:${value}`;
+  return `fn:${term.fn}/${term.args.length}`;
+}
+
+const noVariables: ReadonlySet<string> = new Set();
+
+/** Candidate rules for a refinement goal from the index's head table, every rule when a predicate is unindexed. */
+function headIndexedCandidates(index: TypeIndex): RuleCandidates {
+  return (predicate, arguments_) => {
+    const all = index.byPredicate.get(predicate) ?? [];
+    const positions = index.heads.get(predicate);
+    if (!positions || positions.length !== arguments_.length) return all;
+    // The most selective known position decides; `byPredicate` is sorted by
+    // name, and the candidates keep that order.
+    let best: { readonly exact: Set<TypeRule> | undefined; readonly wildcard: Set<TypeRule> } | undefined;
+    for (let position = 0; position < positions.length; position += 1) {
+      const argument = arguments_[position];
+      if (!argument) continue;
+      const slot = positions[position]!;
+      const exact = slot.byHead.get(headToken(argument, noVariables)!);
+      const size = (exact?.size ?? 0) + slot.wildcard.size;
+      if (!best || size < (best.exact?.size ?? 0) + best.wildcard.size) best = { exact, wildcard: slot.wildcard };
+    }
+    if (!best) return all;
+    if (!best.exact && best.wildcard.size === 0) return [];
+    if ((best.exact?.size ?? 0) + best.wildcard.size === all.length) return all;
+    return all.filter(rule => best!.wildcard.has(rule) || best!.exact?.has(rule) === true);
+  };
+}
+
+function indexRuleHeads(heads: Map<string, readonly HeadIndexPosition[] | null>, rule: TypeRule): void {
+  const existing = heads.get(rule.predicate);
+  if (existing === null) return;
+  if (existing && existing.length !== rule.arguments.length) { heads.set(rule.predicate, null); return; }
+  const positions = existing ?? Array.from({ length: rule.arguments.length }, (): HeadIndexPosition => ({ byHead: new Map(), wildcard: new Set() }));
+  const variables = ruleVariables(rule);
+  positions.forEach((slot, position) => {
+    const argument = rule.arguments[position]!;
+    const token = flexibleNaturalPattern(argument, variables) ? undefined : headToken(argument, variables);
+    if (token === undefined) { slot.wildcard.add(rule); return; }
+    let rules = slot.byHead.get(token);
+    if (!rules) { rules = new Set(); slot.byHead.set(token, rules); }
+    rules.add(rule);
+  });
+  if (!existing) heads.set(rule.predicate, positions);
+}
+
+function insertRuleHeads(positions: readonly DiscriminationNode[], rule: TypeRule): void {
+  const variables = ruleVariables(rule);
+  positions.forEach((root, position) => {
+    const argument = rule.arguments[position]!;
+    const tokens = flexibleNaturalPattern(argument, variables)
+      ? [DISCRIMINATION_WILDCARD]
+      : discriminationTokens(argument, variables);
+    insertDiscriminationRule(root, tokens, rule);
+  });
+}
+
+/** The rules whose patterns can match the given arguments at every known position; undefined when none is known. */
+function retrieveCandidates(positions: readonly DiscriminationNode[], arguments_: readonly (Term | undefined)[]): Set<TypeRule> | undefined {
+  let candidates: Set<TypeRule> | undefined;
+  for (let position = 0; position < positions.length; position += 1) {
+    const argument = arguments_[position];
+    if (!argument) continue;
+    const matching = retrieveDiscriminationRules(positions[position]!, discriminationTokens(argument));
+    candidates = candidates === undefined
+      ? matching
+      : new Set([...candidates].filter(rule => matching.has(rule)));
+    if (candidates.size === 0) break;
+  }
+  return candidates;
 }
 
 interface PreparedInstanceRules {
@@ -424,34 +550,15 @@ function prepareInstanceCandidateIndex(
   const indices = new Map<string, readonly DiscriminationNode[]>();
   for (const [predicate, rules] of rulesByPredicate) {
     const arity = rules[0]?.arguments.length ?? 0;
-    const positions = Array.from({ length: arity }, (_, position): DiscriminationNode => {
-      const root = discriminationNode();
-      for (const rule of rules) {
-        const variables = ruleVariables(rule);
-        const argument = rule.arguments[position]!;
-        const tokens = flexibleNaturalPattern(argument, variables)
-          ? [DISCRIMINATION_WILDCARD]
-          : discriminationTokens(argument, variables);
-        insertDiscriminationRule(root, tokens, rule);
-      }
-      return root;
-    });
+    const positions = Array.from({ length: arity }, discriminationNode);
+    for (const rule of rules) insertRuleHeads(positions, rule);
     indices.set(predicate, Object.freeze(positions));
   }
   return (predicate, arguments_) => {
     const all = rulesByPredicate.get(predicate) ?? [];
     const positions = indices.get(predicate);
     if (!positions || positions.length !== arguments_.length) return all;
-    let candidates: Set<TypeRule> | undefined;
-    for (let position = 0; position < positions.length; position += 1) {
-      const argument = arguments_[position];
-      if (!argument) continue;
-      const matching = retrieveDiscriminationRules(positions[position]!, discriminationTokens(argument));
-      candidates = candidates === undefined
-        ? matching
-        : new Set([...candidates].filter(rule => matching.has(rule)));
-      if (candidates.size === 0) break;
-    }
+    const candidates = retrieveCandidates(positions, arguments_);
     return [...(candidates ?? new Set(all))].sort((left, right) => left.name.localeCompare(right.name));
   };
 }
@@ -472,7 +579,7 @@ function discriminationTokens(term: Term, variables: ReadonlySet<string> = new S
 function flexibleNaturalPattern(term: Term, variables: ReadonlySet<string>): boolean {
   if (term.tag !== "app") return false;
   return (term.fn === "succ" && naturalValue(term) === undefined &&
-    [...freeRuleTermVariables(term)].some(variable => variables.has(variable))) ||
+    [...freeTermVariables(term)].some(variable => variables.has(variable))) ||
     term.args.some(argument => flexibleNaturalPattern(argument, variables));
 }
 
@@ -535,12 +642,12 @@ function prepareRuleProver(
     const rule = compileTypeRule(kernel, `local_${index}`, item.proof, assumptions);
     if (rule) localRules.set(rule.predicate, [...(localRules.get(rule.predicate) ?? []), rule]);
   }
-  const directFacts = new Map<string, Proof>();
+  const directFacts = new GoalTable<Proof>();
   const localPredicates = new Map<string, Map<string, AvailableFact>>();
   for (const item of available) {
     if (item.formula.tag !== "pred") continue;
     const key = refinementKey(item.formula.pred, item.formula.args);
-    directFacts.set(key, item.proof);
+    directFacts.set(goalKeys(item.formula.pred, item.formula.args), item.proof);
     // Repeated proofs of one local proposition are not distinct instance
     // choices. Index complete argument tuples, retaining ambiguity
     // when a partially specified request matches different tuples.
@@ -603,9 +710,15 @@ function prepareRuleProver(
     return results;
   };
   const activeCompletions = new Set<string>();
-  const memo = new Map<string, Proof | false>();
+  const memo = new GoalTable<Proof | false>();
+  // A shared refinement prover keeps the proofs it found and the goals that
+  // failed; a goal that failed while a query's search budget was exhausted
+  // is remembered only within that query, since the failure may be the
+  // budget's rather than the goal's.
+  let negatives = new GoalTable<true>();
+  let exhausted = false;
   const outputMemo = new Map<string, InstanceSynthesisResult | false>();
-  const active = new Set<string>();
+  const active = new GoalTable<true>();
   const limits = {
     maximumDepth: configuredLimits.maximumDepth ?? 64,
     maximumGoals: configuredLimits.maximumGoals ?? 4096,
@@ -644,32 +757,31 @@ function prepareRuleProver(
   // rule is reached. The order is a property of the rule set, not of the
   // declarations loaded, so a proof found alone is found in any larger
   // environment too.
-  const specificityCache = new WeakMap<readonly TypeRule[], readonly TypeRule[]>();
-  const rigidArguments = (rule: TypeRule): number => rule.arguments.filter(argument => argument.tag !== "var").length;
   const bySpecificity = (rules: readonly TypeRule[]): readonly TypeRule[] => {
-    let ordered = specificityCache.get(rules);
-    if (!ordered) {
-      ordered = rules.map((rule, index) => ({ rule, index, rigid: rigidArguments(rule) }))
-        .sort((left, right) => right.rigid - left.rigid || left.index - right.index).map(item => item.rule);
-      specificityCache.set(rules, ordered);
-    }
-    return ordered;
+    if (rules.length < 2) return rules;
+    let mixed = false;
+    const first = rigidArguments(rules[0]!);
+    for (let index = 1; index < rules.length && !mixed; index += 1) mixed = rigidArguments(rules[index]!) !== first;
+    if (!mixed) return rules;
+    return rules.map((rule, index) => ({ rule, index, rigid: rigidArguments(rule) }))
+      .sort((left, right) => right.rigid - left.rigid || left.index - right.index).map(item => item.rule);
   };
   const solve = (wantedArguments: readonly Term[], wantedPredicate: string, depth = 0): Proof | undefined => {
-    if (!rejectAmbiguity && !refinementTermsFit(wantedArguments)) return undefined;
-    const key = refinementKey(wantedPredicate, wantedArguments);
+    const key = goalKeys(wantedPredicate, wantedArguments);
     const cached = memo.get(key);
-    if (cached !== undefined) { counters.memoHits += 1; return cached || undefined; }
+    if (cached) { counters.memoHits += 1; return cached; }
+    if (cached === false || negatives.get(key)) { counters.memoHits += 1; return undefined; }
     const direct = directFacts.get(key);
     if (direct) { memo.set(key, direct); return direct; }
+    if (!rejectAmbiguity && !refinementTermsFit(wantedArguments)) { exhausted = true; return undefined; }
     if (!rejectAmbiguity && (depth > 256 || counters.goalsVisited >= 4096 ||
-      counters.rulesConsidered >= 100_000)) return undefined;
-    if (active.has(key)) return undefined;
+      counters.rulesConsidered >= 100_000)) { exhausted = true; return undefined; }
+    if (active.get(key)) return undefined;
     counters.goalsVisited += 1;
     counters.maximumDepth = Math.max(counters.maximumDepth, depth);
     enforce("maximumGoals", counters.goalsVisited);
     enforce("maximumDepth", depth);
-    active.add(key);
+    active.set(key, true);
     try {
       // A large numeral is typed in logarithmic depth without entering the
       // general rule loop, whose other rules can send a numeral down a
@@ -763,9 +875,14 @@ function prepareRuleProver(
         }
       }
       const solutions: { readonly name: string; readonly proof: Proof }[] = [];
-      for (const rule of [...(localRules.get(wantedPredicate) ?? []),
-        ...bySpecificity(selectRules(candidateRules?.(wantedPredicate, wantedArguments) ?? rulesByPredicate.get(wantedPredicate) ?? []))]) {
-        if (!rejectAmbiguity && counters.rulesConsidered >= 100_000) return undefined;
+      const bucket = rulesByPredicate.get(wantedPredicate) ?? [];
+      const candidates = bySpecificity(selectRules(candidateRules?.(wantedPredicate, wantedArguments) ?? bucket));
+      // The rules the head index leaves out would have been scanned and
+      // rejected; charging them keeps the search budget, and so the point at
+      // which a search gives up, the same as a full scan's.
+      if (!rejectAmbiguity) counters.rulesConsidered += Math.max(0, bucket.length - candidates.length);
+      for (const rule of [...(localRules.get(wantedPredicate) ?? []), ...candidates]) {
+        if (!rejectAmbiguity && counters.rulesConsidered >= 100_000) { exhausted = true; return undefined; }
         counters.rulesConsidered += 1;
         enforce("maximumRuleAttempts", counters.rulesConsidered);
         const matched = new Map<string, Term>();
@@ -820,7 +937,7 @@ function prepareRuleProver(
     } finally {
       active.delete(key);
     }
-    memo.set(key, false);
+    if (rejectAmbiguity || !exhausted) memo.set(key, false); else negatives.set(key, true);
     return undefined;
   };
   let typeRules: RefinementProver | undefined;
@@ -919,18 +1036,18 @@ function prepareRuleProver(
     // A prepared refinement prover answers many queries for one tactic; the
     // search budget is per query, while the memo of solved goals is shared.
     prove: (term: Term, predicate: string, parameters: readonly Term[] = []) => {
-      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; }
+      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false; }
       return solve([...parameters, term], predicate);
     },
     complete: (predicate: string, arguments_: readonly (Term | undefined)[]) => {
-      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; }
+      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false; }
       return resolve(predicate, arguments_);
     },
     // Several completions, for a caller that must try alternatives: the
     // endpoints of one guard may be completed in more than one way, and only
     // one of them may let a later guard complete.
     completions: (predicate: string, arguments_: readonly (Term | undefined)[], limit = 8): InstanceSynthesisResult[] => {
-      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; }
+      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false; }
       if (!arguments_.some(argument => argument === undefined)) {
         const single = resolve(predicate, arguments_);
         return single ? [single] : [];
@@ -965,6 +1082,53 @@ function instantiateRuleTerm(term: Term, substitution: ReadonlyMap<string, Term>
     args.push(instantiated);
   }
   return args.every((argument, index) => argument === term.args[index]) ? term : app(term.fn, ...args);
+}
+
+/**
+ * A refinement goal as the solver's tables key it: the predicate and, per
+ * argument, a numeral's value or the term's canonical form. Canonical forms
+ * are cached per node, so the strings carry their hashes, and a table keyed
+ * level by level on them looks a goal up without building a composite key.
+ */
+type GoalKeys = readonly string[];
+function goalKeys(predicate: string, arguments_: readonly Term[]): GoalKeys {
+  const keys: string[] = [predicate];
+  for (const term of arguments_) {
+    const value = naturalValue(term);
+    keys.push(value === undefined ? termCanonical(term) : `#nat:${value}`);
+  }
+  return keys;
+}
+
+interface GoalNode<V> { value?: V; children?: Map<string, GoalNode<V>> }
+class GoalTable<V> {
+  private readonly root: GoalNode<V> = {};
+  get(keys: GoalKeys): V | undefined {
+    let node: GoalNode<V> | undefined = this.root;
+    for (const key of keys) {
+      node = node.children?.get(key);
+      if (!node) return undefined;
+    }
+    return node.value;
+  }
+  set(keys: GoalKeys, value: V): void {
+    let node = this.root;
+    for (const key of keys) {
+      if (!node.children) node.children = new Map();
+      let next = node.children.get(key);
+      if (!next) { next = {}; node.children.set(key, next); }
+      node = next;
+    }
+    node.value = value;
+  }
+  delete(keys: GoalKeys): void {
+    let node: GoalNode<V> | undefined = this.root;
+    for (const key of keys) {
+      node = node.children?.get(key);
+      if (!node) return;
+    }
+    node.value = undefined;
+  }
 }
 
 function refinementKey(predicate: string, arguments_: readonly Term[]): string {
@@ -1053,7 +1217,7 @@ function typeIndex(kernel: Kernel): TypeIndex {
       kernel.definitions.size < index.definitionCount) {
     index = {
       stamp: "", theoremCount: 0, axiomCount: 0, definitionCount: 0, propertyCount: 0,
-      processed: new Set(), byPredicate: new Map(), byName: new Map(),
+      processed: new Set(), byPredicate: new Map(), byName: new Map(), heads: new Map(),
     };
     indices.set(kernel, index);
   }
@@ -1069,6 +1233,7 @@ function typeIndex(kernel: Kernel): TypeIndex {
       if (bucket[middle]!.name.localeCompare(rule.name) < 0) low = middle + 1; else high = middle;
     }
     bucket.splice(low, 0, rule);
+    indexRuleHeads(index!.heads, rule);
   };
   const add = (name: string, proof: Proof, origin: string): void => {
     if (index!.processed.has(name)) return;
