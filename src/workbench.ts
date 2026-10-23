@@ -293,8 +293,9 @@ interface DependencyCheckpoint {
     readonly dependencies: readonly CompiledModuleDependency[];
     readonly prefix?: string;
   };
-  /** How many modules this checkpoint elaborated from source rather than replayed. */
+  /** How many modules this checkpoint elaborated from source rather than replayed, and how long that took. */
   readonly elaborated: number;
+  readonly elaboratedMilliseconds: number;
 }
 
 const incrementalBases = new Map<string, DependencyCheckpoint>();
@@ -647,11 +648,12 @@ function dependencyCheckpoint(
       sorries: [],
     }));
     setSurfaceTraceCapture(kernel, false);
+    const started = performance.now();
     const newlyLoaded = loadDisplayedModuleGraph(kernel,
       orderedSources.map(([, source]) => source), roots.roots, [], imports, roots.derive);
     return rememberCheckpoint({ key, profile, kernel, loaded: [...standardLoaded, ...newlyLoaded], sourceDigests,
       base: { foundation, kernel: replayed.kernel, mark, dependencies: replayed.dependencies, prefix: standard.rootModule },
-      elaborated: newlyLoaded.length });
+      elaborated: newlyLoaded.length, elaboratedMilliseconds: performance.now() - started });
   }
 
   let base: DependencyCheckpoint["base"];
@@ -667,10 +669,12 @@ function dependencyCheckpoint(
     forkSurfaceEnvironment(foundation, kernel);
   }
   setSurfaceTraceCapture(kernel, false);
+  const started = performance.now();
   const newlyLoaded = loadDisplayedModuleGraph(kernel, orderedSources.map(([, source]) => source), roots.roots, [], imports, roots.derive);
   const loaded = compatible ? [...compatible.loaded, ...newlyLoaded] : newlyLoaded;
   return rememberCheckpoint({ key, profile, kernel, loaded, sourceDigests, base,
-    elaborated: (compatible?.elaborated ?? 0) + newlyLoaded.length });
+    elaborated: (compatible?.elaborated ?? 0) + newlyLoaded.length,
+    elaboratedMilliseconds: (compatible?.elaboratedMilliseconds ?? 0) + performance.now() - started });
 }
 
 /** What the active file's dependency prefix needs before a prepare or check, so a worker can fetch or recall it. */
@@ -680,8 +684,9 @@ export interface DependencyCheckpointPlan {
   readonly sources: readonly (readonly [module: string, digest: string])[];
   /** This exact dependency set is already prepared in this process. */
   readonly exact: boolean;
-  /** Modules the prepared checkpoint elaborated from source; absent until it exists. */
+  /** Modules the prepared checkpoint elaborated from source, and the time that took; absent until it exists. */
   readonly elaborated?: number;
+  readonly elaboratedMilliseconds?: number;
   /** The largest matching checkpoint whose payload is not installed yet. */
   readonly standard?: { readonly rootModule: string; readonly file?: string };
   /** Sources covered by the largest installed matching checkpoint. */
@@ -709,7 +714,7 @@ export function dependencyCheckpointPlan(
     sources: graph.orderedSources.map(([name, source]) =>
       [name, inspectDependencySource(source.file, source.source, roots).contentDigest ??= sha256Hex(source.source)] as const),
     exact: exact !== undefined,
-    ...(exact ? { elaborated: exact.elaborated } : {}),
+    ...(exact ? { elaborated: exact.elaborated, elaboratedMilliseconds: Math.round(exact.elaboratedMilliseconds) } : {}),
     ...(best && best !== installed ? { standard: { rootModule: best.rootModule, ...(best.file ? { file: best.file } : {}) } } : {}),
     installedPrefix: installed?.sources.length ?? 0,
   };

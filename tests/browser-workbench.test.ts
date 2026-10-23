@@ -670,6 +670,7 @@ test("a kept checkpoint exported by the browser replays as a prefix for a later 
   const plan = browser.dependencyCheckpointPlan([{ name: active, source }], "ZFG", active);
   assert.equal(plan?.exact, true);
   assert.equal(plan?.elaborated, prepared.modules);
+  assert.ok((plan?.elaboratedMilliseconds ?? 0) > 0);
   const kept = browser.exportDependencyCheckpoint([{ name: active, source }], "ZFG", active);
   assert.ok(kept);
   assert.equal(kept.rootModule, `kept:${plan!.key}`);

@@ -88,10 +88,10 @@ async function ensureInstalled(rootModule) {
   await fetching.get(rootModule);
 }
 
-// Keeping: once a prepared prefix has elaborated enough modules from source,
-// it is compiled and stored in this browser, in a quiet moment after the
-// requests that needed it have been answered.
-const keepThreshold = 20;
+// Keeping: once a prepared prefix has spent long enough elaborating modules
+// from source, it is compiled and stored in this browser, in a quiet moment
+// after the requests that needed it have been answered.
+const keepThresholdMilliseconds = 1500;
 const keepDatabase = "grace17-workbench-checkpoints";
 const keepStore = "checkpoints";
 const keepBudget = 400 * 1024 * 1024;
@@ -102,7 +102,7 @@ function scheduleKeep(files, activeName) {
 }
 async function keep(files, activeName) {
   const plan = dependencyCheckpointPlan(files, "ZFG", activeName);
-  if (!plan?.exact || (plan.elaborated ?? 0) < keepThreshold) return;
+  if (!plan?.exact || (plan.elaboratedMilliseconds ?? 0) < keepThresholdMilliseconds) return;
   if (await hasKept(plan.key)) return;
   const exported = exportDependencyCheckpoint(files, "ZFG", activeName);
   if (!exported) return;
