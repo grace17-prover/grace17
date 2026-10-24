@@ -129,12 +129,12 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| CycleDoubleCover.Graphs.EdgeSets | 6 | 6 | 0 |
-| CycleDoubleCover.Graphs.Degree | 25 | 25 | 0 |
+| CycleDoubleCover.Graphs.EdgeSets | 5 | 5 | 0 |
+| CycleDoubleCover.Graphs.Degree | 24 | 24 | 0 |
 | CycleDoubleCover.Graphs.Even | 5 | 5 | 0 |
-| CycleDoubleCover.Graphs.Cuts | 26 | 26 | 0 |
+| CycleDoubleCover.Graphs.Cuts | 24 | 24 | 0 |
 | CycleDoubleCover.Graphs.Connectivity | 27 | 27 | 0 |
-| CycleDoubleCover.Graphs.Trees | 42 | 42 | 0 |
+| CycleDoubleCover.Graphs.Trees | 48 | 48 | 0 |
 | CycleDoubleCover.DoubleCover.Covers | 4 | 0 | 4 |
 | CycleDoubleCover.TreePacking.Decompositions | 5 | 0 | 5 |
 | CycleDoubleCover.TreePacking.Kaiser | 9 | 0 | 9 |
@@ -146,5 +146,5 @@ graph TD
 | CycleDoubleCover.Flows.Contraction | 5 | 0 | 5 |
 | CycleDoubleCover.Flows.EightFlow | 4 | 0 | 4 |
 | CycleDoubleCover.DoubleCover.Theorem | 2 | 0 | 2 |
-| **total** | **186** | **131** | **55** |
+| **total** | **188** | **133** | **55** |
 <!-- /blueprint-status -->
