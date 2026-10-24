@@ -155,16 +155,27 @@ function validateProgram(program: ProofMachineProgram): void {
 
 function isUint(value: number): boolean { return Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff; }
 
+/** A byte buffer that doubles as it fills: a library module runs to hundreds
+ * of megabytes, which a number per byte in a JS array would multiply by eight. */
 class Writer {
-  private readonly data: number[] = [];
-  byte(value: number): void { this.data.push(value); }
-  bytes(values: Uint8Array): void { for (const value of values) this.data.push(value); }
+  private data = new Uint8Array(1 << 16);
+  private length = 0;
+  private reserve(count: number): void {
+    if (this.length + count <= this.data.length) return;
+    let size = this.data.length * 2;
+    while (size < this.length + count) size *= 2;
+    const grown = new Uint8Array(size);
+    grown.set(this.data.subarray(0, this.length));
+    this.data = grown;
+  }
+  byte(value: number): void { this.reserve(1); this.data[this.length++] = value; }
+  bytes(values: Uint8Array): void { this.reserve(values.length); this.data.set(values, this.length); this.length += values.length; }
   varUint(value: number): void {
     if (!isUint(value)) throw new KernelError(`Cannot encode G17M integer ${value}`);
     do { const chunk = value % 128; value = Math.floor(value / 128); this.byte(chunk | (value > 0 ? 0x80 : 0)); } while (value > 0);
   }
   string(value: string): void { const bytes = new TextEncoder().encode(value); this.varUint(bytes.length); this.bytes(bytes); }
-  finish(): Uint8Array { return Uint8Array.from(this.data); }
+  finish(): Uint8Array { return this.data.slice(0, this.length); }
 }
 
 class Reader {

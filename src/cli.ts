@@ -249,8 +249,10 @@ export function runCli(args: readonly string[]): void {
       } else if (command === "compile") {
         const theoremNames = checked.flatMap(item => item.theorems);
         if (theoremNames.length === 0) throw new KernelError("No theorems to compile");
-        const machine = compileProofModule(theoremNames.map(name => exportTheoremForMachine(kernel, name)));
-        const binary = encodeProofMachineBinary(machine);
+        // Each theorem is exported as it is appended to the tape, and the
+        // program is not kept once encoded: the verify pass decodes its own.
+        const exports = function* () { for (const name of theoremNames) yield exportTheoremForMachine(kernel, name); };
+        const binary = encodeProofMachineBinary(compileProofModule(exports()));
         const verified = verifyProofMachineBinary(kernel, binary);
         const output = resolve(option("--out") ?? "module.g17m");
         writeFileSync(output, binary);
