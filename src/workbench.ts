@@ -12,7 +12,10 @@ import { callNative } from "./runtime.ts";
 import { exportTheorem, theoremDependencies } from "./export.ts";
 import { formatFormula, formatTerm, type PrettyOptions } from "./pretty.ts";
 import { createSetTheoryFoundationKernel, createSetTheoryKernel, SET_THEORY_BOOTSTRAP_FILES } from "./zfg.ts";
-import { loadModuleSourceGraph, moduleNameFromRoots, type LoadedModule, type ModuleSourceFile } from "./module-loader.ts";
+import {
+  beginDependencyReads, dependencyStampsCurrent, endDependencyReads, loadModuleSourceGraph, moduleNameFromRoots, noteDependencyRead,
+  type DependencyStamp, type LoadedModule, type ModuleSourceFile,
+} from "./module-loader.ts";
 import { scanModule, type ModuleNameDeriver } from "./module-source-loader.ts";
 import { resolveImportName } from "./module-names.ts";
 import { classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
@@ -1158,6 +1161,50 @@ function completedTheorems(
     .map(({ name, ...location }) => renderTheorem(kernel, name, location, shortNames, notations, sorries, { includeKernelDetails: false, includeDependencies: true }));
 }
 
+/**
+ * The environment a failed check loaded before it stopped: the symbols of
+ * every dependency and of the failing file's declarations before the
+ * failure, reported as a checked environment reports them, with the
+ * notations in scope and a lookup of generated properties. A failure with no
+ * kernel behind it, such as an unresolved import, has no environment.
+ */
+export function workbenchFailureEnvironment(error: unknown, files: readonly WorkbenchFile[], options: WorkbenchWorkspaceOptions = {}) {
+  const kernel = error instanceof SurfaceError ? failureKernels.get(error) : undefined;
+  if (!kernel) return undefined;
+  const roots = workspaceRoots(options.moduleRoots);
+  const sourceByName = new Map(files.map(file => [file.name, file.source]));
+  const workspaceModules = new Map<string, string>();
+  for (const file of files) {
+    const name = scanModule(file.source, file.name, roots.derive).name;
+    if (name) workspaceModules.set(name, file.name);
+  }
+  const fileOf = (module: string): string | undefined => {
+    const known = workspaceModules.get(module);
+    if (known) return known;
+    const relativePath = `${module.split(".").join("/")}.g17`;
+    return roots.roots.map(root => resolve(root, relativePath)).find(candidate => safeRead(candidate) !== undefined);
+  };
+  const empty = { definitions: [], theorems: [], theoremLocations: [], evaluations: [], sorries: [] } as const;
+  const loaded: LoadedModule[] = moduleReport(kernel).map(record => ({ file: fileOf(record.name) ?? record.name, module: record.name, ...empty }));
+  // The failing file's own declarations before the failure are in the
+  // kernel whether or not its module is registered yet.
+  for (const file of files) {
+    if (loaded.some(item => item.file === file.name)) continue;
+    const module = [...workspaceModules].find(([, name]) => name === file.name)?.[0];
+    loaded.push({ file: file.name, ...(module ? { module } : {}), ...empty });
+  }
+  const symbolNames = [...new Set([...kernel.functions.keys(), ...kernel.predicates.keys()])];
+  const shortNames = shortestUniqueNames(symbolNames, symbolSignature(kernel));
+  const notations = notationReport(kernel);
+  const display = formulaDisplay(kernel, shortNames, notations);
+  return {
+    symbols: symbolReport(kernel, loaded, sourceByName, shortNames, display, roots),
+    loaded,
+    notations: notations.map(({ definitionTarget, ...notation }) => ({ ...notation, target: definitionTarget ?? notation.target })),
+    property: (name: string) => kernelProperty(kernel, name),
+  };
+}
+
 function displayDocumentName(file: string, roots: WorkspaceRoots = workspaceRoots()): string {
   for (const root of roots.roots) if (file.startsWith(`${root}/`)) return relative(root, file);
   return file;
@@ -1514,7 +1561,9 @@ function declarationRanges(source: string, definitions: boolean): readonly { lin
 // audits and statement queries that follow a check reuse the environment
 // instead of loading it again. The incremental loader already keeps the
 // dependency checkpoint; this keeps the checked leaf as well.
-const workspaceKernels = new Map<string, ReturnType<typeof createSetTheoryKernel>>();
+// Kept with the dependency files their load read, so a kernel whose
+// dependency was rewritten on disk since is loaded again rather than reused.
+const workspaceKernels = new Map<string, { readonly kernel: ReturnType<typeof createSetTheoryKernel>; readonly stamps: readonly DependencyStamp[] }>();
 const maximumWorkspaceKernels = 4;
 
 function workspaceKernel(
@@ -1524,11 +1573,17 @@ function workspaceKernel(
   const known = workspaceKernels.get(key);
   if (known) {
     workspaceKernels.delete(key);
-    workspaceKernels.set(key, known);
-    return known;
+    if (pinnedDependencies || dependencyStampsCurrent(known.stamps)) {
+      workspaceKernels.set(key, known);
+      return known.kernel;
+    }
   }
-  const { kernel } = loadWorkspace(files, profile, entryFiles, roots);
-  workspaceKernels.set(key, kernel);
+  beginDependencyReads();
+  let kernel: ReturnType<typeof createSetTheoryKernel>;
+  let stamps: readonly DependencyStamp[];
+  try { kernel = loadWorkspace(files, profile, entryFiles, roots).kernel; }
+  finally { stamps = endDependencyReads(); }
+  workspaceKernels.set(key, { kernel, stamps });
   while (workspaceKernels.size > maximumWorkspaceKernels) workspaceKernels.delete(workspaceKernels.keys().next().value!);
   return kernel;
 }
@@ -1592,7 +1647,11 @@ export function describeWorkbenchStatement(files: readonly WorkbenchFile[], theo
  */
 export function describeWorkbenchProperty(files: readonly WorkbenchFile[], name: string,
   profile: WorkbenchFoundation = "ZFG", entryFiles?: readonly string[], options: WorkbenchWorkspaceOptions = {}) {
-  const kernel = workspaceKernel(files, profile, entryFiles, workspaceRoots(options.moduleRoots));
+  return kernelProperty(workspaceKernel(files, profile, entryFiles, workspaceRoots(options.moduleRoots)), name);
+}
+
+/** The generated property a name denotes in a kernel; see `describeWorkbenchProperty`. */
+function kernelProperty(kernel: ReturnType<typeof createSetTheoryKernel>, name: string) {
   const parts = name.split(".");
   const candidates: { readonly definition: string; readonly kind: string; readonly property: string; readonly formula: Formula }[] = [];
   for (let split = parts.length - 1; split >= 1 && candidates.length === 0; split -= 1) {
@@ -1633,6 +1692,7 @@ function readDependency(file: string): string | undefined {
   const pinned = pinnedDependencies?.get(file);
   if (pinned !== undefined) return pinned;
   const source = safeRead(file);
+  noteDependencyRead(file);
   if (pinnedDependencies && source !== undefined) pinnedDependencies.set(file, source);
   return source;
 }

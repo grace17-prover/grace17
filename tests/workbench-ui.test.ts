@@ -76,6 +76,9 @@ proof
 test("checked import-only modules receive the proven file state", () => {
   assert.equal(checkedFileProofState({ theorems: 0, definitions: 0, sorries: 0, admittedSorries: 0 }), "proven");
   assert.equal(checkedFileProofState({ theorems: 0, definitions: 0, sorries: 1, admittedSorries: 1 }), "sorry");
+  // A file whose proofs are complete but cite an admission elsewhere is
+  // dependent: its own obligations are met, so it is not amber.
+  assert.equal(checkedFileProofState({ theorems: 1, definitions: 0, sorries: 0, admittedSorries: 1 }), "proven");
   assert.equal(checkedFileProofState(undefined), undefined);
 });
 

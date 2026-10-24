@@ -44,9 +44,60 @@ export function loadModuleSourceGraph(
   setLibraryDeclarationLocator(libraryDeclarationLocator(resolvedRoots));
   return loadModuleSourceGraphResolved(kernel, entries, entryFiles, name => {
     const relative = `${name.split(".").join("/")}.g17`;
-    const file = resolvedRoots.map(root => resolve(root, relative)).find(candidate => existsSync(candidate));
+    const file = resolvedRoots.map(root => resolve(root, relative)).find(candidate => {
+      noteDependencyRead(candidate);
+      return existsSync(candidate);
+    });
     return file ? { file, source: readFileSync(file, "utf8") } : undefined;
   }, entryModules, deriveName);
+}
+
+// The dependency files a check read from disk, each with the size and
+// modification time seen: a caller that keeps an answer computed over them
+// can tell when a later request must not reuse it, because a dependency was
+// rewritten, created, or removed meanwhile. A file that was looked for and
+// not found is recorded too, so that its creation is also a change.
+export interface DependencyStamp {
+  readonly file: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+const MISSING_STAMP = -1;
+// Recordings nest: a load started while another records is noted by both.
+const dependencyReads: Map<string, DependencyStamp>[] = [];
+
+/** Record the dependency files read from now until the matching `endDependencyReads`. */
+export function beginDependencyReads(): void {
+  dependencyReads.push(new Map());
+}
+
+/** The dependency files read since the matching `beginDependencyReads`, and stop that recording. */
+export function endDependencyReads(): readonly DependencyStamp[] {
+  return [...(dependencyReads.pop()?.values() ?? [])];
+}
+
+function stampOf(file: string): DependencyStamp {
+  try {
+    const stat = statSync(file);
+    return { file, size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch {
+    return { file, size: MISSING_STAMP, mtimeMs: MISSING_STAMP };
+  }
+}
+
+/** Note that a loader read, or looked for, a dependency file on disk. */
+export function noteDependencyRead(file: string): void {
+  if (dependencyReads.length === 0) return;
+  const stamp = stampOf(file);
+  for (const recording of dependencyReads) if (!recording.has(file)) recording.set(file, stamp);
+}
+
+/** Whether every recorded dependency file is as it was when it was read: same size and modification time, or still missing. */
+export function dependencyStampsCurrent(stamps: readonly DependencyStamp[]): boolean {
+  return stamps.every(stamp => {
+    const now = stampOf(stamp.file);
+    return now.size === stamp.size && now.mtimeMs === stamp.mtimeMs;
+  });
 }
 
 /** The declarations of the modules under the roots, read from their sources
