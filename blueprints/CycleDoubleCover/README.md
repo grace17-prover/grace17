@@ -134,7 +134,7 @@ graph TD
 | CycleDoubleCover.Graphs.Even | 5 | 5 | 0 |
 | CycleDoubleCover.Graphs.Cuts | 24 | 24 | 0 |
 | CycleDoubleCover.Graphs.Connectivity | 27 | 27 | 0 |
-| CycleDoubleCover.Graphs.Trees | 48 | 48 | 0 |
+| CycleDoubleCover.Graphs.Trees | 47 | 47 | 0 |
 | CycleDoubleCover.DoubleCover.Covers | 4 | 0 | 4 |
 | CycleDoubleCover.TreePacking.Decompositions | 5 | 0 | 5 |
 | CycleDoubleCover.TreePacking.Kaiser | 9 | 0 | 9 |
@@ -146,5 +146,5 @@ graph TD
 | CycleDoubleCover.Flows.Contraction | 5 | 0 | 5 |
 | CycleDoubleCover.Flows.EightFlow | 4 | 0 | 4 |
 | CycleDoubleCover.DoubleCover.Theorem | 2 | 0 | 2 |
-| **total** | **188** | **133** | **55** |
+| **total** | **187** | **132** | **55** |
 <!-- /blueprint-status -->
