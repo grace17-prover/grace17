@@ -230,7 +230,7 @@ the at and with arguments first use ∀E and →E to obtain P
 
 ### `fact with ⟨a, b⟩`
 
-**Supply a conjunction or existential premise in place.** An anonymous constructor is a proof expression wherever its proposition is known: in a with list, after exact or show, in an annotated have, and as a refine component. Nested constructors go through predicate definitions. When a requirement is a conjunction and the with list supplies its conjuncts in order, as difference.membership.backward with inSpace, notInjective does for x ∈ A ∧ x ∉ B, the entries are combined as ⟨inSpace, notInjective⟩ would be; a genuine mismatch keeps its message. Parentheses group a multi-premise application inside refine ⟨…⟩, where commas separate components. A local fact that is a transparent predicate application, such as subset : A ⊆ B, applies to arguments through its definition without unfolding it first.
+**Supply a conjunction or existential premise in place.** An anonymous constructor is a proof expression wherever its proposition is known: in a with list, after exact or show, in an annotated have, and as a refine component. Nested constructors go through predicate definitions. In an unannotated have, the components fix the parameters of the applied theorem as named entries do: have m := lemma.backward with ⟨hJ, extendsJ⟩ matches hJ and extendsJ against the conjuncts of the requirement, so no at list is needed and no context fact of the same shape can choose another instance. When a requirement is a conjunction and the with list supplies its conjuncts in order, as difference.membership.backward with inSpace, notInjective does for x ∈ A ∧ x ∉ B, the entries are combined as ⟨inSpace, notInjective⟩ would be; a genuine mismatch keeps its message. Parentheses group a multi-premise application inside refine ⟨…⟩, where commas separate components. A local fact that is a transparent predicate application, such as subset : A ⊆ B, applies to arguments through its definition without unfolding it first.
 
 ```g17
 -- ih : ∀ y, y ∈ H ∧ R(y, x) → P(y), hy : y ∈ H, earlier : R(y, x)
@@ -643,9 +643,9 @@ discharges the local hypothesis h : ¬P
 
 ### `by_cases h : P`
 
-**Split the goal on a proposition and its negation.** Two goals follow, the first with h : P and the second with h : ¬P, each taking a bullet as after cases; the name defaults to h. The split is excluded middle for P, reconstructed by checked classical double-negation elimination, so by_cases h : P is the idiom have split : P ∨ ¬P by tauto followed by cases split with h | h in one step.
+**Split the goal on a proposition and its negation.** Two goals follow, the first with h : P and the second with h : ¬P, each taking a bullet as after cases; the name defaults to h. The split is excluded middle for P, reconstructed by checked classical double-negation elimination, so by_cases h : P is the idiom have split : P ∨ ¬P by tauto followed by cases split with h | h in one step. The proposition may begin on the next line, more indented than the by_cases, as after have h :.
 
-`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it.
+`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it. With nothing after the colon, `by_cases h :` takes its proposition from the next, more indented line, as `have h :` does; a proposition may also break after an operator or a comma, or before an operator, like any other step.
 
 ```g17
 -- goal: x = y ∨ x ≠ y
@@ -683,9 +683,9 @@ search constructs the displayed natural-deduction steps
 
 ### `tauto`
 
-**Finish classical propositional reasoning.** Predicates, equalities, and quantified formulas are atoms. The proof is a case split on those atoms.
+**Finish classical propositional reasoning.** Predicates, equalities, and quantified formulas are atoms. An equation and its mirror image are one atom, so a = b, b = a, a ≠ b, and ¬(b = a) are decided together. The proof is a case split on those atoms.
 
-`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error.
+`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. An equation is the same atom in either orientation, so `a = b` and `b = a` are one atom, as are `a ≠ b` and `¬(b = a)`; from `h : a = b` the goal `¬(b ≠ a)` closes, and a lemma stated as `l = v ∨ r = v` meets a hypothesis `v ≠ l`. This is a reading of the atoms, not equality reasoning: `a = b` and `b = c` do not give `a = c`, which is for `cc`. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error.
 
 ```g17
 -- goal: ((P → Q) → P) → P
@@ -730,7 +730,7 @@ the at form stores the result as a local fact
 
 Rewriting is equality elimination. A notation token names its underlying definition wherever a rule is expected.
 
-After `unfold`, local equalities may already have been applied to the exposed body, so a following `rw h` can report that the rule does not match; `cc` closes such goals directly.
+`unfold` leaves local equalities unapplied, so `rw h` after `unfold f` finds the instance the definition exposed; `cc` closes a goal that follows from the context equalities directly.
 
 ```g17
 -- hxy : x = y, goal: pair(x, x) = pair(y, y)
@@ -788,13 +788,15 @@ x occurs free in neither s nor t; ∀ and reverse rewriting are analogous
 
 ### `simp [rules]`
 
-**Normalize, decide membership, and close with the logical search.** simp with rules is equivalent. It closes the goal when normalization, ground reasoning, or the logical search suffice; otherwise a checked proposition equivalence may replace the focused goal so simplification can continue incrementally. Membership in compound sets needs no rules: the visible membership characterizations and the Subset definition are instantiated where the goal's atoms match them, universal hypotheses are instantiated at the terms in play, and the result is decided by case analysis with congruence closure, so ext y then simp proves insert(x, V ∖ {x}) = V from x ∈ V. Other definitions are named, as in simp [pow]. Inside a logical goal the named equalities are applied to a bounded fixed point, so simp [fst.pair, snd.pair] reduces every layer of fst(fst(((a, b), c))) ∈ A and leaves a ∈ A for the next tactic. Add at h to simplify a proved proposition in place. Conditional rewrite hypotheses use context and soft typing by default; opt into recursive relief with simp (backchain := 2, work := 128) [rules]. Relief shares its work allowance and never splits cases. In a disjunction, the incremental pass may use negated sibling literals, discharging them in the reconstructed proof.
+**Normalize, decide membership, and close with the logical search.** simp with rules is equivalent. It closes the goal when normalization, ground reasoning, or the logical search suffice; otherwise a checked proposition equivalence may replace the focused goal so simplification can continue incrementally. Membership in compound sets needs no rules: the visible membership characterizations and the Subset definition are instantiated where the goal's atoms match them, universal hypotheses are instantiated at the terms in play, and the result is decided by case analysis with congruence closure, so ext y then simp proves insert(x, V ∖ {x}) = V from x ∈ V. Other definitions are named, as in simp [pow]. A predicate definition among the rules, simp [EvenSet] or simp [EvenSet] at h, is opened wherever the goal or fact mentions it, as unfold opens it. Inside a logical goal the named equalities are applied to a bounded fixed point, so simp [fst.pair, snd.pair] reduces every layer of fst(fst(((a, b), c))) ∈ A and leaves a ∈ A for the next tactic. Add at h to simplify a proved proposition in place. Conditional rewrite hypotheses use context and soft typing by default; opt into recursive relief with simp (backchain := 2, work := 128) [rules]. Relief shares its work allowance and never splits cases. In a disjunction, the incremental pass may use negated sibling literals, discharging them in the reconstructed proof.
 
 `simp` normalizes with checked definitions, equalities, ground computation, and routine logical assembly. It evaluates closed `Bool` expressions and discharges many constructive propositional tautologies; for complete classical propositional reasoning use `tauto`.
 
 Incremental use: if the rules do not close the goal but a supplied equivalence changes the outer proposition, `simp` leaves the equivalent simplified proposition as the next goal and records the checked backward implication. If no outer equivalence applies, it can perform one equality rewrite inside a logical goal, including a negated condition, without rewriting beneath quantifiers or splitting cases. In a disjunction it may use the negations of sibling literals while rewriting one literal and discharges those assumptions in the reconstructed proof.
 
 `simp [rules] at h` forward-simplifies an arbitrary proved proposition through checked equivalences and equality transport: `simp [pair.membership] at h` turns `h : x ∈ pair(a, b)` into `h : x = a ∨ x = b`.
+
+A predicate definition named among the rules is opened at every instance first, as `unfold` opens it, so `simp [EvenSet] at parity` turns every `EvenSet(A)` in `parity` into `Even(cardinality(A))` before the rest of the simplification; the equivalence rewriting that follows reaches the outer proposition.
 
 Conditional rewrite rules use direct contextual evidence and soft-type reasoning by default. Recursive relief needs explicit limits, `simp (backchain := 2, work := 128) [rules]`, also accepted by `simp ... at h` and `simpa`. `backchain` bounds recursive rule applications along a hypothesis path; `work` is one allowance shared across relief entries, attempted conclusions and conjuncts, contextual bindings, sibling guards, and the closure phases. Relief can select conjuncts of a rule conclusion and either direction of an equivalence, and may bind a rule variable absent from the conclusion by matching a hypothesis against a contextual fact; it never guesses witnesses or splits cases, and exhaustion leaves the rewrite unapplied.
 
@@ -836,9 +838,9 @@ the normalized fact must match the normalized goal
 
 ### `unfold name`
 
-**Expose one definition.** A defined predicate is unfolded wherever the goal mentions it: at the head, under ∧, ∨, →, and ¬, and inside a ∀ or ∃ whose bound variable the instance mentions. Add at h for a local fact. Notation such as % may name its underlying definition directly. A name declared at two arities means the one the goal, or the fact named by at, mentions.
+**Expose one definition.** The named definition is opened at every instance of the goal, or of the fact named by at h, in one call: under every connective and relation, inside arguments, and inside a ∀ or ∃ whose bound variable the instance mentions. A defined predicate at the head of the goal or fact is opened through its definition, with its generated carrier guards supplied or peeled. Nothing else changes: local equalities are never applied, so the result depends on the definition alone and not on the context; bring a context equality h in afterwards with rw h, with simp [name, h], or close from the context with cc. A definition the goal or fact does not mention is reported. Notation such as % may name its underlying definition directly. A name declared at two arities means the one the goal, or the fact named by at, mentions.
 
-`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` also rewrites with local equalities in the exposed body.
+`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` never rewrites with local equalities: after `unfold f`, a context equality `h` is applied by `rw h` or by `simp [f, h]`, and `cc` closes a goal the context equalities settle. Every instance opens in one call, so a second `unfold f` on the same goal or fact reports that there is nothing left to unfold.
 
 ```g17
 -- goal mentions a % b

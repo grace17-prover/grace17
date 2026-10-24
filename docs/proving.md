@@ -130,7 +130,8 @@ shape, and take the next small step:
 
 `by_cases h : P` is `have split : P ∨ ¬P by tauto` followed by `cases
 split with h | h` in one step: two goals, the first with `h : P`, the
-second with `h : ¬P`, each taking a bullet. `exact`, `show P := fact`,
+second with `h : ¬P`, each taking a bullet; a long proposition may begin
+on the next, more indented line after `by_cases h :`, as after `have h :`. `exact`, `show P := fact`,
 `apply`, `assumption`, `have`, `unfold`, `rfl`, `compute`, and `simp`
 provide the usual proof assembly and computation steps. `simp [f, h]` normalizes with checked definitions, equalities, and
 ground computation, and closes a logical goal when its search succeeds; `rw h` rewrites forward and `rw ← h` backward; `symm`
@@ -334,7 +335,16 @@ Three more forms keep applications on one line. An anonymous constructor
 conjunction or existential premise is supplied in place: `ih with y, ⟨hy,
 earlier⟩`, `exact absent with ⟨J, hJ⟩`, and `have m : P := lemma.backward
 with ⟨hJ, extendsJ⟩`; nested constructors go through predicate definitions,
-as in `exact ⟨⟨x, hx⟩, hx⟩` for `Nonempty(S) ∧ x ∈ S`. When a requirement
+as in `exact ⟨⟨x, hx⟩, hx⟩` for `Nonempty(S) ∧ x ∈ S`. In an unannotated
+`have`, where no goal fixes the parameters, the components of the
+constructor fix them as named entries do: `have m := lemma.backward with
+⟨hJ, extendsJ⟩` matches `hJ` and `extendsJ` against the conjuncts of the
+requirement, nested constructors against nested conjunctions, and a
+witness term against an existential, so no `at` list is needed and no
+context fact of the same shape can choose another instance. A component
+that meets its conjunct only through a definition does not take part,
+and the constructor is checked against the premise once the parameters
+are known from the goal or the other entries. When a requirement
 is a conjunction and the `with` list supplies its conjuncts in order, they
 are combined as the constructor would combine them, so `exact
 difference.membership.backward with inSpace, notInjective` proves `x ∈ A ∖
@@ -594,11 +604,12 @@ with the notation in scope: `rewrite rule pow_zero (x ^ 0 = G.one) does not
 match the goal x = x`. In `rw [a, b, c]` the failing rule is reported by its
 own name and located at that rule.
 
-`unfold` handles both predicate definitions and equations, and unfolds a
-defined predicate wherever the goal mentions it: at the head, under `∧`,
-`∨`, `→`, and `¬`, and inside a `∀` or `∃` whose bound variable the
-instance mentions. The foundational equations can expose a compact numeral
-as a von Neumann set:
+`unfold` handles both predicate definitions and equations, and opens the
+named definition at every instance of the goal, or of the fact named by
+`at`, in one call: under every connective and relation, inside arguments,
+and inside a `∀` or `∃` whose bound variable the instance mentions. A
+definition the goal or fact does not mention is reported. The foundational
+equations can expose a compact numeral as a von Neumann set:
 
 ```g17
 lemma two.encoding
@@ -609,9 +620,11 @@ proof
 ```
 
 The compact numeral stays the evaluator's native representation; unfolding
-produces one equality proof. `unfold` also rewrites with local equalities in
-the exposed body, so a following `rw h` may find nothing left to rewrite; `cc`
-closes such goals directly.
+produces one equality proof. `unfold` never rewrites with local equalities,
+so the exposed body depends on the definition alone and not on the context:
+a following `rw h` finds the instance the definition exposed, `simp [f, h]`
+unfolds and rewrites in one step, and `cc` closes a goal the context
+equalities settle.
 
 A power with a literal exponent, `t ^ k` for `k ≤ 16`, is expanded by
 `ring` and `ring_nf` into its product over ℕ, ℤ, ℚ, ℝ, and bundled rings,
@@ -877,7 +890,12 @@ and quantified formulas are treated as atoms; `and`, `or`, implication,
 equivalence, negation, and `⊥` are decided propositionally. The search branches
 on an atom only while the current partial valuation leaves the goal and all
 hypotheses undecided. Each split is a proof of excluded middle, and each leaf
-is a natural-deduction proof.
+is a natural-deduction proof. An equation is the same atom in either
+orientation: `a = b` and `b = a` are one atom, as are `a ≠ b` and `¬(b = a)`,
+so from `h : a = b` the goal `¬(b ≠ a)` closes, and a lemma stated as
+`leftEnd(e) = v ∨ rightEnd(e) = v` meets a hypothesis `v ≠ leftEnd(e)` without
+reorienting it first. This is a reading of the atoms, not equality reasoning:
+`a = b` and `b = c` do not give `a = c`, which is for `cc`.
 
 ```g17
 theorem Peirce (x y z w : Set)
@@ -1332,6 +1350,17 @@ results; exported theorem dependencies include the axiom; the CLI prints a
 warning; and the Workbench shows an amber admitted state instead of the green
 proof-complete state. A check containing `sorry` succeeds so downstream work
 can continue. Nothing with a `sorry` belongs in Cumulus.
+
+An admission propagates through citation: a theorem whose proof is complete
+but cites an admitted theorem, of its own module or an imported one, depends
+on that admission, and the axiom appears among its dependencies. Such a
+theorem is *dependent*, not admitted: it has no obligation of its own, and
+its file is not amber for it, but what it rests on is reported. The machine
+interface reports the three cases as the statuses `proved`, `admitted` (a
+`sorry` of the proof's own), and `dependent`; the CLI prints a note naming
+the admissions that complete proofs depend on; and a theorem's own `sorries`
+list, in the Workbench and the protocol, holds every admission it rests on,
+own or inherited.
 
 ## Proof maps
 

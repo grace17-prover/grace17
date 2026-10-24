@@ -87,17 +87,18 @@ export const tacticReference = new Map([
     "A contradiction branch must start with `exfalso`: a proof that establishes `⊥` against a goal that is still `∃ …` or another proposition is reported as establishing the wrong formula.",
   ]],
   ["tauto", [
-    "`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error.",
+    "`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. An equation is the same atom in either orientation, so `a = b` and `b = a` are one atom, as are `a ≠ b` and `¬(b = a)`; from `h : a = b` the goal `¬(b ≠ a)` closes, and a lemma stated as `l = v ∨ r = v` meets a hypothesis `v ≠ l`. This is a reading of the atoms, not equality reasoning: `a = b` and `b = c` do not give `a = c`, which is for `cc`. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error.",
   ]],
 
   ["rw h  /  rewrite h  /  rw ← h", [
     "Rewriting is equality elimination. A notation token names its underlying definition wherever a rule is expected.",
-    "After `unfold`, local equalities may already have been applied to the exposed body, so a following `rw h` can report that the rule does not match; `cc` closes such goals directly.",
+    "`unfold` leaves local equalities unapplied, so `rw h` after `unfold f` finds the instance the definition exposed; `cc` closes a goal that follows from the context equalities directly.",
   ]],
   ["simp [rules]", [
     "`simp` normalizes with checked definitions, equalities, ground computation, and routine logical assembly. It evaluates closed `Bool` expressions and discharges many constructive propositional tautologies; for complete classical propositional reasoning use `tauto`.",
     "Incremental use: if the rules do not close the goal but a supplied equivalence changes the outer proposition, `simp` leaves the equivalent simplified proposition as the next goal and records the checked backward implication. If no outer equivalence applies, it can perform one equality rewrite inside a logical goal, including a negated condition, without rewriting beneath quantifiers or splitting cases. In a disjunction it may use the negations of sibling literals while rewriting one literal and discharges those assumptions in the reconstructed proof.",
     "`simp [rules] at h` forward-simplifies an arbitrary proved proposition through checked equivalences and equality transport: `simp [pair.membership] at h` turns `h : x ∈ pair(a, b)` into `h : x = a ∨ x = b`.",
+    "A predicate definition named among the rules is opened at every instance first, as `unfold` opens it, so `simp [EvenSet] at parity` turns every `EvenSet(A)` in `parity` into `Even(cardinality(A))` before the rest of the simplification; the equivalence rewriting that follows reaches the outer proposition.",
     "Conditional rewrite rules use direct contextual evidence and soft-type reasoning by default. Recursive relief needs explicit limits, `simp (backchain := 2, work := 128) [rules]`, also accepted by `simp ... at h` and `simpa`. `backchain` bounds recursive rule applications along a hypothesis path; `work` is one allowance shared across relief entries, attempted conclusions and conjuncts, contextual bindings, sibling guards, and the closure phases. Relief can select conjuncts of a rule conclusion and either direction of an equivalence, and may bind a rule variable absent from the conclusion by matching a hypothesis against a contextual fact; it never guesses witnesses or splits cases, and exhaustion leaves the rewrite unapplied.",
     "Context equalities receive a conservative occurs check: an expanding fact `x = f(x)` is oriented as `f(x) → x`, rewrite paths are cycle-checked, and normalization has an explicit depth limit. These are termination controls.",
   ]],
@@ -105,7 +106,7 @@ export const tacticReference = new Map([
     "Binder-independent terms are rewritten beneath `∀` and `∃` without guessing witnesses; a rewrite that depends on a bound variable or would capture it is not performed. Logical normalization is cycle-checked and limited to 256 transport steps per side, equality normalization keeps its separate rewrite fuel, and the logical fallback stops at a 1,000-step budget or 64 nested search states.",
   ]],
   ["unfold name", [
-    "`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` also rewrites with local equalities in the exposed body.",
+    "`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` never rewrites with local equalities: after `unfold f`, a context equality `h` is applied by `rw h` or by `simp [f, h]`, and `cc` closes a goal the context equalities settle. Every instance opens in one call, so a second `unfold f` on the same goal or fact reports that there is nothing left to unfold.",
   ]],
   ["clear h", [
     "Unused assumptions never need to be mentioned.",
@@ -130,7 +131,7 @@ export const tacticReference = new Map([
     "`cc` chains local equalities, closes function congruences, transports positive predicate facts across congruent arguments, and derives arbitrary goals from a congruent disequality or a positive/negative predicate conflict. The explanation is built from the original equalities, equality transitivity and symmetry, function congruence, and equality elimination. `cc` does no quantifier instantiation and no conditional rewriting; use `specialize`, `rw`, and `simp` for those.",
   ]],
   ["by_cases h : P", [
-    "`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it.",
+    "`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it. With nothing after the colon, `by_cases h :` takes its proposition from the next, more indented line, as `have h :` does; a proposition may also break after an operator or a comma, or before an operator, like any other step.",
   ]],
   ["compute", [
     "`compute` accepts only closed terms. Its proof node stores the equality and the exact sorted list of admitted function definitions used during normalization; the kernel re-runs the trusted closed-value evaluator on both sides and compares normal forms, so the proof stays small however long the computation runs. Fuel or host resource exhaustion can only reject a certificate. A top-level `eval term` inspects a computation without adding a theorem.",

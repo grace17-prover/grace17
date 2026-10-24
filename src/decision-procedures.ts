@@ -490,10 +490,33 @@ export function excludedMiddle(formula: Formula): Proof {
   return dne(choice, impIntro(not(choice), absurdity));
 }
 
+/**
+ * An equation in a fixed orientation, so `a = b` and `b = a` (and so
+ * `a ≠ b` and `¬(b = a)`) are one propositional atom. The orientation is
+ * chosen by the canonical text of the sides, so it is stable across the
+ * facts and the goal; a mirrored occurrence is transported by symmetry.
+ */
+function orientEquality(formula: Formula): Formula {
+  if (formula.tag !== "eq") return formula;
+  return termCanonical(formula.left) <= termCanonical(formula.right)
+    ? formula
+    : eq(formula.right, formula.left);
+}
+
 function evaluateFormula(formula: Formula, valuation: ReadonlyMap<string, SignedProof>): SignedProof | undefined {
   switch (formula.tag) {
     case "bottom": return { truth: false, proof: impIntro(bottom, assume(bottom)) };
-    case "eq":
+    case "eq": {
+      const oriented = orientEquality(formula);
+      const signed = valuation.get(formulaCanonical(oriented));
+      if (!signed || formulaEquals(oriented, formula)) return signed;
+      // The valuation decided the mirror image: a proof of `b = a` is the
+      // symmetric of one of `a = b`, and a refutation of `b = a` refutes
+      // `a = b` through symmetry of the assumed equation.
+      if (signed.truth) return { truth: true, proof: symm(signed.proof) };
+      const refuted = impElim(signed.proof, symm(assume(formula)));
+      return { truth: false, proof: impIntro(formula, refuted) };
+    }
     case "pred":
     case "forall":
     case "exists": return valuation.get(formulaCanonical(formula));
@@ -569,7 +592,8 @@ function evaluateFormula(formula: Formula, valuation: ReadonlyMap<string, Signed
 function evaluateBoolean(formula: Formula, valuation: ReadonlyMap<string, boolean>): boolean | undefined {
   switch (formula.tag) {
     case "bottom": return false;
-    case "eq": case "pred": case "forall": case "exists": return valuation.get(formulaCanonical(formula));
+    case "eq": return valuation.get(formulaCanonical(orientEquality(formula)));
+    case "pred": case "forall": case "exists": return valuation.get(formulaCanonical(formula));
     case "and": {
       const left = evaluateBoolean(formula.left, valuation);
       if (left === false) return false;
@@ -699,9 +723,12 @@ function collectPropositionalAtoms(formula: Formula, atoms: Map<string, { formul
     case "pred":
     case "forall":
     case "exists": {
-      const key = formulaCanonical(formula);
+      // Equations are collected in their fixed orientation, so the search
+      // splits once on `a = b` however each occurrence is written.
+      const atom = orientEquality(formula);
+      const key = formulaCanonical(atom);
       const previous = atoms.get(key);
-      atoms.set(key, { formula, count: (previous?.count ?? 0) + 1 });
+      atoms.set(key, { formula: atom, count: (previous?.count ?? 0) + 1 });
       return;
     }
     case "imp":
