@@ -888,6 +888,14 @@ export function proveCongruence(
     const equality = explain(goal.left, goal.right);
     if (equality) return checkedCongruenceResult(kernel, equality, goal, assumptions);
   }
+  // A negated goal, a disequality or a denied predicate, is assumed and
+  // refuted: the equation or predicate joins the facts and ⊥ is derived.
+  if (goal.tag === "imp" && goal.right.tag === "bottom" && (goal.left.tag === "eq" || goal.left.tag === "pred")) {
+    const assumed: AvailableFact = { formula: goal.left, proof: assume(goal.left) };
+    const refutation = proveCongruence(kernel, goal.right, [...assumptions, goal.left], factProofs,
+      knownFacts ? [...knownFacts, assumed] : undefined);
+    return checkedCongruenceResult(kernel, impIntro(goal.left, refutation), goal, assumptions);
+  }
   if (goal.tag === "pred") {
     for (const fact of facts) if (fact.formula.tag === "pred") {
       const proof = transportPredicate(fact.formula, goal, fact.proof);

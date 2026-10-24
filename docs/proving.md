@@ -352,6 +352,22 @@ B` from `inSpace : x ∈ A` and `notInjective : x ∉ B`; an entry that fits
 no conjunct is still reported as matching no requirement. Parentheses group a
 multi-premise application inside `refine ⟨…⟩`, where commas separate
 components: `refine ⟨y, yInB, (constantFunction.relates with xInA, yInB)⟩`.
+A parenthesised application inside a `with` list is a premise too: when its
+own parameters are fixed by its facts, it is read first and its statement
+fixes the outer parameters as a named fact does; when they need its
+expected proposition, as in `Joined.monotone with
+(difference.subset_of_subset with bound), joinedC`, it is read after the
+other entries have fixed what they can, against the requirement it fills,
+and its statement then fixes the rest, so no named `have` is needed first.
+A premise stated through a defined predicate meets a requirement stated by
+the predicate's body, and the other way round, through one layer of the
+definition: `degreeWeights.membership.forward with xy` accepts `xy :
+relates(w, x, y)` for the requirement `(x, y) ∈ w` without an `unfold
+relates at xy` first, and the evidence is bridged by the definition when
+the application is checked. A numeral in a requirement matches the
+constructor term of the same value, so `HasCardinality.empty_of_zero with
+has` accepts `has : HasCardinality(F, zero)` as an induction case states
+it, and an inequality `a ≠ b` is matched as the negated equation it is.
 A local fact that is a transparent predicate application applies to
 arguments through its definition, so `subset : A ⊆ B` gives `subset with x,
 hx` without an `unfold Subset at subset` first; a predicate an application
@@ -585,7 +601,17 @@ ambiguous compositions are rejected.
 backward, `rw [h₁, h₂]` rewrites with each rule in turn, and `rw moves with
 p, hp` rewrites with the instance that application names, as `have inst :=
 moves with p, hp` followed by `rw inst` would; a `with` list that does not
-apply is reported with the application `rw` read. `unfold name`
+apply is reported with the application `rw` read. The parameters the facts
+leave open are fixed by the goal, or by the fact named after `at`: after the
+named premises fix what they can, the rule's left side (its right side for
+`rw ←`) is matched against the subterms of the goal, and the one instance
+that occurs fixes the rest, so `rw crossing.restrict with edges` on the
+goal `crossing(leftEnd, rightEnd, F, X) = {e}` needs no `at leftEnd,
+rightEnd, E, F, X`; two different instances are reported with their
+bindings, and an explicit `at` list chooses between them. The same holds
+for `rwa` and `rw … at h`. A parenthesised application, `rw (thm with
+facts)`, is a rule wherever a rule name is, including `rwa` and the rule
+lists of `simp`, `simp at`, and `simpa`. `unfold name`
 exposes one definition. `rwa h` rewrites and then closes the goal from a
 matching local fact, and `rwa h at fact` rewrites the fact and uses it. Transformation tactics
 accept a common `at h` location suffix: `unfold Subset at hAB`, `rw hxy at h`,
@@ -603,6 +629,13 @@ selects nothing is reported with its two sides and the goal or fact, printed
 with the notation in scope: `rewrite rule pow_zero (x ^ 0 = G.one) does not
 match the goal x = x`. In `rw [a, b, c]` the failing rule is reported by its
 own name and located at that rule.
+
+A set-builder `def f(…) : Set := { x ∈ A | φ }` is defined by its membership
+law, so `unfold f` opens every `t ∈ f(…)` instance into `t ∈ A ∧ φ`; when the
+goal or fact mentions `f(…)` only as a set, on a side of `=` or `⊆`, `unfold f`
+says so and `ext` is the way in. A comprehension standing as an argument in a
+`def` body, as in `⋃({ X ∈ P | v ∈ X })`, is a helper definition `name.family`
+over the same parameters, with its law `name.family.membership`.
 
 `unfold` handles both predicate definitions and equations, and opens the
 named definition at every instance of the goal, or of the fact named by
@@ -653,7 +686,7 @@ no outer equivalence applies, it rewrites with the named equalities inside a
 logical goal, including a negated condition, repeating on the result to a
 bounded fixed point, so `simp [fst.pair, snd.pair]` reduces every layer of
 `fst(fst(((a, b), c))) ∈ A` and leaves `a ∈ A` as the residual goal for
-later tactics. This fallback needs evidence for conditional rules and does not
+later tactics, or closes the goal when the context settles it. This fallback needs evidence for conditional rules and does not
 rewrite beneath quantifiers or introduce case splits. For example:
 
 ```g17
@@ -666,7 +699,14 @@ The first line may expose the pointwise subset obligation; the second can then
 simplify membership in the quotient.
 
 `simp at` works on any proved proposition, forward-simplifying it through
-equivalences and equality transport. So `simp [pair.membership] at h` changes
+equivalences and equality transport. An equivalence among the rules, a
+membership law or a set-builder definition, is opened at every instance of the
+fact, under `∃` and `∀` included, so `simp [union2.membership,
+singleton.membership] at hf` opens both layers in one step; the empty-set law
+is applied by default and `⊥` is absorbed, so `h : a ∈ ∅ ∧ P` becomes `h : ⊥`.
+On a goal, the residue the rewrites leave is closed when it is a propositional
+consequence of the context or a closed numeral computation such as `1 + 1 = 2`.
+So `simp [pair.membership] at h` changes
 `h : x in pair(a, b)` into `h : x = a or x = b`.
 
 For a disjunction, the incremental goal simplifier can use the negations of

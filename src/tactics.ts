@@ -250,6 +250,14 @@ interface AvailableFact {
 
 class SettleSearchLimit extends Error {}
 
+/** An equation without variables that mentions a numeral under a function. */
+function closedNumeralEquation(formula: Extract<Formula, { tag: "eq" }>): boolean {
+  if (freeFormulaVariables(formula).size) return false;
+  const literalUnderFunction = (term: Term): boolean =>
+    term.tag === "app" && term.args.some(item => item.tag === "nat" || literalUnderFunction(item));
+  return literalUnderFunction(formula.left) || literalUnderFunction(formula.right);
+}
+
 function preserveSettleSearchLimit(error: unknown): void {
   if (error instanceof SettleSearchLimit) throw error;
 }
@@ -782,9 +790,13 @@ export function simplifyEqualityFact(kernel: Kernel, proof: Proof, options: Simp
   const original = kernel.checkProof(proof, assumptions);
   if (original.tag !== "eq") throw new Error("simp at currently requires an equality hypothesis");
   const logicalRules = Array.isArray(options.using) ? options.using : [];
+  // A context fact whose proof is still being discharged, such as a
+  // destructured witness, does not check on its own and is left out.
   const facts: AvailableFact[] = expandFacts(kernel, [
     ...assumptions.map(formula => ({ formula, proof: assume(formula) })),
-    ...(options.facts ?? []).map(item => ({ formula: kernel.checkProof(item, assumptions), proof: item })),
+    ...(options.facts ?? []).flatMap(item => {
+      try { return [{ formula: kernel.checkProof(item, assumptions), proof: item }]; } catch { return []; }
+    }),
   ], options.visibility);
   const explicit = Array.isArray(options.using)
     ? indexRules(options.using.flatMap(item => {
@@ -966,6 +978,11 @@ function settleLogical(
     const refuted = refuteLiteralEquation(kernel, available);
     if (refuted) return wanted.tag === "bottom" ? refuted : falseElim(wanted, refuted);
     if (wanted.tag === "eq" && termCanonical(wanted.left) === termCanonical(wanted.right)) return refl(wanted.left);
+    // A closed equation between numeral expressions is evaluated, so
+    // `1 + 1 = 2` closes by computation inside a logical goal.
+    if (wanted.tag === "eq" && closedNumeralEquation(wanted)) {
+      try { return kernel.proveComputation(wanted.left, wanted.right); } catch {}
+    }
     const grounded = tryGround(wanted, context, available.map(fact => fact.proof));
     if (grounded) return grounded;
     // Total fuel alone permits a long branch to retain quadratic context/key
