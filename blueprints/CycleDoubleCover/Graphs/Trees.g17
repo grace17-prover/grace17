@@ -10,13 +10,6 @@
 module CycleDoubleCover.Graphs.Trees
 import Connectivity
 
-predicate Forest (V leftEnd rightEnd F : Set) :=
-  Finite(F) ∧ (∀ C ⊆ F, EvenEdgeSet(V, leftEnd, rightEnd, C) → C = ∅)
-
-predicate SpanningTree (V leftEnd rightEnd T : Set) :=
-  Finite(T) ∧ Connects(V, leftEnd, rightEnd, T)
-  ∧ cardinality(T) + 1 = cardinality(V)
-
 -- Components. A vertex lies in its own component, two vertices with the same
 -- component are joined, and the components are finitely many subsets of V.
 theorem componentBy.self (V leftEnd rightEnd F u : Set)
@@ -350,7 +343,6 @@ proof
   have removeLeft := cardinality.remove with finiteOld, leftIn
   have removeRight := cardinality.remove with finiteInner, rightInner
   have removeMerged := cardinality.remove with finiteNew, mergedIn
-  have natRest := cardinality.nat with finiteRest
   rw rest at removeRight
   rw [removeMerged, removeLeft, removeRight]
   arith
@@ -413,19 +405,7 @@ proof
   have count := cardinality.injective_image with
     injective, reflexive, finiteVertices
   have image := componentMap.image at V, leftEnd, rightEnd, ∅
-  rw image at count
-  exact count
-
-theorem Forest.subset (V leftEnd rightEnd F G : Set)
-  requires forest : Forest(V, leftEnd, rightEnd, F)
-  requires subset : G ⊆ F
-  shows Forest(V, leftEnd, rightEnd, G)
-proof
-  obtain ⟨finite, acyclic⟩ := forest
-  constructor
-  . exact Finite.subset with finite, subset
-  . intros C bound even
-    exact acyclic with C, (Subset.transitive with bound, subset), even
+  rwa image at count
 
 -- Each edge merges at most two components: |V| ≤ |F| + |components of F|.
 theorem componentsBy.lower_bound_of_size (V leftEnd rightEnd F : Set) (n : Nat)
@@ -436,7 +416,6 @@ theorem componentsBy.lower_bound_of_size (V leftEnd rightEnd F : Set) (n : Nat)
   shows cardinality(V) ≤
     cardinality(F) + cardinality(componentsBy(V, leftEnd, rightEnd, F))
 proof
-  have natV := cardinality.nat with finiteVertices
   induction n generalizing F
   | zero =>
     intros F finite size ends
@@ -456,11 +435,6 @@ proof
     have restEnds := ends_in.subset with ends, restSubset
     have rest := ih with F ∖ {e}, restFinite, restSize, restEnds
     have edgeEnds := ends with e, he
-    have natF := cardinality.nat with finite
-    have natRest := cardinality.nat with (componentsBy.finite at
-      V, leftEnd, rightEnd, F ∖ {e} with finiteVertices)
-    have natWhole := cardinality.nat with
-      (componentsBy.finite at V, leftEnd, rightEnd, F with finiteVertices)
     by_cases bridged :
       Joined(leftEnd, rightEnd, F ∖ {e}, leftEnd(e), rightEnd(e))
     . have same := componentsBy.add_edge_joined with restEnds, edgeEnds, bridged
@@ -479,10 +453,100 @@ theorem componentsBy.lower_bound (V leftEnd rightEnd F : Set)
   shows cardinality(V) ≤
     cardinality(F) + cardinality(componentsBy(V, leftEnd, rightEnd, F))
 proof
-  have natF := cardinality.nat with finite
   have same : cardinality(F) = cardinality(F) by rfl
   exact componentsBy.lower_bound_of_size at V, leftEnd, rightEnd, F,
     cardinality(F) with finiteVertices, finite, same, ends
+
+-- Connectivity and the number of components: a disconnected edge set has
+-- two components or more, a connected one exactly one.
+theorem Connects.witness_apart (V leftEnd rightEnd F : Set)
+  requires disconnected : ¬Connects(V, leftEnd, rightEnd, F)
+  shows ∃ u ∈ V, ∃ v ∈ V, ¬Joined(leftEnd, rightEnd, F, u, v)
+proof
+  by_contra none
+  apply disconnected
+  intros u hu v hv
+  by_contra apart
+  exact none with ⟨u, hu, v, hv, apart⟩
+
+theorem componentsBy.two_of_disconnected (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires disconnected : ¬Connects(V, leftEnd, rightEnd, F)
+  shows 2 ≤ cardinality(componentsBy(V, leftEnd, rightEnd, F))
+proof
+  obtain ⟨u, hu, v, hv, apart⟩ := Connects.witness_apart with disconnected
+  have inU := componentsBy.contains at V, leftEnd, rightEnd, F, u with hu
+  have inV := componentsBy.contains at V, leftEnd, rightEnd, F, v with hv
+  have finiteComponents := componentsBy.finite at V, leftEnd, rightEnd, F
+    with finiteVertices
+  have singletonSubset : {componentBy(V, leftEnd, rightEnd, F, u)} ⊆
+      componentsBy(V, leftEnd, rightEnd, F) :=
+    singleton.subset_iff.backward with inU
+  have fresh : ¬componentBy(V, leftEnd, rightEnd, F, v) ∈
+      {componentBy(V, leftEnd, rightEnd, F, u)}
+    intro member
+    have same := singleton.membership.forward with member
+    symm at same
+    exact apart with (componentBy.joined_of_eq with hv, same)
+  have strict := cardinality.strict with
+    finiteComponents, singletonSubset, inV, fresh
+  rw cardinality.singleton at strict
+  arith
+
+theorem componentBy.eq_vertices (V leftEnd rightEnd F u : Set)
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  requires vertex : u ∈ V
+  shows componentBy(V, leftEnd, rightEnd, F, u) = V
+proof
+  ext v
+  constructor
+  . intro hv
+    exact componentBy.subset at V, leftEnd, rightEnd, F, u with v, hv
+  . intro hv
+    have joined := connected with u, vertex, v, hv
+    exact componentBy.membership.backward with ⟨hv, joined⟩
+
+theorem componentsBy.connected_subset (V leftEnd rightEnd F : Set)
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  shows componentsBy(V, leftEnd, rightEnd, F) ⊆ {V}
+proof
+  intros X hX
+  obtain ⟨u, hu, rfl⟩ := componentsBy.membership.forward with hX
+  have same := componentBy.eq_vertices with connected, hu
+  rw same
+  simp
+
+theorem componentsBy.le_one_of_connected (V leftEnd rightEnd F : Set)
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  shows cardinality(componentsBy(V, leftEnd, rightEnd, F)) ≤ 1
+proof
+  have subset := componentsBy.connected_subset with connected
+  have bound := cardinality.monotone with (Finite.singleton at V), subset
+  rwa cardinality.singleton at bound
+
+theorem componentsBy.connected_count (V leftEnd rightEnd F : Set)
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  requires nonempty : V ≠ ∅
+  shows cardinality(componentsBy(V, leftEnd, rightEnd, F)) = 1
+proof
+  have subset := componentsBy.connected_subset with connected
+  obtain ⟨u, hu⟩ := Nonempty.of_ne_empty with nonempty
+  have contains := componentsBy.contains at V, leftEnd, rightEnd, F, u with hu
+  have same := componentBy.eq_vertices with connected, hu
+  rw same at contains
+  have reverse : {V} ⊆ componentsBy(V, leftEnd, rightEnd, F) :=
+    singleton.subset_iff.backward with contains
+  have equal := Subset.antisymmetric with subset, reverse
+  rw [equal, cardinality.singleton]
+
+theorem Graph.ends (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  shows ∀ e ∈ E, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+proof
+  obtain ⟨leftFunction, rightFunction⟩ := graph
+  intros e he
+  exact ⟨(FunctionBetween.apply_closed with leftFunction, he),
+    (FunctionBetween.apply_closed with rightFunction, he)⟩
 
 -- In an even edge set the ends of every edge are joined by the other edges:
 -- otherwise the edge alone would leave the component of one of its ends,
@@ -536,17 +600,13 @@ theorem EvenEdgeSet.of_path_edge (V leftEnd rightEnd P e : Set)
   shows EvenEdgeSet(V, leftEnd, rightEnd, P ∪ {e})
 proof
   have finiteEdge := Finite.singleton at e
-  have apart : Disjoint(P, {e})
-    unfold Disjoint
-    ext x
-    simp
+  have apart : Disjoint(P, {e}) by unfold Disjoint; ext x; simp
   constructor
   . exact Finite.union with finite, finiteEdge
   . intros w hw
     have sum := degreeIn.union_disjoint at leftEnd, rightEnd, P, {e}, w
       with finite, finiteEdge, apart
     have parity := path with w, hw
-    have natDegree := degreeIn.natural at leftEnd, rightEnd, P, w with finite
     rw sum
     by_cases atEnd : leftEnd(e) = w ∨ rightEnd(e) = w
     . -- At an end of e the path has odd degree and e supplies one more.
@@ -565,6 +625,26 @@ proof
       rw [zero, add.right_unit]
       exact parity.backward with away
 
+-- Forests and spanning trees.
+
+predicate Forest (V leftEnd rightEnd F : Set) :=
+  Finite(F) ∧ (∀ C ⊆ F, EvenEdgeSet(V, leftEnd, rightEnd, C) → C = ∅)
+
+predicate SpanningTree (V leftEnd rightEnd T : Set) :=
+  Finite(T) ∧ Connects(V, leftEnd, rightEnd, T)
+  ∧ cardinality(T) + 1 = cardinality(V)
+
+theorem Forest.subset (V leftEnd rightEnd F G : Set)
+  requires forest : Forest(V, leftEnd, rightEnd, F)
+  requires subset : G ⊆ F
+  shows Forest(V, leftEnd, rightEnd, G)
+proof
+  obtain ⟨finite, acyclic⟩ := forest
+  constructor
+  . exact Finite.subset with finite, subset
+  . intros C bound even
+    exact acyclic with C, (Subset.transitive with bound, subset), even
+
 -- In a forest the ends of an edge are joined only through that edge: a path
 -- around it would close a nonempty even set, and a loop is one by itself.
 theorem Forest.ends_apart (V leftEnd rightEnd F e : Set)
@@ -579,28 +659,24 @@ proof
   have restFinite := Finite.subset with finite, restSubset
   have restEnds := ends_in.subset with ends, restSubset
   have edgeSubset : {e} ⊆ F := singleton.subset_iff.backward with edge
-  have self : e ∈ {e} by simp
   by_cases loop : leftEnd(e) = rightEnd(e)
   . have even := EvenEdgeSet.loop at V, leftEnd, rightEnd, e with loop
     have empty := acyclic with {e}, edgeSubset, even
-    rw empty at self
-    exact set.empty with self
+    exact singleton.ne_empty with empty
   . obtain ⟨P, subsetP, path⟩ :=
       Joined.path with restFinite, restEnds, loop, joined
     have finiteP := Finite.subset with restFinite, subsetP
     have outside : ¬e ∈ P
       intro inP
-      obtain ⟨_, different⟩ :=
-        difference.singleton_membership.forward with (subsetP with e, inP)
-      apply different
-      rfl
+      have inRest := subsetP with e, inP
+      rw difference.singleton_membership at inRest
+      cc
     have even := EvenEdgeSet.of_path_edge with finiteP, outside, loop, path
     have inside : P ∪ {e} ⊆ F := Subset.union2_iff.backward with
       ⟨(Subset.transitive with subsetP, restSubset), edgeSubset⟩
     have empty := acyclic with P ∪ {e}, inside, even
-    have member : e ∈ P ∪ {e} by simp
-    rw empty at member
-    exact set.empty with member
+    rw union2.eq_empty_iff at empty
+    exact singleton.ne_empty with empty.right
 
 -- Adding an edge between vertices a forest does not join keeps it a forest:
 -- an even set through the new edge would join its ends by the old edges.
@@ -630,19 +706,7 @@ proof
       have joined := EvenEdgeSet.ends_joined with
         finiteVertices, endsC, even, inC
       exact apart with (Joined.monotone with inF, joined)
-    . have same : C ∖ {e} = C
-        ext g
-        rw difference.singleton_membership
-        constructor
-        . intro hg
-          exact hg.left
-        . intro hg
-          have different : g ≠ e
-            intro same
-            rw same at hg
-            exact inC with hg
-          exact ⟨hg, different⟩
-      rw same at inF
+    . rw difference.singleton_of_absent with inC at inF
       exact acyclic with C, inF, even
 
 -- Removing an edge of a forest splits a component in two, so a forest has
@@ -655,7 +719,6 @@ theorem Forest.edge_bound_of_size (V leftEnd rightEnd F : Set) (n : Nat)
   shows cardinality(F) + cardinality(componentsBy(V, leftEnd, rightEnd, F)) ≤
     cardinality(V)
 proof
-  have natV := cardinality.nat with finiteVertices
   induction n generalizing F
   | zero =>
     intros F size ends forest
@@ -681,97 +744,7 @@ proof
     have count := componentsBy.add_edge_apart with
       finiteVertices, restEnds, edgeEnds, apart
     rw restored at count
-    have natF := cardinality.nat with finite
-    have natRest := cardinality.nat with (componentsBy.finite at
-      V, leftEnd, rightEnd, F ∖ {e} with finiteVertices)
-    have natWhole := cardinality.nat with
-      (componentsBy.finite at V, leftEnd, rightEnd, F with finiteVertices)
     arith
-
--- Connectivity and the number of components: a disconnected edge set has
--- two components or more, a connected one exactly one.
-theorem Connects.witness_apart (V leftEnd rightEnd F : Set)
-  requires disconnected : ¬Connects(V, leftEnd, rightEnd, F)
-  shows ∃ u ∈ V, ∃ v ∈ V, ¬Joined(leftEnd, rightEnd, F, u, v)
-proof
-  by_contra none
-  apply disconnected
-  intros u hu v hv
-  by_contra apart
-  exact none with ⟨u, hu, v, hv, apart⟩
-
-theorem componentsBy.two_of_disconnected (V leftEnd rightEnd F : Set)
-  requires finiteVertices : Finite(V)
-  requires disconnected : ¬Connects(V, leftEnd, rightEnd, F)
-  shows 2 ≤ cardinality(componentsBy(V, leftEnd, rightEnd, F))
-proof
-  obtain ⟨u, hu, v, hv, apart⟩ := Connects.witness_apart with disconnected
-  have inU := componentsBy.contains at V, leftEnd, rightEnd, F, u with hu
-  have inV := componentsBy.contains at V, leftEnd, rightEnd, F, v with hv
-  have finiteComponents := componentsBy.finite at V, leftEnd, rightEnd, F
-    with finiteVertices
-  have singletonSubset : {componentBy(V, leftEnd, rightEnd, F, u)} ⊆
-      componentsBy(V, leftEnd, rightEnd, F) :=
-    singleton.subset_iff.backward with inU
-  have fresh : ¬componentBy(V, leftEnd, rightEnd, F, v) ∈
-      {componentBy(V, leftEnd, rightEnd, F, u)}
-    intro member
-    have same := singleton.membership.forward with member
-    symm at same
-    exact apart with (componentBy.joined_of_eq with hv, same)
-  have strict := cardinality.strict with
-    finiteComponents, singletonSubset, inV, fresh
-  have natComponents := cardinality.nat with finiteComponents
-  rw cardinality.singleton at strict
-  arith
-
-theorem componentBy.eq_vertices (V leftEnd rightEnd F u : Set)
-  requires connected : Connects(V, leftEnd, rightEnd, F)
-  requires vertex : u ∈ V
-  shows componentBy(V, leftEnd, rightEnd, F, u) = V
-proof
-  ext v
-  constructor
-  . intro hv
-    exact componentBy.subset at V, leftEnd, rightEnd, F, u with v, hv
-  . intro hv
-    have joined := connected with u, vertex, v, hv
-    exact componentBy.membership.backward with ⟨hv, joined⟩
-
-theorem componentsBy.connected_subset (V leftEnd rightEnd F : Set)
-  requires connected : Connects(V, leftEnd, rightEnd, F)
-  shows componentsBy(V, leftEnd, rightEnd, F) ⊆ {V}
-proof
-  intros X hX
-  obtain ⟨u, hu, rfl⟩ := componentsBy.membership.forward with hX
-  have same := componentBy.eq_vertices with connected, hu
-  rw same
-  simp
-
-theorem componentsBy.le_one_of_connected (V leftEnd rightEnd F : Set)
-  requires connected : Connects(V, leftEnd, rightEnd, F)
-  shows cardinality(componentsBy(V, leftEnd, rightEnd, F)) ≤ 1
-proof
-  have subset := componentsBy.connected_subset with connected
-  have bound := cardinality.monotone with (Finite.singleton at V), subset
-  rw cardinality.singleton at bound
-  exact bound
-
-theorem componentsBy.connected_count (V leftEnd rightEnd F : Set)
-  requires connected : Connects(V, leftEnd, rightEnd, F)
-  requires nonempty : V ≠ ∅
-  shows cardinality(componentsBy(V, leftEnd, rightEnd, F)) = 1
-proof
-  have subset := componentsBy.connected_subset with connected
-  obtain ⟨u, hu⟩ := Nonempty.of_ne_empty with nonempty
-  have contains := componentsBy.contains at V, leftEnd, rightEnd, F, u with hu
-  have same := componentBy.eq_vertices with connected, hu
-  rw same at contains
-  have reverse : {V} ⊆ componentsBy(V, leftEnd, rightEnd, F) :=
-    singleton.subset_iff.backward with contains
-  have equal := Subset.antisymmetric with subset, reverse
-  rw equal
-  exact cardinality.singleton at V
 
 -- A forest on a finite vertex set has at most |V| − c edges, c the number of
 -- its components; connected forests have exactly |V| − 1.
@@ -783,7 +756,6 @@ theorem Forest.edge_bound (V leftEnd rightEnd F : Set)
     cardinality(V)
 proof
   obtain ⟨finite, _⟩ := forest
-  have natF := cardinality.nat with finite
   have same : cardinality(F) = cardinality(F) by rfl
   exact Forest.edge_bound_of_size at V, leftEnd, rightEnd, F, cardinality(F)
     with finiteVertices, same, ends, forest
@@ -808,10 +780,6 @@ proof
       exact none with ⟨C, bound, nonempty, even⟩
   have upper := Forest.edge_bound with finiteVertices, ends, forest
   have two := componentsBy.two_of_disconnected with finiteVertices, disconnected
-  have natF := cardinality.nat with finite
-  have natV := cardinality.nat with finiteVertices
-  have natComponents := cardinality.nat with
-    (componentsBy.finite at V, leftEnd, rightEnd, F with finiteVertices)
   arith
 
 -- A spanning tree is a forest: an edge of an even subset could be dropped
@@ -839,19 +807,13 @@ proof
       difference.subset_of_subset with bound
     have bridged := Joined.monotone with restC, joinedC
     have same := componentsBy.add_edge_joined with restEnds, edgeEnds, bridged
-    have restored : (T ∖ {e}) ∪ {e} = T
-      ext y
-      simp
+    have restored : (T ∖ {e}) ∪ {e} = T by ext y; simp
     rw restored at same
     have lower := componentsBy.lower_bound with
       finiteVertices, restFinite, restEnds
     rw ← same at lower
     have one := componentsBy.le_one_of_connected with connected
     have removed := cardinality.remove with finite, inT
-    have natRest := cardinality.nat with restFinite
-    have natV := cardinality.nat with finiteVertices
-    have natComponents := cardinality.nat with
-      (componentsBy.finite at V, leftEnd, rightEnd, T with finiteVertices)
     rw removed at count
     arith
 
@@ -869,23 +831,12 @@ proof
   have one := componentsBy.connected_count with connected, nonempty
   rw one at upper
   rw one at lower
-  have natT := cardinality.nat with finite
-  have natV := cardinality.nat with finiteVertices
   refine ⟨finite, connected, _⟩
   arith
 
 -- The forests inside an edge set, a finite family when the edge set is finite.
 def forestsIn (V leftEnd rightEnd E : Set) : Set :=
   { F ∈ 𝒫(E) | Forest(V, leftEnd, rightEnd, F) }
-
-theorem Graph.ends (V E leftEnd rightEnd : Set)
-  requires graph : Graph(V, E, leftEnd, rightEnd)
-  shows ∀ e ∈ E, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
-proof
-  obtain ⟨leftFunction, rightFunction⟩ := graph
-  intros e he
-  exact ⟨(FunctionBetween.apply_closed with leftFunction, he),
-    (FunctionBetween.apply_closed with rightFunction, he)⟩
 
 -- Every connected finite multigraph has a spanning tree: a maximal forest
 -- inside E is connected, else an edge of E leaving one of its components
@@ -1033,9 +984,9 @@ proof
       obtain ⟨inCg, notF⟩ := difference.singleton_membership.forward with hg
       have split := union2.membership.forward with (inside with g, inCg)
       cases split with old | single
-      . exact keep with g,
+      . exact union2.left with
           (difference.singleton_membership.backward with ⟨old, notF⟩)
-      . exact union2.subset_right at T ∖ {f}, {e} with g, single
+      . exact union2.right with single
     have bridged := Joined.monotone with restC, joinedC
     have grow : T ⊆ ((T ∖ {f}) ∪ {e}) ∪ {f}
       intros g hg
@@ -1044,8 +995,7 @@ proof
         simp
       . have inRest : g ∈ T ∖ {f} :=
           difference.singleton_membership.backward with ⟨hg, same⟩
-        exact union2.subset_left at (T ∖ {f}) ∪ {e}, {f}
-          with g, (keep with g, inRest)
+        exact union2.left with (union2.left with inRest)
     intros u hu v hv
     have joinedBig := Joined.monotone with grow, (connected with u, hu, v, hv)
     exact Joined.drop_edge with newEnds, fEnds, joinedBig, bridged
@@ -1057,5 +1007,4 @@ proof
     have same : (T ∖ {f}) ∪ {e} = insert(e, T ∖ {f})
       unfold insert
       exact union2.commutative at T ∖ {f}, {e}
-    rw [same, inserted, ← removed]
-    exact count
+    rwa [same, inserted, ← removed]
