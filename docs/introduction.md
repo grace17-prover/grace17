@@ -75,13 +75,13 @@ theory, with human and AI participation designed in from the start.
 Grace17 grows out of longstanding work in automated reasoning and formal
 verification and a wish to bring set theory into the mainstream of formal
 proof. I (<a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a>) have been inspired by many friends and collaborators,
-including Bob Boyer, J Moore, Leo de Moura, Jeremy Avigad, Matt Kaufmann, Larry
-Paulson, Natarajan Shankar, Sam Owre, Paul Jackson, Wenda Li, Marijn Heule,
-Yves Bertot, Assia Mahboubi, Bas Spitters, André Platzer, Larry Wos, Michael
-Beeson, Yuri Gurevich, Nikolaj Bjorner, Denis Ignatovich, András Salamon,
-Christoph Wintersteiger, Simon Cruanes, Thomas Forster, Peter Koepke, Norm
-Megill, John Harrison, Mike Gordon, Rob Arthan, Roger Bishop Jones, Robin
-Milner, and many others. My design
+including Bob Boyer, J Moore, Leo de Moura, Jeremy Avigad, Matt Kaufmann, Jared
+Davis, Larry Paulson, Natarajan Shankar, Sam Owre, Paul Jackson, Wenda Li,
+Marijn Heule, Yves Bertot, Assia Mahboubi, Bas Spitters, André Platzer, Larry
+Wos, Michael Beeson, Yuri Gurevich, Nikolaj Bjorner, Denis Ignatovich, András
+Salamon, Christoph Wintersteiger, Simon Cruanes, Thomas Forster, Peter Koepke,
+Norm Megill, John Harrison, Mike Gordon, Magnus Myreen, Rob Arthan, Roger
+Bishop Jones, Robin Milner, and many others. My design
 decisions would not be the same without their work and ideas (though I must
 take credit for all decisions they would disagree with! :-)).
 
