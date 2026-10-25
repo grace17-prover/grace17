@@ -2,7 +2,7 @@
 
 <p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-25">25 October 2026</time></span></p>
 
-![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem as Grace17 states it.")
+![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
 Every finite bridgeless multigraph has a list of cycles in which every edge
 lies exactly twice. Grace17 now proves this from the axioms of set theory. The
@@ -15,11 +15,12 @@ covers.
 This page is my account of how the proof was planned and carried out, and of
 what I learned about doing a proof of this size in Grace17. The short version:
 a blueprint written in an afternoon, based on Oum's exposition and the Lean
-proof, five layers proved by agents in about nine hours of agent time across a
-day and a half, 521 theorems in forty-one modules, a certificate that an
-independent Grace17 proof checker replays from axioms of set theory in under
-three seconds, and a theorem whose statement is a formula of ZF. Needless to
-say, I believe this is an encouraging result :-).
+proof, five layers proved by agents using the [Grace17 agent
+interface](agents.md) in about nine hours of agent time across a day and a
+half, 521 theorems in forty-one modules, a certificate that an independent
+Grace17 proof checker replays from axioms of set theory in under three seconds,
+and a theorem whose statement is a formula of ZF. Needless to say, I believe
+this is an encouraging result :-).
 
 Mathematics is better for having many foundations, tools, and habits of
 thought. This theorem now has formal proofs in both dependent type theory and
