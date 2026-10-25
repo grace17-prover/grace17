@@ -258,93 +258,65 @@ let quote s =
   Buffer.add_char b '"' ;
   Buffer.contents b
 
-let rec canonical = function
-  | Null -> "null"
-  | Bool b -> string_of_bool b
-  | Num n -> string_of_int n
-  | Str s -> quote s
-  | Arr a -> "[" ^ String.concat "," (List.map canonical a) ^ "]"
+(* Keys sort by UTF-16 code units; for ASCII keys, nearly all of them, that
+   is byte order, so the conversion is made only when a key needs it. *)
+let ascii s =
+  let rec go i = i = String.length s || (Char.code (String.unsafe_get s i) < 128 && go (i + 1)) in
+  go 0
+
+let key_compare a c =
+  if ascii a && ascii c then compare a c else compare (utf16 a) (utf16 c)
+
+let rec write_canonical b = function
+  | Null -> Buffer.add_string b "null"
+  | Bool x -> Buffer.add_string b (string_of_bool x)
+  | Num n -> Buffer.add_string b (string_of_int n)
+  | Str s -> Buffer.add_string b (quote s)
+  | Arr a ->
+      Buffer.add_char b '[' ;
+      List.iteri (fun i x -> if i > 0 then Buffer.add_char b ',' ; write_canonical b x) a ;
+      Buffer.add_char b ']'
   | Obj o ->
-      let o = List.sort (fun (a, _) (b, _) -> compare (utf16 a) (utf16 b)) o in
-      "{"
-      ^ String.concat "," (List.map (fun (k, v) -> quote k ^ ":" ^ canonical v) o)
-      ^ "}"
+      let sorted = List.stable_sort (fun (a, _) (c, _) -> key_compare a c) o in
+      Buffer.add_char b '{' ;
+      List.iteri
+        (fun i (k, v) ->
+          if i > 0 then Buffer.add_char b ',' ;
+          Buffer.add_string b (quote k) ;
+          Buffer.add_char b ':' ;
+          write_canonical b v )
+        sorted ;
+      Buffer.add_char b '}'
+
+(* Canonical JSON is written into one buffer; building it from string
+   concatenations copied a large document many times over. *)
+let canonical j =
+  let b = Buffer.create 4096 in
+  write_canonical b j ;
+  Buffer.contents b
 
 module Sha256 = struct
-  open Int32
+  (* Native integers masked to 32 bits: boxed Int32 arithmetic allocated on
+     every operation and made the digest of a large certificate the slowest
+     step of a check. *)
+  let mask = 0xffffffff
 
-  let ( +! ) = add
-
-  let rotr x n = logor (shift_right_logical x n) (shift_left x (32 - n))
-
-  let xor3 a b c = logxor a (logxor b c)
+  let rotr x n = ((x lsr n) lor (x lsl (32 - n))) land mask
 
   let k =
-    Array.map of_string
-      [| "0x428a2f98"
-       ; "0x71374491"
-       ; "0xb5c0fbcf"
-       ; "0xe9b5dba5"
-       ; "0x3956c25b"
-       ; "0x59f111f1"
-       ; "0x923f82a4"
-       ; "0xab1c5ed5"
-       ; "0xd807aa98"
-       ; "0x12835b01"
-       ; "0x243185be"
-       ; "0x550c7dc3"
-       ; "0x72be5d74"
-       ; "0x80deb1fe"
-       ; "0x9bdc06a7"
-       ; "0xc19bf174"
-       ; "0xe49b69c1"
-       ; "0xefbe4786"
-       ; "0x0fc19dc6"
-       ; "0x240ca1cc"
-       ; "0x2de92c6f"
-       ; "0x4a7484aa"
-       ; "0x5cb0a9dc"
-       ; "0x76f988da"
-       ; "0x983e5152"
-       ; "0xa831c66d"
-       ; "0xb00327c8"
-       ; "0xbf597fc7"
-       ; "0xc6e00bf3"
-       ; "0xd5a79147"
-       ; "0x06ca6351"
-       ; "0x14292967"
-       ; "0x27b70a85"
-       ; "0x2e1b2138"
-       ; "0x4d2c6dfc"
-       ; "0x53380d13"
-       ; "0x650a7354"
-       ; "0x766a0abb"
-       ; "0x81c2c92e"
-       ; "0x92722c85"
-       ; "0xa2bfe8a1"
-       ; "0xa81a664b"
-       ; "0xc24b8b70"
-       ; "0xc76c51a3"
-       ; "0xd192e819"
-       ; "0xd6990624"
-       ; "0xf40e3585"
-       ; "0x106aa070"
-       ; "0x19a4c116"
-       ; "0x1e376c08"
-       ; "0x2748774c"
-       ; "0x34b0bcb5"
-       ; "0x391c0cb3"
-       ; "0x4ed8aa4a"
-       ; "0x5b9cca4f"
-       ; "0x682e6ff3"
-       ; "0x748f82ee"
-       ; "0x78a5636f"
-       ; "0x84c87814"
-       ; "0x8cc70208"
-       ; "0x90befffa"
-       ; "0xa4506ceb"
-       ; "0xbef9a3f7"
-       ; "0xc67178f2" |]
+    [| 0x428a2f98; 0x71374491; 0xb5c0fbcf; 0xe9b5dba5; 0x3956c25b; 0x59f111f1;
+       0x923f82a4; 0xab1c5ed5; 0xd807aa98; 0x12835b01; 0x243185be; 0x550c7dc3;
+       0x72be5d74; 0x80deb1fe; 0x9bdc06a7; 0xc19bf174; 0xe49b69c1; 0xefbe4786;
+       0x0fc19dc6; 0x240ca1cc; 0x2de92c6f; 0x4a7484aa; 0x5cb0a9dc; 0x76f988da;
+       0x983e5152; 0xa831c66d; 0xb00327c8; 0xbf597fc7; 0xc6e00bf3; 0xd5a79147;
+       0x06ca6351; 0x14292967; 0x27b70a85; 0x2e1b2138; 0x4d2c6dfc; 0x53380d13;
+       0x650a7354; 0x766a0abb; 0x81c2c92e; 0x92722c85; 0xa2bfe8a1; 0xa81a664b;
+       0xc24b8b70; 0xc76c51a3; 0xd192e819; 0xd6990624; 0xf40e3585; 0x106aa070;
+       0x19a4c116; 0x1e376c08; 0x2748774c; 0x34b0bcb5; 0x391c0cb3; 0x4ed8aa4a;
+       0x5b9cca4f; 0x682e6ff3; 0x748f82ee; 0x78a5636f; 0x84c87814; 0x8cc70208;
+       0x90befffa; 0xa4506ceb; 0xbef9a3f7; 0xc67178f2 |]
+
+  let hex h = String.concat "" (Array.to_list (Array.map (Printf.sprintf "%08x") h))
 
   let digest s =
     let len = String.length s in
@@ -359,58 +331,46 @@ module Sha256 = struct
         (Char.chr
            (Int64.to_int (Int64.logand 255L (Int64.shift_right_logical bits (8 * i)))))
     done ;
-    let h =
-      Array.map of_string
-        [| "0x6a09e667"
-         ; "0xbb67ae85"
-         ; "0x3c6ef372"
-         ; "0xa54ff53a"
-         ; "0x510e527f"
-         ; "0x9b05688c"
-         ; "0x1f83d9ab"
-         ; "0x5be0cd19" |]
-    in
-    let w = Array.make 64 0l in
+    let h = [| 0x6a09e667; 0xbb67ae85; 0x3c6ef372; 0xa54ff53a; 0x510e527f; 0x9b05688c; 0x1f83d9ab; 0x5be0cd19 |] in
+    let w = Array.make 64 0 in
+    let byte p = Char.code (Bytes.get b p) in
     for off = 0 to (n / 64) - 1 do
       for i = 0 to 15 do
-        let v = ref 0l in
-        for j = 0 to 3 do
-          v :=
-            logor (shift_left !v 8)
-              (of_int (Char.code (Bytes.get b ((64 * off) + (4 * i) + j))))
-        done ;
-        w.(i) <- !v
+        let p = (64 * off) + (4 * i) in
+        w.(i) <- (byte p lsl 24) lor (byte (p + 1) lsl 16) lor (byte (p + 2) lsl 8) lor byte (p + 3)
       done ;
       for i = 16 to 63 do
         let x = w.(i - 15) and y = w.(i - 2) in
-        w.(i)
-        <- w.(i - 16)
-           +! xor3 (rotr x 7) (rotr x 18) (shift_right_logical x 3)
-           +! w.(i - 7)
-           +! xor3 (rotr y 17) (rotr y 19) (shift_right_logical y 10)
+        let s0 = rotr x 7 lxor rotr x 18 lxor (x lsr 3) in
+        let s1 = rotr y 17 lxor rotr y 19 lxor (y lsr 10) in
+        w.(i) <- (w.(i - 16) + s0 + w.(i - 7) + s1) land mask
       done ;
-      let v = Array.copy h in
+      let a = ref h.(0) and bb = ref h.(1) and c = ref h.(2) and d = ref h.(3) in
+      let e = ref h.(4) and f = ref h.(5) and g = ref h.(6) and hh = ref h.(7) in
       for i = 0 to 63 do
-        let a = v.(0) and e = v.(4) in
-        let t1 =
-          v.(7)
-          +! xor3 (rotr e 6) (rotr e 11) (rotr e 25)
-          +! logxor (logand e v.(5)) (logand (lognot e) v.(6))
-          +! k.(i) +! w.(i)
-        in
-        let t2 =
-          xor3 (rotr a 2) (rotr a 13) (rotr a 22)
-          +! xor3 (logand a v.(1)) (logand a v.(2)) (logand v.(1) v.(2))
-        in
-        for j = 7 downto 1 do
-          v.(j) <- v.(j - 1)
-        done ;
-        v.(4) <- v.(4) +! t1 ;
-        v.(0) <- t1 +! t2
+        let s1 = rotr !e 6 lxor rotr !e 11 lxor rotr !e 25 in
+        let ch = (!e land !f) lxor (lnot !e land mask land !g) in
+        let t1 = (!hh + s1 + ch + k.(i) + w.(i)) land mask in
+        let s0 = rotr !a 2 lxor rotr !a 13 lxor rotr !a 22 in
+        let maj = (!a land !bb) lxor (!a land !c) lxor (!bb land !c) in
+        let t2 = (s0 + maj) land mask in
+        hh := !g ;
+        g := !f ;
+        f := !e ;
+        e := (!d + t1) land mask ;
+        d := !c ;
+        c := !bb ;
+        bb := !a ;
+        a := (t1 + t2) land mask
       done ;
-      for i = 0 to 7 do
-        h.(i) <- h.(i) +! v.(i)
-      done
+      h.(0) <- (h.(0) + !a) land mask ;
+      h.(1) <- (h.(1) + !bb) land mask ;
+      h.(2) <- (h.(2) + !c) land mask ;
+      h.(3) <- (h.(3) + !d) land mask ;
+      h.(4) <- (h.(4) + !e) land mask ;
+      h.(5) <- (h.(5) + !f) land mask ;
+      h.(6) <- (h.(6) + !g) land mask ;
+      h.(7) <- (h.(7) + !hh) land mask
     done ;
-    String.concat "" (Array.to_list (Array.map (fun x -> Printf.sprintf "%08lx" x) h))
+    hex h
 end
