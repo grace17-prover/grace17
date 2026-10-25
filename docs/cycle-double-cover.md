@@ -143,9 +143,9 @@ means replacing admissions with proofs, one theorem at a time. A module whose
 last `sorry` admission is eliminated by a proof is promoted into Cumulus under
 the home named in its header.
 
-The blueprint for this theorem had 17 modules in 5 layers and 108 theorems, all
-admitted. I wrote it with Claude's assistance in an afternoon by following the
-Oum exposition: the parity algebra of edge sets, tree packing, parity systems,
+The blueprint for this theorem had 17 modules in 5 layers and 108 theorems. I
+wrote it with Claude's assistance in an afternoon by following the Oum
+exposition: the parity algebra of edge sets, tree packing, parity systems,
 flows, double covers. This is when key design decisions were made, especially
 about representation. Edge sets are subsets of `E`. Degrees count edge ends, so
 loops need no special case anywhere. Connectivity along an edge set is closure
@@ -161,28 +161,28 @@ proving process. I come back to them below.
 ## The exposition and the Lean proof
 
 The mathematics came from Oum's exposition. I read it closely while writing the
-blueprint, and the blueprint is where it was turned into set theory; the
-proving agents worked from the blueprint's statements. The exposition's
-mathematics, as the blueprint states it, went through without a change. What
-the exposition assumes, we either proved (tree packing) or went around
-(Fleischner's splitting lemma).
+blueprint, and the blueprint is where it was turned into set theory. The
+proving agents then worked systematically from the blueprint's statements. The
+exposition's mathematics, as the blueprint states it, went through without a
+change. What the exposition assumes, we either proved (tree packing) or went
+around (Fleischner's splitting lemma).
 
 The Lean proof was a major achievement and helped inform the writing of the
 blueprint. Before writing it I read the main file of `openai/cdc-lean` and the
-outline of its declarations, and the shape of its route, the expansion of each
-vertex by a rotation system in place of a reduction through Fleischner's lemma,
-the projection of a cover back through the expansion, and the decomposition of
-even edge sets into cycles at the end. We did not port the Lean files, and in
-fact the proving agents were not given access to them, though that would also
-be a very interesting route to take.
+outline of its declarations, and the shape of its argument, the expansion of
+each vertex by a rotation system in place of a reduction through Fleischner's
+lemma, the projection of a cover back through the expansion, and the
+decomposition of even edge sets into cycles at the end. We did not port the
+Lean files, and in fact the proving agents were not given access to them,
+though that would also be a very interesting route to take.
 
 ## The layers, with a theorem from each
 
 ![The forty-one modules of the proof, by area, with their imports](images/cycle-double-cover-modules.svg "The modules of the proof and their imports, from the parity of finite sets on the left to the theorem on the right.")
 
-The import graph above is the proof's dependency graph, and the five areas
-are the blueprint's five layers. A theorem or two from each, as they stand
-in Cumulus; each opens in the Workbench at its line.
+The import graph above is the proof's dependency graph, and the five areas are
+the blueprint's five layers. Below I'll share a theorem or two from each, as
+they stand in Cumulus; each opens in the Workbench at its line.
 
 **Multigraphs.** An even edge set crosses every cut an even number of
 times, so a bridge lies in no even edge set, and a graph that is
