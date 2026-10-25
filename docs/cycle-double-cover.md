@@ -1,6 +1,6 @@
 # An adventure in multifoundational Mathematics 2.0: the cycle double cover theorem in Grace17
 
-<p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-25">25 October 2026</time></span></p>
+<p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-26">26 October 2026</time></span></p>
 
 ![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
@@ -507,14 +507,23 @@ reports. The numbers below are from one laptop.
 | compiling the certificate | 47 s |
 | replay with the Rust checker | 2.9 s |
 | replay with the Python checker | 9.9 s |
-| replay with the OCaml checker | 11 s |
+| replay with the OCaml checker | 9 s |
 
 The same proofs as a [machine tape](kernel-format.md), the lower-level format
 in which every proof is a sequence of natural-deduction instructions against an
 authenticated environment, are 2,221 theorems in 1,139,382 instructions: a 39
 MB tape with a 12 MB environment, compiled in 53 s. The Rust checker replays
-the tape in 0.6 s, Python in 9.1 s, and OCaml in 4.4 s, and the kernel verifies
+the tape in 0.6 s, Python in 9.1 s, and OCaml in 3.1 s, and the kernel verifies
 it against the elaborated modules in 18 s.
+
+Measuring this found a bug worth recording. The OCaml checker first took over
+two minutes on both the certificate and the tape, slower than the Python
+checker, which made no sense for native code. The cause was a duplicate check
+over the arena's vectors through a generic hashtable whose hash looks at only
+the first few elements of a list; contexts that open with the same hypotheses
+all landed in one bucket and the check went quadratic. Hashing every word,
+equality that short-circuits on identity, and a digest on native integers
+instead of boxed ones brought it to the times above.
 
 I find this part quietly thrilling. Everything above the kernel, the
 elaborator, the tactics, the agents, the session that ran them, is untrusted.
@@ -620,8 +629,8 @@ automation can be as sophisticated as we want, provided that they are outside
 of the trusted proof checking base. Lean is built on the same principle, a
 small trusted kernel with an untrusted elaborator above it; the difference is
 only in what the kernel checks, reasoning over a dependent type theory in Lean
-and the axioms of set theory here, whose description fits on a page of the
-[foundation contract](foundations.md).
+and the axioms of set theory for Grace17 (cf. the [foundation
+contract](foundations.md) for details).
 
 ## How Claude was used
 
@@ -702,18 +711,14 @@ I did this to stress test Grace17 and many of my current design decisions (and
 motivate directed improvements to Grace17 and Cumulus along the way), and to
 show that a set-theoretic foundation can work well for a major recent result. A
 recent theorem of some depth, proved by a machine, formalized in Lean and
-written up by a domain expert, has now been formalized in first-order set
-theory, by a machine, from a plan written in a day. The two proofs agree in
+written up by a domain expert, has now been formalized in classical ZFC,
+largely by machine, from a plan written in a day. The two proofs agree in
 outline and differ in some interesting ways. The set-theoretic proof is checked
 by a relatively small kernel implementing a variant of ZFC and replayed by
 three independent checkers, its statement is a formula in ZF and its proof is a
 sequence of beautiful moves naturally expressed in first-order set theory.
-
 Studying these proofs in Grace17, I think they are beautiful and natural,
-though I still see quite a few places for ergonomic improvement. The proof
-is eight thousand lines. Crucially, I believe the lemma and
-intermediate statements are mathematically natural, and at the bottom there is
-nothing but the axioms of set theory.
+though I still see quite a few places for ergonomic improvement.
 
 As I say in the [Introduction](introduction.md), mathematics is better for
 having many foundations, tools, and habits of thought; the same theorem seen
