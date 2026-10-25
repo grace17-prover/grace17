@@ -330,5 +330,21 @@ const hierarchyLine = scanSearchDeclarations(hierarchy.file, hierarchy.source).f
 const demo = workbenchLink(hierarchy.file, hierarchyLine, "./workbench/");
 writeFileSync(join(out, "try.html"), page("Explore a proof", `<h1>The cumulative hierarchy</h1><p class="lede">Edit and check the actual Cumulus source below. Proof execution happens in your browser. <a href="${demo}">Open the full Workbench</a>.</p><iframe title="Grace17 cumulative hierarchy proof Workbench" src="${demo}" loading="lazy" class="proof-frame"></iframe>`, "./", { wide: true }));
 
+// Pages for search engines: everything the site links to, with the documentation
+// pages taken from the docs index, so a page left out of it stays out here too.
+{
+  const origin = "https://grace17.org";
+  const listedDocs = new Set([...docsIndex.matchAll(/\]\(([^)#]+\.md)\)/g)].map(m => m[1])
+    .filter(p => !p.includes("/")).map(p => `docs/${p.replace(/\.md$/, ".html")}`));
+  const pages = walk(out).map(f => relative(out, f).replaceAll("\\", "/")).filter(f => f.endsWith(".html"))
+    .filter(f => !f.startsWith("workbench/") || f === "workbench/index.html")
+    .filter(f => !f.startsWith("docs/") || f === "docs/index.html" || listedDocs.has(f))
+    .filter(f => f !== "analytics.html")
+    .map(f => f.replace(/index\.html$/, "")).sort();
+  const urls = pages.map(f => `  <url><loc>${origin}/${f}</loc></url>`).join("\n");
+  writeFileSync(join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+  writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`);
+}
+
 writeFileSync(join(out, "site-build.json"), JSON.stringify({ version, modules: sources.length, declarations: records.length, docs: docCount, examples: examples.length }, null, 2));
 console.log(`Built static site: ${sources.length} modules, ${records.length} declarations, ${docCount} documentation pages, ${examples.length} examples → ${out}`);
