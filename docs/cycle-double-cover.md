@@ -618,9 +618,9 @@ that the Python, OCaml and Rust checkers replay. So the elaboration and proof
 automation can be as sophisticated as we want, provided that they are outside
 of the trusted proof checking base. Lean is built on the same principle, a
 small trusted kernel with an untrusted elaborator above it; the difference is
-only in what the kernel checks, a dependent type theory in Lean and the axioms
-of set theory here, which fit on a page of the [foundation
-contract](foundations.md).
+only in what the kernel checks, reasoning over a dependent type theory in Lean
+and the axioms of set theory here, whose description fits on a page of the
+[foundation contract](foundations.md).
 
 ## How Claude was used
 
