@@ -2290,7 +2290,16 @@ function notationShape(notation, tokenText, underlying) {
   const operand = index => names[index] || ["a", "b", "c"][index] || `x${index + 1}`;
   const leading = notation.leadingArguments?.length || 0;
   const argument = index => operand(leading + index);
-  switch (notation.fixity) {
+  // A built-in function notation such as 𝒫 or ⋃ carries no fixity; the
+  // declaration's parameter count says whether it is written applied, as a
+  // constant, or between two operands.
+  const fixity = notation.fixity
+    || (names.length === 0 ? "constant" : names.length === 1 ? "function" : undefined);
+  switch (fixity) {
+    case "function": case "scoped": {
+      const operands = Array.from({ length: Math.max(1, names.length - leading) }, (_, index) => argument(index));
+      return { written: `${tokenText}(${operands.join(", ")})`, elaborated: `${short}(${operands.join(", ")})` };
+    }
     case "prefix": return { written: `${tokenText}${argument(0)}`, elaborated: `${short}(${argument(0)})` };
     case "postfix": return { written: `${argument(0)}${tokenText}`, elaborated: `${short}(${argument(0)})` };
     case "constant": return { written: tokenText, elaborated: short };
