@@ -1,0 +1,316 @@
+-- Consequences of tree packing: a 2k-edge-connected graph has k disjoint
+-- spanning trees, and a 3-edge-connected graph has three spanning trees with
+-- no edge common to all three, found in the graph with every edge doubled.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Corollaries
+import Kaiser
+import Multigraph.Doubling
+import Combinatorics.Partitions
+
+-- Section: The cut of a class and its degree in the quotient.
+
+-- An edge leaving a class of P joins two classes.
+theorem crossingClasses.of_crossing (V E P leftEnd rightEnd X g : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires class : X ∈ P
+  requires cut : g ∈ crossing(leftEnd, rightEnd, E, X)
+  shows g ∈ crossingClasses(P, leftEnd, rightEnd, E)
+proof
+  obtain ⟨inE, sides⟩ := cut
+  obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, g, inE
+  have leftIff := classOf.eq_iff_member with partition, class, leftIn
+  have rightIff := classOf.eq_iff_member with partition, class, rightIn
+  refine ⟨inE, _⟩
+  intro same
+  rcases sides with ⟨leftX, rightX⟩ | ⟨rightX, leftX⟩
+  . have leftClass := leftIff.backward with leftX
+    rw same at leftClass
+    exact rightX with (rightIff.forward with leftClass)
+  . have rightClass := rightIff.backward with rightX
+    rw ← same at rightClass
+    exact leftX with (leftIff.forward with rightClass)
+
+-- An edge leaving the class X is, in the quotient, an end of a crossing edge
+-- at X: the end on the side of X, which is the right end exactly when the
+-- right end lies in X.
+defgraph crossingEnd (V E P leftEnd rightEnd X : Set)
+    (g ∈ crossing(leftEnd, rightEnd, E, X)) :
+    incidentEnds(quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd),
+      crossingClasses(P, leftEnd, rightEnd, E), X) :=
+  (g, indicator(X, rightEnd(g)))
+requires graph : Graph(V, E, leftEnd, rightEnd)
+requires partition : Partition(V, P)
+requires class : X ∈ P
+proof
+  have inE := member.left
+  obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, g, inE
+  obtain ⟨leftValue, rightValue⟩ :=
+    quotientEnd.value with graph, partition, inE
+  have crossing :=
+    crossingClasses.of_crossing with graph, partition, class, member
+  have leftIff := classOf.eq_iff_member with partition, class, leftIn
+  have rightIff := classOf.eq_iff_member with partition, class, rightIn
+  rw incidentEnds.pair
+  refine ⟨crossing, _⟩
+  rw [leftValue, rightValue]
+  rcases member.right with ⟨leftX, rightX⟩ | ⟨rightX, leftX⟩
+  . left
+    rw indicator.absent with rightX
+    exact ⟨rfl, (leftIff.backward with leftX)⟩
+  . right
+    rw indicator.member with rightX
+    exact ⟨rfl, (rightIff.backward with rightX)⟩
+
+theorem crossingEnd.injective (V E P leftEnd rightEnd X : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires class : X ∈ P
+  shows InjectiveBetween(crossingEnd(V, E, P, leftEnd, rightEnd, X),
+    crossing(leftEnd, rightEnd, E, X),
+    incidentEnds(quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd),
+      crossingClasses(P, leftEnd, rightEnd, E), X))
+proof
+  have function := crossingEnd.function at V, E, P, leftEnd, rightEnd, X
+    with graph, partition, class
+  apply Injective.of_pointwise with function
+  intros g hg h hh same
+  rw [(crossingEnd.value at V, E, P, leftEnd, rightEnd, X, g
+      with graph, partition, class, hg),
+    (crossingEnd.value at V, E, P, leftEnd, rightEnd, X, h
+      with graph, partition, class, hh)] at same
+  exact orderedPair.first with same
+
+-- So the cut of a class is no larger than its degree in the quotient.
+theorem degreeIn.quotient_ge_cut (V E P leftEnd rightEnd X : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires partition : Partition(V, P)
+  requires class : X ∈ P
+  shows cardinality(crossing(leftEnd, rightEnd, E, X)) ≤
+    degreeIn(quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd),
+      crossingClasses(P, leftEnd, rightEnd, E), X)
+proof
+  have injective := crossingEnd.injective with graph, partition, class
+  have finiteCut := crossing.finite at leftEnd, rightEnd, E, X
+    with finiteEdges
+  have finiteClasses := crossingClasses.finite
+    at P, leftEnd, rightEnd, E with finiteEdges
+  have image := cardinality.injective_image
+    with injective, Subset.reflexive, finiteCut
+  unfold degreeIn
+  rw ← image
+  exact cardinality.monotone
+    with (incidentEnds.finite with finiteClasses), functionImage.subset
+
+-- Section: Edge-connectivity gives the packing condition.
+
+-- Summing the cut sizes over the classes of a partition counts each crossing
+-- edge twice, so 2k-edge-connectivity gives the packing condition for k. The
+-- sum is the degree sum of the crossing edges in the quotient graph, which
+-- the handshake lemma evaluates.
+theorem EdgeConnected.packing_condition (V E leftEnd rightEnd : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires connected : EdgeConnected(V, E, leftEnd, rightEnd, 2 * k)
+  shows PackingCondition(V, E, leftEnd, rightEnd, k)
+proof
+  intros P partition
+  have finiteP := Partition.finite with finiteVertices, partition
+  have finiteClasses := crossingClasses.finite
+    at P, leftEnd, rightEnd, E with finiteEdges
+  have natClasses := cardinality.nat with finiteClasses
+  have natP := cardinality.nat with finiteP
+  by_cases whole : V ∈ P
+  . -- The trivial partition has one class and asks for nothing.
+    have single : P = {V}
+      ext Y
+      constructor
+      . intro hY
+        rw singleton.membership
+        by_contra different
+        have apart := partition.right.left with Y, hY, V, whole, different
+        obtain ⟨inV, nonempty⟩ := partition.left with Y, hY
+        obtain ⟨y, hy⟩ := Nonempty.of_ne_empty with nonempty
+        rw Disjoint.iff at apart
+        exact apart with y, hy, (inV with y, hy)
+      . intro hY
+        rw singleton.membership at hY
+        rw hY
+        exact whole
+    have zero : k * (1 - 1) = 0
+      have one : 1 - 1 = 0 by compute
+      rw one
+      ring
+    have count : cardinality(P) = 1
+      rw single
+      exact cardinality.singleton
+    rw [count, zero]
+    arith
+  . -- Every class is a nonempty proper vertex set, left by at least 2k
+    -- edges, and the degree of a class in the quotient is at least its cut.
+    have edgesClasses : crossingClasses(P, leftEnd, rightEnd, E) ⊆ E :=
+      crossingClasses.subset
+    have endsQ := quotientEnd.ends with graph, partition, edgesClasses
+    have handshake := degreeIn.handshake with finiteP, finiteClasses, endsQ
+    have bounds : ∀ X ∈ P,
+        degreeWeights(P, quotientEnd(E, P, leftEnd),
+          quotientEnd(E, P, rightEnd),
+          crossingClasses(P, leftEnd, rightEnd, E))(X) ∈ ℕ ∧
+        LessEqual(2 * k, degreeWeights(P, quotientEnd(E, P, leftEnd),
+          quotientEnd(E, P, rightEnd),
+          crossingClasses(P, leftEnd, rightEnd, E))(X))
+      intros X hX
+      obtain ⟨inV, nonempty⟩ := partition.left with X, hX
+      have proper : X ≠ V
+        intro same
+        rw same at hX
+        exact whole with hX
+      have many := connected with X, inV, nonempty, proper
+      have below := degreeIn.quotient_ge_cut
+        with graph, finiteEdges, partition, hX
+      have natDegree := degreeIn.natural
+        at quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd),
+          crossingClasses(P, leftEnd, rightEnd, E), X
+        with finiteClasses
+      rw degreeWeights.value with finiteClasses, hX
+      refine ⟨natDegree, _⟩
+      arith
+    have lower := natSum.ge_of_bounded with finiteP, bounds
+    rw handshake at lower
+    -- Cancel the factor two, then drop one class.
+    have rearranged : cardinality(P) * (2 * k) = 2 * (k * cardinality(P))
+      ring
+    rw rearranged at lower
+    have twoPositive : 2 ≠ 0 by simp
+    have cancelled :=
+      LessEqual.mul_left_cancel_positive with twoPositive, lower
+    have step : cardinality(P) ≤ cardinality(P) + 1 by arith
+    have below := sub.one_le_of_le_add_one with step
+    have monotone := LessEqual.mul_left
+      at cardinality(P) - 1, cardinality(P), k with below
+    exact LessEqual.transitive with monotone, cancelled
+
+theorem EdgeConnected.tree_packing (V E leftEnd rightEnd : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires connected : EdgeConnected(V, E, leftEnd, rightEnd, 2 * k)
+  shows TreePacking(V, E, leftEnd, rightEnd, k)
+proof
+  have condition := EdgeConnected.packing_condition
+    with graph, finiteVertices, finiteEdges, connected
+  exact treePacking with graph, finiteVertices, finiteEdges, nonempty, condition
+
+-- Section: Three spanning trees with no common edge.
+
+-- Three spanning trees of the doubled graph correspond to three spanning
+-- trees of G, and no edge of G lies in all three: the projection of a tree
+-- connects V, since a vertex set closed under the projected edges is closed
+-- under their copies, and has at most |V| − 1 edges; an edge of all three
+-- projections would have two copies in one tree, as there are two sides.
+theorem EdgeConnected.three_trees (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires connected : EdgeConnected(V, E, leftEnd, rightEnd, 3)
+  shows ∃ T, FunctionBetween(T, 3, 𝒫(E)) ∧
+    (∀ i ∈ 3, SpanningTree(V, leftEnd, rightEnd, T(i))) ∧
+    T(0) ∩ T(1) ∩ T(2) = ∅
+proof
+  have doubledGraph := doubled.graph with graph
+  have doubledConnected :=
+    doubled.edge_connected with graph, finiteEdges, connected
+  have finiteDoubled : Finite(doubledEdges(E))
+    unfold doubledEdges
+    exact Finite.product with finiteEdges, Finite.natural
+  obtain ⟨T, function, apart, trees⟩ := EdgeConnected.tree_packing
+    with doubledGraph, finiteVertices, finiteDoubled, nonempty, doubledConnected
+  have endsE := Graph.ends with graph
+  have natV := cardinality.nat with finiteVertices
+  -- Each tree projects to a spanning tree of G.
+  have spanning : ∀ i ∈ 3,
+      SpanningTree(V, leftEnd, rightEnd, projected(E, T(i)))
+    intros i hi
+    have tree := trees with i, hi
+    have inDoubled : T(i) ⊆ doubledEdges(E) := powerset.membership_iff.forward
+      with (FunctionBetween.apply_closed with function, hi)
+    unfold doubledEdges at inDoubled
+    have inE : projected(E, T(i)) ⊆ E
+      intros e he
+      exact he.left
+    have finiteProjected := Finite.subset with finiteEdges, inE
+    have connects : Connects(V, leftEnd, rightEnd, projected(E, T(i)))
+      intros u hu v hv A start closed
+      have closedCopies : ClosedUnder(doubledEnd(V, E, leftEnd),
+          doubledEnd(V, E, rightEnd), T(i), A)
+        intros p hp
+        obtain ⟨_, e, he, j, hj, rfl⟩ :=
+          product.membership.forward with (inDoubled with p, hp)
+        rw [(doubledEnd.value with graph.left, he, hj),
+          (doubledEnd.value with graph.right, he, hj)]
+        exact closed with e, ⟨he, j, hj, hp⟩
+      have joined := tree.right.left with u, hu, v, hv
+      exact joined with A, start, closedCopies
+    have upper := projected.count with finiteEdges, inDoubled
+    have lower := componentsBy.lower_bound
+      with finiteVertices, finiteProjected, (ends_in.subset with endsE, inE)
+    rw componentsBy.connected_count with connects, nonempty at lower
+    have count := tree.right.right
+    have natT := cardinality.nat with tree.left
+    have natProjected := cardinality.nat with finiteProjected
+    refine ⟨finiteProjected, connects, _⟩
+    arith
+  have less0 : 0 < 3 by arith
+  have less1 : 1 < 3 by arith
+  have less2 : 2 < 3 by arith
+  have zero := membership.of_Less at 0, 3 with *, less0
+  have one := membership.of_Less at 1, 3 with *, less1
+  have two := membership.of_Less at 2, 3 with *, less2
+  witness projectedTrees(E, T)
+  refine ⟨(projectedTrees.function at E, T), _, _⟩
+  . intros i hi
+    rw projectedTrees.value with hi
+    exact spanning with i, hi
+  . -- An edge of all three projections has copies in three trees with only
+    -- two sides, so two copies coincide, against the disjointness of trees.
+    rw [(projectedTrees.value with zero), (projectedTrees.value with one),
+      (projectedTrees.value with two)]
+    have ne01 : 0 ≠ 1 by simp
+    have ne02 : 0 ≠ 2 by simp
+    have ne12 : 1 ≠ 2 by simp
+    have apart01 := Disjoint.iff.forward with (apart with 0, zero, 1, one, ne01)
+    have apart02 := Disjoint.iff.forward with (apart with 0, zero, 2, two, ne02)
+    have apart12 := Disjoint.iff.forward with (apart with 1, one, 2, two, ne12)
+    ext e
+    constructor
+    . intro he
+      obtain ⟨both, in2⟩ := intersection.membership.forward with he
+      obtain ⟨in0, in1⟩ := intersection.membership.forward with both
+      obtain ⟨_, j0, hj0, c0⟩ := in0
+      obtain ⟨_, j1, hj1, c1⟩ := in1
+      obtain ⟨_, j2, hj2, c2⟩ := in2
+      have cases0 := membership.two.forward with hj0
+      have cases1 := membership.two.forward with hj1
+      have cases2 := membership.two.forward with hj2
+      exfalso
+      rcases cases0 with rfl | rfl
+      . rcases cases1 with rfl | rfl
+        . exact apart01 with (e, 0), c0, c1
+        . rcases cases2 with rfl | rfl
+          . exact apart02 with (e, 0), c0, c2
+          . exact apart12 with (e, 1), c1, c2
+      . rcases cases1 with rfl | rfl
+        . rcases cases2 with rfl | rfl
+          . exact apart12 with (e, 0), c1, c2
+          . exact apart02 with (e, 1), c0, c2
+        . exact apart01 with (e, 1), c0, c1
+    . intro he
+      simp at he

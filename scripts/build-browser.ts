@@ -69,6 +69,9 @@ const checkpointRoots = [
   "Grace.Cumulus.Complex.PolynomialMinimum",
   "Grace.Cumulus.Rotation.Freeness",
   "Grace.Cumulus.Geometry.Sphere.Absorb",
+  "Grace.Cumulus.GraphTheory.Flows.Splits",
+  "Grace.Cumulus.GraphTheory.Flows.EightFlow",
+  "Grace.Cumulus.GraphTheory.DoubleCover.EvenDoubleCover",
 ].slice(0, process.env.GRACE17_CHECKPOINTS === "minimal" ? 3 : undefined);
 const checkpointOutput = join(output, "checkpoints");
 rmSync(checkpointOutput, { recursive: true, force: true });

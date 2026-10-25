@@ -48,6 +48,7 @@ notation never changes what the kernel checks.
 | `f⁽ᵏ⁾`, `f⁽ⁿ⁺¹⁾(x)` | `iteratedDerivative(f, k)`, `apply(iteratedDerivative(f, n + 1), x)` | `\lsup`, `\supk`, `\supplus`, `\sup1`, `\rsup` |
 | `n! * X`, `n < X` for a natural `n` and a real `X` | `realMulValue(realNat(n!), X)`, `relates(realLess, realNat(n), X)` | keyboard symbols |
 | `∀ k ≤ n, φ`, `∃ k < n, φ` | `forall k, Nat(k) → k ≤ n → φ`, `exists k, Nat(k) ∧ k < n ∧ φ` | `\forall`, `\le` |
+| `∀ X ⊆ V, φ`, `∃ X ⊆ V, φ` | `forall X, X ⊆ V → φ`, `exists X, X ⊆ V ∧ φ` | `\forall`, `\subseteq` |
 | `∏ xs` for a list of naturals | `listProduct(xs)` | `\prod` |
 | `√X` for a nonnegative real | `sqrt(X)` | `\sqrt` |
 | `A < B`, `A ≤ B` for reals | `relates(realLess, A, B)`, `relates(realLe, A, B)` | keyboard symbols |
@@ -954,7 +955,10 @@ clearer than `(n : ℕ) ∧ P`. A natural number bounded by an order is a
 bounded quantifier: `∀ k ≤ n, φ` is `∀ k, Nat(k) → k ≤ n → φ` with `k` a
 natural number in `φ`, `∃ k < n, φ` is `∃ k, Nat(k) ∧ k < n ∧ φ`, and both
 print back in the bounded form when the bound does not mention the
-variable. The formula is unchanged by any of this; only its text is.
+variable. A subset is bounded the same way: `∀ X ⊆ V, φ` is
+`∀ X, X ⊆ V → φ`, `∃ X ⊆ V, φ` is `∃ X, X ⊆ V ∧ φ`, several variables may
+share one bound, and both print back as written. The formula is unchanged
+by any of this; only its text is.
 
 Two notations that share a token and fixity never share a spelling in one
 printed formula: of the group power `x ^ n` and the matrix power under a

@@ -1,0 +1,615 @@
+-- Cycles in even edge sets: a cycle is a nonempty even edge set with every
+-- degree 0 or 2 whose edges are joined to one another, every nonempty even
+-- edge set contains a cycle, and a finite even edge set splits into cycles.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.Cycles
+import Covers
+import Cardinal.FiniteUnion
+
+-- Section: Cycles in even sets.
+
+-- A cycle: a nonempty even edge set in which every vertex has degree 0 or 2
+-- and whose edges are all joined to one another.
+predicate Cycle (V leftEnd rightEnd C : Set) :=
+  C ≠ ∅ ∧ EvenEdgeSet(V, leftEnd, rightEnd, C) ∧
+  (∀ v ∈ V, degreeIn(leftEnd, rightEnd, C, v) = 0 ∨
+    degreeIn(leftEnd, rightEnd, C, v) = 2) ∧
+  (∀ e ∈ C, ∀ f ∈ C,
+    Joined(leftEnd, rightEnd, C, leftEnd(e), leftEnd(f)))
+
+-- A nonempty even edge set that is not a cycle has a proper nonempty even
+-- subset: the edges into one component when two edges are not joined, and
+-- a path closed by two edges at a vertex of degree other than two.
+
+-- The edges of C whose left end lies in A. When A is closed under C they
+-- carry every end of C at a vertex of A and none elsewhere.
+def edgesInto (leftEnd C A : Set) : Set := { e ∈ C | leftEnd(e) ∈ A }
+
+theorem edgesInto.subset (leftEnd C A : Set)
+  shows edgesInto(leftEnd, C, A) ⊆ C
+proof
+  intros e he
+  exact he.left
+
+theorem edgesInto.ends_inside (leftEnd rightEnd C A v : Set)
+  requires closed : ClosedUnder(leftEnd, rightEnd, C, A)
+  requires member : v ∈ A
+  shows incidentEnds(leftEnd, rightEnd, edgesInto(leftEnd, C, A), v) =
+    incidentEnds(leftEnd, rightEnd, C, v)
+proof
+  apply Subset.antisymmetric
+  . exact incidentEnds.monotone with edgesInto.subset
+  . intros p hp
+    obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp
+    have sides := (incidentEnds.pair.forward with hp).right
+    have balanced := closed with e, he
+    have inside : leftEnd(e) ∈ A
+      rcases sides with ⟨_, atLeft⟩ | ⟨_, atRight⟩
+      . rw atLeft
+        exact member
+      . rw atRight at balanced
+        exact balanced.backward with member
+    exact incidentEnds.pair.backward with ⟨⟨he, inside⟩, sides⟩
+
+theorem edgesInto.ends_outside (leftEnd rightEnd C A v : Set)
+  requires closed : ClosedUnder(leftEnd, rightEnd, C, A)
+  requires outside : ¬v ∈ A
+  shows incidentEnds(leftEnd, rightEnd, edgesInto(leftEnd, C, A), v) = ∅
+proof
+  apply Subset.antisymmetric
+  . intros p hp
+    obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp
+    have sides := (incidentEnds.pair.forward with hp).right
+    have balanced := closed with e, he.left
+    have inside := he.right
+    exfalso
+    apply outside
+    rcases sides with ⟨_, atLeft⟩ | ⟨_, atRight⟩
+    . rw ← atLeft
+      exact inside
+    . rw ← atRight
+      exact balanced.forward with inside
+  . exact empty.subset
+
+theorem edgesInto.even (V leftEnd rightEnd C A : Set)
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires closed : ClosedUnder(leftEnd, rightEnd, C, A)
+  shows EvenEdgeSet(V, leftEnd, rightEnd, edgesInto(leftEnd, C, A))
+proof
+  constructor
+  . exact Finite.subset with even.left, edgesInto.subset
+  . intros v hv
+    have evenV := even.right with v, hv
+    unfold degreeIn at evenV
+    unfold degreeIn
+    by_cases member : v ∈ A
+    . rw edgesInto.ends_inside with closed, member
+      exact evenV
+    . rw [(edgesInto.ends_outside with closed, member), cardinality.empty]
+      exact Even.zero
+
+-- Two edges of an even set not joined through it: the edges into the
+-- component of the first form a proper nonempty even subset.
+theorem EvenEdgeSet.smaller_of_apart (V leftEnd rightEnd C e f : Set)
+  requires ends : ∀ g ∈ C, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires edges : e ∈ C ∧ f ∈ C
+  requires apart : ¬Joined(leftEnd, rightEnd, C, leftEnd(e), leftEnd(f))
+  shows ∃ B ⊆ C, B ≠ ∅ ∧ B ≠ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, B)
+proof
+  have closed := componentBy.closed at V, leftEnd, rightEnd, C, leftEnd(e)
+    with ends
+  have leftIn := (ends with e, edges.left).left
+  have inside : e ∈ edgesInto(leftEnd, C,
+      componentBy(V, leftEnd, rightEnd, C, leftEnd(e))) :=
+    ⟨edges.left, (componentBy.self with leftIn)⟩
+  have outside : ¬f ∈ edgesInto(leftEnd, C,
+      componentBy(V, leftEnd, rightEnd, C, leftEnd(e)))
+    intro member
+    exact apart with member.right.right
+  refine ⟨edgesInto(leftEnd, C,
+    componentBy(V, leftEnd, rightEnd, C, leftEnd(e))),
+    edgesInto.subset, ?_, ?_, (edgesInto.even with even, closed)⟩
+  . intro empty
+    rw empty at inside
+    simp at inside
+  . intro same
+    rw same at outside
+    exact outside with edges.right
+
+-- The edges of C not at v; v is isolated in them.
+def avoiding (leftEnd rightEnd C v : Set) : Set :=
+  { g ∈ C | leftEnd(g) ≠ v ∧ rightEnd(g) ≠ v }
+
+theorem avoiding.subset (leftEnd rightEnd C v : Set)
+  shows avoiding(leftEnd, rightEnd, C, v) ⊆ C
+proof
+  intros g hg
+  exact hg.left
+
+theorem avoiding.degree (leftEnd rightEnd C v Q : Set)
+  requires subset : Q ⊆ avoiding(leftEnd, rightEnd, C, v)
+  shows degreeIn(leftEnd, rightEnd, Q, v) = 0
+proof
+  have none : incidentEnds(leftEnd, rightEnd, Q, v) = ∅
+    apply Subset.antisymmetric
+    . intros p hp
+      obtain ⟨g, hg, i, hi, rfl⟩ := incidentEnds.shape with hp
+      have sides := (incidentEnds.pair.forward with hp).right
+      have away := (subset with g, hg).right
+      exfalso
+      tauto
+    . exact empty.subset
+  unfold degreeIn
+  rw none
+  exact cardinality.empty
+
+-- A vertex other than v is not joined to v by the edges avoiding v.
+theorem avoiding.not_joined (V leftEnd rightEnd C v a : Set)
+  requires ends : ∀ g ∈ C, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+  requires vertex : a ∈ V
+  requires distinct : a ≠ v
+  shows ¬Joined(leftEnd, rightEnd, avoiding(leftEnd, rightEnd, C, v), a, v)
+proof
+  intro joined
+  have closed : ClosedUnder(leftEnd, rightEnd,
+      avoiding(leftEnd, rightEnd, C, v), V ∖ {v})
+    intros g hg
+    have bounds := ends with g, hg.left
+    have away := hg.right
+    simp [bounds.left, bounds.right, away.left, away.right]
+  have start : a ∈ V ∖ {v} by simp [vertex, distinct]
+  have reached := joined with V ∖ {v}, start, closed
+  simp at reached
+
+-- An edge at v that is not a loop has its other end elsewhere in V.
+theorem edge.other_end (V leftEnd rightEnd e v : Set)
+  requires ends : leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires loop : leftEnd(e) ≠ rightEnd(e)
+  requires atV : leftEnd(e) = v ∨ rightEnd(e) = v
+  shows ∃ a ∈ V, a ≠ v ∧ ((leftEnd(e) = v ∧ rightEnd(e) = a) ∨
+    (leftEnd(e) = a ∧ rightEnd(e) = v))
+proof
+  cases atV with atLeft | atRight
+  . refine ⟨rightEnd(e), ends.right, ?_, ?_⟩
+    . cc
+    . left
+      exact ⟨atLeft, rfl⟩
+  . refine ⟨leftEnd(e), ends.left, ?_, ?_⟩
+    . cc
+    . right
+      exact ⟨rfl, atRight⟩
+
+theorem Disjoint.singleton_of_fresh (A x : Set)
+  requires fresh : ¬x ∈ A
+  shows Disjoint(A, {x})
+proof
+  simp [Disjoint.iff, fresh]
+
+-- An edge with the two distinct ends v and a has odd degree exactly there.
+theorem degreeIn.single_parity_ends (leftEnd rightEnd e v a : Set)
+  requires shape : (leftEnd(e) = v ∧ rightEnd(e) = a) ∨
+    (leftEnd(e) = a ∧ rightEnd(e) = v)
+  requires distinct : a ≠ v
+  shows ∀ w, (Even(degreeIn(leftEnd, rightEnd, {e}, w)) ↔ (w ≠ v ∧ w ≠ a))
+proof
+  intro w
+  have loop : leftEnd(e) ≠ rightEnd(e)
+    rcases shape with ⟨l, r⟩ | ⟨l, r⟩
+    . rw [l, r]
+      cc
+    . rw [l, r]
+      cc
+  have single := degreeIn.single_parity with loop, w
+  rcases shape with ⟨l, r⟩ | ⟨l, r⟩
+  . rw [l, r] at single
+    exact single
+  . rw [l, r] at single
+    tauto
+
+-- A path from a to b closed by an edge va and an edge vb is even: at each
+-- vertex the three degrees have an even sum.
+theorem EvenEdgeSet.of_path_two_edges (V leftEnd rightEnd Q e f v a b : Set)
+  requires finite : Finite(Q)
+  requires fresh : ¬e ∈ Q ∧ ¬f ∈ Q ∧ e ≠ f
+  requires shapeE : (leftEnd(e) = v ∧ rightEnd(e) = a) ∨
+    (leftEnd(e) = a ∧ rightEnd(e) = v)
+  requires shapeF : (leftEnd(f) = v ∧ rightEnd(f) = b) ∨
+    (leftEnd(f) = b ∧ rightEnd(f) = v)
+  requires distinct : a ≠ v ∧ b ≠ v
+  requires path : ∀ w ∈ V,
+    (Even(degreeIn(leftEnd, rightEnd, Q, w)) ↔ (w = a ↔ w = b))
+  shows EvenEdgeSet(V, leftEnd, rightEnd, (Q ∪ {e}) ∪ {f})
+proof
+  obtain ⟨eFresh, fFresh, different⟩ := fresh
+  obtain ⟨notA, notB⟩ := distinct
+  have apartE := Disjoint.singleton_of_fresh with eFresh
+  have fOutside : ¬f ∈ Q ∪ {e} by simp [fFresh, different]
+  have apartF := Disjoint.singleton_of_fresh with fOutside
+  have finiteE : Finite(Q ∪ {e}) := Finite.union with finite, Finite.singleton
+  have parityE := degreeIn.single_parity_ends with shapeE, notA
+  have parityF := degreeIn.single_parity_ends with shapeF, notB
+  constructor
+  . exact Finite.union with finiteE, Finite.singleton
+  . intros w hw
+    rw [(degreeIn.union_disjoint with finiteE, Finite.singleton, apartF),
+      (degreeIn.union_disjoint with finite, Finite.singleton, apartE),
+      Even.add_iff, Even.add_iff, (path with w, hw), (parityE with w),
+      (parityF with w)]
+    have notBothA : ¬(w = v ∧ w = a)
+      intro both
+      have same : a = v by cc
+      exact notA with same
+    have notBothB : ¬(w = v ∧ w = b)
+      intro both
+      have same : b = v by cc
+      exact notB with same
+    tauto
+
+-- A vertex of degree other than 0 and 2 in an even set gives a proper
+-- nonempty even subset: a loop by itself, or else an edge e = va at v, a
+-- second edge f = vb of the cut at the component of a away from v, and a
+-- path from a to b avoiding v, which together have degree two at v.
+theorem EvenEdgeSet.smaller_of_degree (V leftEnd rightEnd C v : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ g ∈ C, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires vertex : v ∈ V
+  requires notZero : degreeIn(leftEnd, rightEnd, C, v) ≠ 0
+  requires notTwo : degreeIn(leftEnd, rightEnd, C, v) ≠ 2
+  shows ∃ B ⊆ C, B ≠ ∅ ∧ B ≠ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, B)
+proof
+  have finite := even.left
+  by_cases loops : ∃ g ∈ C, leftEnd(g) = rightEnd(g)
+  . -- A loop is an even set by itself, of degree 0 or 2 at v.
+    obtain ⟨g, hg, loop⟩ := loops
+    refine ⟨{g}, (singleton.subset_iff.backward with hg),
+      singleton.ne_empty, ?_, (EvenEdgeSet.loop with loop)⟩
+    intro same
+    rw ← same at notZero, notTwo
+    by_cases atV : leftEnd(g) = v
+    . have right : rightEnd(g) = v by cc
+      exact notTwo with (degreeIn.loop with atV, right)
+    . have right : rightEnd(g) ≠ v by cc
+      exact notZero with (degreeIn.absent with atV, right)
+  . have noLoop : ∀ g ∈ C, leftEnd(g) ≠ rightEnd(g)
+      intros g hg same
+      exact loops with ⟨g, hg, same⟩
+    -- An edge e at v, with other end a.
+    have inhabited : incidentEnds(leftEnd, rightEnd, C, v) ≠ ∅
+      intro empty
+      apply notZero
+      unfold degreeIn
+      rw [empty, cardinality.empty]
+    obtain ⟨p, hp⟩ := Nonempty.of_ne_empty with inhabited
+    obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp
+    have sides := (incidentEnds.pair.forward with hp).right
+    have atV : leftEnd(e) = v ∨ rightEnd(e) = v by tauto
+    have loopE := noLoop with e, he
+    obtain ⟨a, aIn, aNotV, shapeE⟩ :=
+      edge.other_end with (ends with e, he), loopE, atV
+    -- The component A of a in the edges avoiding v, which v lies outside.
+    have subsetS := avoiding.subset at leftEnd, rightEnd, C, v
+    have finiteS := Finite.subset with finite, subsetS
+    have endsS := ends_in.subset with ends, subsetS
+    have closed := componentBy.closed at V, leftEnd, rightEnd,
+      avoiding(leftEnd, rightEnd, C, v), a with endsS
+    have aInA := componentBy.self at V, leftEnd, rightEnd,
+      avoiding(leftEnd, rightEnd, C, v), a with aIn
+    have vOut : ¬v ∈ componentBy(V, leftEnd, rightEnd,
+        avoiding(leftEnd, rightEnd, C, v), a)
+      intro member
+      exact avoiding.not_joined with ends, aIn, aNotV, member.right
+    -- The cut at A holds e, so it holds a second edge f.
+    have eCrosses : e ∈ crossing(leftEnd, rightEnd, C,
+        componentBy(V, leftEnd, rightEnd, avoiding(leftEnd, rightEnd, C, v), a))
+      refine ⟨he, ?_⟩
+      rcases shapeE with ⟨l, r⟩ | ⟨l, r⟩
+      . right
+        rw [l, r]
+        exact ⟨aInA, vOut⟩
+      . left
+        rw [l, r]
+        exact ⟨aInA, vOut⟩
+    have notSingle := EvenEdgeSet.crossing_ne_singleton at V, leftEnd,
+      rightEnd, C, componentBy(V, leftEnd, rightEnd,
+        avoiding(leftEnd, rightEnd, C, v), a), e
+      with finiteVertices, even, componentBy.subset
+    have second : ∃ f ∈ crossing(leftEnd, rightEnd, C,
+        componentBy(V, leftEnd, rightEnd,
+          avoiding(leftEnd, rightEnd, C, v), a)), f ≠ e
+      by_contra none
+      apply notSingle
+      ext g
+      rw singleton.membership
+      constructor
+      . intro hg
+        by_contra other
+        exact none with ⟨g, hg, other⟩
+      . intro same
+        rw same
+        exact eCrosses
+    obtain ⟨f, fCrosses, fNotE⟩ := second
+    have hf : f ∈ C := fCrosses.left
+    have fSides := fCrosses.right
+    -- f is at v, since A is closed under the edges avoiding v, and its other
+    -- end b lies in A.
+    have fAtV : leftEnd(f) = v ∨ rightEnd(f) = v
+      by_contra away
+      have both : leftEnd(f) ≠ v ∧ rightEnd(f) ≠ v by tauto
+      have balanced := closed with f, ⟨hf, both⟩
+      tauto
+    have loopF := noLoop with f, hf
+    obtain ⟨b, bIn, bNotV, shapeF⟩ :=
+      edge.other_end with (ends with f, hf), loopF, fAtV
+    have bInA : b ∈ componentBy(V, leftEnd, rightEnd,
+        avoiding(leftEnd, rightEnd, C, v), a)
+      rcases shapeF with ⟨l, r⟩ | ⟨l, r⟩
+      . rw [l, r] at fSides
+        tauto
+      . rw [l, r] at fSides
+        tauto
+    -- A path from a to b through the edges avoiding v.
+    have pathExists : ∃ Q ⊆ avoiding(leftEnd, rightEnd, C, v), ∀ w ∈ V,
+        (Even(degreeIn(leftEnd, rightEnd, Q, w)) ↔ (w = a ↔ w = b))
+      by_cases same : a = b
+      . refine ⟨∅, empty.subset, ?_⟩
+        intros w hw
+        rw [degreeIn.empty, same]
+        simp [Even.zero]
+      . have joined := componentBy.joined with bInA
+        obtain ⟨Q, inS, path⟩ :=
+          Joined.path with finiteS, endsS, same, joined
+        refine ⟨Q, inS, ?_⟩
+        intros w hw
+        rw (path with w, hw)
+        have notBoth : ¬(w = a ∧ w = b)
+          intro both
+          have equal : a = b by cc
+          exact same with equal
+        tauto
+    obtain ⟨Q, QinS, path⟩ := pathExists
+    have finiteQ := Finite.subset with finiteS, QinS
+    have eFresh : ¬e ∈ Q
+      intro inQ
+      have away := (QinS with e, inQ).right
+      tauto
+    have fFresh : ¬f ∈ Q
+      intro inQ
+      have away := (QinS with f, inQ).right
+      tauto
+    have eNotF : e ≠ f by cc
+    have evenB := EvenEdgeSet.of_path_two_edges with finiteQ,
+      ⟨eFresh, fFresh, eNotF⟩, shapeE, shapeF, ⟨aNotV, bNotV⟩, path
+    have QsubC := Subset.transitive with QinS, subsetS
+    have QeSub : Q ∪ {e} ⊆ C := Subset.union2_iff.backward
+      with ⟨QsubC, (singleton.subset_iff.backward with he)⟩
+    have BsubC : (Q ∪ {e}) ∪ {f} ⊆ C := Subset.union2_iff.backward
+      with ⟨QeSub, (singleton.subset_iff.backward with hf)⟩
+    refine ⟨(Q ∪ {e}) ∪ {f}, BsubC, ?_, ?_, evenB⟩
+    . intro empty
+      have inB : e ∈ (Q ∪ {e}) ∪ {f} by simp
+      rw empty at inB
+      simp at inB
+    . -- The degree at v is two in the new set and not in C.
+      intro same
+      apply notTwo
+      rw ← same
+      have apartE := Disjoint.singleton_of_fresh with eFresh
+      have fOutside : ¬f ∈ Q ∪ {e} by simp [fFresh, fNotE]
+      have apartF := Disjoint.singleton_of_fresh with fOutside
+      have finiteQe : Finite(Q ∪ {e}) :=
+        Finite.union with finiteQ, Finite.singleton
+      rw [(degreeIn.union_disjoint with finiteQe, Finite.singleton, apartF),
+        (degreeIn.union_disjoint with finiteQ, Finite.singleton, apartE),
+        (avoiding.degree with QinS), (degreeIn.end with loopE, atV),
+        (degreeIn.end with loopF, fAtV)]
+      compute
+
+-- A nonempty even edge set is a cycle or has a proper nonempty even subset.
+theorem EvenEdgeSet.cycle_or_smaller (V leftEnd rightEnd C : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ g ∈ C, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires nonempty : C ≠ ∅
+  shows Cycle(V, leftEnd, rightEnd, C) ∨
+    (∃ B ⊆ C, B ≠ ∅ ∧ B ≠ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, B))
+proof
+  by_cases degrees : ∀ v ∈ V, degreeIn(leftEnd, rightEnd, C, v) = 0 ∨
+    degreeIn(leftEnd, rightEnd, C, v) = 2
+  . by_cases joined : ∀ e ∈ C, ∀ f ∈ C,
+      Joined(leftEnd, rightEnd, C, leftEnd(e), leftEnd(f))
+    . left
+      exact ⟨nonempty, even, degrees, joined⟩
+    . right
+      have found : ∃ e ∈ C, ∃ f ∈ C,
+          ¬Joined(leftEnd, rightEnd, C, leftEnd(e), leftEnd(f))
+        by_contra none
+        apply joined
+        intros e he f hf
+        by_contra apart
+        exact none with ⟨e, he, f, hf, apart⟩
+      obtain ⟨e, he, f, hf, apart⟩ := found
+      exact EvenEdgeSet.smaller_of_apart with ends, even, ⟨he, hf⟩, apart
+  . right
+    have found : ∃ v ∈ V, degreeIn(leftEnd, rightEnd, C, v) ≠ 0 ∧
+        degreeIn(leftEnd, rightEnd, C, v) ≠ 2
+      by_contra none
+      apply degrees
+      intros v hv
+      by_contra neither
+      have both : degreeIn(leftEnd, rightEnd, C, v) ≠ 0 ∧
+          degreeIn(leftEnd, rightEnd, C, v) ≠ 2 by tauto
+      exact none with ⟨v, hv, both⟩
+    obtain ⟨v, hv, notZero, notTwo⟩ := found
+    exact EvenEdgeSet.smaller_of_degree
+      with finiteVertices, ends, even, hv, notZero, notTwo
+
+-- A proper subset of a finite set is strictly smaller.
+theorem cardinality.proper (B C : Set)
+  requires finite : Finite(C)
+  requires subset : B ⊆ C
+  requires proper : B ≠ C
+  shows cardinality(B) < cardinality(C)
+proof
+  have missing : ∃ a ∈ C, ¬a ∈ B
+    by_contra none
+    apply proper
+    apply Subset.antisymmetric
+    . exact subset
+    . intros a ha
+      by_contra outside
+      exact none with ⟨a, ha, outside⟩
+  obtain ⟨a, ha, outside⟩ := missing
+  exact cardinality.strict with finite, subset, ha, outside
+
+-- Every nonempty even edge set contains a cycle: by induction on the number
+-- of edges, a nonempty even set is a cycle or has a smaller nonempty even
+-- subset.
+theorem EvenEdgeSet.cycle_of_size (V leftEnd rightEnd F : Set, n : Nat)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ∀ C ⊆ F, cardinality(C) ≤ n → C ≠ ∅ →
+    EvenEdgeSet(V, leftEnd, rightEnd, C) →
+    ∃ D ⊆ C, Cycle(V, leftEnd, rightEnd, D)
+proof
+  induction n
+  | zero =>
+    intros C bound size nonempty even
+    have finiteC := even.left
+    have zero : cardinality(C) = 0 by arith
+    exfalso
+    exact nonempty with (cardinality.eq_empty_of_zero with finiteC, zero)
+  | succ(k) using ih =>
+    intros C bound size nonempty even
+    have finiteC := even.left
+    have endsC := ends_in.subset with ends, bound
+    have split := EvenEdgeSet.cycle_or_smaller
+      with finiteVertices, endsC, even, nonempty
+    cases split with cycle | smaller
+    . exact ⟨C, Subset.reflexive, cycle⟩
+    . obtain ⟨B, inC, nonemptyB, proper, evenB⟩ := smaller
+      have finiteB := evenB.left
+      have less := cardinality.proper with finiteC, inC, proper
+      have smallerSize : cardinality(B) ≤ k by arith
+      obtain ⟨D, inB, cycle⟩ := ih with B,
+        (Subset.transitive with inC, bound), smallerSize, nonemptyB, evenB
+      exact ⟨D, (Subset.transitive with inB, inC), cycle⟩
+
+theorem EvenEdgeSet.contains_cycle (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, F)
+  requires nonempty : F ≠ ∅
+  shows ∃ C ⊆ F, Cycle(V, leftEnd, rightEnd, C)
+proof
+  have finite := even.left
+  have bound : cardinality(F) ≤ cardinality(F) by arith
+  exact EvenEdgeSet.cycle_of_size
+    at V, leftEnd, rightEnd, F, cardinality(F)
+    with finiteVertices, ends, F, Subset.reflexive, bound, nonempty, even
+
+-- Section: Decomposition.
+
+-- Splitting an even edge set into cycles: remove a cycle and split the
+-- rest, which is even as its symmetric difference with the cycle is the
+-- whole set. The empty set splits into no cycles.
+theorem cycleDecomposition.empty (V leftEnd rightEnd C : Set)
+  requires empty : C = ∅
+  shows ∃ D, Finite(D) ∧ (∀ K ∈ D, Cycle(V, leftEnd, rightEnd, K)) ∧
+    (∀ K ∈ D, ∀ B ∈ D, K ≠ B → Disjoint(K, B)) ∧ ⋃(D) = C
+proof
+  refine ⟨∅, Finite.empty, ?_, ?_, ?_⟩
+  . intros K hK
+    simp at hK
+  . intros K hK
+    simp at hK
+  . rw [union.empty, empty]
+
+theorem EvenEdgeSet.decomposition_of_size (V leftEnd rightEnd F : Set, n : Nat)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ∀ C ⊆ F, cardinality(C) ≤ n →
+    EvenEdgeSet(V, leftEnd, rightEnd, C) →
+    ∃ D, Finite(D) ∧ (∀ K ∈ D, Cycle(V, leftEnd, rightEnd, K)) ∧
+      (∀ K ∈ D, ∀ B ∈ D, K ≠ B → Disjoint(K, B)) ∧ ⋃(D) = C
+proof
+  induction n
+  | zero =>
+    intros C bound size even
+    have finiteC := even.left
+    have zero : cardinality(C) = 0 by arith
+    exact cycleDecomposition.empty
+      with (cardinality.eq_empty_of_zero with finiteC, zero)
+  | succ(k) using ih =>
+    intros C bound size even
+    have finiteC := even.left
+    by_cases empty : C = ∅
+    . exact cycleDecomposition.empty with empty
+    . have endsC := ends_in.subset with ends, bound
+      obtain ⟨K, inC, cycle⟩ :=
+        EvenEdgeSet.contains_cycle with finiteVertices, endsC, even, empty
+      -- The rest C ∖ K is even and smaller.
+      have restSubset := difference.subset_left at C, K
+      have restFinite := Finite.subset with finiteC, restSubset
+      have restored : K △ (C ∖ K) = C by ext x; simp
+      have evenWhole : EvenEdgeSet(V, leftEnd, rightEnd, K △ (C ∖ K))
+        rw restored
+        exact even
+      have evenRest := EvenEdgeSet.of_symmetricDifference
+        with cycle.right.left, restFinite, evenWhole
+      have less : cardinality(C ∖ K) < cardinality(C)
+        obtain ⟨a, ha⟩ := Nonempty.of_ne_empty with cycle.left
+        have outside : ¬a ∈ C ∖ K by simp [ha]
+        exact cardinality.strict with finiteC, restSubset, (inC with a, ha),
+          outside
+      have smallerSize : cardinality(C ∖ K) ≤ k by arith
+      obtain ⟨D, finiteD, cycles, apart, covers⟩ := ih with C ∖ K,
+        (Subset.transitive with restSubset, bound), smallerSize, evenRest
+      -- Adjoin K to the decomposition of the rest, which it misses.
+      have inRest : ∀ B ∈ D, B ⊆ C ∖ K
+        intros B hB
+        rw ← covers
+        exact union.subset_of_member with hB
+      have apartK : ∀ B ∈ D, Disjoint(B, K)
+        intros B hB
+        exact Disjoint.of_subset_left with Disjoint.difference_left,
+          (inRest with B, hB)
+      refine ⟨D ∪ {K}, (Finite.union with finiteD, Finite.singleton),
+        ?_, ?_, ?_⟩
+      . intros B hB
+        simp at hB
+        rcases hB with inD | rfl
+        . exact cycles with B, inD
+        . exact cycle
+      . intros B hB A hA different
+        simp at hB, hA
+        rcases hB with inD | rfl
+        . rcases hA with inD2 | rfl
+          . exact apart with B, inD, A, inD2, different
+          . exact apartK with B, inD
+        . rcases hA with inD2 | rfl
+          . exact Disjoint.symmetric with (apartK with A, inD2)
+          . exfalso
+            exact different with rfl
+      . rw [union.union2, union.singleton, covers]
+        ext x
+        have fromK : x ∈ K → x ∈ C := inC with x
+        simp [difference.membership]
+
+theorem EvenEdgeSet.cycle_decomposition (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, F)
+  shows ∃ D, Finite(D) ∧ (∀ C ∈ D, Cycle(V, leftEnd, rightEnd, C)) ∧
+    (∀ C ∈ D, ∀ B ∈ D, C ≠ B → Disjoint(C, B)) ∧ ⋃(D) = F
+proof
+  have finite := even.left
+  have bound : cardinality(F) ≤ cardinality(F) by arith
+  exact EvenEdgeSet.decomposition_of_size
+    at V, leftEnd, rightEnd, F, cardinality(F)
+    with finiteVertices, ends, F, Subset.reflexive, bound, even

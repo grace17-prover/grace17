@@ -1,0 +1,412 @@
+-- Contracting an edge of a multigraph: the quotient by the partition merging
+-- its two ends. The contraction of a bridgeless graph is bridgeless, its cuts
+-- are the cuts of the graph not separating the ends of the edge, and the
+-- degrees of its classes are read off from the graph.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Flows.Contraction
+import EvenCovers
+
+-- Section: The contraction of an edge.
+
+-- The partition of V that merges the two ends of e: the components of {e}.
+def contractionPartition (V leftEnd rightEnd e : Set) : Set :=
+  componentsBy(V, leftEnd, rightEnd, {e})
+
+def contractedLeft (V E leftEnd rightEnd e : Set) : Set :=
+  quotientEnd(E ∖ {e}, contractionPartition(V, leftEnd, rightEnd, e), leftEnd)
+def contractedRight (V E leftEnd rightEnd e : Set) : Set :=
+  quotientEnd(E ∖ {e}, contractionPartition(V, leftEnd, rightEnd, e),
+    rightEnd)
+
+theorem contractionPartition.partition (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  shows Partition(V, contractionPartition(V, leftEnd, rightEnd, e))
+proof
+  have ends : ∀ f ∈ {e}, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V
+    intros f hf
+    rw singleton.membership at hf
+    rw hf
+    exact Graph.ends with graph, e, edge
+  unfold contractionPartition
+  exact componentsBy.partition with ends
+
+-- The quotient ends of a subset of the edges, as a function on that subset.
+theorem quotientEnd.function_subset (V E D P endpoint : Set)
+  requires function : endpoint : E → V
+  requires partition : Partition(V, P)
+  requires edges : D ⊆ E
+  shows quotientEnd(D, P, endpoint) : D → P
+proof
+  constructor
+  . intros p member
+    exact member.left
+  constructor
+  . intros x y relatedY z relatedZ
+    obtain ⟨_, valueY⟩ := quotientEnd.relates with relatedY
+    obtain ⟨_, valueZ⟩ := quotientEnd.relates with relatedZ
+    cc
+  . intros x edge
+    have vertex := FunctionBetween.apply_closed
+      with function, (edges with x, edge)
+    obtain ⟨class, _⟩ := classOf.member with partition, vertex
+    witness classOf(P, endpoint(x))
+    refine ⟨class, _⟩
+    exact quotientEnd.membership.backward
+      with ⟨(product.pair with edge, class), x, edge, rfl⟩
+
+theorem quotientEnd.value_subset (V E D P endpoint f : Set)
+  requires function : endpoint : E → V
+  requires partition : Partition(V, P)
+  requires edges : D ⊆ E
+  requires edge : f ∈ D
+  shows quotientEnd(D, P, endpoint)(f) = classOf(P, endpoint(f))
+proof
+  have vertex := FunctionBetween.apply_closed
+    with function, (edges with f, edge)
+  obtain ⟨class, _⟩ := classOf.member with partition, vertex
+  have related :
+      relates(quotientEnd(D, P, endpoint), f, classOf(P, endpoint(f))) :=
+    quotientEnd.membership.backward
+      with ⟨(product.pair with edge, class), f, edge, rfl⟩
+  exact FunctionBetween.apply_value
+    with (quotientEnd.function_subset with function, partition, edges),
+      edge, related
+
+theorem contraction.graph (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  shows Graph(contractionPartition(V, leftEnd, rightEnd, e), E ∖ {e},
+    contractedLeft(V, E, leftEnd, rightEnd, e),
+    contractedRight(V, E, leftEnd, rightEnd, e))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  have edges := difference.subset_left at E, {e}
+  unfold contractedLeft
+  unfold contractedRight
+  exact ⟨(quotientEnd.function_subset with graph.left, partition, edges),
+    (quotientEnd.function_subset with graph.right, partition, edges)⟩
+
+-- The ends of an edge of the contraction are the classes of its ends.
+theorem contraction.value (V E leftEnd rightEnd e f : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires other : f ∈ E ∖ {e}
+  shows contractedLeft(V, E, leftEnd, rightEnd, e)(f) =
+      classOf(contractionPartition(V, leftEnd, rightEnd, e), leftEnd(f)) ∧
+    contractedRight(V, E, leftEnd, rightEnd, e)(f) =
+      classOf(contractionPartition(V, leftEnd, rightEnd, e), rightEnd(f))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  have edges := difference.subset_left at E, {e}
+  unfold contractedLeft
+  unfold contractedRight
+  exact ⟨(quotientEnd.value_subset with graph.left, partition, edges, other),
+    (quotientEnd.value_subset with graph.right, partition, edges, other)⟩
+
+-- Along no edges, distinct vertices stay apart.
+theorem Joined.not_empty (leftEnd rightEnd u v : Set)
+  requires distinct : u ≠ v
+  shows ¬Joined(leftEnd, rightEnd, ∅, u, v)
+proof
+  intro joined
+  have same := Joined.empty with joined
+  cc
+
+theorem ends_in.empty (V leftEnd rightEnd : Set)
+  shows ∀ f ∈ ∅, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V
+proof
+  intros f hf
+  simp at hf
+
+-- Contracting a proper edge loses one vertex.
+theorem contraction.vertex_count (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires edge : e ∈ E
+  requires proper : leftEnd(e) ≠ rightEnd(e)
+  shows cardinality(contractionPartition(V, leftEnd, rightEnd, e)) + 1 =
+    cardinality(V)
+proof
+  have edgeEnds := Graph.ends with graph, e, edge
+  -- Along no edges the two ends of e are apart, so e merges two singletons.
+  have apart : ¬Joined(leftEnd, rightEnd, ∅, leftEnd(e), rightEnd(e)) :=
+    Joined.not_empty with proper
+  have count := componentsBy.add_edge_apart
+    with finiteVertices, ends_in.empty, edgeEnds, apart
+  rw [union2.left_empty, (componentsBy.empty_count with finiteVertices)]
+    at count
+  unfold contractionPartition
+  exact count
+
+-- The two ends of e share a class of the contraction.
+theorem contraction.same_class (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  shows classOf(contractionPartition(V, leftEnd, rightEnd, e), leftEnd(e)) =
+    classOf(contractionPartition(V, leftEnd, rightEnd, e), rightEnd(e))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  unfold contractionPartition at partition
+  unfold contractionPartition
+  have apart := partition.right.left
+  obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, e, edge
+  have joined : Joined(leftEnd, rightEnd, {e}, leftEnd(e), rightEnd(e)) :=
+    Joined.of_edge with singleton.self
+  have class : componentBy(V, leftEnd, rightEnd, {e}, leftEnd(e)) ∈
+      componentsBy(V, leftEnd, rightEnd, {e}) :=
+    componentsBy.contains at V, leftEnd, rightEnd, {e}, leftEnd(e) with leftIn
+  have leftMember :
+      leftEnd(e) ∈ componentBy(V, leftEnd, rightEnd, {e}, leftEnd(e)) :=
+    componentBy.self with leftIn
+  have rightMember :
+      rightEnd(e) ∈ componentBy(V, leftEnd, rightEnd, {e}, leftEnd(e)) :=
+    ⟨rightIn, joined⟩
+  rw [(classOf.eq_of_member with apart, class, leftMember),
+    (classOf.eq_of_member with apart, class, rightMember)]
+
+-- Section: Cuts of the contraction.
+
+-- A cut of the contraction is a cut of the graph not separating the ends of
+-- e, which e therefore does not cross.
+theorem contraction.crossing (V E leftEnd rightEnd e Y : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires classes : Y ⊆ contractionPartition(V, leftEnd, rightEnd, e)
+  shows crossing(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), E ∖ {e}, Y) =
+    crossing(leftEnd, rightEnd, E, ⋃(Y))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  have endsE := Graph.ends with graph
+  ext f
+  by_cases inRest : f ∈ E ∖ {e}
+  . obtain ⟨leftValue, rightValue⟩ :=
+      contraction.value with graph, edge, inRest
+    obtain ⟨inE, _⟩ := difference.membership.forward with inRest
+    obtain ⟨leftIn, rightIn⟩ := endsE with f, inE
+    have leftIff := classOf.mem_union_iff with partition, classes, leftIn
+    have rightIff := classOf.mem_union_iff with partition, classes, rightIn
+    simp [crossing, leftValue, rightValue, leftIff, rightIff, inRest, inE]
+  . by_cases same : f = e
+    . rw same
+      obtain ⟨leftIn, rightIn⟩ := endsE with e, edge
+      have leftIff := classOf.mem_union_iff with partition, classes, leftIn
+      have rightIff := classOf.mem_union_iff with partition, classes, rightIn
+      have sameClass := contraction.same_class with graph, edge
+      have absent : ¬e ∈ E ∖ {e} by simp
+      simp [crossing, leftIff, rightIff, sameClass, absent]
+    . have notE : ¬f ∈ E
+        intro inE
+        apply inRest
+        simp [inE, same]
+      simp [crossing, inRest, notE]
+
+-- Every cut of the contraction is a cut of the graph, so none has one edge.
+theorem contraction.bridgeless (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires edge : e ∈ E
+  requires bridgeless : Bridgeless(V, E, leftEnd, rightEnd)
+  shows Bridgeless(contractionPartition(V, leftEnd, rightEnd, e), E ∖ {e},
+    contractedLeft(V, E, leftEnd, rightEnd, e),
+    contractedRight(V, E, leftEnd, rightEnd, e))
+proof
+  intros Y classes
+  have partition := contractionPartition.partition with graph, edge
+  have inV : ⋃(Y) ⊆ V
+    intros v hv
+    obtain ⟨X, inY, inX⟩ := union.membership.forward with hv
+    exact (partition.left with X, (classes with X, inY)).left with v, inX
+  rw contraction.crossing with graph, edge, classes
+  exact bridgeless with ⋃(Y), inV
+
+-- Section: The classes of the contraction and their degrees.
+
+-- The class of a vertex in the contraction is its component along {e}: a
+-- vertex apart from the ends of e is a class by itself, and the ends of e
+-- form the one other class.
+theorem contraction.class (V E leftEnd rightEnd e v : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires vertex : v ∈ V
+  shows classOf(contractionPartition(V, leftEnd, rightEnd, e), v) =
+    componentBy(V, leftEnd, rightEnd, {e}, v)
+proof
+  have partition := contractionPartition.partition with graph, edge
+  unfold contractionPartition at partition
+  unfold contractionPartition
+  have class : componentBy(V, leftEnd, rightEnd, {e}, v) ∈
+      componentsBy(V, leftEnd, rightEnd, {e}) :=
+    componentsBy.contains at V, leftEnd, rightEnd, {e}, v with vertex
+  have member : v ∈ componentBy(V, leftEnd, rightEnd, {e}, v) :=
+    componentBy.self with vertex
+  exact classOf.eq_of_member with partition.right.left, class, member
+
+theorem contraction.class_apart (V E leftEnd rightEnd e v : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires vertex : v ∈ V
+  requires left : v ≠ leftEnd(e)
+  requires right : v ≠ rightEnd(e)
+  shows classOf(contractionPartition(V, leftEnd, rightEnd, e), v) = {v}
+proof
+  rw contraction.class with graph, edge, vertex
+  -- Along no edges v reaches neither end of e, so e does not move v.
+  have apartLeft : ¬Joined(leftEnd, rightEnd, ∅, v, leftEnd(e)) :=
+    Joined.not_empty with left
+  have apartRight : ¬Joined(leftEnd, rightEnd, ∅, v, rightEnd(e)) :=
+    Joined.not_empty with right
+  have unchanged := componentBy.add_edge_apart
+    with ends_in.empty, vertex, apartLeft, apartRight
+  rw union2.left_empty at unchanged
+  rw unchanged
+  ext w
+  constructor
+  . intro hw
+    have same := Joined.empty with hw.right
+    rw same
+    exact singleton.self
+  . intro hw
+    rw singleton.membership at hw
+    rw hw
+    exact componentBy.self with vertex
+
+theorem contraction.class_end (V E leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  shows classOf(contractionPartition(V, leftEnd, rightEnd, e), leftEnd(e)) =
+    {leftEnd(e), rightEnd(e)}
+proof
+  obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, e, edge
+  rw contraction.class with graph, edge, leftIn
+  ext w
+  constructor
+  . intro hw
+    -- The pair of ends is closed under e, so it holds all that e reaches.
+    have closed : ClosedUnder(leftEnd, rightEnd, {e},
+        {leftEnd(e), rightEnd(e)})
+      intros f hf
+      rw singleton.membership at hf
+      rw hf
+      simp
+    have start : leftEnd(e) ∈ {leftEnd(e), rightEnd(e)} := pair.left
+    exact hw.right with {leftEnd(e), rightEnd(e)}, start, closed
+  . intro hw
+    rw pair.membership at hw
+    rcases hw with rfl | rfl
+    . exact componentBy.self with leftIn
+    . have joined : Joined(leftEnd, rightEnd, {e}, leftEnd(e), rightEnd(e)) :=
+        Joined.of_edge with singleton.self
+      exact ⟨rightIn, joined⟩
+
+-- An end (f, i) of the contraction at a class Y is an end of f at a vertex
+-- of Y.
+theorem incidentEnds.contraction (V E leftEnd rightEnd e F Y f i : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires edges : F ⊆ E ∖ {e}
+  requires class : Y ∈ contractionPartition(V, leftEnd, rightEnd, e)
+  shows (f, i) ∈ incidentEnds(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), F, Y) ↔
+    f ∈ F ∧ ((i = 0 ∧ leftEnd(f) ∈ Y) ∨ (i = 1 ∧ rightEnd(f) ∈ Y))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  rw incidentEnds.pair
+  by_cases inF : f ∈ F
+  . have other := edges with f, inF
+    obtain ⟨leftValue, rightValue⟩ :=
+      contraction.value with graph, edge, other
+    obtain ⟨inE, _⟩ := difference.membership.forward with other
+    obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, f, inE
+    have leftIff := classOf.eq_iff_member with partition, class, leftIn
+    have rightIff := classOf.eq_iff_member with partition, class, rightIn
+    simp [leftValue, rightValue, leftIff, rightIff, inF]
+  . simp [inF]
+
+-- The degree of a singleton class is the degree of its vertex, and the
+-- degree of the class of the two ends of a proper edge e is the sum of
+-- their degrees.
+theorem degreeIn.contraction_singleton (V E leftEnd rightEnd e F v : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires edges : F ⊆ E ∖ {e}
+  requires class : {v} ∈ contractionPartition(V, leftEnd, rightEnd, e)
+  shows degreeIn(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), F, {v}) =
+    degreeIn(leftEnd, rightEnd, F, v)
+proof
+  unfold degreeIn
+  have same : incidentEnds(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), F, {v}) =
+      incidentEnds(leftEnd, rightEnd, F, v)
+    apply incidentEnds.ext
+    intros f i
+    rw [(incidentEnds.contraction with graph, edge, edges, class),
+      incidentEnds.pair]
+    simp [singleton.membership]
+  rw same
+
+theorem degreeIn.contraction_pair (V E leftEnd rightEnd e F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires edge : e ∈ E
+  requires finite : Finite(F)
+  requires edges : F ⊆ E ∖ {e}
+  requires proper : leftEnd(e) ≠ rightEnd(e)
+  shows degreeIn(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), F,
+      {leftEnd(e), rightEnd(e)}) =
+    degreeIn(leftEnd, rightEnd, F, leftEnd(e)) +
+      degreeIn(leftEnd, rightEnd, F, rightEnd(e))
+proof
+  have partition := contractionPartition.partition with graph, edge
+  obtain ⟨leftIn, _⟩ := Graph.ends with graph, e, edge
+  have class : {leftEnd(e), rightEnd(e)} ∈
+      contractionPartition(V, leftEnd, rightEnd, e)
+    rw ← contraction.class_end with graph, edge
+    exact (classOf.member with partition, leftIn).left
+  -- The ends at the class are the ends at either vertex, and no end is at
+  -- both since the vertices differ.
+  have same : incidentEnds(contractedLeft(V, E, leftEnd, rightEnd, e),
+      contractedRight(V, E, leftEnd, rightEnd, e), F,
+      {leftEnd(e), rightEnd(e)}) =
+      incidentEnds(leftEnd, rightEnd, F, leftEnd(e)) ∪
+      incidentEnds(leftEnd, rightEnd, F, rightEnd(e))
+    ext p
+    by_cases shape : ∃ f ∈ F, ∃ i ∈ 2, p = (f, i)
+    . obtain ⟨f, hf, i, hi, rfl⟩ := shape
+      rw [(incidentEnds.contraction with graph, edge, edges, class),
+        union2.membership, incidentEnds.pair, incidentEnds.pair]
+      simp [pair.membership]
+    . constructor
+      . intro hp
+        exfalso
+        exact shape with (incidentEnds.shape with hp)
+      . intro hp
+        rw union2.membership at hp
+        exfalso
+        rcases hp with hp | hp
+        . exact shape with (incidentEnds.shape with hp)
+        . exact shape with (incidentEnds.shape with hp)
+  have apart : Disjoint(incidentEnds(leftEnd, rightEnd, F, leftEnd(e)),
+      incidentEnds(leftEnd, rightEnd, F, rightEnd(e)))
+    rw Disjoint.iff
+    intros p hp inRight
+    obtain ⟨f, _, i, _, rfl⟩ := incidentEnds.shape with hp
+    rw incidentEnds.pair at hp, inRight
+    have apart01 : 0 ≠ 1 by simp
+    rcases hp.right with ⟨_, atLeft⟩ | ⟨_, atLeft⟩
+    . rcases inRight.right with ⟨_, atRight⟩ | ⟨_, atRight⟩
+      . cc
+      . cc
+    . rcases inRight.right with ⟨_, atRight⟩ | ⟨_, atRight⟩
+      . cc
+      . cc
+  unfold degreeIn
+  rw same
+  exact cardinality.union_disjoint with (incidentEnds.finite with finite),
+    (incidentEnds.finite with finite), apart

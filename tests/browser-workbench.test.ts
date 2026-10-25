@@ -107,6 +107,33 @@ test("browser Workbench replays an authenticated rational dependency checkpoint"
   assert.ok(prepared.milliseconds < 2_500, `rational dependency replay took ${prepared.milliseconds} ms`);
 });
 
+test("browser Workbench opens the cycle double cover modules from bundled checkpoints", async () => {
+  const browser = await import("../workbench/generated/src/workbench.js");
+  const { standardLibrary } = await import("../workbench/generated/shims/standard-library.js");
+  // Opening the even double cover and then following its import to the
+  // eight-flow theorem, as a reader does from the docs, replays bundled
+  // prefixes and elaborates only short tails.
+  const cases: [string, string, number][] = [
+    ["lib/Grace/Cumulus/GraphTheory/DoubleCover/EvenDoubleCover.g17", "Grace.Cumulus.GraphTheory.Flows.EightFlow", 16],
+    ["lib/Grace/Cumulus/GraphTheory/Flows/EightFlow.g17", "Grace.Cumulus.GraphTheory.Flows.Splits", 0],
+    ["lib/Grace/Cumulus/GraphTheory/DoubleCover/Theorem.g17", "Grace.Cumulus.GraphTheory.DoubleCover.EvenDoubleCover", 4],
+  ];
+  for (const [active, root, tail] of cases) {
+    const source = standardLibrary.get(active);
+    assert.ok(source, active);
+    const files = [{ name: active, source }];
+    const before = browser.dependencyCheckpointPlan(files, "ZFG", active);
+    if (before?.standard) {
+      assert.equal(before.standard.rootModule, root, active);
+      await installBundledCheckpoint(root);
+    }
+    const plan = browser.dependencyCheckpointPlan(files, "ZFG", active);
+    assert.ok((plan?.modules ?? 0) - (plan?.installedPrefix ?? 0) <= tail, `${active}: ${plan?.modules} modules, ${plan?.installedPrefix} from the checkpoint`);
+    const prepared = browser.prepareWorkbenchFiles(files, "ZFG", active);
+    assert.equal(prepared.ok, true, active);
+  }
+});
+
 test("browser Workbench exposes cursor-addressable goals throughout the rational density proof", async () => {
   const browser = await import("../workbench/generated/src/workbench.js");
   const { standardLibrary } = await import("../workbench/generated/shims/standard-library.js");

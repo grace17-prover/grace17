@@ -1,0 +1,342 @@
+-- Forests and spanning trees as edge sets: a forest contains no nonempty
+-- even edge set, a spanning tree connects V with one edge fewer than
+-- vertices, and adding an edge to a tree closes exactly one even set.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Multigraph.Trees
+import Components
+
+predicate Forest (V leftEnd rightEnd F : Set) :=
+  Finite(F) ∧ (∀ C ⊆ F, EvenEdgeSet(V, leftEnd, rightEnd, C) → C = ∅)
+
+predicate SpanningTree (V leftEnd rightEnd T : Set) :=
+  Finite(T) ∧ Connects(V, leftEnd, rightEnd, T)
+  ∧ cardinality(T) + 1 = cardinality(V)
+
+theorem Forest.subset (V leftEnd rightEnd F G : Set)
+  requires forest : Forest(V, leftEnd, rightEnd, F)
+  requires subset : G ⊆ F
+  shows Forest(V, leftEnd, rightEnd, G)
+proof
+  obtain ⟨finite, acyclic⟩ := forest
+  constructor
+  . exact Finite.subset with finite, subset
+  . intros C bound even
+    exact acyclic with C, (Subset.transitive with bound, subset), even
+
+-- In a forest the ends of an edge are joined only through that edge: a path
+-- around it would close a nonempty even set, and a loop is one by itself.
+theorem Forest.ends_apart (V leftEnd rightEnd F e : Set)
+  requires ends : ∀ f ∈ F, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V
+  requires forest : Forest(V, leftEnd, rightEnd, F)
+  requires edge : e ∈ F
+  shows ¬Joined(leftEnd, rightEnd, F ∖ {e}, leftEnd(e), rightEnd(e))
+proof
+  intro joined
+  obtain ⟨finite, acyclic⟩ := forest
+  have restSubset := difference.subset_left at F, {e}
+  have restFinite := Finite.subset with finite, restSubset
+  have restEnds := ends_in.subset with ends, restSubset
+  have edgeSubset : {e} ⊆ F := singleton.subset_iff.backward with edge
+  by_cases loop : leftEnd(e) = rightEnd(e)
+  . have even := EvenEdgeSet.loop at V, leftEnd, rightEnd, e with loop
+    have empty := acyclic with {e}, edgeSubset, even
+    exact singleton.ne_empty with empty
+  . obtain ⟨P, subsetP, path⟩ :=
+      Joined.path with restFinite, restEnds, loop, joined
+    have finiteP := Finite.subset with restFinite, subsetP
+    have outside : ¬e ∈ P
+      intro inP
+      have inRest := subsetP with e, inP
+      simp at inRest
+    have even := EvenEdgeSet.of_path_edge with finiteP, outside, loop, path
+    have inside : P ∪ {e} ⊆ F by simp
+    have empty := acyclic with P ∪ {e}, inside, even
+    rw union2.eq_empty_iff at empty
+    exact singleton.ne_empty with empty.right
+
+-- Adding an edge between vertices a forest does not join keeps it a forest:
+-- an even set through the new edge would join its ends by the old edges.
+theorem Forest.add_edge (V leftEnd rightEnd F e : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ f ∈ F, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V
+  requires edgeEnds : leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires forest : Forest(V, leftEnd, rightEnd, F)
+  requires apart : ¬Joined(leftEnd, rightEnd, F, leftEnd(e), rightEnd(e))
+  shows Forest(V, leftEnd, rightEnd, F ∪ {e})
+proof
+  obtain ⟨finite, acyclic⟩ := forest
+  have moreEnds := ends_in.union_edge with ends, edgeEnds
+  constructor
+  . exact Finite.union with finite, Finite.singleton
+  . intros C bound even
+    have endsC := ends_in.subset with moreEnds, bound
+    have inF : C ∖ {e} ⊆ F by simp
+    by_cases inC : e ∈ C
+    . exfalso
+      have joined := EvenEdgeSet.ends_joined with
+        finiteVertices, endsC, even, inC
+      exact apart with (Joined.monotone with inF, joined)
+    . rw difference.singleton_of_absent with inC at inF
+      exact acyclic with C, inF, even
+
+-- A forest on a finite vertex set has at most |V| − c edges, c the number of
+-- its components: adding its edges one at a time, each merges two components,
+-- since a forest joins the ends of an edge only through that edge.
+theorem Forest.edge_bound (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires forest : Forest(V, leftEnd, rightEnd, F)
+  shows cardinality(F) + cardinality(componentsBy(V, leftEnd, rightEnd, F)) ≤
+    cardinality(V)
+proof
+  obtain ⟨finite, _⟩ := forest
+  induction finite with G e
+  | empty =>
+    rw [(componentsBy.empty_count with finiteVertices), cardinality.empty]
+    arith
+  | insert using ih =>
+    have GEnds := ends_in.subset with ends, GSubset
+    have edgeEnds := ends with e, eMember
+    have apart : ¬Joined(leftEnd, rightEnd, G, leftEnd(e), rightEnd(e))
+      have rest : G ⊆ F ∖ {e} by simp
+      have apartRest := Forest.ends_apart with ends, forest, eMember
+      intro joined
+      exact apartRest with (Joined.monotone with rest, joined)
+    have count := componentsBy.add_edge_apart with
+      finiteVertices, GEnds, edgeEnds, apart
+    have grown := cardinality.union_singleton with GFinite, eFresh
+    arith
+
+-- An edge set on V with at least |V| − 1 edges that does not connect V
+-- holds a nonempty even edge set: the key counting step of tree packing.
+theorem EvenEdgeSet.of_dense_disconnected (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires finite : Finite(F)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires dense : cardinality(V) ≤ cardinality(F) + 1
+  requires disconnected : ¬Connects(V, leftEnd, rightEnd, F)
+  shows ∃ C ⊆ F, C ≠ ∅ ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)
+proof
+  by_contra none
+  -- Without a nonempty even subset, F is a forest with at least two components.
+  have forest : Forest(V, leftEnd, rightEnd, F)
+    constructor
+    . exact finite
+    . intros C bound even
+      by_contra nonempty
+      exact none with ⟨C, bound, nonempty, even⟩
+  have upper := Forest.edge_bound with finiteVertices, ends, forest
+  have two := componentsBy.two_of_disconnected with finiteVertices, disconnected
+  arith
+
+-- A spanning tree is a forest: an edge of an even subset could be dropped
+-- without disconnecting V, leaving too few edges for a connected edge set.
+theorem SpanningTree.forest (V leftEnd rightEnd T : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ T, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  shows Forest(V, leftEnd, rightEnd, T)
+proof
+  obtain ⟨finite, connected, count⟩ := tree
+  constructor
+  . exact finite
+  . intros C bound even
+    by_contra nonempty
+    obtain ⟨e, he⟩ := Nonempty.of_ne_empty with nonempty
+    have inT := bound with e, he
+    have restSubset := difference.subset_left at T, {e}
+    have restFinite := Finite.subset with finite, restSubset
+    have restEnds := ends_in.subset with ends, restSubset
+    have edgeEnds := ends with e, inT
+    have endsC := ends_in.subset with ends, bound
+    have joinedC := EvenEdgeSet.ends_joined with finiteVertices, endsC, even, he
+    have restC : C ∖ {e} ⊆ T ∖ {e} :=
+      difference.subset_of_subset with bound
+    have bridged := Joined.monotone with restC, joinedC
+    have same := componentsBy.add_edge_joined with restEnds, edgeEnds, bridged
+    have restored : (T ∖ {e}) ∪ {e} = T by ext y; simp
+    rw restored at same
+    have lower := componentsBy.lower_bound with
+      finiteVertices, restFinite, restEnds
+    rw ← same at lower
+    have one := componentsBy.le_one_of_connected with connected
+    have removed := cardinality.remove with finite, inT
+    rw removed at count
+    arith
+
+-- A connected forest on a nonempty vertex set has exactly |V| − 1 edges.
+theorem SpanningTree.of_connected_forest (V leftEnd rightEnd T : Set)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires ends : ∀ e ∈ T, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires forest : Forest(V, leftEnd, rightEnd, T)
+  requires connected : Connects(V, leftEnd, rightEnd, T)
+  shows SpanningTree(V, leftEnd, rightEnd, T)
+proof
+  obtain ⟨finite, _⟩ := forest
+  have upper := Forest.edge_bound with finiteVertices, ends, forest
+  have lower := componentsBy.lower_bound with finiteVertices, finite, ends
+  have one := componentsBy.connected_count with connected, nonempty
+  refine ⟨finite, connected, _⟩
+  arith
+
+-- The forests inside an edge set, a finite family when the edge set is finite.
+def forestsIn (V leftEnd rightEnd E : Set) : Set :=
+  { F ∈ 𝒫(E) | Forest(V, leftEnd, rightEnd, F) }
+
+-- Every connected finite multigraph has a spanning tree: a maximal forest
+-- inside E is connected, else an edge of E leaving one of its components
+-- could be added to it.
+theorem SpanningTree.exists (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires connected : Connects(V, leftEnd, rightEnd, E)
+  shows ∃ T ⊆ E, SpanningTree(V, leftEnd, rightEnd, T)
+proof
+  have endsE := Graph.ends with graph
+  have finiteFamily : Finite(forestsIn(V, leftEnd, rightEnd, E))
+    have subset : forestsIn(V, leftEnd, rightEnd, E) ⊆ 𝒫(E)
+      intros F hF
+      obtain ⟨inPowerset, _⟩ := hF
+      exact inPowerset
+    exact Finite.subset with (Finite.powerset with finiteEdges), subset
+  have emptyForest : ∅ ∈ forestsIn(V, leftEnd, rightEnd, E)
+    have emptySubset : ∅ ∈ 𝒫(E) :=
+      powerset.membership_iff.backward with empty.subset
+    have forest : Forest(V, leftEnd, rightEnd, ∅)
+      constructor
+      . exact Finite.empty
+      . intros C bound even
+        exact Subset.antisymmetric with bound, empty.subset
+    exact ⟨emptySubset, forest⟩
+  obtain ⟨T, inFamily, _, maximal⟩ :=
+    Finite.maximal_extension with finiteFamily, emptyForest
+  obtain ⟨inPowerset, forest⟩ := inFamily
+  have subsetE := powerset.membership_iff.forward with inPowerset
+  have endsT := ends_in.subset with endsE, subsetE
+  have connectedT : Connects(V, leftEnd, rightEnd, T)
+    by_contra disconnected
+    obtain ⟨u, hu, v, hv, apart⟩ := Connects.witness_apart with disconnected
+    have closedT := componentBy.closed at V, leftEnd, rightEnd, T, u
+      with endsT
+    have selfU := componentBy.self at V, leftEnd, rightEnd, T, u with hu
+    -- Some edge of E leaves the T-component of u, since v lies outside it.
+    have crossingEdge : ∃ e ∈ E,
+        ¬(leftEnd(e) ∈ componentBy(V, leftEnd, rightEnd, T, u) ↔
+          rightEnd(e) ∈ componentBy(V, leftEnd, rightEnd, T, u))
+      by_contra none
+      have closedE : ClosedUnder(leftEnd, rightEnd, E,
+          componentBy(V, leftEnd, rightEnd, T, u))
+        intros e he
+        by_contra unbalanced
+        exact none with ⟨e, he, unbalanced⟩
+      have inComponent := connected with u, hu, v, hv,
+        componentBy(V, leftEnd, rightEnd, T, u), selfU, closedE
+      exact apart with inComponent.right
+    obtain ⟨e, he, unbalanced⟩ := crossingEdge
+    have edgeEnds := endsE with e, he
+    have outside : ¬e ∈ T
+      intro inT
+      exact unbalanced with (closedT with e, inT)
+    have apartEnds : ¬Joined(leftEnd, rightEnd, T, leftEnd(e), rightEnd(e))
+      intro joined
+      exact unbalanced with (Joined.balanced with
+        endsT, edgeEnds.left, edgeEnds.right, joined, closedT)
+    -- Then T ∪ {e} is a larger forest inside E, against maximality.
+    have bigger := Forest.add_edge with
+      finiteVertices, endsT, edgeEnds, forest, apartEnds
+    have biggerSubset : T ∪ {e} ⊆ E := Subset.union2_iff.backward with
+      ⟨subsetE, (singleton.subset_iff.backward with he)⟩
+    have biggerIn : T ∪ {e} ∈ forestsIn(V, leftEnd, rightEnd, E) :=
+      ⟨(powerset.membership_iff.backward with biggerSubset), bigger⟩
+    have equal := maximal with T ∪ {e}, biggerIn, union2.subset_left
+    have member : e ∈ T ∪ {e} by simp
+    rw equal at member
+    exact outside with member
+  refine ⟨T, subsetE, _⟩
+  exact SpanningTree.of_connected_forest with
+    finiteVertices, nonempty, endsT, forest, connectedT
+
+-- The fundamental even set of an edge outside a spanning tree: an even set
+-- inside T ∪ {e} that contains e.
+theorem SpanningTree.fundamental (V leftEnd rightEnd T e : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : (∀ f ∈ T, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V)
+    ∧ leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  requires outside : ¬e ∈ T
+  shows ∃ C ⊆ T ∪ {e}, e ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)
+proof
+  obtain ⟨finite, connected, _⟩ := tree
+  obtain ⟨endsT, leftIn, rightIn⟩ := ends
+  have member : e ∈ {e} by simp
+  by_cases loop : leftEnd(e) = rightEnd(e)
+  . refine ⟨{e}, union2.subset_right, member, _⟩
+    exact EvenEdgeSet.loop at V, leftEnd, rightEnd, e with loop
+  . have joined := connected with leftEnd(e), leftIn, rightEnd(e), rightIn
+    obtain ⟨P, subsetP, path⟩ :=
+      Joined.path with finite, endsT, loop, joined
+    have finiteP := Finite.subset with finite, subsetP
+    have outsideP : ¬e ∈ P
+      intro inP
+      exact outside with (subsetP with e, inP)
+    have even := EvenEdgeSet.of_path_edge with finiteP, outsideP, loop, path
+    have inside : P ∪ {e} ⊆ T ∪ {e} := union2.monotone_left with subsetP
+    have inC : e ∈ P ∪ {e} by simp
+    exact ⟨P ∪ {e}, inside, inC, even⟩
+
+-- Exchanging an edge of a tree for another edge of the even set it closes
+-- gives a tree again: the one-edge exchange of the tree-packing proof.
+theorem SpanningTree.exchange (V leftEnd rightEnd T C e f : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : (∀ g ∈ T, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V)
+    ∧ leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  requires outside : ¬e ∈ T
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires closes : C ⊆ T ∪ {e} ∧ e ∈ C
+  requires other : f ∈ C ∧ f ≠ e
+  shows SpanningTree(V, leftEnd, rightEnd, (T ∖ {f}) ∪ {e})
+proof
+  obtain ⟨finite, connected, count⟩ := tree
+  obtain ⟨endsT, edgeEnds⟩ := ends
+  obtain ⟨inside, inC⟩ := closes
+  obtain ⟨fInC, different⟩ := other
+  have fInT : f ∈ T by simp
+  have fEnds := endsT with f, fInT
+  have restSubset := difference.subset_left at T, {f}
+  have restFinite := Finite.subset with finite, restSubset
+  have restEnds := ends_in.subset with endsT, restSubset
+  have newEnds := ends_in.union_edge with restEnds, edgeEnds
+  have keep := union2.subset_left at T ∖ {f}, {e}
+  refine ⟨(Finite.union with restFinite, Finite.singleton), _, _⟩
+  . -- The ends of f stay joined through C ∖ {f}, so dropping f from
+    -- T ∪ {e} loses no connection.
+    have endsC := ends_in.subset with (ends_in.union_edge with endsT, edgeEnds),
+      inside
+    have joinedC := EvenEdgeSet.ends_joined with
+      finiteVertices, endsC, even, fInC
+    have restC : C ∖ {f} ⊆ (T ∖ {f}) ∪ {e}
+      intros g hg
+      obtain ⟨inCg, notF⟩ := difference.singleton_membership.forward with hg
+      have inBig := inside with g, inCg
+      simp
+    have bridged := Joined.monotone with restC, joinedC
+    have grow : T ⊆ ((T ∖ {f}) ∪ {e}) ∪ {f}
+      intros g hg
+      simp
+    intros u hu v hv
+    have joinedBig := Joined.monotone with grow, (connected with u, hu, v, hv)
+    exact Joined.drop_edge with newEnds, fEnds, joinedBig, bridged
+  . have fresh : ¬e ∈ T ∖ {f}
+      intro inRest
+      exact outside with (restSubset with e, inRest)
+    have inserted := cardinality.union_singleton with restFinite, fresh
+    have removed := cardinality.remove_add_one with finite, fInT
+    rwa [inserted, ← removed]

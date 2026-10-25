@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setSurfaceTraceCapture } from "../src/surface.ts";
 import { compileProofModule, createZfgKernel, exportTheorem, exportTheoremForMachine, loadModuleGraph, loadModuleSourceGraph, verifyProofMachine } from "../src/index.ts";
 
 const project = fileURLToPath(new URL("..", import.meta.url));
@@ -103,6 +104,9 @@ test("Cumulus root files are subject entrypoints rather than implementations", (
 
 test("Cumulus loads over Core and every library theorem replays", () => {
   const kernel = createZfgKernel();
+  // The kernel replay is the point here; the tactic traces of five thousand
+  // theorems would only cost memory.
+  setSurfaceTraceCapture(kernel, false);
   const loaded = loadModuleGraph(kernel, [cumulus], [library]);
   const libraryTheorems = loaded.filter(item => item.file.startsWith(library)).flatMap(item => item.theorems);
   assert.ok(libraryTheorems.length >= 4826, "retain the validated Cumulus theorem coverage");
@@ -425,7 +429,8 @@ test("Cumulus loads over Core and every library theorem replays", () => {
     "[[fraction(3, 1, 2), fraction(2, 2, 2), fraction(7, 3, 2)], [fraction(1, 1, 2), fraction(2, 0, 2), fraction(3, 1, 2)]]",
     "[some(0), some(7), some(3), some(9), some(5), none]",
   ]);
-  const machine = compileProofModule(libraryTheorems.map(name => exportTheoremForMachine(kernel, name)));
+  const exports = function* () { for (const name of libraryTheorems) yield exportTheoremForMachine(kernel, name); };
+  const machine = compileProofModule(exports());
   assert.equal(verifyProofMachine(kernel, machine).stats.instructions, machine.code.length);
   const central = exportTheorem(kernel, "Grace.Cumulus.Cardinal.Product.natProductEquiv.bijective");
   assert.deepEqual(central.tactics?.narrative.filter(entry => entry.kind === "heading").map(entry => entry.text), [

@@ -14,7 +14,7 @@ test("the Workbench guide contains every built-in tactic family", () => {
   const expected = [
     "exact?", "apply?", "rw?", "sorry", "ext", "simp", "simpa", "rewrite", "rw", "unfold",
     "induction", "obtain", "have", "calc", "specialize", "apply", "exact", "intro", "intros", "left", "right",
-    "constructor", "split", "refine", "rcases", "cases", "clear", "rename", "revert", "exfalso",
+    "constructor", "split", "refine", "rcases", "cases", "clear", "rename", "revert", "set", "exfalso",
     "by_contra", "by_cases", "contradiction", "tauto", "cc", "congruence", "witness", "use", "assumption",
     "reflexivity", "rfl", "compute", "decide", "linear_combination", "ring_nf", "ring", "arith", "linarith",
     "settle", "typecheck", "synthesize", "tactic",
@@ -60,11 +60,13 @@ test("Help begins with the language, builds from small moves, and ends with indu
   }
 });
 
-test("the guide distinguishes all three induction interfaces", () => {
+test("the guide distinguishes all four induction interfaces", () => {
   const induction = tacticGuideSections.find(section => section.id === "induction");
-  assert.equal(induction?.entries.length, 3);
+  assert.equal(induction?.entries.length, 4);
   const text = JSON.stringify(induction);
   assert.match(text, /constructors of an inductive datatype/);
+  assert.match(text, /induction finite with G a/);
+  assert.match(text, /\| insert using ih =>/);
   assert.match(text, /using membership/);
   assert.match(text, /wellFoundedOn/);
   assert.match(text, /∀ x, x ∈ A → P\(x\)/);
@@ -211,6 +213,9 @@ test("Help examples receive safe Grace17 syntax highlighting", () => {
   assert.match(html, /g17-tactic\">exact/);
   assert.match(html, /g17-comment\">-- checked/);
   assert.doesNotMatch(highlightGrace17('<script>alert("x")<\/script>'), /<script>/);
+  // A bare R, N, or Q is a variable unless it annotates a binder.
+  assert.doesNotMatch(highlightGrace17("theorem t (A R C b : Set)\n  requires side : b ⊆ R"), /g17-type\">R/);
+  assert.match(highlightGrace17("theorem t (x : R)\n  shows (0:R) = realZero"), /g17-type\">R/);
 });
 
 test("every built-in tactic spelling has semantic hover help", () => {

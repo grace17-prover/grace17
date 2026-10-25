@@ -1,0 +1,229 @@
+-- A nowhere-zero flow with values in the three-dimensional space over the
+-- two-element field is three even edge sets that together cover every edge;
+-- the value of an edge is the set of coordinates whose even set holds it.
+-- Three spanning trees with no common edge give one.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Flows.EvenCovers
+import Multigraph.Trees
+import TreePacking.Corollaries
+import Set.Function.Triples
+
+-- Section: Even covers as nowhere-zero flows over the field of two elements
+-- cubed.
+
+-- F assigns an even edge set to each coordinate i ∈ 3, and every edge lies
+-- in one of them.
+predicate EvenCover (V E leftEnd rightEnd F : Set) :=
+  FunctionBetween(F, 3, 𝒫(E)) ∧
+  (∀ i ∈ 3, EvenEdgeSet(V, leftEnd, rightEnd, F(i))) ∧
+  (∀ e ∈ E, ∃ i ∈ 3, e ∈ F(i))
+
+-- The value of an edge: the coordinates whose even set holds it.
+def flowValue (F e : Set) : Set := { i ∈ 3 | e ∈ F(i) }
+
+-- The ends at v whose edge carries coordinate i.
+def coordinateEnds (leftEnd rightEnd E F v i : Set) : Set :=
+  { p ∈ incidentEnds(leftEnd, rightEnd, E, v) | i ∈ flowValue(F, fst(p)) }
+
+theorem flowValue.nonzero (V E leftEnd rightEnd F e : Set)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires edge : e ∈ E
+  shows flowValue(F, e) ≠ ∅
+proof
+  obtain ⟨i, hi, member⟩ := cover.right.right with e, edge
+  apply Nonempty.ne_empty
+  witness i
+  exact ⟨hi, member⟩
+
+-- The ends at v carrying coordinate i are the ends of the edges of F(i) at v.
+theorem coordinateEnds.eq (V E leftEnd rightEnd F v i : Set)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires coordinate : i ∈ 3
+  shows coordinateEnds(leftEnd, rightEnd, E, F, v, i) =
+    incidentEnds(leftEnd, rightEnd, F(i), v)
+proof
+  have edges : F(i) ⊆ E := powerset.membership_iff.forward
+    with (FunctionBetween.apply_closed with cover.left, coordinate)
+  ext p
+  constructor
+  . intro hp
+    obtain ⟨inEnds, value⟩ := hp
+    obtain ⟨e, he, j, hj, rfl⟩ := incidentEnds.shape with inEnds
+    rw fst.pair at value
+    have atV := (incidentEnds.pair.forward with inEnds).right
+    exact incidentEnds.pair.backward with ⟨value.right, atV⟩
+  . intro hp
+    obtain ⟨e, he, j, hj, rfl⟩ := incidentEnds.shape with hp
+    have atV := (incidentEnds.pair.forward with hp).right
+    have inE := edges with e, he
+    refine ⟨(incidentEnds.pair.backward with ⟨inE, atV⟩), _⟩
+    rw fst.pair
+    exact ⟨coordinate, he⟩
+
+-- Conservation at a vertex: the values of the incident ends sum to zero,
+-- coordinate by coordinate, since each even set has even degree there.
+theorem flowValue.conservation (V E leftEnd rightEnd F v i : Set)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires vertex : v ∈ V
+  requires coordinate : i ∈ 3
+  shows EvenSet(coordinateEnds(leftEnd, rightEnd, E, F, v, i))
+proof
+  have even := (cover.right.left with i, coordinate).right with v, vertex
+  unfold degreeIn at even
+  unfold EvenSet
+  rw coordinateEnds.eq with cover, coordinate
+  exact even
+
+-- Section: An even set containing the complement of a spanning tree.
+
+-- Closing the edges of D outside the tree one at a time: the symmetric
+-- difference of their fundamental even sets lies inside T ∪ D and holds
+-- every edge of D, since the fundamental set of an edge holds no other edge
+-- outside the tree.
+theorem SpanningTree.even_superset_of (V E leftEnd rightEnd T D : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finite : Finite(D)
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  requires edges : T ⊆ E
+  requires outside : D ⊆ E ∖ T
+  shows ∃ F ⊆ T ∪ D, EvenEdgeSet(V, leftEnd, rightEnd, F) ∧ D ⊆ F
+proof
+  induction finite with G a
+  | empty =>
+    exact ⟨∅, empty.subset, EvenEdgeSet.empty, empty.subset⟩
+  | insert using ih =>
+    obtain ⟨F, inside, even, covers⟩ := ih
+    have endsE := Graph.ends with graph
+    obtain ⟨aInE, aNotT⟩ := difference.membership.forward with aMember
+    have ends : (∀ f ∈ T, leftEnd(f) ∈ V ∧ rightEnd(f) ∈ V)
+        ∧ leftEnd(a) ∈ V ∧ rightEnd(a) ∈ V :=
+      ⟨(ends_in.subset with endsE, edges), (endsE with a, aInE)⟩
+    obtain ⟨C, closes, aInC, evenC⟩ :=
+      SpanningTree.fundamental with finiteVertices, ends, tree, aNotT
+    have growF : T ∪ G ⊆ T ∪ (G ∪ {a}) by simp
+    have growC : T ∪ {a} ⊆ T ∪ (G ∪ {a}) by simp
+    refine ⟨F △ C, (symmetricDifference.subset
+      with (Subset.transitive with inside, growF),
+        (Subset.transitive with closes, growC)),
+      (EvenEdgeSet.symmetricDifference with even, evenC), _⟩
+    intros g hg
+    rw symmetricDifference.membership
+    simp at hg
+    rcases hg with inG | rfl
+    . -- An edge of G lies in F, and outside C: it is neither in T nor a.
+      have inF := covers with g, inG
+      obtain ⟨_, gNotT⟩ :=
+        difference.membership.forward with (GSubset with g, inG)
+      have notA : g ≠ a
+        intro same
+        rw same at inG
+        exact aFresh with inG
+      have notC : ¬g ∈ C
+        intro inC
+        have inBig := closes with g, inC
+        simp at inBig
+      tauto
+    . -- a lies in C, and outside F ⊆ T ∪ G.
+      have notF : ¬a ∈ F
+        intro inF
+        have inBig := inside with a, inF
+        simp at inBig
+      tauto
+
+-- The even set of a spanning tree's complement: the symmetric difference of
+-- the fundamental even sets of the edges outside the tree.
+theorem SpanningTree.even_superset (V E leftEnd rightEnd T : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  requires edges : T ⊆ E
+  shows ∃ F ⊆ E, EvenEdgeSet(V, leftEnd, rightEnd, F) ∧ E ∖ T ⊆ F
+proof
+  have outside := Subset.reflexive at E ∖ T
+  have finite := Finite.difference at E, T with finiteEdges
+  obtain ⟨F, inside, even, covers⟩ := SpanningTree.even_superset_of
+    with graph, finiteVertices, finite, tree, edges, outside
+  have whole : T ∪ (E ∖ T) ⊆ E by simp
+  exact ⟨F, (Subset.transitive with inside, whole), even, covers⟩
+
+-- Section: Even covers from three spanning trees.
+
+-- Three spanning trees with no common edge give an even cover: the
+-- complement of each tree lies in an even set, and every edge misses a tree.
+theorem EvenCover.of_three_trees (V E leftEnd rightEnd T : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires trees : FunctionBetween(T, 3, 𝒫(E)) ∧
+    (∀ i ∈ 3, SpanningTree(V, leftEnd, rightEnd, T(i)))
+  requires sparse : T(0) ∩ T(1) ∩ T(2) = ∅
+  shows ∃ F, EvenCover(V, E, leftEnd, rightEnd, F)
+proof
+  obtain ⟨function, spanning⟩ := trees
+  have zero : 0 ∈ 3 by simp [membership.three]
+  have one : 1 ∈ 3 by simp [membership.three]
+  have two : 2 ∈ 3 by simp [membership.three]
+  -- Each tree's complement lies in an even set.
+  have superset : ∀ i ∈ 3, ∃ F ⊆ E,
+      EvenEdgeSet(V, leftEnd, rightEnd, F) ∧ E ∖ T(i) ⊆ F
+    intros i hi
+    have edges : T(i) ⊆ E := powerset.membership_iff.forward
+      with (FunctionBetween.apply_closed with function, hi)
+    exact SpanningTree.even_superset
+      with graph, finiteVertices, finiteEdges, (spanning with i, hi), edges
+  obtain ⟨F0, in0, even0, cover0⟩ := superset with 0, zero
+  obtain ⟨F1, in1, even1, cover1⟩ := superset with 1, one
+  obtain ⟨F2, in2, even2, cover2⟩ := superset with 2, two
+  have mem0 : F0 ∈ 𝒫(E) := powerset.membership_iff.backward with in0
+  have mem1 : F1 ∈ 𝒫(E) := powerset.membership_iff.backward with in1
+  have mem2 : F2 ∈ 𝒫(E) := powerset.membership_iff.backward with in2
+  have values := tripleMap.value with mem0, mem1, mem2
+  witness tripleMap(𝒫(E), F0, F1, F2)
+  refine ⟨(tripleMap.function with mem0, mem1, mem2), _, _⟩
+  . intros i hi
+    have cases := membership.three.forward with hi
+    rcases cases with rfl | rfl | rfl
+    . rw values.left
+      exact even0
+    . rw values.right.left
+      exact even1
+    . rw values.right.right
+      exact even2
+  . -- An edge misses one of the three trees, so one even set holds it.
+    intros e he
+    have misses : e ∉ T(0) ∨ e ∉ T(1) ∨ e ∉ T(2)
+      by_contra all
+      have inAll : e ∈ T(0) ∧ e ∈ T(1) ∧ e ∈ T(2) by tauto
+      have common : e ∈ T(0) ∩ T(1) ∩ T(2)
+        by simp [inAll.left, inAll.right.left, inAll.right.right]
+      rw sparse at common
+      simp at common
+    rcases misses with miss | miss | miss
+    . refine ⟨0, zero, _⟩
+      rw values.left
+      exact cover0 with e, (difference.membership.backward with he, miss)
+    . refine ⟨1, one, _⟩
+      rw values.right.left
+      exact cover1 with e, (difference.membership.backward with he, miss)
+    . refine ⟨2, two, _⟩
+      rw values.right.right
+      exact cover2 with e, (difference.membership.backward with he, miss)
+
+theorem EvenCover.of_three_edge_connected (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires connected : EdgeConnected(V, E, leftEnd, rightEnd, 3)
+  shows ∃ F, EvenCover(V, E, leftEnd, rightEnd, F)
+proof
+  obtain ⟨T, function, spanning, sparse⟩ := EdgeConnected.three_trees
+    with graph, finiteVertices, finiteEdges, nonempty, connected
+  exact EvenCover.of_three_trees
+    with graph, finiteVertices, finiteEdges, ⟨function, spanning⟩, sparse

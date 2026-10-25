@@ -1,0 +1,491 @@
+-- Rotation systems: a permutation of the edge ends carrying each end to
+-- another end at the same vertex, whose orbit through an end is all the ends
+-- there. Every finite multigraph has one, by a cyclic permutation of the
+-- ends at each vertex.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.RotationSystems
+import Cycles
+import Multigraph.Cuts
+import Nat.CyclicShift
+
+-- Section: Rotation systems.
+
+-- The ends of the edges: (e, 0) is the left end of e and (e, 1) its right
+-- end. The ends at a vertex v are incidentEnds(leftEnd, rightEnd, E, v).
+def halfEdges (E : Set) : Set := E × 2
+
+-- The n-th iterate of σ at h.
+def orbitStep (σ h : Set, n : Nat) → Set
+  | σ, h, zero => h
+  | σ, h, succ(m) => σ(orbitStep(σ, h, m))
+
+-- A rotation system: a permutation of the ends carrying each end to another
+-- end at the same vertex, whose orbit through an end is all the ends there.
+predicate RotationSystem (V E leftEnd rightEnd σ : Set) :=
+  BijectiveBetween(σ, halfEdges(E), halfEdges(E)) ∧
+  (∀ v ∈ V, ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, v),
+    σ(h) ∈ incidentEnds(leftEnd, rightEnd, E, v)) ∧
+  (∀ v ∈ V, ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, v),
+    ∀ k ∈ incidentEnds(leftEnd, rightEnd, E, v),
+    ∃ n ∈ ℕ, orbitStep(σ, h, n) = k)
+
+-- Iterates compose: the (m + k)-th iterate is the k-th iterate of the m-th.
+theorem orbitStep.add (σ h : Set, m k : Nat)
+  shows orbitStep(σ, h, m + k) = orbitStep(σ, orbitStep(σ, h, m), k)
+proof
+  induction k
+  | zero => rw [add.right_unit, orbitStep]
+  | succ(j) using ih => rw [add.succ_right, orbitStep, orbitStep, ih]
+
+-- The orbit of a point of a set closed under σ stays in the set.
+theorem orbitStep.closed (σ h X : Set, n : Nat)
+  requires closed : ∀ x ∈ X, σ(x) ∈ X
+  requires start : h ∈ X
+  shows orbitStep(σ, h, n) ∈ X
+proof
+  induction n
+  | zero => rwa orbitStep
+  | succ(m) using ih =>
+    rw orbitStep
+    exact closed with orbitStep(σ, h, m), ih
+
+-- A fixed point of σ has a one-point orbit.
+theorem orbitStep.fixed (σ h : Set, n : Nat)
+  requires fixed : σ(h) = h
+  shows orbitStep(σ, h, n) = h
+proof
+  induction n
+  | zero => rw orbitStep
+  | succ(m) using ih => rw [orbitStep, ih, fixed]
+
+-- Two maps agreeing on a set closed under one of them have the same orbits
+-- through its points.
+theorem orbitStep.agree (σ τ h X : Set, n : Nat)
+  requires same : ∀ x ∈ X, τ(x) = σ(x)
+  requires closed : ∀ x ∈ X, σ(x) ∈ X
+  requires start : h ∈ X
+  shows orbitStep(τ, h, n) = orbitStep(σ, h, n)
+proof
+  induction n
+  | zero => rw [orbitStep, orbitStep]
+  | succ(m) using ih =>
+    have reached := orbitStep.closed at σ, h, X, m with closed, start
+    rw [orbitStep, orbitStep, ih]
+    exact same with orbitStep(σ, h, m), reached
+
+theorem halfEdges.pair (E e i : Set)
+  shows (e, i) ∈ halfEdges(E) ↔ e ∈ E ∧ i ∈ 2
+proof
+  unfold halfEdges
+  exact product.pair_membership
+
+theorem halfEdges.shape (E h : Set)
+  requires end : h ∈ halfEdges(E)
+  shows ∃ e ∈ E, ∃ i ∈ 2, h = (e, i)
+proof
+  unfold halfEdges at end
+  exact (product.membership.forward with end).right
+
+-- The two ends of an edge.
+theorem halfEdges.left (E e : Set)
+  requires edge : e ∈ E
+  shows (e, 0) ∈ halfEdges(E)
+proof
+  have zero : 0 ∈ 2 by typecheck
+  exact halfEdges.pair.backward with ⟨edge, zero⟩
+
+theorem halfEdges.right (E e : Set)
+  requires edge : e ∈ E
+  shows (e, 1) ∈ halfEdges(E)
+proof
+  have one : 1 ∈ 2 by typecheck
+  exact halfEdges.pair.backward with ⟨edge, one⟩
+
+theorem halfEdges.finite (E : Set)
+  requires finiteEdges : Finite(E)
+  shows Finite(halfEdges(E))
+proof
+  unfold halfEdges
+  exact Finite.product with finiteEdges, Finite.natural
+
+theorem incidentEnds.subset_halfEdges (leftEnd rightEnd E v : Set)
+  shows incidentEnds(leftEnd, rightEnd, E, v) ⊆ halfEdges(E)
+proof
+  unfold halfEdges
+  exact incidentEnds.subset_product
+
+-- The left end of e lies at leftEnd(e), the right end at rightEnd(e).
+theorem incidentEnds.left (leftEnd rightEnd E v e : Set)
+  requires edge : e ∈ E
+  shows (e, 0) ∈ incidentEnds(leftEnd, rightEnd, E, v) ↔ leftEnd(e) = v
+proof
+  simp [incidentEnds.pair, edge]
+
+theorem incidentEnds.right (leftEnd rightEnd E v e : Set)
+  requires edge : e ∈ E
+  shows (e, 1) ∈ incidentEnds(leftEnd, rightEnd, E, v) ↔ rightEnd(e) = v
+proof
+  simp [incidentEnds.pair, edge]
+
+-- Every end lies at a vertex of the graph, and at one vertex only.
+theorem halfEdges.vertex (V E leftEnd rightEnd h : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires end : h ∈ halfEdges(E)
+  shows ∃ v ∈ V, h ∈ incidentEnds(leftEnd, rightEnd, E, v)
+proof
+  obtain ⟨e, he, i, hi, rfl⟩ := halfEdges.shape with end
+  have ends := Graph.ends with graph, e, he
+  have sides := membership.two.forward with hi
+  rcases sides with rfl | rfl
+  . refine ⟨leftEnd(e), ends.left, _⟩
+    simp [incidentEnds.pair, he]
+  . refine ⟨rightEnd(e), ends.right, _⟩
+    simp [incidentEnds.pair, he]
+
+theorem incidentEnds.same_vertex (leftEnd rightEnd E v w p : Set)
+  requires atV : p ∈ incidentEnds(leftEnd, rightEnd, E, v)
+  requires atW : p ∈ incidentEnds(leftEnd, rightEnd, E, w)
+  shows v = w
+proof
+  obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with atV
+  have sides := (incidentEnds.pair.forward with atV).right
+  rcases sides with ⟨rfl, hv⟩ | ⟨rfl, hv⟩
+  . rw (incidentEnds.left with he) at atW
+    cc
+  . rw (incidentEnds.right with he) at atW
+    cc
+
+theorem RotationSystem.function (V E leftEnd rightEnd σ : Set)
+  requires rotation : RotationSystem(V, E, leftEnd, rightEnd, σ)
+  shows σ : halfEdges(E) → halfEdges(E)
+proof
+  exact rotation.left.left.left
+
+-- σ carries the ends at v to ends at v, and no other end to one.
+theorem RotationSystem.at_vertex (V E leftEnd rightEnd σ v h : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires rotation : RotationSystem(V, E, leftEnd, rightEnd, σ)
+  requires vertex : v ∈ V
+  requires end : h ∈ halfEdges(E)
+  shows h ∈ incidentEnds(leftEnd, rightEnd, E, v) ↔
+    σ(h) ∈ incidentEnds(leftEnd, rightEnd, E, v)
+proof
+  constructor
+  . intro atV
+    exact rotation.right.left with v, vertex, h, atV
+  . intro imageAtV
+    obtain ⟨w, hw, atW⟩ := halfEdges.vertex with graph, end
+    have imageAtW := rotation.right.left with w, hw, h, atW
+    rw (incidentEnds.same_vertex with imageAtV, imageAtW)
+    exact atW
+
+-- With at least two ends at every vertex, σ fixes no end: the orbit of a
+-- fixed end is a single point, but it must reach the other end at its vertex.
+theorem RotationSystem.moves (V E leftEnd rightEnd σ h : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires rotation : RotationSystem(V, E, leftEnd, rightEnd, σ)
+  requires degrees : ∀ v ∈ V, 2 ≤ degreeIn(leftEnd, rightEnd, E, v)
+  requires end : h ∈ halfEdges(E)
+  shows σ(h) ≠ h
+proof
+  intro fixed
+  obtain ⟨v, hv, atV⟩ := halfEdges.vertex with graph, end
+  have finiteEnds := incidentEnds.finite at leftEnd, rightEnd, E, v
+    with finiteEdges
+  have another : incidentEnds(leftEnd, rightEnd, E, v) ∖ {h} ≠ ∅
+    intro empty
+    have count := cardinality.remove_add_one with finiteEnds, atV
+    have bound := degrees with v, hv
+    unfold degreeIn at bound
+    rw [empty, cardinality.empty] at count
+    arith
+  obtain ⟨k, hk⟩ := Nonempty.of_ne_empty with another
+  obtain ⟨atVk, different⟩ := hk
+  obtain ⟨n, hn, reaches⟩ :=
+    rotation.right.right with v, hv, h, atV, k, atVk
+  rw orbitStep.fixed with fixed at reaches
+  simp [reaches] at different
+
+-- Section: Existence of rotation systems.
+
+-- The orbit of i under the cyclic shift of n counts up while it stays in n.
+theorem rotation.orbit_below (n : Nat, i k : Nat)
+  requires inside : i + k ∈ n
+  shows orbitStep(rotation(n), i, k) = i + k
+proof
+  induction k
+  | zero =>
+    intro inside
+    rw [orbitStep, add.right_unit]
+  | succ(j) using ih =>
+    intro inside
+    rw add.succ_right at inside
+    have earlier : i + j ∈ n
+      have below := Less.of_membership with inside
+      have lower : i + j < n by arith
+      exact membership.of_Less with lower
+    rw [orbitStep, (ih with earlier), add.succ_right]
+    exact rotation.step with earlier, inside
+
+-- Every member of n is reached from every other: climb from i to n − 1,
+-- wrap to 0, and climb to j.
+theorem rotation.orbit (n : Nat, i j : Set)
+  requires hi : i ∈ n
+  requires hj : j ∈ n
+  shows ∃ m ∈ ℕ, orbitStep(rotation(n), i, m) = j
+proof
+  have iNat := natural.member at n with hi
+  have jNat := natural.member at n with hj
+  have below := Less.of_membership with hi
+  obtain ⟨d, dNat, split⟩ := Less.exists_add_one with below
+  have top : succ(i + d) = n
+    rw split
+    ring
+  have topIn : i + d ∈ n
+    have lower : i + d < n by arith
+    exact membership.of_Less with lower
+  have toZero : orbitStep(rotation(n), i, succ(d)) = 0
+    rw [orbitStep, (rotation.orbit_below with topIn)]
+    exact rotation.wrap with topIn, top
+  have fromZero : orbitStep(rotation(n), 0, j) = j
+    have start : 0 + j ∈ n
+      rw add.left_unit
+      exact hj
+    rw rotation.orbit_below with start
+    exact add.left_unit
+  refine ⟨succ(d) + j, _, _⟩
+  . typecheck
+  . rw [orbitStep.add, toZero, fromZero]
+
+-- Conjugating the shift by an enumeration f : A → n: the orbit of a under
+-- f⁻¹ ∘ ρ ∘ f is the orbit of f(a) under ρ, carried back by f⁻¹.
+def conjugated (f ρ A n : Set) : Set :=
+  compose(converse(f, A, n), compose(ρ, f, A, n, n), A, n, A)
+
+theorem conjugated.bijective (f ρ A n : Set)
+  requires enumeration : BijectiveBetween(f, A, n)
+  requires shift : BijectiveBetween(ρ, n, n)
+  shows BijectiveBetween(conjugated(f, ρ, A, n), A, A)
+proof
+  unfold conjugated
+  exact compose.bijective with (compose.bijective with enumeration, shift),
+    (converse.bijective with enumeration)
+
+theorem conjugated.apply (f ρ A n a : Set)
+  requires enumeration : BijectiveBetween(f, A, n)
+  requires shift : BijectiveBetween(ρ, n, n)
+  requires member : a ∈ A
+  shows conjugated(f, ρ, A, n)(a) = converse(f, A, n)(ρ(f(a)))
+proof
+  have fFunction :=
+    Injective.function with (Bijective.injective with enumeration)
+  have ρFunction := Injective.function with (Bijective.injective with shift)
+  have inner := Injective.function
+    with (Bijective.injective with (compose.bijective with enumeration, shift))
+  have inverse := converse.function_of_bijective with enumeration
+  unfold conjugated
+  rw [(compose.apply with inner, inverse, member),
+    (compose.apply with fFunction, ρFunction, member)]
+
+theorem conjugated.orbit (f ρ A n a : Set, m : Nat)
+  requires enumeration : BijectiveBetween(f, A, n)
+  requires shift : BijectiveBetween(ρ, n, n)
+  requires member : a ∈ A
+  shows orbitStep(conjugated(f, ρ, A, n), a, m) =
+    converse(f, A, n)(orbitStep(ρ, f(a), m))
+proof
+  induction m
+  | zero =>
+    rw [orbitStep, orbitStep]
+    symm
+    exact Bijective.inverse_apply with enumeration, member
+  | succ(k) using ih =>
+    have fFunction :=
+      Injective.function with (Bijective.injective with enumeration)
+    have ρFunction := Injective.function with (Bijective.injective with shift)
+    have closed : ∀ x ∈ n, ρ(x) ∈ n
+      intros x hx
+      exact FunctionBetween.apply_closed with ρFunction, hx
+    have start := FunctionBetween.apply_closed with fFunction, member
+    have reached := orbitStep.closed at ρ, f(a), n, k with closed, start
+    have inverse := converse.function_of_bijective with enumeration
+    have back := FunctionBetween.apply_closed with inverse, reached
+    rw [orbitStep, ih, (conjugated.apply with enumeration, shift, back),
+      (Bijective.apply_inverse with enumeration, reached), orbitStep]
+
+-- Every finite set has a cyclic permutation: enumerate it by its cardinality
+-- and conjugate the cyclic shift.
+theorem cyclicPermutation.exists (A : Set)
+  requires finite : Finite(A)
+  shows ∃ σ, BijectiveBetween(σ, A, A) ∧
+    (∀ a ∈ A, ∀ b ∈ A, ∃ n ∈ ℕ, orbitStep(σ, a, n) = b)
+proof
+  obtain ⟨nNat, f, enumeration⟩ := cardinality.correct with finite
+  have shift := rotation.bijective at cardinality(A) with nNat
+  have fFunction :=
+    Injective.function with (Bijective.injective with enumeration)
+  refine ⟨conjugated(f, rotation(cardinality(A)), A, cardinality(A)),
+    (conjugated.bijective with enumeration, shift), _⟩
+  intros a ha b hb
+  have ia := FunctionBetween.apply_closed with fFunction, ha
+  have ib := FunctionBetween.apply_closed with fFunction, hb
+  obtain ⟨m, hm, reaches⟩ := rotation.orbit with nNat, ia, ib
+  refine ⟨m, hm, _⟩
+  rw [(conjugated.orbit with enumeration, shift, ha), reaches]
+  exact Bijective.inverse_apply with enumeration, hb
+
+-- The ends at the vertices of W.
+def endsAt (leftEnd rightEnd E W : Set) : Set :=
+  { h ∈ halfEdges(E) |
+    ∃ v ∈ W, h ∈ incidentEnds(leftEnd, rightEnd, E, v) }
+
+theorem endsAt.of_vertex (leftEnd rightEnd E W v h : Set)
+  requires vertex : v ∈ W
+  requires end : h ∈ incidentEnds(leftEnd, rightEnd, E, v)
+  shows h ∈ endsAt(leftEnd, rightEnd, E, W)
+proof
+  have inside := incidentEnds.subset_halfEdges at leftEnd, rightEnd, E, v
+  exact ⟨(inside with h, end), v, vertex, end⟩
+
+theorem endsAt.empty (leftEnd rightEnd E : Set)
+  shows endsAt(leftEnd, rightEnd, E, ∅) = ∅
+proof
+  ext h
+  simp [endsAt]
+
+-- Adding a vertex adds its ends, and the ends at a vertex outside W lie at
+-- no vertex of W.
+theorem endsAt.insert (leftEnd rightEnd E W a : Set)
+  shows endsAt(leftEnd, rightEnd, E, W ∪ {a}) =
+    endsAt(leftEnd, rightEnd, E, W) ∪ incidentEnds(leftEnd, rightEnd, E, a)
+proof
+  ext h
+  constructor
+  . intro hh
+    obtain ⟨inEnds, v, hv, atV⟩ := hh
+    simp at hv
+    apply union2.membership.backward
+    rcases hv with inW | rfl
+    . left
+      exact ⟨inEnds, v, inW, atV⟩
+    . right
+      exact atV
+  . intro hh
+    have split := union2.membership.forward with hh
+    rcases split with inW | atA
+    . obtain ⟨inEnds, v, hv, atV⟩ := inW
+      refine ⟨inEnds, v, _, atV⟩
+      simp [hv]
+    . have inside := incidentEnds.subset_halfEdges at leftEnd, rightEnd, E, a
+      refine ⟨(inside with h, atA), a, _, atA⟩
+      simp
+
+theorem endsAt.disjoint (leftEnd rightEnd E W a : Set)
+  requires fresh : a ∉ W
+  shows Disjoint(endsAt(leftEnd, rightEnd, E, W),
+    incidentEnds(leftEnd, rightEnd, E, a))
+proof
+  apply Disjoint.iff.backward
+  intros h hh atA
+  obtain ⟨_, v, hv, atV⟩ := hh
+  rw (incidentEnds.same_vertex with atV, atA) at hv
+  exact fresh with hv
+
+-- Every end lies at a vertex of the graph.
+theorem endsAt.all (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  shows endsAt(leftEnd, rightEnd, E, V) = halfEdges(E)
+proof
+  ext h
+  constructor
+  . intro hh
+    exact hh.left
+  . intro hh
+    obtain ⟨v, hv, atV⟩ := halfEdges.vertex with graph, hh
+    exact ⟨hh, v, hv, atV⟩
+
+-- A rotation system on the ends at the vertices of a finite set W: a cyclic
+-- permutation of the ends at each vertex, glued over W.
+theorem RotationSystem.exists_on (E leftEnd rightEnd W : Set)
+  requires finiteEdges : Finite(E)
+  requires finiteVertices : Finite(W)
+  shows ∃ σ, BijectiveBetween(σ, endsAt(leftEnd, rightEnd, E, W),
+      endsAt(leftEnd, rightEnd, E, W)) ∧
+    (∀ v ∈ W, ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, v),
+      σ(h) ∈ incidentEnds(leftEnd, rightEnd, E, v)) ∧
+    (∀ v ∈ W, ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, v),
+      ∀ k ∈ incidentEnds(leftEnd, rightEnd, E, v),
+      ∃ n ∈ ℕ, orbitStep(σ, h, n) = k)
+proof
+  induction finiteVertices with G a
+  | empty =>
+    obtain ⟨σ, bijective, _⟩ := cyclicPermutation.exists with Finite.empty
+    refine ⟨σ, _, _, _⟩
+    . rw endsAt.empty
+      exact bijective
+    . intros v hv
+      simp at hv
+    . intros v hv
+      simp at hv
+  | insert using ih =>
+    obtain ⟨σ, bijective, closed, orbits⟩ := ih
+    obtain ⟨τ, cyclic, orbitsA⟩ := cyclicPermutation.exists
+      with (incidentEnds.finite at leftEnd, rightEnd, E, a with finiteEdges)
+    have σFunction :=
+      Injective.function with (Bijective.injective with bijective)
+    have τFunction := Injective.function with (Bijective.injective with cyclic)
+    have apart := endsAt.disjoint at leftEnd, rightEnd, E, G, a with aFresh
+    -- On the ends at a vertex of G the glued map acts as σ, at a as τ.
+    have onOld : ∀ v ∈ G, ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, v),
+        (σ ∪ τ)(h) = σ(h)
+      intros v hv h hh
+      exact FunctionBetween.union_apply_left
+        with σFunction, τFunction, apart, (endsAt.of_vertex with hv, hh)
+    have onNew : ∀ h ∈ incidentEnds(leftEnd, rightEnd, E, a),
+        (σ ∪ τ)(h) = τ(h)
+      intros h hh
+      exact FunctionBetween.union_apply_right
+        with σFunction, τFunction, apart, hh
+    have closedA : ∀ x ∈ incidentEnds(leftEnd, rightEnd, E, a),
+        τ(x) ∈ incidentEnds(leftEnd, rightEnd, E, a)
+      intros x hx
+      exact FunctionBetween.apply_closed with τFunction, hx
+    refine ⟨σ ∪ τ, _, _, _⟩
+    . rw endsAt.insert
+      exact Bijective.union_disjoint with bijective, cyclic, apart, apart
+    . intros v hv h hh
+      simp at hv
+      rcases hv with inG | rfl
+      . rw onOld with v, inG, h, hh
+        exact closed with v, inG, h, hh
+      . rw onNew with h, hh
+        exact closedA with h, hh
+    . intros v hv h hh k hk
+      simp at hv
+      rcases hv with inG | rfl
+      . obtain ⟨n, hn, reaches⟩ := orbits with v, inG, h, hh, k, hk
+        refine ⟨n, hn, _⟩
+        rw ← reaches
+        exact orbitStep.agree with (onOld with v, inG), (closed with v, inG), hh
+      . obtain ⟨n, hn, reaches⟩ := orbitsA with h, hh, k, hk
+        refine ⟨n, hn, _⟩
+        rw ← reaches
+        exact orbitStep.agree with onNew, closedA, hh
+
+theorem RotationSystem.exists (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  shows ∃ σ, RotationSystem(V, E, leftEnd, rightEnd, σ)
+proof
+  obtain ⟨σ, bijective, closed, orbits⟩ :=
+    RotationSystem.exists_on at E, leftEnd, rightEnd, V
+      with finiteEdges, finiteVertices
+  rw endsAt.all with graph at bijective
+  refine ⟨σ, _⟩
+  exact ⟨bijective, closed, orbits⟩

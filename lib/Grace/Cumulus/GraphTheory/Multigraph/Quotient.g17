@@ -1,0 +1,215 @@
+-- The quotient multigraph of a partition of the vertex set, in which every
+-- class is one vertex and an edge keeps its identity: the class of a vertex,
+-- refinement of partitions, and the edges crossing a set of classes.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Multigraph.Quotient
+import Connectivity
+
+-- The class of v: the union of the classes containing v, which under a
+-- partition is the one class containing v.
+def classesContaining (P v : Set) : Set := { X ∈ P | v ∈ X }
+def classOf (P v : Set) : Set := ⋃(classesContaining(P, v))
+
+theorem classOf.membership (P v z : Set)
+  shows z ∈ classOf(P, v) ↔ ∃ X ∈ P, v ∈ X ∧ z ∈ X
+proof
+  simp [classOf, classesContaining, union.membership]
+
+theorem classOf.eq_of_member (P v X : Set)
+  requires apart : ∀ X ∈ P, ∀ Y ∈ P, X ≠ Y → Disjoint(X, Y)
+  requires class : X ∈ P
+  requires member : v ∈ X
+  shows classOf(P, v) = X
+proof
+  ext z
+  rw classOf.membership
+  constructor
+  . intro inUnion
+    obtain ⟨Y, classY, vInY, inY⟩ := inUnion
+    have same : X = Y
+      by_contra different
+      exact apart with X, class, Y, classY, different, v, member, vInY
+    cc
+  . intro inX
+    exact ⟨X, class, member, inX⟩
+
+theorem classOf.member (V P v : Set)
+  requires partition : Partition(V, P)
+  requires vertex : v ∈ V
+  shows classOf(P, v) ∈ P ∧ v ∈ classOf(P, v)
+proof
+  obtain ⟨X, class, member⟩ := partition.right.right with v, vertex
+  rw classOf.eq_of_member with partition.right.left, class, member
+  exact ⟨class, member⟩
+
+theorem classOf.eq_iff (V P u v : Set)
+  requires partition : Partition(V, P)
+  requires first : u ∈ V
+  requires second : v ∈ V
+  shows classOf(P, u) = classOf(P, v) ↔ (∃ X ∈ P, u ∈ X ∧ v ∈ X)
+proof
+  have apart := partition.right.left
+  constructor
+  . intro equal
+    obtain ⟨X, classX, uInX⟩ := partition.right.right with u, first
+    obtain ⟨Y, classY, vInY⟩ := partition.right.right with v, second
+    have classU := classOf.eq_of_member with apart, classX, uInX
+    have classV := classOf.eq_of_member with apart, classY, vInY
+    witness X
+    refine ⟨classX, uInX, _⟩
+    cc
+  . intro common
+    obtain ⟨X, class, uInX, vInX⟩ := common
+    have classU := classOf.eq_of_member with apart, class, uInX
+    have classV := classOf.eq_of_member with apart, class, vInX
+    cc
+
+-- A vertex lies in a union of classes exactly when its class is one of them.
+theorem classOf.mem_union_iff (V P Y v : Set)
+  requires partition : Partition(V, P)
+  requires subfamily : Y ⊆ P
+  requires vertex : v ∈ V
+  shows v ∈ ⋃(Y) ↔ classOf(P, v) ∈ Y
+proof
+  have apart := partition.right.left
+  constructor
+  . intro inUnion
+    obtain ⟨Z, inY, inZ⟩ := union.membership.forward with inUnion
+    have classZ := subfamily with Z, inY
+    rw classOf.eq_of_member with apart, classZ, inZ
+    exact inY
+  . intro inY
+    obtain ⟨X, class, member⟩ := partition.right.right with v, vertex
+    rw classOf.eq_of_member with apart, class, member at inY
+    exact union.membership.backward with ⟨X, inY, member⟩
+
+-- A partition refines another when every class of the first lies in a class
+-- of the second.
+predicate Refines (P Q : Set) := ∀ X ∈ P, ∃ Y ∈ Q, X ⊆ Y
+
+-- The quotient multigraph: the vertices are the classes, and an edge joins
+-- the classes of its ends. Edges inside a class become loops; the crossing
+-- classes of F are its edges joining distinct classes.
+def quotientEnd (E P endpoint : Set) : Set :=
+  { p ∈ E × P | ∃ e ∈ E, p = (e, classOf(P, endpoint(e))) }
+
+def crossingClasses (P leftEnd rightEnd F : Set) : Set :=
+  { e ∈ F | classOf(P, leftEnd(e)) ≠ classOf(P, rightEnd(e)) }
+
+theorem quotientEnd.relates (E P endpoint e X : Set)
+  requires related : relates(quotientEnd(E, P, endpoint), e, X)
+  shows e ∈ E ∧ X = classOf(P, endpoint(e))
+proof
+  obtain ⟨_, f, inE, equation⟩ := related
+  obtain ⟨rfl, value⟩ := orderedPair.injective with equation
+  exact ⟨inE, value⟩
+
+theorem quotientEnd.relates_class (V E P endpoint e : Set)
+  requires function : endpoint : E → V
+  requires partition : Partition(V, P)
+  requires edge : e ∈ E
+  shows relates(quotientEnd(E, P, endpoint), e, classOf(P, endpoint(e)))
+proof
+  have vertex := FunctionBetween.apply_closed with function, edge
+  obtain ⟨class, _⟩ := classOf.member with partition, vertex
+  exact quotientEnd.membership.backward
+    with ⟨(product.pair with edge, class), e, edge, rfl⟩
+
+theorem quotientEnd.function (V E P endpoint : Set)
+  requires function : endpoint : E → V
+  requires partition : Partition(V, P)
+  shows quotientEnd(E, P, endpoint) : E → P
+proof
+  constructor
+  . intros p member
+    exact member.left
+  constructor
+  . intros x y relatedY z relatedZ
+    obtain ⟨_, valueY⟩ := quotientEnd.relates with relatedY
+    obtain ⟨_, valueZ⟩ := quotientEnd.relates with relatedZ
+    cc
+  . intros x edge
+    have vertex := FunctionBetween.apply_closed with function, edge
+    obtain ⟨class, _⟩ := classOf.member with partition, vertex
+    witness classOf(P, endpoint(x))
+    exact ⟨class,
+      (quotientEnd.relates_class with function, partition, edge)⟩
+
+theorem quotientEnd.graph (V E P leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  shows Graph(P, E, quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd))
+proof
+  constructor
+  . exact quotientEnd.function with graph.left, partition
+  . exact quotientEnd.function with graph.right, partition
+
+theorem quotientEnd.value (V E P leftEnd rightEnd e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edge : e ∈ E
+  shows quotientEnd(E, P, leftEnd)(e) = classOf(P, leftEnd(e)) ∧
+    quotientEnd(E, P, rightEnd)(e) = classOf(P, rightEnd(e))
+proof
+  constructor
+  . exact FunctionBetween.apply_value with
+      (quotientEnd.function with graph.left, partition), edge,
+      (quotientEnd.relates_class with graph.left, partition, edge)
+  . exact FunctionBetween.apply_value with
+      (quotientEnd.function with graph.right, partition), edge,
+      (quotientEnd.relates_class with graph.right, partition, edge)
+
+-- Edges within a class contribute nothing to crossing a union of classes, so
+-- crossing in the quotient is crossing in the graph.
+theorem crossing.quotient (V E P leftEnd rightEnd F Y : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  requires classes : Y ⊆ P
+  shows crossing(quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd), F, Y)
+    = crossing(leftEnd, rightEnd, F, ⋃(Y))
+proof
+  ext e
+  by_cases inF : e ∈ F
+  . have inE := edges with e, inF
+    obtain ⟨leftValue, rightValue⟩ :=
+      quotientEnd.value with graph, partition, inE
+    have leftIn := FunctionBetween.apply_closed with graph.left, inE
+    have rightIn := FunctionBetween.apply_closed with graph.right, inE
+    have leftIff := classOf.mem_union_iff with partition, classes, leftIn
+    have rightIff := classOf.mem_union_iff with partition, classes, rightIn
+    simp [crossing, leftValue, rightValue, leftIff, rightIff]
+  . simp [crossing, inF]
+
+-- F connects the classes of P in the quotient when its crossing edges do: an
+-- edge inside a class is a loop of the quotient and leaves no vertex set.
+theorem Connects.quotient_iff (V E P leftEnd rightEnd F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  shows Connects(P, quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd), F)
+    ↔ Connects(P, quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd),
+      crossingClasses(P, leftEnd, rightEnd, F))
+proof
+  have crossingSubset : crossingClasses(P, leftEnd, rightEnd, F) ⊆ F
+    intros e member
+    exact member.left
+  constructor
+  . intros connected X classX Y classY A start closed
+    have closedF : ClosedUnder(quotientEnd(E, P, leftEnd),
+        quotientEnd(E, P, rightEnd), F, A)
+      intros e inF
+      by_cases same : classOf(P, leftEnd(e)) = classOf(P, rightEnd(e))
+      . have inE := edges with e, inF
+        obtain ⟨leftValue, rightValue⟩ :=
+          quotientEnd.value with graph, partition, inE
+        simp [leftValue, rightValue, same]
+      . exact closed with e, ⟨inF, same⟩
+    exact connected with X, classX, Y, classY, A, start, closedF
+  . intros connected X classX Y classY
+    have joined := connected with X, classX, Y, classY
+    exact Joined.monotone with crossingSubset, joined

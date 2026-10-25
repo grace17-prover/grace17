@@ -1,0 +1,163 @@
+-- Every finite bridgeless multigraph has an even double cover: over its
+-- active vertices a rotation system expands it to a cubic bridgeless graph,
+-- the eight-flow theorem gives the expansion an even cover, its labelling
+-- gives an even double cover, and the cover projects back.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.EvenDoubleCover
+import CubicLabeling
+import Projection
+import Flows.EightFlow
+
+-- The vertices at an end of some edge. An isolated vertex has no end to
+-- expand, so the expansion is taken over the active vertices alone, and a
+-- cover found there is a cover of the whole graph.
+def activeVertices (V E leftEnd rightEnd : Set) : Set :=
+  { v ∈ V | ∃ e ∈ E, leftEnd(e) = v ∨ rightEnd(e) = v }
+
+theorem activeVertices.subset (V E leftEnd rightEnd : Set)
+  shows activeVertices(V, E, leftEnd, rightEnd) ⊆ V
+proof
+  intros v hv
+  exact hv.left
+
+theorem activeVertices.graph (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  shows Graph(activeVertices(V, E, leftEnd, rightEnd), E, leftEnd, rightEnd)
+proof
+  have ends := Graph.ends with graph
+  constructor
+  . have values : ∀ e ∈ E,
+        leftEnd(e) ∈ activeVertices(V, E, leftEnd, rightEnd)
+      intros e he
+      refine ⟨(ends with e, he).left, e, he, _⟩
+      left
+      rfl
+    exact FunctionBetween.codomain_of_values with graph.left, values
+  . have values : ∀ e ∈ E,
+        rightEnd(e) ∈ activeVertices(V, E, leftEnd, rightEnd)
+      intros e he
+      refine ⟨(ends with e, he).right, e, he, _⟩
+      right
+      rfl
+    exact FunctionBetween.codomain_of_values with graph.right, values
+
+-- Bridgelessness is inherited by the active vertices, as every vertex set
+-- of theirs is one of V.
+theorem activeVertices.bridgeless (V E leftEnd rightEnd : Set)
+  requires bridgeless : Bridgeless(V, E, leftEnd, rightEnd)
+  shows Bridgeless(activeVertices(V, E, leftEnd, rightEnd), E,
+    leftEnd, rightEnd)
+proof
+  intros X bound
+  exact bridgeless with X, (Subset.transitive with bound, activeVertices.subset)
+
+-- An active vertex of a bridgeless graph has degree at least two: it has an
+-- end, and a bridgeless graph has no vertex of degree one.
+theorem activeVertices.degrees (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires bridgeless : Bridgeless(V, E, leftEnd, rightEnd)
+  shows ∀ v ∈ activeVertices(V, E, leftEnd, rightEnd),
+    2 ≤ degreeIn(leftEnd, rightEnd, E, v)
+proof
+  intros v hv
+  obtain ⟨vertex, e, he, atEnd⟩ := hv
+  have finiteEnds := incidentEnds.finite at leftEnd, rightEnd, E, v
+    with finiteEdges
+  have notOne :=
+    Bridgeless.degrees with graph, finiteEdges, bridgeless, v, vertex
+  have notZero : degreeIn(leftEnd, rightEnd, E, v) ≠ 0
+    unfold degreeIn
+    cases atEnd with atLeft | atRight
+    . have end : (e, 0) ∈ incidentEnds(leftEnd, rightEnd, E, v)
+        simp [incidentEnds.pair, he, atLeft]
+      exact cardinality.ne_zero_of_member with finiteEnds, end
+    . have end : (e, 1) ∈ incidentEnds(leftEnd, rightEnd, E, v)
+        simp [incidentEnds.pair, he, atRight]
+      exact cardinality.ne_zero_of_member with finiteEnds, end
+  have natural := degreeIn.natural at leftEnd, rightEnd, E, v with finiteEdges
+  have zeroLe : 0 ≤ degreeIn(leftEnd, rightEnd, E, v) by arith
+  have apart : 0 ≠ degreeIn(leftEnd, rightEnd, E, v) by cc
+  have positive : 0 < degreeIn(leftEnd, rightEnd, E, v) :=
+    Less.of_LessEqual_ne with zeroLe, apart
+  have above : 1 < degreeIn(leftEnd, rightEnd, E, v) :=
+    Less.successor_lower_of_ne with positive, notOne
+  arith
+
+-- An edge set even over the active vertices is even over all of them: an
+-- isolated vertex has degree zero in every edge set.
+theorem EvenEdgeSet.of_active (V E leftEnd rightEnd F : Set)
+  requires edges : F ⊆ E
+  requires even : EvenEdgeSet(activeVertices(V, E, leftEnd, rightEnd),
+    leftEnd, rightEnd, F)
+  shows EvenEdgeSet(V, leftEnd, rightEnd, F)
+proof
+  constructor
+  . exact even.left
+  . intros v hv
+    by_cases active : v ∈ activeVertices(V, E, leftEnd, rightEnd)
+    . exact even.right with v, active
+    . have none : incidentEnds(leftEnd, rightEnd, F, v) = ∅
+        apply Subset.antisymmetric
+        . intros p hp
+          obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp
+          have sides := (incidentEnds.pair.forward with hp).right
+          exfalso
+          apply active
+          refine ⟨hv, e, (edges with e, he), _⟩
+          tauto
+        . exact empty.subset
+      unfold degreeIn
+      rw [none, cardinality.empty]
+      exact Even.zero
+
+theorem EvenDoubleCover.of_active (V E leftEnd rightEnd H I : Set)
+  requires cover : EvenDoubleCover(activeVertices(V, E, leftEnd, rightEnd),
+    E, leftEnd, rightEnd, H, I)
+  shows EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+proof
+  obtain ⟨finiteIndex, family, evens, twice⟩ := cover
+  refine ⟨finiteIndex, family, _, twice⟩
+  intros i hi
+  have edges : H(i) ⊆ E :=
+    powerset.membership.forward
+      with (FunctionBetween.apply_closed with family, hi)
+  exact EvenEdgeSet.of_active with edges, (evens with i, hi)
+
+-- A finite bridgeless graph has an even double cover. Over its active
+-- vertices it is bridgeless with every degree at least two, so a rotation
+-- system expands it to a finite cubic bridgeless graph; the eight-flow
+-- theorem gives the expansion an even cover, its labelling gives an even
+-- double cover, and the cover projects back along the spokes.
+theorem Bridgeless.even_double_cover (V E leftEnd rightEnd : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires bridgeless : Bridgeless(V, E, leftEnd, rightEnd)
+  shows ∃ H, ∃ I, EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+proof
+  have active := activeVertices.graph with graph
+  have finiteActive : Finite(activeVertices(V, E, leftEnd, rightEnd)) :=
+    Finite.subset with finiteVertices, activeVertices.subset
+  have bridgelessActive := activeVertices.bridgeless with bridgeless
+  have degrees := activeVertices.degrees with graph, finiteEdges, bridgeless
+  obtain ⟨σ, rotation⟩ :=
+    RotationSystem.exists with active, finiteActive, finiteEdges
+  have expanded := expansion.graph with active, rotation
+  have finiteEnds := halfEdges.finite with finiteEdges
+  have finiteExpanded := expandedEdges.finite with finiteEdges
+  have cubic := expansion.cubic with active, finiteEdges, rotation, degrees
+  have expandedBridgeless := expansion.bridgeless
+    with active, finiteActive, finiteEdges, rotation, bridgelessActive
+  obtain ⟨F, cover⟩ :=
+    eightFlow with expanded, finiteEnds, finiteExpanded, expandedBridgeless
+  obtain ⟨H, double⟩ := Cubic.even_double_cover
+    with expanded, finiteEnds, finiteExpanded, cubic, cover
+  have projected :=
+    projected.double_cover with active, finiteEdges, rotation, double
+  exact ⟨projectedFamily(E, H, 𝒫(3)), 𝒫(3),
+    (EvenDoubleCover.of_active with projected)⟩

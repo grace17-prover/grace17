@@ -1,0 +1,292 @@
+-- Connectivity through an edge set: two vertices are joined when a path of
+-- edges of F links them, the component of a vertex collects the vertices
+-- joined to it, and the components of F partition the vertex set.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Multigraph.Connectivity
+import Cuts
+
+-- A vertex set that no edge of F leaves.
+predicate ClosedUnder (leftEnd rightEnd F A : Set) :=
+  ∀ e ∈ F, (leftEnd(e) ∈ A ↔ rightEnd(e) ∈ A)
+
+-- v is reached from u along edges of F: every closed set containing u
+-- contains v.
+predicate Joined (leftEnd rightEnd F u v : Set) :=
+  ∀ A, u ∈ A → ClosedUnder(leftEnd, rightEnd, F, A) → v ∈ A
+
+predicate Connects (V leftEnd rightEnd F : Set) :=
+  ∀ u ∈ V, ∀ v ∈ V, Joined(leftEnd, rightEnd, F, u, v)
+
+-- The component of u: the vertices joined to u along F.
+def componentBy (V leftEnd rightEnd F u : Set) : Set :=
+  { v ∈ V | Joined(leftEnd, rightEnd, F, u, v) }
+
+def componentsBy (V leftEnd rightEnd F : Set) : Set :=
+  { componentBy(V, leftEnd, rightEnd, F, u) | u ∈ V }
+
+theorem Joined.reflexive (leftEnd rightEnd F u : Set)
+  shows Joined(leftEnd, rightEnd, F, u, u)
+proof
+  intros A start closed
+  exact start
+
+theorem Joined.of_edge (leftEnd rightEnd F e : Set)
+  requires edge : e ∈ F
+  shows Joined(leftEnd, rightEnd, F, leftEnd(e), rightEnd(e))
+proof
+  intros A start closed
+  have crossed := closed with e, edge
+  exact crossed.forward with start
+
+theorem Joined.of_edge_reverse (leftEnd rightEnd F e : Set)
+  requires edge : e ∈ F
+  shows Joined(leftEnd, rightEnd, F, rightEnd(e), leftEnd(e))
+proof
+  intros A start closed
+  have crossed := closed with e, edge
+  exact crossed.backward with start
+
+theorem Joined.transitive (leftEnd rightEnd F u v w : Set)
+  requires first : Joined(leftEnd, rightEnd, F, u, v)
+  requires second : Joined(leftEnd, rightEnd, F, v, w)
+  shows Joined(leftEnd, rightEnd, F, u, w)
+proof
+  intros A start closed
+  have middle := first with A, start, closed
+  exact second with A, middle, closed
+
+theorem Joined.monotone (leftEnd rightEnd F G u v : Set)
+  requires subset : F ⊆ G
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows Joined(leftEnd, rightEnd, G, u, v)
+proof
+  intros A start closed
+  have closedF : ClosedUnder(leftEnd, rightEnd, F, A)
+    intros e edge
+    exact closed with e, (subset with e, edge)
+  exact joined with A, start, closedF
+
+-- Symmetry: the vertices joined to u form a closed set containing u, so it
+-- contains every vertex that u is joined to.
+def joinedTo (V leftEnd rightEnd F u : Set) : Set :=
+  { w ∈ V | Joined(leftEnd, rightEnd, F, w, u) }
+
+theorem joinedTo.closed (V leftEnd rightEnd F u : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ClosedUnder(leftEnd, rightEnd, F, joinedTo(V, leftEnd, rightEnd, F, u))
+proof
+  intros e edge
+  obtain ⟨leftV, rightV⟩ := ends with e, edge
+  constructor
+  . intro member
+    exact ⟨rightV, (Joined.transitive
+      with (Joined.of_edge_reverse with edge), member.right)⟩
+  . intro member
+    exact ⟨leftV, (Joined.transitive
+      with (Joined.of_edge with edge), member.right)⟩
+
+theorem Joined.symmetric (V leftEnd rightEnd F u v : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires first : u ∈ V
+  requires second : v ∈ V
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows Joined(leftEnd, rightEnd, F, v, u)
+proof
+  have reached := joined with joinedTo(V, leftEnd, rightEnd, F, u),
+    ⟨first, Joined.reflexive⟩, (joinedTo.closed with ends)
+  exact reached.right
+
+-- A vertex outside V is a closed set on its own, so it is joined to nothing
+-- else.
+theorem Joined.start_in (V leftEnd rightEnd F u v : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires distinct : u ≠ v
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows u ∈ V
+proof
+  by_contra outside
+  have closed : ClosedUnder(leftEnd, rightEnd, F, {u})
+    intros e edge
+    have bounds := ends with e, edge
+    simp
+  have reached := joined with {u}, singleton.self, closed
+  simp at reached
+  cc
+
+-- A single non-loop edge has odd degree exactly at its two ends.
+theorem degreeIn.single_parity (leftEnd rightEnd e : Set)
+  requires distinct : leftEnd(e) ≠ rightEnd(e)
+  shows ∀ x, (Even(degreeIn(leftEnd, rightEnd, {e}, x)) ↔
+    (x ≠ leftEnd(e) ∧ x ≠ rightEnd(e)))
+proof
+  intro x
+  by_cases hit : leftEnd(e) = x ∨ rightEnd(e) = x
+  . rw degreeIn.end with distinct, hit
+    simp [Even.not_one]
+  . have notLeft : leftEnd(e) ≠ x by tauto
+    have notRight : rightEnd(e) ≠ x by tauto
+    rw degreeIn.absent with notLeft, notRight
+    simp [Even.zero]
+
+-- The vertices reached from u by a path along F, with u itself: w ≠ u is
+-- reached when some P ⊆ F has odd degree exactly at u and w.
+def pathReached (V leftEnd rightEnd F u : Set) : Set :=
+  { w ∈ V | w = u ∨ ∃ P ⊆ F, ∀ x ∈ V,
+    (Even(degreeIn(leftEnd, rightEnd, P, x)) ↔ (x ≠ u ∧ x ≠ w)) }
+
+-- An edge with ends a and b carries a path from u to a on to b: the edge
+-- alone when a = u, and otherwise the symmetric difference with the edge.
+theorem pathReached.step (V leftEnd rightEnd F u e a b : Set)
+  requires finite : Finite(F)
+  requires edge : e ∈ F
+  requires distinct : a ≠ b
+  requires vertex : b ∈ V
+  requires parity : ∀ x, (Even(degreeIn(leftEnd, rightEnd, {e}, x)) ↔
+    (x ≠ a ∧ x ≠ b))
+  requires reached : a ∈ pathReached(V, leftEnd, rightEnd, F, u)
+  shows b ∈ pathReached(V, leftEnd, rightEnd, F, u)
+proof
+  have single : {e} ⊆ F := singleton.subset_iff.backward with edge
+  refine ⟨vertex, _⟩
+  by_cases start : a = u
+  . right
+    witness {e}
+    refine ⟨single, _⟩
+    intros x inV
+    rw ← start
+    exact parity with x
+  rcases reached with ⟨_, same | ⟨P, subset, parityP⟩⟩
+  . contradiction
+  by_cases finish : b = u
+  . left
+    exact finish
+  right
+  witness P △ {e}
+  refine ⟨(symmetricDifference.subset with subset, single), _⟩
+  intros x inV
+  have finiteP := Finite.subset with finite, subset
+  have atP := parityP with x, inV
+  have atEdge := parity with x
+  -- P and {e} are both odd at a, so their sum is odd exactly at u and b.
+  rw degreeIn.symmetricDifference_parity with finiteP, (Finite.singleton at e)
+  simp [atP, atEdge]
+
+theorem pathReached.closed (V leftEnd rightEnd F u : Set)
+  requires finite : Finite(F)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ClosedUnder(leftEnd, rightEnd, F,
+    pathReached(V, leftEnd, rightEnd, F, u))
+proof
+  intros e edge
+  have bounds := ends with e, edge
+  by_cases loop : leftEnd(e) = rightEnd(e)
+  . simp [loop]
+  have parity := degreeIn.single_parity with loop
+  have flipped : ∀ x, (Even(degreeIn(leftEnd, rightEnd, {e}, x)) ↔
+      (x ≠ rightEnd(e) ∧ x ≠ leftEnd(e)))
+    intro x
+    have direct := parity with x
+    tauto
+  have reverse : rightEnd(e) ≠ leftEnd(e) by cc
+  constructor
+  . intro reached
+    exact pathReached.step
+      with finite, edge, loop, bounds.right, parity, reached
+  . intro reached
+    exact pathReached.step
+      with finite, edge, reverse, bounds.left, flipped, reached
+
+-- Along edges of F, a vertex joined to u is reached by a path from u: an
+-- edge set P ⊆ F whose degrees are odd exactly at u and v when u ≠ v.
+theorem Joined.path (V leftEnd rightEnd F u v : Set)
+  requires finite : Finite(F)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires distinct : u ≠ v
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows ∃ P ⊆ F, ∀ w ∈ V,
+    (Even(degreeIn(leftEnd, rightEnd, P, w)) ↔ (w ≠ u ∧ w ≠ v))
+proof
+  have start := Joined.start_in with ends, distinct, joined
+  have self : u ∈ pathReached(V, leftEnd, rightEnd, F, u)
+    by simp [pathReached, start]
+  have reached := joined with pathReached(V, leftEnd, rightEnd, F, u), self,
+    (pathReached.closed with finite, ends)
+  rcases reached with ⟨_, same | path⟩
+  . cc
+  . exact path
+
+theorem componentBy.closed (V leftEnd rightEnd F u : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ClosedUnder(leftEnd, rightEnd, F,
+    componentBy(V, leftEnd, rightEnd, F, u))
+proof
+  intros e edge
+  obtain ⟨leftV, rightV⟩ := ends with e, edge
+  constructor
+  . intro member
+    exact ⟨rightV, (Joined.transitive
+      with member.right, (Joined.of_edge with edge))⟩
+  . intro member
+    exact ⟨leftV, (Joined.transitive
+      with member.right, (Joined.of_edge_reverse with edge))⟩
+
+theorem componentBy.eq_of_joined (V leftEnd rightEnd F u w : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires first : u ∈ V
+  requires second : w ∈ V
+  requires joined : Joined(leftEnd, rightEnd, F, u, w)
+  shows componentBy(V, leftEnd, rightEnd, F, u) =
+    componentBy(V, leftEnd, rightEnd, F, w)
+proof
+  have back := Joined.symmetric with ends, first, second, joined
+  ext z
+  constructor
+  . intro member
+    exact ⟨member.left, (Joined.transitive with back, member.right)⟩
+  . intro member
+    exact ⟨member.left, (Joined.transitive with joined, member.right)⟩
+
+-- The edges of F with both ends in X.
+def inside (leftEnd rightEnd F X : Set) : Set :=
+  { e ∈ F | leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X }
+
+-- A partition of V: nonempty classes, pairwise disjoint, covering V.
+predicate Partition (V P : Set) :=
+  (∀ X ∈ P, X ⊆ V ∧ X ≠ ∅) ∧
+    (∀ X ∈ P, ∀ Y ∈ P, X ≠ Y → Disjoint(X, Y)) ∧
+    (∀ v ∈ V, ∃ X ∈ P, v ∈ X)
+
+theorem componentsBy.partition (V leftEnd rightEnd F : Set)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows Partition(V, componentsBy(V, leftEnd, rightEnd, F))
+proof
+  constructor
+  -- A component is a subset of V containing its own vertex.
+  . intros X inFamily
+    obtain ⟨u, inV, rfl⟩ := inFamily
+    constructor
+    . intros w member
+      exact member.left
+    . apply Nonempty.ne_empty
+      witness u
+      exact ⟨inV, Joined.reflexive⟩
+  constructor
+  -- Two components sharing a vertex are one component.
+  . intros X inFamilyX Y inFamilyY different
+    obtain ⟨u, uInV, rfl⟩ := inFamilyX
+    obtain ⟨w, wInV, rfl⟩ := inFamilyY
+    apply Disjoint.iff.backward
+    intros x inU inW
+    obtain ⟨xInV, fromU⟩ := inU
+    obtain ⟨_, fromW⟩ := inW
+    have back := Joined.symmetric with ends, wInV, xInV, fromW
+    have joined := Joined.transitive with fromU, back
+    apply different
+    exact componentBy.eq_of_joined with ends, uInV, wInV, joined
+  . intros v inV
+    witness componentBy(V, leftEnd, rightEnd, F, v)
+    exact ⟨⟨v, inV, rfl⟩, ⟨inV, Joined.reflexive⟩⟩

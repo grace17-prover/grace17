@@ -41,7 +41,6 @@ test("signed GCD handles every sign combination and both zero inputs", () => {
   shows integerGCD(${signed(a)}, ${signed(b)}) = ${g}
 proof
   simp [integerGCD, integerNatAbs.ofNat, integerNatAbs.ofNegativeNat]
-  compute
 `;
   }
   assert.equal(checkWorkbenchFiles([{ name: "IntegerRegression.g17", source }]).ok, true);

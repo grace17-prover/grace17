@@ -124,10 +124,11 @@ development and its executable Cantor normal forms.
 countability by injection into ℕ and its closure properties, Cantor's
 diagonal theorem, equipotence as the existence of a bijection, finiteness by
 bijection with a von Neumann natural, and the arithmetic of finite
-cardinalities, including the subset count of a finite set. Order theory
-covers partial, linear, and well-orders, chains and maximal elements, order
-embeddings and isomorphisms, and the Hartogs bound, all in ZF; Zorn's lemma
-and the maximal principles are the Choice-dependent layer above them.
+cardinalities, including the subset count of a finite set and the parity
+of a symmetric difference. Order theory covers partial, linear, and
+well-orders, chains and maximal elements, order embeddings and
+isomorphisms, and the Hartogs bound, all in ZF; Zorn's lemma and the
+maximal principles are the Choice-dependent layer above them.
 
 `Grace.Cumulus.Lattice` continues order theory into lattices. An ordered
 set is one set `P`, the `structure Order` with projections `P.points` and
@@ -214,7 +215,9 @@ and the other binomial identities, the numbers of functions, injections,
 bijections, and permutations between finite sets, Fibonacci and Lucas
 numbers with Cassini's identity, counting a finite set by the fibers of a
 map, Catalan, Stirling, and Bell numbers, derangements, Vandermonde's
-identity, the infinite Ramsey theorem, and Möbius inversion: the Möbius
+identity, the infinite Ramsey theorem, parity systems (linear systems over
+the two-element field in the language of finite sets, solvable exactly when
+no left-kernel vector sees an odd right-hand side), and Möbius inversion: the Möbius
 function from the prime factorization, its multiplicativity, the identity
 `∑_{d ∣ n} μ(d) = [n = 1]`, and the inversion formula in both directions for
 integer-valued functions on the positive naturals.
@@ -429,8 +432,16 @@ axioms and the axiom of choice, used exactly for the orbit representatives.
 complements, reachability and connectivity for graphs of arbitrary
 cardinality, the handshaking lemma, Ramsey's theorem for triangles,
 multigraphs with walks, trails, and Euler trails, the Königsberg bridges,
-and weighted paths with a structurally recursive, executable Dijkstra solver
-proved correct for arbitrary graph sizes. See
+edge sets of a multigraph as a parity algebra (degrees, even edge sets, cuts
+and bridges, connectivity and components, the quotient multigraph of a
+partition of the vertices, forests and spanning trees with the fundamental
+even set and the one-edge exchange), the tree-packing theorem of Tutte and
+Nash-Williams by Kaiser's exchange argument, the eight-flow theorem of
+Jaeger and Kilpatrick as an even cover of every finite bridgeless
+multigraph, the cycle double cover theorem by expanding every vertex into a
+cycle and labelling the cubic expansion, and weighted paths with a structurally
+recursive, executable Dijkstra solver proved correct for arbitrary graph
+sizes. See
 [the correctness argument](dijkstra-correctness.md) for how an executable
 algorithm and its proof live together in Cumulus.
 

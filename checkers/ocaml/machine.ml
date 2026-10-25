@@ -118,9 +118,9 @@ let verify_current ?statements p env =
     require (num (lookup table name) = n) ("signature mismatch " ^ name)
   in
   let symbol i = at p.symbols i in
-  unique (Array.to_list p.terms) ;
-  unique (Array.to_list p.formulas) ;
-  unique (Array.to_list p.contexts) ;
+  unique_vectors (Array.to_list p.terms) ;
+  unique_vectors (Array.to_list p.formulas) ;
+  unique_vectors (Array.to_list p.contexts) ;
   let terms = Array.make (Array.length p.terms) (N Z.zero) in
   Array.iteri
     (fun i node ->
@@ -234,7 +234,7 @@ let verify_current ?statements p env =
       let words n = require (Array.length data = n) "data length" in
       let branch i expected =
         let _, _, c, _, _ = at instructions (at pre i) in
-        require (at contexts c = expected) "branch context mismatch"
+        require (context_equal (at contexts c) expected) "branch context mismatch"
       in
       let same () = Array.iteri (fun i _ -> branch i context) pre in
       let unary () = count 1 ; same () in
@@ -248,7 +248,7 @@ let verify_current ?statements p env =
             count 0 ;
             words 1 ;
             let a = df 0 in
-            require (List.mem a context) "inactive assumption" ;
+            require (List.exists (formula_equal a) context) "inactive assumption" ;
             a
         | 1 | 2 | 3 -> (
             count 0 ;
@@ -277,7 +277,7 @@ let verify_current ?statements p env =
             binary () ;
             words 0 ;
             let a, b = eq (r 0) and c, d = eq (r 1) in
-            require (b = c) "transitivity midpoint" ;
+            require (term_equal b c) "transitivity midpoint" ;
             Eq (a, d)
         | 7 ->
             same () ;
@@ -295,7 +295,7 @@ let verify_current ?statements p env =
             binary () ;
             words 0 ;
             let a, b = imp (r 0) in
-            require (a = r 1) "implication argument" ;
+            require (formula_equal a (r 1)) "implication argument" ;
             b
         | 10 ->
             unary () ;
@@ -315,7 +315,7 @@ let verify_current ?statements p env =
             require (d 2 <= 1) "equality direction" ;
             let a, b = eq (r 0) in
             let a, b = if d 2 = 0 then (a, b) else (b, a) in
-            require (r 1 = subst (ds 0) a (df 1)) "equality evidence" ;
+            require (formula_equal (r 1) (subst (ds 0) a (df 1))) "equality evidence" ;
             subst (ds 0) b (df 1)
         | 14 ->
             binary () ;
@@ -339,14 +339,14 @@ let verify_current ?statements p env =
             | Or (a, b) ->
                 branch 1 (context @ [a]) ;
                 branch 2 (context @ [b]) ;
-                require (r 1 = r 2) "disjunction branches" ;
+                require (formula_equal (r 1) (r 2)) "disjunction branches" ;
                 r 1
             | _ -> fail "expected disjunction" )
         | 20 ->
             binary () ;
             words 0 ;
             let a, b = imp (r 0) and c, d = imp (r 1) in
-            require (a = d && b = c) "equivalence directions" ;
+            require (formula_equal a d && formula_equal b c) "equivalence directions" ;
             Iff (a, b)
         | 21 | 22 ->
             unary () ;
@@ -357,7 +357,7 @@ let verify_current ?statements p env =
             unary () ;
             words 3 ;
             let body = df 1 in
-            require (r 0 = subst (ds 0) (dt 2) body) "existential instance" ;
+            require (formula_equal (r 0) (subst (ds 0) (dt 2) body)) "existential instance" ;
             Ex (abstract (ds 0) body)
         | 24 -> (
             count 2 ;
@@ -382,7 +382,7 @@ let verify_current ?statements p env =
             unary () ;
             words 1 ;
             let a = df 0 in
-            require (r 0 = Imp (Imp (a, False), False)) "double negation" ;
+            require (formula_equal (r 0) (Imp (Imp (a, False), False))) "double negation" ;
             a
         | 27 ->
             binary () ;
@@ -400,7 +400,7 @@ let verify_current ?statements p env =
                    || List.exists (fun a -> free x a || free y a) context ) )
               "well-founded freshness" ;
             require
-              (r 0 = Pred ("wellFoundedOn", [rel; domain]))
+              (formula_equal (r 0) (Pred ("wellFoundedOn", [rel; domain])))
               "well-founded certificate" ;
             let member = Pred ("in", [V x; domain]) in
             let ih =
@@ -413,7 +413,7 @@ let verify_current ?statements p env =
                       , subst x (V y) motive )))
             in
             require
-              (r 1 = All (abstract x (Imp (member, Imp (ih, motive)))))
+              (formula_equal (r 1) (All (abstract x (Imp (member, Imp (ih, motive))))))
               "well-founded step" ;
             All (abstract x (Imp (member, motive)))
         | 12 ->
@@ -479,7 +479,7 @@ let verify_current ?statements p env =
                         (arr (optional ctor "parameterFields" (Arr []))) )
                   field_terms ;
                 branch i !expected ;
-                require (r i = subst x (app name field_terms) motive) "induction case"
+                require (formula_equal (r i) (subst x (app name field_terms) motive)) "induction case"
                 )
               ctors ;
             require (!cursor = Array.length data) "extra induction data" ;

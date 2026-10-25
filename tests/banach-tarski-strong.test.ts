@@ -50,14 +50,14 @@ const expected: Record<string, string> = {
   "Grace.Cumulus.Algebra.Group.Paradox.SchroederBernstein.Equidecomposable.of_injections":
     "∀ act, ∀ G, ∀ X, ∀ A, ∀ B, ∀ f, ∀ g, Action(act, G, X) → FunctionBetween(f, A, B) → " +
     "InjectiveBetween(g, B, A) → " +
-    "(∀ C, C ⊆ A → Equidecomposable(act, G, X, C, functionImage(f, C, B))) → " +
-    "(∀ D, D ⊆ B → Equidecomposable(act, G, X, D, functionImage(g, D, A))) → " +
+    "(∀ C ⊆ A, Equidecomposable(act, G, X, C, functionImage(f, C, B))) → " +
+    "(∀ D ⊆ B, Equidecomposable(act, G, X, D, functionImage(g, D, A))) → " +
     "Equidecomposable(act, G, X, A, B)",
   "Grace.Cumulus.Algebra.Group.Paradox.SchroederBernstein.Equidecomposable.of_embeddings":
     "∀ act, ∀ G, ∀ X, ∀ A, ∀ B, Action(act, G, X) → A ⊆ X → B ⊆ X → Embeds(act, G, X, A, B) → " +
     "Embeds(act, G, X, B, A) → Equidecomposable(act, G, X, A, B)",
   "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls_part":
-    "∃ C, C ⊆ unitBall ∧ Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
+    "∃ C ⊆ unitBall, Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
   "Grace.Cumulus.Geometry.BanachTarski.Strong.banachTarski.two_balls":
     "Equidecomposable(motionAction, Motions, ℝ³, unitBall, unitBall ∪ shiftedBall)",
 };

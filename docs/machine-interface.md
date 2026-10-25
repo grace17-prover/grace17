@@ -62,7 +62,7 @@ that is not JSON, or not an object with a string `method`, answers with
 | `unknown_method` | No such method; see `capabilities` |
 | `invalid_params` | A parameter is missing or has the wrong type |
 | `unknown_file` | A file cannot be read, or `activeFile` or `file` is not among the files |
-| `check_failed` | The method needs a checked environment and the workspace does not check |
+| `check_failed` | The method needs a checked environment and the workspace does not check; `declaration` and `signature` answer from what did load and raise it only when no environment was built at all (see those methods) |
 | `no_theorem_at_position` | `suggest` was asked outside every theorem |
 | `after_failure` | `suggest` was asked at or after the step that failed, or past the failing theorem; `failureLine` says where (`goal` answers `ok: true` with `code: "after_failure"` instead) |
 | `dependency_failed` | A dependency of the position's file fails, at `failureFile` and `failureLine` |
@@ -118,7 +118,7 @@ Result: the protocol version, the Grace17 version, the methods with a
 one-line description each, and the foundation profiles.
 
 ```json
-{"protocol": "1", "grace17": "1.0.0",
+{"protocol": "1", "grace17": "1.0.1",
  "methods": [{"name": "check", "description": "Check a workspace: ..."}, ...],
  "foundations": ["ZF", "ZFC", "ZFG"]}
 ```
@@ -173,9 +173,10 @@ The shape:
 - `status` is `checked` when every file elaborates, `failed` otherwise.
   Elaboration stops at the first error, so a failed result has exactly one
   diagnostic of severity `error`. Its `theorems` are the theorems of the
-  workspace files that completed before the failure, each `proved` or
-  `admitted` with its statement, states, and dependencies as in a checked
-  result, followed by the one that failed, carrying the partial trace: the
+  workspace files that completed before the failure, each `proved`,
+  `dependent`, or `admitted` with its statement, states, and dependencies
+  as in a checked result, followed by the one that failed, carrying the
+  partial trace: the
   steps up to and including the one that failed, each with its `before`
   and `after` state. A step that failed repeats its `before` state as its
   `after` state; a proof that ends with goals remaining has every step
@@ -187,10 +188,23 @@ The shape:
 - `files` summarizes each workspace file: `status` is `checked`, `context`
   (loaded as a dependency, not reported), `failed`, or `unchecked`; a
   checked file also carries its `module`, and counts of `definitions`,
-  `theorems`, `evaluations`, `sorries`, and `admittedSorries`.
+  `theorems`, `evaluations`, `sorries` (the `sorry` lines in the file's
+  own proofs: its own obligations), `admittedSorries` (the distinct
+  admissions its theorems rest on, own or inherited through citation),
+  `admittedTheorems` (its theorems with a `sorry` of their own), and
+  `dependentTheorems` (its complete proofs that cite an admitted theorem).
+  A file with `sorries: 0` and `admittedSorries: 5` has met every
+  obligation of its own and rests on five admissions elsewhere.
 - `theorems` holds one record per theorem, lemma, and instance of the
-  reported files, in source order. `status` is `proved`, `admitted` (the
-  proof is complete modulo `sorry`), or `failed`. `statement` is the
+  reported files, in source order. `status` is `proved` (the kernel
+  accepted the proof and it rests on no admission), `admitted` (the proof
+  has a `sorry` of its own), `dependent` (the proof is complete with no
+  `sorry` of its own, but a theorem it cites, in this file or an imported
+  module, is admitted), or `failed`. A theorem's `sorries` lists every
+  admission it rests on, so a `dependent` theorem's list names the
+  admitted theorems, with their files and lines, that it depends on; its
+  `dependencies.axioms` carries the same admissions by axiom name.
+  `statement` is the
   theorem printed as the Workbench prints it. `initial` is the state at the
   start of the proof and `steps` the checked tactic steps, each with its
   one-based `line`, `columnStart`, `columnEnd`, the `command` as written,
@@ -313,7 +327,9 @@ a `proof` block in `ident.type`, with the definition's whole source range
 as `lineStart` and `lineEnd`, in a checked file and in the file whose
 failure is in that proof. `step` is 0 for the initial
 state and k for the state after the k-th step; `caption` is the goal pane's
-caption. `info` is present when the step at the cursor is a query tactic.
+caption: `Current goal, at theorem start` for step 0, `Current goal, after
+line N` after a step, and `Current position, after line N` at a failed
+step. `info` is present when the step at the cursor is a query tactic.
 `complete` is true when no goal remains. `scope` is the theorem's scope
 table, as in `check`.
 
@@ -328,7 +344,12 @@ outside the failing theorem, answers `kind: "none"` with
 `code: "after_failure"` and the `diagnostic`. When a dependency fails, the
 answer is `kind: "none"` with `code: "dependency_failed"`. A proof that
 ran out of steps with goals remaining has no failed step: the line after
-its last step is a position like any other, and a tactic can go there.
+its last step is a position like any other, and a tactic can go there. A
+failure inside a `have … by …` block traces that block alone: the trace's
+initial state is the block's goal and the steps before the block are
+absent, so step 0 is captioned `Current goal, at the start of the block on
+line N` rather than as the theorem's start, at every position before the
+block's first step.
 
 ### suggest
 
@@ -451,7 +472,17 @@ Request: `name`, and either a workspace (`files`, `activeFile`) or a
 
 With a workspace or a module, the name is resolved in the checked
 environment as the hover resolves it, short names included, and the result
-is what the hover shows:
+is what the hover shows. A workspace whose active file does not check
+still answers, from the environment that did load: the dependencies, and
+the active file's declarations before the failure point. Such an answer
+carries `partial: true` and `checkFailed` with the failure's `file`,
+`line`, and `message`; a library name resolves as usual, an earlier theorem
+of the file resolves as usual, and a name declared after the failure
+answers with `inScope: false` and a `message` saying it is declared after
+the failure; after an import that cannot be resolved, nothing of the file
+loaded, and a library name answers `inScope: false` with `checkFailed`
+naming the import. `check_failed` is raised only when no environment was
+built at all, as after a kernel error. The result:
 
 ```json
 {"elaborated": true,
@@ -572,9 +603,12 @@ typing fact to the statement; `with` lists do not name those, the
 elaborator discharges them from the context. `rings` lists the
 `notation ring` scopes in force. With `elaborate: true` and a workspace or
 module, `statement` and `fullName` are added from the checked environment
-and `elaborated` is true; when the environment does not check,
-`checkFailed` carries the failure's `file`, `line`, and `message` and the
-header fields stand alone. Definitions and predicates answer with their
+and `elaborated` is true; when the environment does not check, the
+statement is taken from what did load (the dependencies and the
+declarations before the failure), with `partial: true`, and `checkFailed`
+carries the failure's `file`, `line`, and `message`; a declaration the
+failure keeps out of the environment leaves the header fields standing
+alone. Definitions and predicates answer with their
 parameters and the header text after them as `conclusion`.
 
 A theorem generated from a definition, such as a `defgraph`'s
@@ -923,8 +957,12 @@ environment stays, and only the edited file is rechecked.
   `activeFile` is kept between calls and the edited file is rechecked over
   it; identical workspaces return the same result without work, whichever
   method asked, and the methods that need only the environment reuse any
-  check of the same workspace. Nothing is cached on disk by the protocol
-  itself.
+  check of the same workspace. A kept result remembers the dependency
+  files its check read, with their sizes and modification times, and is
+  not reused once one of them has changed on disk, or a file that was
+  missing has appeared: a dependency rewritten between two requests of one
+  `serve` session is read again by the next, unless the session is
+  pinned. Nothing is cached on disk by the protocol itself.
 - **Trust.** The protocol is an untrusted client of the kernel, like the
   Workbench. A theorem counts as proved when `status` is `proved`, which
   means the kernel accepted its certificate; suggestions and search are
@@ -932,7 +970,12 @@ environment stays, and only the edited file is rechecked.
 
 ## Limits
 
-- `serve` handles one request at a time, in order.
+- `serve` handles one request at a time, in order. No request ends the
+  session: a malformed line, a method that throws, a result that cannot be
+  serialized, and an error raised outside any handler while the session
+  runs are each answered with an error object (`id` null when no request
+  can be blamed), and the next line is read. The session ends with its
+  input, or when its output can no longer be written.
 - A failed check stops at the first error. To see every theorem's first
   error in a module, end each unfinished proof with `sorry` and read the
   warnings, or run `python3 scripts/all-errors.py`; to see every failing

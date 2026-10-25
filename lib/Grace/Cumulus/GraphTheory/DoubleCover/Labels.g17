@@ -1,0 +1,392 @@
+-- Labels from a compatible assignment: the local base point of an edge end
+-- is the value of another edge at that vertex, and vertex vectors whose
+-- differences along the edges are compatible with the base points give
+-- two-element labels with even local multiplicity, hence an even double
+-- cover.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.Labels
+import CubicVertex
+
+-- The local base point of an end: the value of one other edge at that vertex,
+-- determined up to the span of the edge's own value.
+predicate BasePoint (V E leftEnd rightEnd F v e c : Set) :=
+  ∃ f ∈ E, f ≠ e ∧ (leftEnd(f) = v ∨ rightEnd(f) = v) ∧
+    c = flowValue(F, f)
+
+-- Vertex vectors t with t(u) △ t(v) ∈ d(e) + span(value(e)) for every edge
+-- e = uv, where d(e) is the sum of the two base points of e.
+predicate Compatible (V E leftEnd rightEnd F t d : Set) :=
+  FunctionBetween(t, V, 𝒫(3)) ∧
+  (∀ e ∈ E, ∃ s ∈ span(flowValue(F, e)),
+    t(leftEnd(e)) △ t(rightEnd(e)) = d(e) △ s)
+
+-- Sums in the two-element field cancel.
+theorem symmetricDifference.cancel_right (A B : Set)
+  shows (A △ B) △ B = A
+proof
+  ext z
+  simp
+
+theorem symmetricDifference.cancel_left (A B C : Set)
+  requires same : A △ B = A △ C
+  shows B = C
+proof
+  ext z
+  have bit := symmetricDifference.membership at z, A, B
+  rw [same, symmetricDifference.membership] at bit
+  tauto
+
+-- Moving x to y by (a △ b) △ s moves x △ u to y △ w by the corrections
+-- a △ u and b △ w and s.
+theorem symmetricDifference.shift (x y u w a b s : Set)
+  requires move : x △ y = (a △ b) △ s
+  shows y △ w = (x △ u) △ (((a △ u) △ (b △ w)) △ s)
+proof
+  ext z
+  have bit := symmetricDifference.membership at z, x, y
+  rw move at bit
+  simp [symmetricDifference.membership]
+
+-- A base point of e at v, the value of some other edge x there, differs from
+-- the value of a fixed other edge f by an element of the span of value(e):
+-- either x = f, or e, x, f are the three edges at v.
+theorem BasePoint.span (V E leftEnd rightEnd F v e f c : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires cubic : Cubic(V, E, leftEnd, rightEnd)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires vertex : v ∈ V
+  requires edge : e ∈ E
+  requires incident : leftEnd(e) = v ∨ rightEnd(e) = v
+  requires other : f ∈ E ∧ f ≠ e ∧ (leftEnd(f) = v ∨ rightEnd(f) = v)
+  requires base : BasePoint(V, E, leftEnd, rightEnd, F, v, e, c)
+  shows c △ flowValue(F, f) ∈ span(flowValue(F, e))
+proof
+  obtain ⟨x, hx, xe, xv, rfl⟩ := base
+  rw span.membership
+  by_cases same : x = f
+  . left
+    rw same
+    exact symmetricDifference.self
+  . right
+    have edges : e ∈ E ∧ x ∈ E ∧ f ∈ E := ⟨edge, hx, other.left⟩
+    have incident3 : (leftEnd(e) = v ∨ rightEnd(e) = v) ∧
+        (leftEnd(x) = v ∨ rightEnd(x) = v) ∧
+        (leftEnd(f) = v ∨ rightEnd(f) = v) :=
+      ⟨incident, xv, other.right.right⟩
+    have ex : e ≠ x by cc
+    have ef : e ≠ f by cc
+    have distinct : e ≠ x ∧ x ≠ f ∧ e ≠ f := ⟨ex, same, ef⟩
+    have triple := flowValue.cubic_vertex
+      with graph, cubic, cover, vertex, edges, incident3, distinct
+    rw triple.right
+    ext z
+    simp
+
+-- The labels of e read at its end v: t(v) △ value(x) for the other edges
+-- x at v. The label pair of e is read at its left end.
+def labelsAt (E leftEnd rightEnd F t v e : Set) : Set :=
+  { q ∈ 𝒫(3) | ∃ x ∈ E, x ≠ e ∧ (leftEnd(x) = v ∨ rightEnd(x) = v) ∧
+    q = t(v) △ flowValue(F, x) }
+
+def labelPairs (E leftEnd rightEnd F t : Set) : Set :=
+  { p ∈ E × 𝒫(𝒫(3)) | ∃ e ∈ E,
+    p = (e, labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e)) }
+
+theorem labelsAt.subset (E leftEnd rightEnd F t v e : Set)
+  shows labelsAt(E, leftEnd, rightEnd, F, t, v, e) ⊆ 𝒫(3)
+proof
+  intros q hq
+  exact hq.left
+
+theorem labelPairs.function (E leftEnd rightEnd F t : Set)
+  shows labelPairs(E, leftEnd, rightEnd, F, t) : E → 𝒫(𝒫(3))
+proof
+  constructor
+  . intros p member
+    exact member.left
+  . constructor
+    . intros x y xy z xz
+      obtain ⟨_, a, _, shapeY⟩ := xy
+      obtain ⟨_, b, _, shapeZ⟩ := xz
+      obtain ⟨sameA, valueY⟩ := orderedPair.injective with shapeY
+      obtain ⟨sameB, valueZ⟩ := orderedPair.injective with shapeZ
+      cc
+    . intros e he
+      have inside :
+          labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e) ∈ 𝒫(𝒫(3)) :=
+        powerset.membership_iff.backward with labelsAt.subset
+      refine ⟨labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e), inside, _⟩
+      exact labelPairs.membership.backward
+        with ⟨(product.pair with he, inside), e, he, rfl⟩
+
+theorem labelPairs.value (E leftEnd rightEnd F t e : Set)
+  requires member : e ∈ E
+  shows labelPairs(E, leftEnd, rightEnd, F, t)(e) =
+    labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e)
+proof
+  have inside :
+      labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e) ∈ 𝒫(𝒫(3)) :=
+    powerset.membership_iff.backward with labelsAt.subset
+  have related : relates(labelPairs(E, leftEnd, rightEnd, F, t), e,
+      labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e)) :=
+    labelPairs.membership.backward
+      with ⟨(product.pair with member, inside), e, member, rfl⟩
+  exact FunctionBetween.apply_value
+    with labelPairs.function, member, related
+
+-- With the other edges f, g at v, the labels of e at v are t(v) △ value(f)
+-- and t(v) △ value(g).
+theorem labelsAt.pair (V E leftEnd rightEnd F t v e f g : Set)
+  requires cubic : Cubic(V, E, leftEnd, rightEnd)
+  requires vertex : v ∈ V
+  requires function : FunctionBetween(t, V, 𝒫(3))
+  requires edges : e ∈ E ∧ f ∈ E ∧ g ∈ E
+  requires incident : (leftEnd(e) = v ∨ rightEnd(e) = v) ∧
+    (leftEnd(f) = v ∨ rightEnd(f) = v) ∧
+    (leftEnd(g) = v ∨ rightEnd(g) = v)
+  requires distinct : e ≠ f ∧ f ≠ g ∧ e ≠ g
+  shows labelsAt(E, leftEnd, rightEnd, F, t, v, e) =
+    {t(v) △ flowValue(F, f), t(v) △ flowValue(F, g)}
+proof
+  have vector : t(v) ⊆ 3 := powerset.membership_iff.forward
+    with (FunctionBetween.apply_closed with function, vertex)
+  have insideF : t(v) △ flowValue(F, f) ∈ 𝒫(3) :=
+    powerset.membership_iff.backward
+      with (symmetricDifference.subset with vector, flowValue.subset)
+  have insideG : t(v) △ flowValue(F, g) ∈ 𝒫(3) :=
+    powerset.membership_iff.backward
+      with (symmetricDifference.subset with vector, flowValue.subset)
+  have fe : f ≠ e by cc
+  have ge : g ≠ e by cc
+  ext q
+  simp [pair.membership]
+  constructor
+  . intro hq
+    obtain ⟨_, x, hx, xe, xv, rfl⟩ := hq
+    have cases :=
+      Cubic.among with cubic, vertex, edges, incident, distinct, hx, xv
+    rcases cases with hxe | hxf | hxg
+    . exfalso
+      exact xe with hxe
+    . left
+      cc
+    . right
+      cc
+  . intro hq
+    rcases hq with rfl | rfl
+    . exact ⟨insideF, f, edges.right.left, fe, incident.right.left, rfl⟩
+    . exact ⟨insideG, g, edges.right.right, ge, incident.right.right, rfl⟩
+
+-- The labels of e read at either end agree: compatibility moves t across e
+-- by the sum of two base points and an element of the span of value(e),
+-- and each base point differs from the chosen other value by such an
+-- element too.
+theorem labelsAt.ends (V E leftEnd rightEnd F t d e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires cubic : Cubic(V, E, leftEnd, rightEnd)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires base : FunctionBetween(d, E, 𝒫(3)) ∧ (∀ e ∈ E, ∃ a, ∃ b,
+    BasePoint(V, E, leftEnd, rightEnd, F, leftEnd(e), e, a) ∧
+    BasePoint(V, E, leftEnd, rightEnd, F, rightEnd(e), e, b) ∧ d(e) = a △ b)
+  requires compatible : Compatible(V, E, leftEnd, rightEnd, F, t, d)
+  requires edge : e ∈ E
+  shows labelsAt(E, leftEnd, rightEnd, F, t, rightEnd(e), e) =
+    labelsAt(E, leftEnd, rightEnd, F, t, leftEnd(e), e)
+proof
+  have ends := Graph.ends with graph
+  obtain ⟨vertexL, vertexR⟩ := ends with e, edge
+  have atL : leftEnd(e) = leftEnd(e) ∨ rightEnd(e) = leftEnd(e) by simp
+  have atR : leftEnd(e) = rightEnd(e) ∨ rightEnd(e) = rightEnd(e) by simp
+  obtain ⟨f, hf, g, hg, distinctL, atF, atG⟩ :=
+    Cubic.others with cubic, vertexL, edge, atL
+  obtain ⟨f2, hf2, g2, hg2, distinctR, atF2, atG2⟩ :=
+    Cubic.others with cubic, vertexR, edge, atR
+  have edgesL : e ∈ E ∧ f ∈ E ∧ g ∈ E := ⟨edge, hf, hg⟩
+  have incidentL : (leftEnd(e) = leftEnd(e) ∨ rightEnd(e) = leftEnd(e)) ∧
+      (leftEnd(f) = leftEnd(e) ∨ rightEnd(f) = leftEnd(e)) ∧
+      (leftEnd(g) = leftEnd(e) ∨ rightEnd(g) = leftEnd(e)) :=
+    ⟨atL, atF, atG⟩
+  have edgesR : e ∈ E ∧ f2 ∈ E ∧ g2 ∈ E := ⟨edge, hf2, hg2⟩
+  have incidentR : (leftEnd(e) = rightEnd(e) ∨ rightEnd(e) = rightEnd(e)) ∧
+      (leftEnd(f2) = rightEnd(e) ∨ rightEnd(f2) = rightEnd(e)) ∧
+      (leftEnd(g2) = rightEnd(e) ∨ rightEnd(g2) = rightEnd(e)) :=
+    ⟨atR, atF2, atG2⟩
+  rw [(labelsAt.pair
+      with cubic, vertexL, compatible.left, edgesL, incidentL, distinctL),
+    (labelsAt.pair
+      with cubic, vertexR, compatible.left, edgesR, incidentR, distinctR)]
+  -- At each end the second label is the first shifted by value(e).
+  have tripleL := flowValue.cubic_vertex
+    with graph, cubic, cover, vertexL, edgesL, incidentL, distinctL
+  have tripleR := flowValue.cubic_vertex
+    with graph, cubic, cover, vertexR, edgesR, incidentR, distinctR
+  have secondL : t(leftEnd(e)) △ flowValue(F, g) =
+      (t(leftEnd(e)) △ flowValue(F, f)) △ flowValue(F, e)
+    rw tripleL.right
+    ext z
+    simp
+  have secondR : t(rightEnd(e)) △ flowValue(F, g2) =
+      (t(rightEnd(e)) △ flowValue(F, f2)) △ flowValue(F, e)
+    rw tripleR.right
+    ext z
+    simp
+  -- The first label at the right end is the first at the left end shifted
+  -- by (a △ value(f)) △ (b △ value(f2)) △ s, a sum of three elements of
+  -- the span of value(e).
+  obtain ⟨s, hs, equation⟩ := compatible.right with e, edge
+  obtain ⟨a, b, baseA, baseB, sumD⟩ := base.right with e, edge
+  have fe : f ≠ e by cc
+  have f2e : f2 ≠ e by cc
+  have otherF : f ∈ E ∧ f ≠ e ∧
+      (leftEnd(f) = leftEnd(e) ∨ rightEnd(f) = leftEnd(e)) := ⟨hf, fe, atF⟩
+  have otherF2 : f2 ∈ E ∧ f2 ≠ e ∧
+      (leftEnd(f2) = rightEnd(e) ∨ rightEnd(f2) = rightEnd(e)) :=
+    ⟨hf2, f2e, atF2⟩
+  have spanA := BasePoint.span
+    with graph, cubic, cover, vertexL, edge, atL, otherF, baseA
+  have spanB := BasePoint.span
+    with graph, cubic, cover, vertexR, edge, atR, otherF2, baseB
+  have inSpan := span.sum with (span.sum with spanA, spanB), hs
+  have move : t(leftEnd(e)) △ t(rightEnd(e)) = (a △ b) △ s
+    rw [equation, sumD]
+  have shift := symmetricDifference.shift
+    at t(leftEnd(e)), t(rightEnd(e)), flowValue(F, f), flowValue(F, f2),
+      a, b, s with move
+  rw [secondL, secondR, shift]
+  rw span.membership at inSpan
+  rcases inSpan with zero | full
+  . rw [zero, symmetricDifference.empty]
+  . rw [full, symmetricDifference.cancel_right]
+    exact pair.commutative
+
+-- From compatible vertex vectors, the label pair of an edge e = uv is
+-- {t(u) △ c, t(u) △ c △ value(e)} for a base point c of u at e; the pair
+-- is independent of the end and the base point, and at each vertex every
+-- label is carried by an even number of the three ends.
+theorem Compatible.labels (V E leftEnd rightEnd F t d : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires cubic : Cubic(V, E, leftEnd, rightEnd)
+  requires cover : EvenCover(V, E, leftEnd, rightEnd, F)
+  requires base : FunctionBetween(d, E, 𝒫(3)) ∧ (∀ e ∈ E, ∃ a, ∃ b,
+    BasePoint(V, E, leftEnd, rightEnd, F, leftEnd(e), e, a) ∧
+    BasePoint(V, E, leftEnd, rightEnd, F, rightEnd(e), e, b) ∧ d(e) = a △ b)
+  requires compatible : Compatible(V, E, leftEnd, rightEnd, F, t, d)
+  shows ∃ P, FunctionBetween(P, E, 𝒫(𝒫(3))) ∧
+    (∀ e ∈ E, cardinality(P(e)) = 2) ∧
+    (∀ v ∈ V, ∀ s ∈ 𝒫(3),
+      EvenSet(labelledEnds(leftEnd, rightEnd, E, P, v, s)))
+proof
+  have ends := Graph.ends with graph
+  have function := labelPairs.function at E, leftEnd, rightEnd, F, t
+  -- The label pair of an edge x, read at either end v of x.
+  have atEnd : ∀ v ∈ V, ∀ x ∈ E, (leftEnd(x) = v ∨ rightEnd(x) = v) →
+      labelPairs(E, leftEnd, rightEnd, F, t)(x) =
+        labelsAt(E, leftEnd, rightEnd, F, t, v, x)
+    intros v hv x hx xv
+    rw labelPairs.value with hx
+    have same := labelsAt.ends with graph, cubic, cover, base, compatible, hx
+    cases xv with atLeft | atRight
+    . cc
+    . cc
+  witness labelPairs(E, leftEnd, rightEnd, F, t)
+  refine ⟨function, ?_, ?_⟩
+  . -- Two labels per edge: the other two edges at its left end have
+    -- distinct values.
+    intros e he
+    obtain ⟨vertexL, _⟩ := ends with e, he
+    have atL : leftEnd(e) = leftEnd(e) ∨ rightEnd(e) = leftEnd(e) by simp
+    obtain ⟨f, hf, g, hg, distinct, atF, atG⟩ :=
+      Cubic.others with cubic, vertexL, he, atL
+    have edges : e ∈ E ∧ f ∈ E ∧ g ∈ E := ⟨he, hf, hg⟩
+    have incident : (leftEnd(e) = leftEnd(e) ∨ rightEnd(e) = leftEnd(e)) ∧
+        (leftEnd(f) = leftEnd(e) ∨ rightEnd(f) = leftEnd(e)) ∧
+        (leftEnd(g) = leftEnd(e) ∨ rightEnd(g) = leftEnd(e)) :=
+      ⟨atL, atF, atG⟩
+    rw [(atEnd with leftEnd(e), vertexL, e, he, atL),
+      (labelsAt.pair
+        with cubic, vertexL, compatible.left, edges, incident, distinct)]
+    have values : flowValue(F, f) ≠ flowValue(F, g) :=
+      flowValue.cubic_distinct with graph, cubic, cover, vertexL,
+        ⟨hf, hg⟩, ⟨atF, atG⟩, distinct.right.left
+    have different :
+        t(leftEnd(e)) △ flowValue(F, f) ≠ t(leftEnd(e)) △ flowValue(F, g)
+      intro same
+      exact values with (symmetricDifference.cancel_left with same)
+    exact cardinality.pair with different
+  . -- At a vertex with edges e, f, g, the label t(v) △ value(x) is carried
+    -- by the two ends other than that of x, and no other label is carried.
+    intros v hv s hs
+    obtain ⟨e, he, f, hf, g, hg, distinct, atE, atF, atG⟩ :=
+      Cubic.ends_at with cubic, hv
+    have edges : e ∈ E ∧ f ∈ E ∧ g ∈ E := ⟨he, hf, hg⟩
+    have incident : (leftEnd(e) = v ∨ rightEnd(e) = v) ∧
+        (leftEnd(f) = v ∨ rightEnd(f) = v) ∧
+        (leftEnd(g) = v ∨ rightEnd(g) = v) :=
+      ⟨atE, atF, atG⟩
+    obtain ⟨i, hi, j, hj, k, hk, apart, shape⟩ :=
+      Cubic.ends_of_three with cubic, hv, edges, incident, distinct
+    have inside : labelledEnds(leftEnd, rightEnd, E,
+        labelPairs(E, leftEnd, rightEnd, F, t), v, s) ⊆
+        ({(e, i)} ∪ {(f, j)}) ∪ {(g, k)}
+      rw ← shape
+      intros p hp
+      exact hp.left
+    rw EvenSet.of_three with apart, inside
+    have endE : (e, i) ∈ incidentEnds(leftEnd, rightEnd, E, v) by rw shape; simp
+    have endF : (f, j) ∈ incidentEnds(leftEnd, rightEnd, E, v) by rw shape; simp
+    have endG : (g, k) ∈ incidentEnds(leftEnd, rightEnd, E, v) by rw shape; simp
+    -- The three label pairs, read at v.
+    have fe : f ≠ e by cc
+    have ge : g ≠ e by cc
+    have gf : g ≠ f by cc
+    have edgesF : f ∈ E ∧ e ∈ E ∧ g ∈ E := ⟨hf, he, hg⟩
+    have incidentF : (leftEnd(f) = v ∨ rightEnd(f) = v) ∧
+        (leftEnd(e) = v ∨ rightEnd(e) = v) ∧
+        (leftEnd(g) = v ∨ rightEnd(g) = v) :=
+      ⟨atF, atE, atG⟩
+    have distinctF : f ≠ e ∧ e ≠ g ∧ f ≠ g :=
+      ⟨fe, distinct.right.right, distinct.right.left⟩
+    have edgesG : g ∈ E ∧ e ∈ E ∧ f ∈ E := ⟨hg, he, hf⟩
+    have incidentG : (leftEnd(g) = v ∨ rightEnd(g) = v) ∧
+        (leftEnd(e) = v ∨ rightEnd(e) = v) ∧
+        (leftEnd(f) = v ∨ rightEnd(f) = v) :=
+      ⟨atG, atE, atF⟩
+    have distinctG : g ≠ e ∧ e ≠ f ∧ g ≠ f := ⟨ge, distinct.left, gf⟩
+    have pairE : labelPairs(E, leftEnd, rightEnd, F, t)(e) =
+        {t(v) △ flowValue(F, f), t(v) △ flowValue(F, g)}
+      rw atEnd with v, hv, e, he, atE
+      exact labelsAt.pair
+        with cubic, hv, compatible.left, edges, incident, distinct
+    have pairF : labelPairs(E, leftEnd, rightEnd, F, t)(f) =
+        {t(v) △ flowValue(F, e), t(v) △ flowValue(F, g)}
+      rw atEnd with v, hv, f, hf, atF
+      exact labelsAt.pair
+        with cubic, hv, compatible.left, edgesF, incidentF, distinctF
+    have pairG : labelPairs(E, leftEnd, rightEnd, F, t)(g) =
+        {t(v) △ flowValue(F, e), t(v) △ flowValue(F, f)}
+      rw atEnd with v, hv, g, hg, atG
+      exact labelsAt.pair
+        with cubic, hv, compatible.left, edgesG, incidentG, distinctG
+    -- The three labels are distinct, as the three values are.
+    have neEF := flowValue.cubic_distinct
+      with graph, cubic, cover, hv, ⟨he, hf⟩, ⟨atE, atF⟩, distinct.left
+    have neFG := flowValue.cubic_distinct
+      with graph, cubic, cover, hv, ⟨hf, hg⟩, ⟨atF, atG⟩, distinct.right.left
+    have neEG := flowValue.cubic_distinct
+      with graph, cubic, cover, hv, ⟨he, hg⟩, ⟨atE, atG⟩, distinct.right.right
+    have apartEF : t(v) △ flowValue(F, e) ≠ t(v) △ flowValue(F, f)
+      intro same
+      exact neEF with (symmetricDifference.cancel_left with same)
+    have apartFG : t(v) △ flowValue(F, f) ≠ t(v) △ flowValue(F, g)
+      intro same
+      exact neFG with (symmetricDifference.cancel_left with same)
+    have apartEG : t(v) △ flowValue(F, e) ≠ t(v) △ flowValue(F, g)
+      intro same
+      exact neEG with (symmetricDifference.cancel_left with same)
+    simp [labelledEnds.membership, endE, endF, endG, fst.pair,
+      pairE, pairF, pairG, pair.membership]

@@ -23,7 +23,7 @@ test("inversion-count exchange signs and unconditional equal-row cancellation ar
     name.startsWith("Grace.Cumulus.Algebra.Ring.PermutationSign.") ||
     name.startsWith("PermutationSigns.") ||
     /(?:InvolutionOn\.restrict_between|transposition\.(?:symmetric|conjugate)|permutationExchange\.(?:symmetric|conjugate)|Less\.(?:successor_lower_of_ne|of_successor_upper_ne))$/.test(name)).filter(name => !name.endsWith(".generalized_induction_aux"));
-  assert.equal(names.length, 25);
+  assert.equal(names.length, 34);
   for (const name of names) {
     const audit = auditTheoremAxioms(kernel, name);
     assert.equal(audit.complete, true, name);

@@ -97,6 +97,46 @@ function readVectors(reader: Reader, name: string): number[][] {
   });
 }
 
+/** Open-addressing set of integer vectors; the validator's duplicate check
+ * without a string per node. */
+class VectorSet {
+  private slots = new Int32Array(1024).fill(-1);
+  private count = 0;
+  private readonly nodes: readonly (readonly number[])[];
+  constructor(nodes: readonly (readonly number[])[]) { this.nodes = nodes; }
+  private static hash(node: readonly number[]): number {
+    let hash = 2166136261;
+    for (let index = 0; index < node.length; index += 1) hash = Math.imul(hash ^ node[index]!, 16777619);
+    return hash >>> 0;
+  }
+  private static same(left: readonly number[], right: readonly number[]): boolean {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+    return true;
+  }
+  /** Add node `id`; false when an equal node was added before. */
+  add(id: number): boolean {
+    const node = this.nodes[id]!;
+    if ((this.count + 1) * 2 > this.slots.length) {
+      const previous = this.slots;
+      this.slots = new Int32Array(previous.length * 2).fill(-1);
+      for (const known of previous) if (known !== -1) this.place(known);
+    }
+    const mask = this.slots.length - 1;
+    for (let slot = VectorSet.hash(node) & mask; ; slot = (slot + 1) & mask) {
+      const known = this.slots[slot]!;
+      if (known === -1) { this.slots[slot] = id; this.count += 1; return true; }
+      if (VectorSet.same(this.nodes[known]!, node)) return false;
+    }
+  }
+  private place(id: number): void {
+    const mask = this.slots.length - 1;
+    let slot = VectorSet.hash(this.nodes[id]!) & mask;
+    while (this.slots[slot] !== -1) slot = (slot + 1) & mask;
+    this.slots[slot] = id;
+  }
+}
+
 function validateProgram(program: ProofMachineProgram): void {
   if (program.version !== 4 || !/^[0-9a-f]{64}$/.test(program.environment)) throw new KernelError("Bad proof-machine version or environment digest");
   if (program.symbols.length > MAX_COUNT || program.terms.length > MAX_COUNT || program.formulas.length > MAX_COUNT ||
@@ -106,38 +146,38 @@ function validateProgram(program: ProofMachineProgram): void {
     if (!symbol || symbols.has(symbol)) throw new KernelError(`Bad or duplicate G17M symbol ${index}`);
     symbols.add(symbol);
   });
-  const termNodes = new Set<string>();
+  const termNodes = new VectorSet(program.terms);
   program.terms.forEach((node, index) => {
     if (node.length < 2 || node.some(value => !isUint(value))) throw new KernelError(`Malformed G17M term ${index}`);
     if (node[0] === 0 && (node.length !== 2 || node[1]! >= program.symbols.length)) throw new KernelError(`Malformed G17M free variable ${index}`);
     else if (node[0] === 1 && node.length !== 2) throw new KernelError(`Malformed G17M bound variable ${index}`);
-    else if (node[0] === 2 && (node[1]! >= program.symbols.length || node.slice(2).some(child => child >= index))) throw new KernelError(`Malformed G17M application ${index}`);
+    else if (node[0] === 2 && (node[1]! >= program.symbols.length || someFrom(node, 2, child => child >= index))) throw new KernelError(`Malformed G17M application ${index}`);
     else if (node[0] === 3 && (node.length !== 2 || node[1]! >= program.symbols.length || !/^(?:0|[1-9]\d*)$/.test(program.symbols[node[1]!]!))) throw new KernelError(`Malformed G17M natural ${index}`);
     else if (node[0]! > 3) throw new KernelError(`Unknown G17M term opcode at ${index}`);
-    const key = node.join(","); if (termNodes.has(key)) throw new KernelError(`Duplicate G17M term ${index}`); termNodes.add(key);
+    if (!termNodes.add(index)) throw new KernelError(`Duplicate G17M term ${index}`);
   });
-  const formulaNodes = new Set<string>();
+  const formulaNodes = new VectorSet(program.formulas);
   program.formulas.forEach((node, index) => {
     if (node.length === 0 || node.some(value => !isUint(value))) throw new KernelError(`Malformed G17M formula ${index}`);
     const op = node[0]!;
     if (op === 0 && node.length !== 1) throw new KernelError(`Malformed G17M bottom ${index}`);
     else if (op === 1 && (node.length !== 3 || node[1]! >= program.terms.length || node[2]! >= program.terms.length)) throw new KernelError(`Malformed G17M equality ${index}`);
-    else if (op === 2 && (node.length < 2 || node[1]! >= program.symbols.length || node.slice(2).some(term => term >= program.terms.length))) throw new KernelError(`Malformed G17M predicate ${index}`);
+    else if (op === 2 && (node.length < 2 || node[1]! >= program.symbols.length || someFrom(node, 2, term => term >= program.terms.length))) throw new KernelError(`Malformed G17M predicate ${index}`);
     else if ((op === 3 || (op >= 5 && op <= 7)) && (node.length !== 3 || node[1]! >= index || node[2]! >= index)) throw new KernelError(`Malformed G17M binary formula ${index}`);
     else if ((op === 4 || op === 8) && (node.length !== 2 || node[1]! >= index)) throw new KernelError(`Malformed G17M quantifier ${index}`);
     else if (op > 8) throw new KernelError(`Unknown G17M formula opcode at ${index}`);
-    const key = node.join(","); if (formulaNodes.has(key)) throw new KernelError(`Duplicate G17M formula ${index}`); formulaNodes.add(key);
+    if (!formulaNodes.add(index)) throw new KernelError(`Duplicate G17M formula ${index}`);
   });
-  const contextNodes = new Set<string>();
+  const contextNodes = new VectorSet(program.contexts);
   program.contexts.forEach((context, index) => {
     if (context.length > MAX_VECTOR || context.some(formula => !isUint(formula) || formula >= program.formulas.length)) throw new KernelError(`Malformed G17M context ${index}`);
-    const key = context.join(","); if (contextNodes.has(key)) throw new KernelError(`Duplicate G17M context ${index}`); contextNodes.add(key);
+    if (!contextNodes.add(index)) throw new KernelError(`Duplicate G17M context ${index}`);
   });
   program.code.forEach((instruction, pc) => {
     if (instruction.length < 4 || instruction.length > MAX_VECTOR || instruction.some(value => !isUint(value))) throw new KernelError(`Malformed G17M instruction ${pc}`);
     const [op, conclusion, context, premises] = instruction;
     if (op! > 29 || conclusion! >= program.formulas.length || context! >= program.contexts.length ||
-        premises! > instruction.length - 4 || instruction.slice(4, 4 + premises!).some(premise => premise >= pc)) {
+        premises! > instruction.length - 4 || someRange(instruction, 4, 4 + premises!, premise => premise >= pc)) {
       throw new KernelError(`Invalid G17M instruction ${pc}`);
     }
   });
@@ -153,18 +193,39 @@ function validateProgram(program: ProofMachineProgram): void {
   }
 }
 
+function someFrom(node: readonly number[], start: number, test: (value: number) => boolean): boolean {
+  for (let index = start; index < node.length; index += 1) if (test(node[index]!)) return true;
+  return false;
+}
+
+function someRange(node: readonly number[], start: number, end: number, test: (value: number) => boolean): boolean {
+  for (let index = start; index < end && index < node.length; index += 1) if (test(node[index]!)) return true;
+  return false;
+}
+
 function isUint(value: number): boolean { return Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff; }
 
+/** A byte buffer that doubles as it fills: a library module runs to hundreds
+ * of megabytes, which a number per byte in a JS array would multiply by eight. */
 class Writer {
-  private readonly data: number[] = [];
-  byte(value: number): void { this.data.push(value); }
-  bytes(values: Uint8Array): void { for (const value of values) this.data.push(value); }
+  private data = new Uint8Array(1 << 16);
+  private length = 0;
+  private reserve(count: number): void {
+    if (this.length + count <= this.data.length) return;
+    let size = this.data.length * 2;
+    while (size < this.length + count) size *= 2;
+    const grown = new Uint8Array(size);
+    grown.set(this.data.subarray(0, this.length));
+    this.data = grown;
+  }
+  byte(value: number): void { this.reserve(1); this.data[this.length++] = value; }
+  bytes(values: Uint8Array): void { this.reserve(values.length); this.data.set(values, this.length); this.length += values.length; }
   varUint(value: number): void {
     if (!isUint(value)) throw new KernelError(`Cannot encode G17M integer ${value}`);
     do { const chunk = value % 128; value = Math.floor(value / 128); this.byte(chunk | (value > 0 ? 0x80 : 0)); } while (value > 0);
   }
   string(value: string): void { const bytes = new TextEncoder().encode(value); this.varUint(bytes.length); this.bytes(bytes); }
-  finish(): Uint8Array { return Uint8Array.from(this.data); }
+  finish(): Uint8Array { return this.data.slice(0, this.length); }
 }
 
 class Reader {

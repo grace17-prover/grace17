@@ -1,0 +1,530 @@
+-- The tree-packing theorem of Tutte and Nash-Williams by Kaiser's argument:
+-- under the packing condition, a maximal decomposition into k trees and a
+-- rest has a connected rest, since an edge of least level in an even set of
+-- the rest would admit an improving exchange, and k + 1 disjoint spanning
+-- trees follow by induction.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Kaiser
+import ExchangeOrder
+
+-- A connected finite edge set holds a spanning tree: a maximal forest
+-- inside it joins whatever it joins.
+theorem SpanningTree.within (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires finite : Finite(F)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  shows ∃ G ⊆ F, SpanningTree(V, leftEnd, rightEnd, G)
+proof
+  have finiteFamily := forestsIn.finite at V, leftEnd, rightEnd, F with finite
+  have emptyForest := forestsIn.contains_empty at V, leftEnd, rightEnd, F
+  obtain ⟨G, inFamily, _, maximal⟩ :=
+    Finite.maximal_extension with finiteFamily, emptyForest
+  obtain ⟨inPowerset, forest⟩ := inFamily
+  have subsetF := powerset.membership_iff.forward with inPowerset
+  have endsG := ends_in.subset with ends, subsetF
+  have connectedG : Connects(V, leftEnd, rightEnd, G)
+    intros u hu v hv
+    exact Forest.maximal_joined with finiteVertices, ends, inFamily, maximal,
+      hu, (connected with u, hu, v, hv)
+  refine ⟨G, subsetF, ?_⟩
+  exact SpanningTree.of_connected_forest with
+    finiteVertices, nonempty, endsG, forest, connectedG
+
+-- The function on succ(k) agreeing with T below k and taking G at k: it
+-- adjoins the edges in no tree as a last colour, and later replaces the
+-- last colour by a spanning tree inside it.
+def replaceLast (E T G : Set, k : Nat) : Set :=
+  { p ∈ succ(k) × 𝒫(E) | ∃ i ∈ succ(k),
+    (i ∈ k ∧ p = (i, T(i))) ∨ (i = k ∧ p = (i, G)) }
+
+theorem replaceLast.shape (E T G x y : Set, k : Nat)
+  requires member : (x, y) ∈ replaceLast(E, T, G, k)
+  shows (x ∈ k ∧ y = T(x)) ∨ (x = k ∧ y = G)
+proof
+  obtain ⟨_, i, _, cases⟩ := member
+  rcases cases with ⟨below, shape⟩ | ⟨same, shape⟩
+  . obtain ⟨xi, yT⟩ := orderedPair.injective with shape
+    left
+    rw xi
+    exact ⟨below, yT⟩
+  . obtain ⟨xi, yG⟩ := orderedPair.injective with shape
+    right
+    rw xi
+    exact ⟨same, yG⟩
+
+theorem replaceLast.function (E T G : Set, k : Nat)
+  requires classes : ∀ i ∈ k, T(i) ∈ 𝒫(E)
+  requires last : G ∈ 𝒫(E)
+  shows replaceLast(E, T, G, k) : succ(k) → 𝒫(E)
+proof
+  have notSelf := membership.irreflexive at k
+  constructor
+  . intros p member
+    exact member.left
+  constructor
+  . intros x y relatedY z relatedZ
+    have shapeY := replaceLast.shape with relatedY
+    have shapeZ := replaceLast.shape with relatedZ
+    rcases shapeY with ⟨xBelow, yT⟩ | ⟨xLast, yG⟩
+    . rcases shapeZ with ⟨_, zT⟩ | ⟨zLast, _⟩
+      . cc
+      . exfalso
+        rw zLast at xBelow
+        exact notSelf with xBelow
+    . rcases shapeZ with ⟨zBelow, _⟩ | ⟨_, zG⟩
+      . exfalso
+        rw xLast at zBelow
+        exact notSelf with zBelow
+      . cc
+  . intros x input
+    have cases := membership.successor_forward{n := k} with input
+    rcases cases with below | same
+    . have class := classes with x, below
+      refine ⟨T(x), class, ?_⟩
+      unfold relates
+      refine ⟨(product.pair with input, class), x, input, ?_⟩
+      left
+      exact ⟨below, rfl⟩
+    . refine ⟨G, last, ?_⟩
+      unfold relates
+      refine ⟨(product.pair with input, last), x, input, ?_⟩
+      right
+      exact ⟨same, rfl⟩
+
+theorem replaceLast.value_below (E T G : Set, k i : Nat)
+  requires classes : ∀ i ∈ k, T(i) ∈ 𝒫(E)
+  requires last : G ∈ 𝒫(E)
+  requires index : i ∈ k
+  shows replaceLast(E, T, G, k)(i) = T(i)
+proof
+  have inSucc : i ∈ succ(k) by simp [index]
+  have class := classes with i, index
+  have related : relates(replaceLast(E, T, G, k), i, T(i))
+    unfold relates
+    refine ⟨(product.pair with inSucc, class), i, inSucc, ?_⟩
+    left
+    exact ⟨index, rfl⟩
+  exact FunctionBetween.apply_value with
+    (replaceLast.function with classes, last), inSucc, related
+
+theorem replaceLast.value_last (E T G : Set, k : Nat)
+  requires classes : ∀ i ∈ k, T(i) ∈ 𝒫(E)
+  requires last : G ∈ 𝒫(E)
+  shows replaceLast(E, T, G, k)(k) = G
+proof
+  have kIn : k ∈ succ(k) by simp
+  have related : relates(replaceLast(E, T, G, k), k, G)
+    unfold relates
+    refine ⟨(product.pair with kIn, last), k, kIn, ?_⟩
+    right
+    exact ⟨rfl, rfl⟩
+  exact FunctionBetween.apply_value with
+    (replaceLast.function with classes, last), kIn, related
+
+-- The packing condition for succ(k) colours gives it for k.
+theorem PackingCondition.below (V E leftEnd rightEnd : Set, k : Nat)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires condition : PackingCondition(V, E, leftEnd, rightEnd, succ(k))
+  shows PackingCondition(V, E, leftEnd, rightEnd, k)
+proof
+  intros P partition
+  have packed := condition with P, partition
+  have finiteClasses := Partition.finite with finiteVertices, partition
+  have finiteCrossing : Finite(crossingClasses(P, leftEnd, rightEnd, E)) :=
+    Finite.subset with finiteEdges,
+      (crossingClasses.subset at P, leftEnd, rightEnd, E)
+  have step := mul.succ_left at k, cardinality(P) - 1
+  rw step at packed
+  arith
+
+-- A packing of k trees extends to a decomposition into succ(k) colours,
+-- the edges in no tree forming the last colour.
+theorem TreePacking.decomposition (V E leftEnd rightEnd T : Set, k : Nat)
+  requires function : FunctionBetween(T, k, 𝒫(E))
+  requires apart : ∀ i ∈ k, ∀ j ∈ k, i ≠ j → Disjoint(T(i), T(j))
+  requires trees : ∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))
+  shows Decomposition(E, replaceLast(E, T, E ∖ coloursBelow(T, k), k),
+      succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd,
+      replaceLast(E, T, E ∖ coloursBelow(T, k), k)(i)))
+proof
+  have last : E ∖ coloursBelow(T, k) ∈ 𝒫(E) :=
+    powerset.membership_iff.backward with difference.subset_left
+  have classes : ∀ i ∈ k, T(i) ∈ 𝒫(E)
+    intros i index
+    exact FunctionBetween.apply_closed with function, index
+  constructor
+  . refine ⟨(replaceLast.function with classes, last), ?_, ?_⟩
+    . -- Every edge has a colour: its tree, or the last colour.
+      intros g inE
+      by_cases inBelow : g ∈ coloursBelow(T, k)
+      . obtain ⟨i, index, inT⟩ := coloursBelow.colour with inBelow
+        have iNat := natural.member at k with i, index
+        have inSucc : i ∈ succ(k) by simp [index]
+        refine ⟨i, inSucc, ?_⟩
+        rw replaceLast.value_below with classes, last, index
+        exact inT
+      . have kIn : k ∈ succ(k) by simp
+        refine ⟨k, kIn, ?_⟩
+        rw replaceLast.value_last with classes, last
+        simp [inE, inBelow]
+    . -- The trees are disjoint, and the last colour misses them all.
+      intros i indexI j indexJ different
+      have iNat := natural.member at succ(k) with i, indexI
+      have jNat := natural.member at succ(k) with j, indexJ
+      have casesI := membership.successor_forward{n := k} with indexI
+      have casesJ := membership.successor_forward{n := k} with indexJ
+      rcases casesI with belowI | lastI
+      . rw replaceLast.value_below with classes, last, belowI
+        rcases casesJ with belowJ | lastJ
+        . rw replaceLast.value_below with classes, last, belowJ
+          exact apart with i, belowI, j, belowJ, different
+        . rw [lastJ, (replaceLast.value_last with classes, last)]
+          apply Disjoint.iff.backward
+          intros g inT inRest
+          have inBelow := coloursBelow.contains with belowI, inT
+          exact (difference.membership.forward with inRest).right with inBelow
+      . rw [lastI, (replaceLast.value_last with classes, last)]
+        rcases casesJ with belowJ | lastJ
+        . rw replaceLast.value_below with classes, last, belowJ
+          apply Disjoint.iff.backward
+          intros g inRest inT
+          have inBelow := coloursBelow.contains with belowJ, inT
+          exact (difference.membership.forward with inRest).right with inBelow
+        . exfalso
+          rw [lastI, lastJ] at different
+          exact different with rfl
+  . intros i index
+    have iNat := natural.member at k with i, index
+    rw replaceLast.value_below with classes, last, index
+    exact trees with i, index
+
+-- The even set closed by e in the colour c refined at the level m of e has
+-- an edge other than e of level below m: otherwise every edge of the set
+-- would keep its ends within the class X of e at stage m, so the set would
+-- join the ends of e inside X by edges of T(c), against the level of e.
+theorem fundamental.lower_level (V E leftEnd rightEnd T e C : Set, c k m : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, succ(k))
+  requires edge : e ∈ E
+  requires level : FiniteLevel(V, leftEnd, rightEnd, T, e, succ(k), m)
+  requires colour : c = leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, succ(k), m), succ(k)))
+  requires closes :
+    C ⊆ T(c) ∪ {e} ∧ e ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)
+  shows ∃ g ∈ C, g ≠ e ∧
+    (∃ n ∈ ℕ, n < m ∧
+      FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n))
+proof
+  obtain ⟨subsetC, eInC, even⟩ := closes
+  obtain ⟨together, parted⟩ := level
+  obtain ⟨X, class, leftIn, rightIn⟩ := together
+  have partition : Partition(V,
+      partitionSequence(V, leftEnd, rightEnd, T, succ(k), m)) :=
+    partitionSequence.partition with graph, nonempty, decomposition
+  obtain ⟨some, _⟩ := FiniteLevel.refining_colour with
+    graph, nonempty, decomposition, level
+  obtain ⟨colourIn, _⟩ := disconnectedColour.least with some
+  rw ← colour at colourIn
+  have ends := Decomposition.ends with graph, decomposition, colourIn
+  have endsC : ∀ g ∈ C, leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+    intros g inC
+    have inUnion := subsetC with g, inC
+    simp at inUnion
+    rcases inUnion with inT | same
+    . exact ends with g, inT
+    . rw same
+      exact Graph.ends with graph, e, edge
+  by_contra none
+  -- Every edge of C keeps its ends together at stage m, so X is closed.
+  have togetherAll : ∀ g ∈ C,
+      ∃ Y ∈ partitionSequence(V, leftEnd, rightEnd, T, succ(k), m),
+        leftEnd(g) ∈ Y ∧ rightEnd(g) ∈ Y
+    intros g inC
+    by_contra apart
+    have start := partitionSequence.together_zero
+      at V, leftEnd, rightEnd, T, g, succ(k) with (endsC with g, inC)
+    obtain ⟨n, natural, less, levelG⟩ :=
+      FiniteLevel.of_parted with start, apart
+    have notE : g ≠ e
+      intro same
+      rw under same at apart
+      exact apart with ⟨X, class, leftIn, rightIn⟩
+    exact none with ⟨g, inC, notE, n, natural, less, levelG⟩
+  -- So C ∖ {e} joins the ends of e inside X by edges of T(c), and they
+  -- share a component of T(c) within X, a class of stage m + 1.
+  have joinedInside := EvenEdgeSet.joined_inside with finiteVertices,
+    partition, class, endsC, even, eInC, ⟨leftIn, rightIn⟩, togetherAll
+  have restSubset : inside(leftEnd, rightEnd, C ∖ {e}, X) ⊆
+      inside(leftEnd, rightEnd, T(c), X)
+    intros g inInside
+    obtain ⟨inRest, leftG, rightG⟩ := inInside
+    obtain ⟨inC, notE⟩ :=
+      difference.singleton_membership.forward with inRest
+    have inUnion := subsetC with g, inC
+    simp [notE] at inUnion
+    exact ⟨inUnion, leftG, rightG⟩
+  have joined := Joined.monotone with restSubset, joinedInside
+  rw under colour at ends
+  apply parted
+  rw under partitionSequence.succ
+  rw under partitionStep.refined with partition, ends, some
+  rw under ← colour
+  exact refineBy.together with class, ⟨leftIn, rightIn⟩, joined
+
+-- The finite levels of the edges of the last colour lying in its even
+-- sets, and the finite levels of the edges other than e of an even set.
+def cycleLevels (V leftEnd rightEnd T : Set, k : Nat) : Set :=
+  { n ∈ ℕ | ∃ g ∈ T(k),
+    FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n) ∧
+    (∃ C, C ⊆ T(k) ∧ g ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)) }
+
+def closedLevels (V leftEnd rightEnd T C e : Set, k : Nat) : Set :=
+  { n ∈ ℕ | ∃ g ∈ C, g ≠ e ∧
+    FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n) }
+
+-- No edge of the last colour in an even set of it has a least finite
+-- level under a maximal decomposition: the colour refined at that level
+-- closes an even set through it, whose edge f of least level is below, and
+-- exchanging the two edges gives a decomposition preceding the maximal one.
+theorem Kaiser.no_least_edge (V E leftEnd rightEnd T e : Set, c k m : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, succ(k))
+  requires trees : ∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))
+  requires maximal : ¬(∃ U, Decomposition(E, U, succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, U(i))) ∧
+    Precedes(V, leftEnd, rightEnd, T, U, succ(k)))
+  requires level : FiniteLevel(V, leftEnd, rightEnd, T, e, succ(k), m)
+  requires least : ∀ g ∈ T(k), ∀ n ∈ ℕ,
+    FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n) →
+    (∃ C, C ⊆ T(k) ∧ g ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)) →
+      m ≤ n
+  requires cycle :
+    ∃ C, C ⊆ T(k) ∧ e ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)
+  requires colour : c = leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, succ(k), m), succ(k)))
+  shows ⊥
+proof
+  -- c is a colour below k not holding e, so e closes an even set in T(c).
+  obtain ⟨C₀, subsetC₀, eInC₀, _⟩ := cycle
+  have first : e ∈ T(k) := subsetC₀ with e, eInC₀
+  obtain ⟨colourC, outside, _⟩ := FiniteLevel.colour_below with
+    graph, nonempty, decomposition, level, first, colour
+  have colourIn : c ∈ succ(k) by simp [colourC]
+  have kIn : k ∈ succ(k) by simp
+  have endsC := Decomposition.ends with graph, decomposition, colourIn
+  have endsK := Decomposition.ends with graph, decomposition, kIn
+  have classK := Decomposition.class_subset with decomposition, kIn
+  have edge : e ∈ E := classK with e, first
+  obtain ⟨C, subsetC, eInC, even⟩ := SpanningTree.fundamental with
+    finiteVertices, ⟨endsC, (endsK with e, first)⟩, (trees with c, colourC),
+    outside
+  -- Its edges other than e have finite levels, one of them below m; f is
+  -- an edge of least such level.
+  obtain ⟨g, gInC, gNotE, n, nNatural, nLess, gLevel⟩ :=
+    fundamental.lower_level with graph, finiteVertices, nonempty,
+      decomposition, edge, level, colour, ⟨subsetC, eInC, even⟩
+  have subsetLevels : closedLevels(V, leftEnd, rightEnd, T, C, e, k) ⊆ ℕ
+    intros p member
+    exact member.left
+  have inLevels : n ∈ closedLevels(V, leftEnd, rightEnd, T, C, e, k) :=
+    ⟨nNatural, g, gInC, gNotE, gLevel⟩
+  have inhabited : Nonempty(closedLevels(V, leftEnd, rightEnd, T, C, e, k)) :=
+    ⟨n, inLevels⟩
+  obtain ⟨pNatural, f, fInC, fNotE, fLevel⟩ :=
+    leastNatural.member with inhabited, subsetLevels
+  have pLeast := leastNatural.least with inhabited, subsetLevels, inLevels
+  have pNat := nat.omega.backward with pNatural
+  have nNat := nat.omega.backward with nNatural
+  have closes : ∃ C, C ⊆ T(c) ∪ {e} ∧ e ∈ C ∧ f ∈ C ∧
+      f ≠ e ∧ EvenEdgeSet(V, leftEnd, rightEnd, C) ∧
+      (∀ g ∈ C, ∀ n ∈ ℕ,
+        FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n) →
+        (∃ p ∈ ℕ,
+          FiniteLevel(V, leftEnd, rightEnd, T, f, succ(k), p) ∧ p ≤ n))
+    refine ⟨C, subsetC, eInC, fInC, fNotE, even, ?_⟩
+    intros h hInC q qNatural hLevel
+    refine ⟨leastNatural(closedLevels(V, leftEnd, rightEnd, T, C, e, k)),
+      pNatural, fLevel, ?_⟩
+    by_cases same : h = e
+    . -- The level of e is m, above the level of g and so of f.
+      rw same at hLevel
+      have unique := FiniteLevel.unique with graph, decomposition, level, hLevel
+      rw ← unique
+      arith
+    . exact leastNatural.least with inhabited, subsetLevels,
+        ⟨qNatural, h, hInC, same, hLevel⟩
+  obtain ⟨precedes, treesU⟩ := exchange.precedes with graph, finiteVertices,
+    finiteEdges, nonempty, decomposition, trees, level, least, cycle, colour,
+    closes
+  have second : f ∈ T(c)
+    have inUnion := subsetC with f, fInC
+    simp [fNotE] at inUnion
+    exact inUnion
+  have decompositionU := exchange.decomposition
+    at V, E, leftEnd, rightEnd, T, e, f, c, k
+    with decomposition, colourC, first, second
+  exact maximal with
+    ⟨exchange(E, T, e, f, c, k), decompositionU, treesU, precedes⟩
+
+-- The last colour of a maximal decomposition connects V: otherwise
+-- Kaiser.cycle_edge gives edges of finite level in even sets of the last
+-- colour, and one of least level is excluded by Kaiser.no_least_edge.
+theorem Kaiser.last_connected (V E leftEnd rightEnd T : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, succ(k))
+  requires trees : ∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))
+  requires condition : PackingCondition(V, E, leftEnd, rightEnd, succ(k))
+  requires maximal : ¬(∃ U, Decomposition(E, U, succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, U(i))) ∧
+    Precedes(V, leftEnd, rightEnd, T, U, succ(k)))
+  shows Connects(V, leftEnd, rightEnd, T(k))
+proof
+  by_contra disconnected
+  obtain ⟨C₀, subsetC₀, even₀, e₀, inC₀, n₀, natural₀, level₀⟩ :=
+    Kaiser.cycle_edge with graph, finiteVertices, finiteEdges, nonempty,
+      decomposition, trees, condition, disconnected
+  have subsetLevels : cycleLevels(V, leftEnd, rightEnd, T, k) ⊆ ℕ
+    intros n member
+    exact member.left
+  have inLevels : n₀ ∈ cycleLevels(V, leftEnd, rightEnd, T, k) :=
+    ⟨natural₀, e₀, (subsetC₀ with e₀, inC₀), level₀,
+      C₀, subsetC₀, inC₀, even₀⟩
+  have inhabited : Nonempty(cycleLevels(V, leftEnd, rightEnd, T, k)) :=
+    ⟨n₀, inLevels⟩
+  obtain ⟨mNatural, e, first, level, cycle⟩ :=
+    leastNatural.member with inhabited, subsetLevels
+  have mNat := nat.omega.backward with mNatural
+  have least : ∀ g ∈ T(k), ∀ n ∈ ℕ,
+      FiniteLevel(V, leftEnd, rightEnd, T, g, succ(k), n) →
+      (∃ C, C ⊆ T(k) ∧ g ∈ C ∧ EvenEdgeSet(V, leftEnd, rightEnd, C)) →
+        leastNatural(cycleLevels(V, leftEnd, rightEnd, T, k)) ≤ n
+    intros g inT n natural levelG cycleG
+    exact leastNatural.least with inhabited, subsetLevels,
+      ⟨natural, g, inT, levelG, cycleG⟩
+  obtain ⟨c, colour⟩ := exists_eq at leastNatural(disconnectedColour(
+    leftEnd, rightEnd, T, partitionSequence(V, leftEnd, rightEnd, T, succ(k),
+      leastNatural(cycleLevels(V, leftEnd, rightEnd, T, k))), succ(k)))
+  have cNat : Nat(c)
+    rw colour
+    exact leastNatural.natural with (disconnectedColour.subset at leftEnd,
+      rightEnd, T, partitionSequence(V, leftEnd, rightEnd, T, succ(k),
+        leastNatural(cycleLevels(V, leftEnd, rightEnd, T, k))), succ(k))
+  exact Kaiser.no_least_edge with graph, finiteVertices, finiteEdges,
+    nonempty, decomposition, trees, maximal, level, least, cycle, colour
+
+-- Tutte and Nash-Williams: the packing condition suffices. By induction
+-- on k: the condition for succ(k) gives k trees, which extend to a
+-- decomposition into succ(k) colours; a maximal one has a connected last
+-- colour, which holds the last tree.
+theorem treePacking (V E leftEnd rightEnd : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires condition : PackingCondition(V, E, leftEnd, rightEnd, k)
+  shows TreePacking(V, E, leftEnd, rightEnd, k)
+proof
+  induction k
+  | zero =>
+    intro _
+    witness ∅
+    refine ⟨?_, ?_, ?_⟩
+    . constructor
+      . exact empty.subset
+      constructor
+      . intros x y relatedY z relatedZ
+        exfalso
+        exact set.empty with relatedY
+      . intros x input
+        exfalso
+        rw nat.zero at input
+        exact set.empty with input
+    . intros i index
+      exfalso
+      rw nat.zero at index
+      exact set.empty with index
+    . intros i index
+      exfalso
+      rw nat.zero at index
+      exact set.empty with index
+  | succ(n) using ih =>
+    intro condition
+    have below := PackingCondition.below with
+      finiteVertices, finiteEdges, condition
+    obtain ⟨T₀, function₀, apart₀, trees₀⟩ := ih with below
+    obtain ⟨decomposition₀, trees₁⟩ :=
+      TreePacking.decomposition with function₀, apart₀, trees₀
+    have some : ∃ T, Decomposition(E, T, succ(n)) ∧
+        (∀ i ∈ n, SpanningTree(V, leftEnd, rightEnd, T(i))) :=
+      ⟨replaceLast(E, T₀, E ∖ coloursBelow(T₀, n), n),
+        decomposition₀, trees₁⟩
+    obtain ⟨T, decomposition, trees, maximal⟩ := Precedes.maximal with
+      graph, finiteVertices, finiteEdges, nonempty, some
+    have connected := Kaiser.last_connected with graph, finiteVertices,
+      finiteEdges, nonempty, decomposition, trees, condition, maximal
+    -- The last tree: a spanning tree inside the connected last colour.
+    have kIn : n ∈ succ(n) by simp
+    have classK := Decomposition.class_subset with decomposition, kIn
+    have endsK := ends_in.subset with (Graph.ends with graph), classK
+    have finiteK := Finite.subset with finiteEdges, classK
+    obtain ⟨G, subsetG, tree⟩ := SpanningTree.within with
+      finiteVertices, nonempty, finiteK, endsK, connected
+    have classes : ∀ i ∈ n, T(i) ∈ 𝒫(E)
+      intros i index
+      have inSucc : i ∈ succ(n) by simp [index]
+      exact FunctionBetween.apply_closed with decomposition.left, inSucc
+    have last : G ∈ 𝒫(E) := powerset.membership_iff.backward with
+      (Subset.transitive with subsetG, classK)
+    witness replaceLast(E, T, G, n)
+    refine ⟨(replaceLast.function with classes, last), ?_, ?_⟩
+    . -- The colours stay disjoint, the last tree lying in the last colour.
+      intros i indexI j indexJ different
+      have iNat := natural.member at succ(n) with i, indexI
+      have jNat := natural.member at succ(n) with j, indexJ
+      have casesI := membership.successor_forward{n := n} with indexI
+      have casesJ := membership.successor_forward{n := n} with indexJ
+      rcases casesI with belowI | lastI
+      . rw replaceLast.value_below with classes, last, belowI
+        rcases casesJ with belowJ | lastJ
+        . rw replaceLast.value_below with classes, last, belowJ
+          exact decomposition.right.right with
+            i, indexI, j, indexJ, different
+        . rw [lastJ, (replaceLast.value_last with classes, last)]
+          rw lastJ at different
+          exact Disjoint.of_subset_right with
+            (decomposition.right.right with i, indexI, n, kIn, different),
+            subsetG
+      . rw [lastI, (replaceLast.value_last with classes, last)]
+        rcases casesJ with belowJ | lastJ
+        . rw replaceLast.value_below with classes, last, belowJ
+          rw lastI at different
+          exact Disjoint.of_subset_left with
+            (decomposition.right.right with n, kIn, j, indexJ, different),
+            subsetG
+        . exfalso
+          rw [lastI, lastJ] at different
+          exact different with rfl
+    . intros i index
+      have iNat := natural.member at succ(n) with i, index
+      have cases := membership.successor_forward{n := n} with index
+      rcases cases with below | same
+      . rw replaceLast.value_below with classes, last, below
+        exact trees with i, below
+      . rw [same, (replaceLast.value_last with classes, last)]
+        exact tree

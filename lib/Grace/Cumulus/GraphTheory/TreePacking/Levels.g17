@@ -1,0 +1,303 @@
+-- The level of an edge in the partition sequence of a decomposition: the
+-- last stage at which both ends share a class, finite exactly when the ends
+-- part at some stage, together with the colour refined at that stage.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Levels
+import Sequences
+
+-- The level of an edge: the largest n at which both ends share a class of
+-- P_n; an edge inside a class of the stable partition has infinite level.
+predicate FiniteLevel (V leftEnd rightEnd T e : Set, k n : Nat) :=
+  (∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, n),
+    leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X) ∧
+  ¬(∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, succ(n)),
+    leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X)
+
+-- At stage 0 the ends of an edge share the one class V.
+theorem partitionSequence.together_zero (V leftEnd rightEnd T e : Set, k : Nat)
+  requires ends : leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows ∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, 0),
+    leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+proof
+  witness V
+  rw partitionSequence.zero
+  exact ⟨singleton.self, ends.left, ends.right⟩
+
+-- An edge whose ends share a class at stage 0 but not at stage N has a
+-- finite level below N: the last stage at which they still share one.
+theorem FiniteLevel.of_parted (V leftEnd rightEnd T e : Set, k N : Nat)
+  requires together :
+    ∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, 0),
+      leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+  requires parted :
+    ¬(∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, N),
+      leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X)
+  shows ∃ n ∈ ℕ, n < N ∧ FiniteLevel(V, leftEnd, rightEnd, T, e, k, n)
+proof
+  induction N
+  | zero =>
+    intro parted
+    exfalso
+    exact parted with together
+  | succ(m) using ih =>
+    intro parted
+    by_cases shared :
+      ∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, m),
+        leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+    . witness m
+      refine ⟨?_, ?_, ?_⟩
+      . exact nat.omega.forward at m with *
+      . arith
+      . unfold FiniteLevel
+        constructor
+        . exact shared
+        . exact parted
+    . obtain ⟨n, natural, less, level⟩ := ih with shared
+      have nNat := nat.omega.backward with natural
+      refine ⟨n, natural, ?_, level⟩
+      arith
+
+-- An edge crossing the stable partition has a finite level: its ends share
+-- the class V at stage 0 and no class at stage |V|.
+theorem FiniteLevel.of_crossing (V leftEnd rightEnd T F e : Set, k : Nat)
+  requires finiteVertices : Finite(V)
+  requires partition : Partition(V, stablePartition(V, leftEnd, rightEnd, T, k))
+  requires ends : leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires crossing : e ∈ crossingClasses(
+    stablePartition(V, leftEnd, rightEnd, T, k), leftEnd, rightEnd, F)
+  shows ∃ n ∈ ℕ, n < cardinality(V) ∧
+    FiniteLevel(V, leftEnd, rightEnd, T, e, k, n)
+proof
+  unfold stablePartition at partition, crossing
+  have together := partitionSequence.together_zero
+    at V, leftEnd, rightEnd, T, e, k with ends
+  have parted : ¬(∃ X ∈
+      partitionSequence(V, leftEnd, rightEnd, T, k, cardinality(V)),
+      leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X)
+    intro common
+    have same := (classOf.eq_iff with partition, ends.left, ends.right).backward
+      with common
+    exact crossing.right with same
+  exact FiniteLevel.of_parted with together, parted
+
+-- Ends sharing a class at a later stage share one at every earlier stage,
+-- since the sequence refines; so an edge has one finite level.
+theorem partitionSequence.earlier (V E leftEnd rightEnd T e : Set, k i d : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires together :
+    ∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, i + d),
+      leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+  shows ∃ X ∈ partitionSequence(V, leftEnd, rightEnd, T, k, i),
+    leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+proof
+  induction d
+  | zero =>
+    intro together
+    rw under add.right_unit at together
+    exact together
+  | succ(n) using ih =>
+    intro together
+    apply ih
+    rw under add.succ_right at together
+    obtain ⟨X, class, leftIn, rightIn⟩ := together
+    have refines := partitionSequence.refines
+      at V, E, leftEnd, rightEnd, T, k, i + n with graph, decomposition
+    obtain ⟨Y, classY, subset⟩ := refines with X, class
+    exact ⟨Y, classY, (subset with leftEnd(e), leftIn),
+      (subset with rightEnd(e), rightIn)⟩
+
+theorem FiniteLevel.unique (V E leftEnd rightEnd T e : Set, k m n : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires levelM : FiniteLevel(V, leftEnd, rightEnd, T, e, k, m)
+  requires levelN : FiniteLevel(V, leftEnd, rightEnd, T, e, k, n)
+  shows m = n
+proof
+  have order := Less.trichotomy at m, n with *
+  rcases order with before | same | after
+  . obtain ⟨d, dNat, sum⟩ := before
+    have together := levelN.left
+    rw under ← sum at together
+    exfalso
+    exact levelM.right with (partitionSequence.earlier with
+      graph, decomposition, together)
+  . exact same
+  . obtain ⟨d, dNat, sum⟩ := after
+    have together := levelM.left
+    rw under ← sum at together
+    exfalso
+    exact levelN.right with (partitionSequence.earlier with
+      graph, decomposition, together)
+
+-- An edge whose every finite level is at least n keeps its ends together
+-- at stage n; an edge of finite level p keeps them together only up to p.
+theorem FiniteLevel.together_of_least (V leftEnd rightEnd T g : Set, k n : Nat)
+  requires ends : leftEnd(g) ∈ V ∧ rightEnd(g) ∈ V
+  requires least : ∀ q ∈ ℕ,
+    FiniteLevel(V, leftEnd, rightEnd, T, g, k, q) → n ≤ q
+  shows ∃ Y ∈ partitionSequence(V, leftEnd, rightEnd, T, k, n),
+    leftEnd(g) ∈ Y ∧ rightEnd(g) ∈ Y
+proof
+  by_contra apart
+  have start := partitionSequence.together_zero
+    at V, leftEnd, rightEnd, T, g, k with ends
+  obtain ⟨q, natural, less, levelG⟩ :=
+    FiniteLevel.of_parted with start, apart
+  have below := least with q, natural, levelG
+  have qNat := nat.omega.backward with natural
+  arith
+
+theorem FiniteLevel.le_of_together (V E leftEnd rightEnd T g : Set, k n p : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires level : FiniteLevel(V, leftEnd, rightEnd, T, g, k, p)
+  requires together :
+    ∃ Y ∈ partitionSequence(V, leftEnd, rightEnd, T, k, n),
+      leftEnd(g) ∈ Y ∧ rightEnd(g) ∈ Y
+  shows n ≤ p
+proof
+  by_contra above
+  have less := Less.of_not_LessEqual with above
+  obtain ⟨d, dNat, sum⟩ := less
+  rw under ← sum at together
+  exact level.right with (partitionSequence.earlier with
+    graph, decomposition, together)
+
+-- Once the sequence has stopped moving it stays, so a stage below a moving
+-- stage is moving.
+theorem partitionSequence.active (V E leftEnd rightEnd T : Set, k n d : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  requires active : disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, k, n + d), k) ≠ ∅
+  shows disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, k, n), k) ≠ ∅
+proof
+  intro none
+  apply active
+  have partition :
+      Partition(V, partitionSequence(V, leftEnd, rightEnd, T, k, n)) :=
+    partitionSequence.partition with graph, nonempty, decomposition
+  have fixed := partitionStep.fixed with partition, none
+  rw ← partitionSequence.succ at fixed
+  rw (partitionSequence.fixed_from with fixed)
+  exact none
+
+-- Vertices joined by F from inside a set closed under F are joined by the
+-- edges of F inside that set.
+theorem Joined.inside (leftEnd rightEnd F X u v : Set)
+  requires closed : ClosedUnder(leftEnd, rightEnd, F, X)
+  requires start : u ∈ X
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows Joined(leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), u, v)
+proof
+  intros A inA closedA
+  have closedBoth : ClosedUnder(leftEnd, rightEnd, F, A ∩ X)
+    intros e inF
+    have balanced := closed with e, inF
+    by_cases leftX : leftEnd(e) ∈ X
+    . have rightX := balanced.forward with leftX
+      have insideEdge : e ∈ inside(leftEnd, rightEnd, F, X) :=
+        ⟨inF, leftX, rightX⟩
+      have balancedA := closedA with e, insideEdge
+      rw [intersection.membership, intersection.membership]
+      simp [leftX, rightX, balancedA]
+    . have rightX : ¬rightEnd(e) ∈ X
+        intro inX
+        exact leftX with (balanced.backward with inX)
+      rw [intersection.membership, intersection.membership]
+      simp [leftX, rightX]
+  have startBoth : u ∈ A ∩ X :=
+    intersection.membership.backward with ⟨inA, start⟩
+  have reached := joined with A ∩ X, startBoth, closedBoth
+  exact (intersection.membership.forward with reached).left
+
+-- Ends of an edge in a class X of P that the edges of F inside X join
+-- share a class of the refinement of P along F: the component of F within
+-- X holding them.
+theorem refineBy.together (leftEnd rightEnd F P X e : Set)
+  requires class : X ∈ P
+  requires ends : leftEnd(e) ∈ X ∧ rightEnd(e) ∈ X
+  requires joined : Joined(leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X),
+    leftEnd(e), rightEnd(e))
+  shows ∃ Y ∈ refineBy(leftEnd, rightEnd, F, P),
+    leftEnd(e) ∈ Y ∧ rightEnd(e) ∈ Y
+proof
+  witness componentBy(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X),
+    leftEnd(e))
+  refine ⟨?_, ?_, ?_⟩
+  . exact refineBy.membership.backward with
+      ⟨X, class, (componentsBy.contains with ends.left)⟩
+  . exact componentBy.self with ends.left
+  . exact ⟨ends.right, joined⟩
+
+-- An edge of the colour refined at stage m whose ends share a class there
+-- keeps them together at stage m + 1: so at the level of an edge some colour
+-- is disconnected, and the edge is not of the refining colour.
+theorem FiniteLevel.refining_colour (V E leftEnd rightEnd T e : Set, k m : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  requires level : FiniteLevel(V, leftEnd, rightEnd, T, e, k, m)
+  shows disconnectedColour(leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, m), k) ≠ ∅ ∧
+    ¬e ∈ T(leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, m), k)))
+proof
+  obtain ⟨together, parted⟩ := level
+  obtain ⟨X, class, leftIn, rightIn⟩ := together
+  have partition :
+      Partition(V, partitionSequence(V, leftEnd, rightEnd, T, k, m)) :=
+    partitionSequence.partition with graph, nonempty, decomposition
+  have some : disconnectedColour(leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, m), k) ≠ ∅
+    intro none
+    have fixed := partitionStep.fixed with partition, none
+    apply parted
+    witness X
+    rw [partitionSequence.succ, fixed]
+    exact ⟨class, leftIn, rightIn⟩
+  refine ⟨some, ?_⟩
+  intro inColour
+  obtain ⟨colour, _⟩ := disconnectedColour.least with some
+  have ends := Decomposition.ends with graph, decomposition, colour
+  have insideEdge : e ∈ inside(leftEnd, rightEnd,
+      T(leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+        partitionSequence(V, leftEnd, rightEnd, T, k, m), k))), X) :=
+    ⟨inColour, leftIn, rightIn⟩
+  have joined := Joined.of_edge at leftEnd, rightEnd, _, _ with insideEdge
+  apply parted
+  rw under partitionSequence.succ
+  rw under partitionStep.refined with partition, ends, some
+  exact refineBy.together with class, ⟨leftIn, rightIn⟩, joined
+
+-- The colour c refined at the level of an edge e of the last colour is a
+-- colour below k not holding e, so e closes an even set in the tree T(c).
+theorem FiniteLevel.colour_below (V E leftEnd rightEnd T e : Set, c k m : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, succ(k))
+  requires level : FiniteLevel(V, leftEnd, rightEnd, T, e, succ(k), m)
+  requires first : e ∈ T(k)
+  requires colour : c = leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, succ(k), m), succ(k)))
+  shows c ∈ k ∧ ¬e ∈ T(c) ∧ disconnectedColour(leftEnd, rightEnd, T,
+    partitionSequence(V, leftEnd, rightEnd, T, succ(k), m), succ(k)) ≠ ∅
+proof
+  obtain ⟨some, outside⟩ := FiniteLevel.refining_colour with
+    graph, nonempty, decomposition, level
+  obtain ⟨colourIn, _⟩ := disconnectedColour.least with some
+  rw ← colour at outside, colourIn
+  have notK : c ≠ k
+    intro same
+    rw same at outside
+    exact outside with first
+  have below := Less.of_membership at c, succ(k) with colourIn
+  have less := Less.of_successor_upper_ne with below, notK
+  exact ⟨(membership.of_Less at c, k with *, less), outside, some⟩

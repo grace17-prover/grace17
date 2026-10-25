@@ -21,6 +21,8 @@ import {
   shadowedPropertyWarnings, transitiveImportNotes,
 } from "./machine-interface.ts";
 import { shadowedProperties } from "./workbench.ts";
+import { setSurfaceTraceCapture } from "./surface.ts";
+import { theoremDependencies } from "./export.ts";
 import { buildModuleStore, createStoreKernel, declaredModule, loadModuleStore } from "./module-store.ts";
 import { scanModule } from "./module-source-loader.ts";
 
@@ -86,6 +88,11 @@ export function runCli(args: readonly string[]): void {
       if (continuing && store) throw new Error("check --continue elaborates from source; it does not take --artifacts");
       // A store replays its foundation image instead of elaborating the prelude.
       kernel = command === "build" || store ? createStoreKernel(store ?? "build/modules", profile) : createSetTheoryKernel({ profile });
+      // The tactic trace of every successful proof serves the Workbench and
+      // the machine interface, and `check` reports a failure from them; a
+      // compile or an audit needs none, and over the whole library they are
+      // a large share of the memory.
+      if (["compile", "build", "axiom-audit", "verify-machine"].includes(command)) setSurfaceTraceCapture(kernel, false);
       // With an artifact store, every entry that is a library module under a
       // root is compiled to its artifact once and replayed afterwards; only
       // workspace files outside the roots are elaborated from source each time.
@@ -222,6 +229,22 @@ export function runCli(args: readonly string[]): void {
           if (!quiet) console.log(`foundation ${kernel.foundationReport().profile}; environment ${kernel.digest()}`);
           const sorryCount = checked.reduce((count, item) => count + item.sorries.length, 0);
           if (sorryCount) console.log(`warning: ${sorryCount} ${sorryCount === 1 ? "proof obligation was" : "proof obligations were"} admitted with sorry`);
+          // A complete proof that cites an admitted theorem, of this file or
+          // an imported module, is dependent: not an obligation of its own,
+          // but reported, with the admissions it rests on.
+          if ([...kernel.axioms.keys()].some(name => name.startsWith("sorry."))) {
+            const inherited = new Map<string, string[]>();
+            for (const item of checked) {
+              for (const name of item.theorems) {
+                const admissions = theoremDependencies(kernel, name).axioms.filter(axiom => axiom.startsWith("sorry.") && !axiom.startsWith(`sorry.${name}.`));
+                if (admissions.length) inherited.set(name, admissions);
+              }
+            }
+            if (inherited.size) {
+              const admissions = new Set([...inherited.values()].flat());
+              console.log(`note: ${inherited.size} complete ${inherited.size === 1 ? "proof depends" : "proofs depend"} on ${admissions.size} ${admissions.size === 1 ? "admission" : "admissions"} elsewhere: ${[...admissions].join(", ")}`);
+            }
+          }
           if (continued) {
             for (const item of failures) console.log(`failed ${item.file} [${item.module}]: ${failureText(item.error)}`);
             for (const item of skipped) console.log(`skipped ${item.file} [${item.module}]: imports ${item.because}`);
@@ -232,8 +255,10 @@ export function runCli(args: readonly string[]): void {
       } else if (command === "compile") {
         const theoremNames = checked.flatMap(item => item.theorems);
         if (theoremNames.length === 0) throw new KernelError("No theorems to compile");
-        const machine = compileProofModule(theoremNames.map(name => exportTheoremForMachine(kernel, name)));
-        const binary = encodeProofMachineBinary(machine);
+        // Each theorem is exported as it is appended to the tape, and the
+        // program is not kept once encoded: the verify pass decodes its own.
+        const exports = function* () { for (const name of theoremNames) yield exportTheoremForMachine(kernel, name); };
+        const binary = encodeProofMachineBinary(compileProofModule(exports()));
         const verified = verifyProofMachineBinary(kernel, binary);
         const output = resolve(option("--out") ?? "module.g17m");
         writeFileSync(output, binary);
@@ -410,7 +435,10 @@ function runMachineCommand(
 ): void {
   if (command === "serve") {
     if (positional.length) { usage(console.error); process.exitCode = 2; return; }
-    void serveMachineInterface(process.stdin, process.stdout, { pin: flag("--pin") });
+    serveMachineInterface(process.stdin, process.stdout, { pin: flag("--pin") }).catch(error => {
+      console.error(`serve stopped: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
     return;
   }
   const integer = (name: string): number | undefined => {

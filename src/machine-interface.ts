@@ -19,6 +19,7 @@ import {
   LibrarySearchWorkspace, moduleDocument, moduleNameOf, parseDeclarationHeader, parseHeaderBinders, scanSearchDeclarations,
   type SearchDeclaration,
 } from "./library-search.ts";
+import { beginDependencyReads, dependencyStampsCurrent, endDependencyReads, type DependencyStamp } from "./module-loader.ts";
 import { moduleNameFromPath, resolveImportName } from "./module-names.ts";
 import { scanModule } from "./module-source-loader.ts";
 import { projectRoot } from "./project-root.ts";
@@ -26,7 +27,7 @@ import { sha256Hex } from "./hash.ts";
 import { SurfaceError } from "./surface.ts";
 import {
   auditWorkbenchTheorem, checkWorkbenchFiles, declarationAtLine, describeWorkbenchProperty, describeWorkbenchStatement,
-  pinWorkbenchDependencies, pinnedWorkbenchDependencies, theoremRanges, workbenchFailure,
+  pinWorkbenchDependencies, pinnedWorkbenchDependencies, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
   type WorkbenchCheckResult, type WorkbenchFile, type WorkbenchFoundation, type WorkbenchState, type WorkbenchStep,
   type WorkbenchStepInfo, type WorkbenchSuggestion, type WorkbenchTheorem,
 } from "./workbench.ts";
@@ -196,10 +197,34 @@ function hasWorkspace(params: Params): boolean {
 
 // Identical workspaces checked again return the same rendering; the kernel
 // behind it is cached by checkWorkbenchFiles, this memo only skips the
-// presentation work when goal, suggest, and declaration follow a check.
-type RawCheck = { readonly ok: true; readonly result: WorkbenchCheckResult } | { readonly ok: false; readonly failure: ReturnType<typeof workbenchFailure> };
-const checkMemo = new Map<string, RawCheck>();
+// presentation work when goal, suggest, and declaration follow a check. An
+// entry remembers the dependency files its check read, with their sizes and
+// modification times: a dependency rewritten on disk since then, or created
+// where one was missing, retires the entry, so a long-running `serve` answers
+// over the files as they are now. A pinned session keeps its entries, as it
+// keeps the sources first seen.
+type FailureEnvironment = NonNullable<ReturnType<typeof workbenchFailureEnvironment>>;
+type RawCheck =
+  | { readonly ok: true; readonly result: WorkbenchCheckResult }
+  | {
+    readonly ok: false;
+    readonly failure: ReturnType<typeof workbenchFailure>;
+    /** What the failed check loaded before it stopped, computed on first use; undefined when nothing loaded. */
+    readonly environment: () => FailureEnvironment | undefined;
+  };
+interface CheckMemoEntry { readonly raw: RawCheck; readonly stamps: readonly DependencyStamp[] }
+const checkMemo = new Map<string, CheckMemoEntry>();
 const checkMemoLimit = 6;
+
+/** A memo entry still answerable: its dependency files are as its check read them. A hit moves it to the back. */
+function currentEntry(memo: Map<string, CheckMemoEntry>, key: string): RawCheck | undefined {
+  const known = memo.get(key);
+  if (!known) return undefined;
+  memo.delete(key);
+  if (!pinnedWorkbenchDependencies() && !dependencyStampsCurrent(known.stamps)) return undefined;
+  memo.set(key, known);
+  return known.raw;
+}
 
 interface CheckOptions {
   readonly kernel: boolean;
@@ -211,7 +236,7 @@ interface CheckOptions {
 
 const plainCheck: CheckOptions = { kernel: false, digest: false, dependencies: false, imports: false };
 
-const workspaceMemo = new Map<string, RawCheck>();
+const workspaceMemo = new Map<string, CheckMemoEntry>();
 
 function workspaceKey(workspace: Workspace): string {
   return sha256Hex(JSON.stringify([workspace.files, workspace.entry ?? null, workspace.profile, workspace.moduleRoots ?? null]));
@@ -224,15 +249,17 @@ function workspaceKey(workspace: Workspace): string {
  * on the same workspace answers from that check.
  */
 function rawCheckAny(workspace: Workspace): RawCheck {
-  return workspaceMemo.get(workspaceKey(workspace)) ?? rawCheck(workspace, plainCheck);
+  return currentEntry(workspaceMemo, workspaceKey(workspace)) ?? rawCheck(workspace, plainCheck);
 }
 
 function rawCheck(workspace: Workspace, options: CheckOptions): RawCheck {
   const workspaceDigest = workspaceKey(workspace);
   const key = sha256Hex(JSON.stringify([workspaceDigest, options]));
-  const known = checkMemo.get(key);
-  if (known) { checkMemo.delete(key); checkMemo.set(key, known); return known; }
+  const known = currentEntry(checkMemo, key);
+  if (known) return known;
   let raw: RawCheck;
+  let stamps: readonly DependencyStamp[] = [];
+  beginDependencyReads();
   try {
     raw = { ok: true, result: checkWorkbenchFiles(workspace.files, workspace.profile, workspace.entry, {
       includeKernelDetails: options.kernel, includeEnvironmentDigest: options.digest, includeDependencies: options.dependencies,
@@ -240,14 +267,31 @@ function rawCheck(workspace: Workspace, options: CheckOptions): RawCheck {
     }) };
   } catch (error) {
     if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
-    raw = { ok: false, failure: workbenchFailure(error, { files: workspace.files, moduleRoots: workspace.moduleRoots }) };
+    let environment: FailureEnvironment | undefined | null = null;
+    raw = {
+      ok: false,
+      failure: workbenchFailure(error, { files: workspace.files, moduleRoots: workspace.moduleRoots }),
+      environment: () => {
+        if (environment === null) environment = workbenchFailureEnvironment(error, workspace.files, { moduleRoots: workspace.moduleRoots });
+        return environment ?? undefined;
+      },
+    };
+  } finally {
+    stamps = endDependencyReads();
   }
-  checkMemo.set(key, raw);
+  const entry: CheckMemoEntry = { raw, stamps };
+  checkMemo.set(key, entry);
   while (checkMemo.size > checkMemoLimit) checkMemo.delete(checkMemo.keys().next().value!);
   workspaceMemo.delete(workspaceDigest);
-  workspaceMemo.set(workspaceDigest, raw);
+  workspaceMemo.set(workspaceDigest, entry);
   while (workspaceMemo.size > checkMemoLimit) workspaceMemo.delete(workspaceMemo.keys().next().value!);
   return raw;
+}
+
+/** The position of a failure as a result field, for an answer given from the environment a failed check loaded. */
+function checkFailedField(raw: RawCheck & { readonly ok: false }, fallbackFile: string | undefined) {
+  const failure = raw.failure;
+  return { ...(failure.file ?? fallbackFile ? { file: failure.file ?? fallbackFile } : {}), ...(failure.line !== undefined ? { line: failure.line } : {}), message: failure.message };
 }
 
 function checkFailed(raw: RawCheck & { readonly ok: false }, fallbackFile: string | undefined): MachineError {
@@ -361,7 +405,19 @@ export function shadowedPropertyWarnings(shadowed: readonly WorkbenchCheckResult
   });
 }
 
-export type MachineTheoremStatus = "proved" | "admitted" | "failed";
+/**
+ * `proved`: the kernel accepted the proof and it rests on no admission.
+ * `admitted`: the proof has a `sorry` of its own. `dependent`: the proof is
+ * complete with no `sorry` of its own, but a theorem it cites, in this file
+ * or an imported module, is admitted. `failed`: the proof did not check.
+ */
+export type MachineTheoremStatus = "proved" | "dependent" | "admitted" | "failed";
+
+/** The status of a checked theorem from the admissions it rests on: its own sorries make it admitted, inherited ones dependent. */
+export function theoremStatus(theorem: { readonly name: string; readonly sorries: readonly { readonly theorem: string }[] }): MachineTheoremStatus {
+  if (theorem.sorries.length === 0) return "proved";
+  return theorem.sorries.some(sorry => sorry.theorem === theorem.name) ? "admitted" : "dependent";
+}
 
 /** The failing declaration's partial trace, presented like a checked theorem. */
 function failedTheorem(failure: ReturnType<typeof workbenchFailure>, file: string, source: string, moduleRoots?: readonly string[]) {
@@ -406,7 +462,7 @@ function stripKernel(theorem: WorkbenchTheorem, keepKernel: boolean) {
 function completedTheorems(failure: ReturnType<typeof workbenchFailure>) {
   return (failure.completed ?? []).map(theorem => ({
     ...stripKernel(theorem, false),
-    status: (theorem.sorries.length ? "admitted" : "proved") as MachineTheoremStatus,
+    status: theoremStatus(theorem),
   }));
 }
 
@@ -455,9 +511,10 @@ export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
 } = {}) {
   const theorems = result.theorems.map(theorem => ({
     ...stripKernel(theorem, options.kernel ?? false),
-    status: (theorem.sorries.length ? "admitted" : "proved") as MachineTheoremStatus,
+    status: theoremStatus(theorem),
     ...(options.audit ? { audit: options.audit(theorem.name) } : {}),
   }));
+  const countStatus = (file: string, status: MachineTheoremStatus): number => theorems.filter(theorem => theorem.file === file && theorem.status === status).length;
   const diagnostics: MachineDiagnostic[] = [
     ...result.sorries.map(sorryDiagnostic),
     ...shadowedPropertyWarnings(result.shadowed ?? []),
@@ -472,6 +529,8 @@ export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
     ...(result.digest ? { digest: result.digest } : {}),
     files: result.files.map(file => ({
       ...file,
+      admittedTheorems: countStatus(file.name, "admitted"),
+      dependentTheorems: countStatus(file.name, "dependent"),
       ...(result.loaded?.find(item => item.file === file.name)?.module ? { module: result.loaded.find(item => item.file === file.name)!.module } : {}),
       status: reported.has(file.name) ? "checked" as const : "context" as const,
     })),
@@ -658,7 +717,9 @@ function goal(params: Params) {
   const stage = step === 0 ? undefined : theorem.steps[step - 1]!;
   const state = stage ? stage.after : theorem.initial;
   const failedStage = theorem.diagnostic !== undefined && step === theorem.steps.length && stage?.line === theorem.diagnostic.line;
-  const caption = step === 0 ? "Current goal, at theorem start"
+  const source = workspace.files.find(item => item.name === position.file)!.source;
+  const block = blockTraceLine(source, theorem);
+  const caption = step === 0 ? (block === undefined ? "Current goal, at theorem start" : `Current goal, at the start of the block on line ${block}`)
     : failedStage ? `Current position, after line ${stage!.line}` : `Current goal, after line ${stage!.line}`;
   return {
     ...base,
@@ -671,6 +732,31 @@ function goal(params: Params) {
     sorries: theorem.sorries,
     ...(theorem.diagnostic ? { diagnostic: theorem.diagnostic } : {}),
   };
+}
+
+/**
+ * The line a failed theorem's trace begins at when it is the trace of a
+ * block inside the proof rather than of the proof from its start: a
+ * failure in a `have … by …` block traces that block alone, so its initial
+ * state is the block's goal and the steps before the block are absent.
+ * Undefined when the trace starts with the proof.
+ */
+function blockTraceLine(source: string, theorem: LocatedTheorem): number | undefined {
+  if (theorem.status !== "failed" || !theorem.diagnostic) return undefined;
+  const first = theorem.steps[0];
+  const lines = source.split(/\r?\n/);
+  const last = Math.min(theorem.lineEnd, lines.length);
+  let index = theorem.lineStart;
+  while (index <= last && !/^\s*proof\s*(?:--.*)?$/.test(lines[index - 1]!)) index += 1;
+  let body: number | undefined;
+  for (index += 1; index <= last; index += 1) {
+    const text = lines[index - 1]!;
+    if (text.trim() && !/^\s*--/.test(text)) { body = index; break; }
+  }
+  if (first && body !== undefined && first.line > body) return first.line;
+  const failing = lines[theorem.diagnostic.line - 1] ?? "";
+  if (theorem.steps.length && theorem.steps.every(step => step.line === theorem.diagnostic!.line) && /\bby\b/.test(failing.replace(/--.*$/, ""))) return theorem.diagnostic.line;
+  return undefined;
 }
 
 const QUERY_TACTICS = ["exact?", "apply?", "rw?"] as const;
@@ -895,14 +981,39 @@ function ownerOfGenerated(records: readonly SearchDeclaration[], name: string): 
 type CheckedEnvironment = WorkbenchCheckResult;
 type EnvironmentSymbol = CheckedEnvironment["symbols"][number];
 
+/**
+ * An environment names resolve in: the symbols and loaded modules of a
+ * checked workspace, or of what a failed check loaded before it stopped
+ * (its dependencies and the failing file's declarations before the
+ * failure), with the lookup of a definition's generated properties.
+ */
+interface ResolvableEnvironment {
+  readonly symbols: readonly EnvironmentSymbol[];
+  readonly loaded?: CheckedEnvironment["loaded"];
+  readonly property: (name: string) => ReturnType<typeof describeWorkbenchProperty>;
+}
+
+/** The environment a checked workspace answers from, or, after a failure, the partial one with the failure's position; undefined when nothing loaded. */
+function resolvable(workspace: Workspace, raw: RawCheck): { readonly environment: ResolvableEnvironment; readonly checkFailed?: ReturnType<typeof checkFailedField> } | undefined {
+  if (raw.ok) {
+    return { environment: {
+      symbols: raw.result.symbols, loaded: raw.result.loaded,
+      property: name => describeWorkbenchProperty(workspace.files, name, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots }),
+    } };
+  }
+  const loaded = raw.environment();
+  if (!loaded) return undefined;
+  return { environment: { symbols: loaded.symbols, loaded: loaded.loaded, property: loaded.property }, checkFailed: checkFailedField(raw, workspace.activeFile) };
+}
+
 /** The module that declares a full name in a checked environment: the longest loaded module that prefixes it. */
-function moduleOfSymbol(environment: CheckedEnvironment, records: readonly SearchDeclaration[], name: string): string | undefined {
+function moduleOfSymbol(environment: ResolvableEnvironment, records: readonly SearchDeclaration[], name: string): string | undefined {
   const modules = (environment.loaded ?? []).flatMap(item => item.module ? [item.module] : []);
   const prefix = modules.filter(module => name === module || name.startsWith(`${module}.`)).sort((left, right) => right.length - left.length)[0];
   return prefix ?? records.find(record => qualifiedName(record) === name)?.module;
 }
 
-function ambiguousSymbols(environment: CheckedEnvironment, records: readonly SearchDeclaration[], name: string, candidates: readonly EnvironmentSymbol[], what = "declarations"): MachineError {
+function ambiguousSymbols(environment: ResolvableEnvironment, records: readonly SearchDeclaration[], name: string, candidates: readonly EnvironmentSymbol[], what = "declarations"): MachineError {
   const declarations = candidates.map(symbol => {
     const module = moduleOfSymbol(environment, records, symbol.name);
     return { name: symbol.name, ...(module ? { module } : {}), ...(symbol.file ? { file: symbol.file } : {}), ...(symbol.line ? { line: symbol.line } : {}) };
@@ -936,11 +1047,11 @@ function describeSymbol(symbol: EnvironmentSymbol, files: readonly WorkbenchFile
  * declared symbol, or a generated fact of a definition's kernel record.
  * Undefined when the environment has no such name; an error when several.
  */
-function resolveInEnvironment(workspace: Workspace, environment: CheckedEnvironment, name: string, files: readonly WorkbenchFile[], records: readonly SearchDeclaration[], contextModule: string | undefined) {
+function resolveInEnvironment(workspace: Workspace, environment: ResolvableEnvironment, name: string, files: readonly WorkbenchFile[], records: readonly SearchDeclaration[], contextModule: string | undefined) {
   const symbols = environment.symbols;
   const symbol = resolveSymbolCandidate(symbols, name, { module: contextModule, file: workspace.activeFile });
   const generated = (wanted: string) => {
-    const property = describeWorkbenchProperty(workspace.files, wanted, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots });
+    const property = environment.property(wanted);
     if ("candidates" in property && property.candidates.length > 1) throw new MachineError("ambiguous_name", `${wanted} names several generated facts`, { candidates: property.candidates });
     if (!("name" in property)) return undefined;
     const owner = resolveSymbolCandidate(symbols, property.definition) ?? resolveSymbolCandidate(symbols, property.definition.replace(/\.inductive$/, ""));
@@ -983,10 +1094,11 @@ function declaration(params: Params) {
     if (!prefix) throw new MachineError("unknown_declaration", `no library declaration named ${name}`);
     const workspace = moduleWorkspace(params, prefix);
     const raw = rawCheckAny(workspace);
-    if (!raw.ok) throw checkFailed(raw, workspace.activeFile);
-    const resolved = resolveInEnvironment(workspace, raw.result, name, files, records, prefix);
+    const loaded = resolvable(workspace, raw);
+    if (!loaded) throw checkFailed(raw as RawCheck & { readonly ok: false }, workspace.activeFile);
+    const resolved = resolveInEnvironment(workspace, loaded.environment, name, files, records, prefix);
     if (!resolved) throw new MachineError("unknown_declaration", `no declaration named ${name}; its prefix is declared in ${prefix}`, { import: prefix });
-    return resolved;
+    return partialAnswer(resolved, loaded.checkFailed);
   }
   const workspace: Workspace = hasWorkspace(params) ? {
     files, activeFile: stringParam(params, "activeFile"),
@@ -994,19 +1106,29 @@ function declaration(params: Params) {
     profile: foundationParam(params), moduleRoots: rootsParam(params),
   } : moduleWorkspace(params, module);
   const raw = rawCheckAny(workspace);
-  if (!raw.ok) throw checkFailed(raw, workspace.activeFile);
+  // A workspace whose check failed still answers from what loaded: its
+  // dependencies and the declarations before the failure. The answer says
+  // where the check stopped, so a name declared after that point is known
+  // to be missing for that reason.
+  const loaded = resolvable(workspace, raw);
+  if (!loaded) throw checkFailed(raw as RawCheck & { readonly ok: false }, workspace.activeFile);
   // A short name resolves as the module's own code resolves it: the
   // module's declarations before those its imports reach.
   const active = workspace.files.find(item => item.name === workspace.activeFile);
   const contextModule = module ?? (active ? moduleNameOf(active.source, active.name) : undefined);
-  const resolved = resolveInEnvironment(workspace, raw.result, name, files, records, contextModule);
-  if (resolved) return resolved;
+  const resolved = resolveInEnvironment(workspace, loaded.environment, name, files, records, contextModule);
+  if (resolved) return partialAnswer(resolved, loaded.checkFailed);
   // Not in this environment: say which module declares it, so the caller
   // can import it, and give the source form meanwhile.
   const outside = matchingRecords(records, name);
   if (outside.length === 1) {
     const record = outside[0]!;
-    return { ...sourceDeclaration(record), inScope: false, import: record.module, message: `${name} is not in this environment; import ${record.module}` };
+    const failed = loaded.checkFailed;
+    const afterFailure = failed !== undefined && record.file === failed.file && (failed.line === undefined || record.line >= failed.line);
+    const where = afterFailure
+      ? `${name} is declared after the failure at line ${failed.line ?? "?"} of ${record.file}; fix that first`
+      : `${name} is not in this environment; import ${record.module}`;
+    return partialAnswer({ ...sourceDeclaration(record), inScope: false, import: record.module, message: where }, loaded.checkFailed);
   }
   if (outside.length > 1) throw ambiguous(name, outside);
   // A generated name of a definition outside the environment: resolve it
@@ -1014,10 +1136,15 @@ function declaration(params: Params) {
   const hint = moduleOfPrefix(records, name);
   if (!hint) throw new MachineError("unknown_declaration", `no declaration named ${name} in this environment`);
   const elsewhere = moduleWorkspace(params, hint);
-  const there = rawCheckAny(elsewhere);
-  const found = there.ok ? resolveInEnvironment(elsewhere, there.result, name, [], records, hint) : undefined;
-  if (found) return { ...found, inScope: false, import: hint, message: `${name} is not in this environment; import ${hint}` };
+  const there = resolvable(elsewhere, rawCheckAny(elsewhere));
+  const found = there ? resolveInEnvironment(elsewhere, there.environment, name, [], records, hint) : undefined;
+  if (found) return partialAnswer({ ...found, inScope: false, import: hint, message: `${name} is not in this environment; import ${hint}` }, loaded.checkFailed ?? there?.checkFailed);
   throw new MachineError("unknown_declaration", `no declaration named ${name} in this environment; its prefix is declared in ${hint}`, { import: hint });
+}
+
+/** An answer given from a partial environment carries `partial: true` and where the check failed; one from a checked environment is unchanged. */
+function partialAnswer<T extends object>(answer: T, checkFailed: ReturnType<typeof checkFailedField> | undefined) {
+  return checkFailed ? { ...answer, partial: true as const, checkFailed } : answer;
 }
 
 /**
@@ -1066,13 +1193,11 @@ function signature(params: Params) {
   if (!booleanParam(params, "elaborate", false)) return { ...base, elaborated: false };
   const workspace: Workspace = hasWorkspace(params) ? workspaceParam(params) : moduleWorkspace(params, module ?? record.module);
   const raw = rawCheckAny(workspace);
-  if (!raw.ok) {
-    const failure = raw.failure;
-    return { ...base, elaborated: false, checkFailed: { file: failure.file ?? workspace.activeFile, line: failure.line, message: failure.message } };
-  }
-  const symbol = resolveSymbolCandidate(raw.result.symbols, base.name) ?? resolveSymbolCandidate(raw.result.symbols, record.name);
+  const loaded = resolvable(workspace, raw);
+  if (!loaded) return { ...base, elaborated: false, checkFailed: checkFailedField(raw as RawCheck & { readonly ok: false }, workspace.activeFile) };
+  const symbol = resolveSymbolCandidate(loaded.environment.symbols, base.name) ?? resolveSymbolCandidate(loaded.environment.symbols, record.name);
   const statement = symbol && "statement" in symbol ? symbol.statement : undefined;
-  return { ...base, elaborated: statement !== undefined, ...(statement ? { statement, fullName: symbol!.name } : {}) };
+  return partialAnswer({ ...base, elaborated: statement !== undefined, ...(statement ? { statement, fullName: symbol!.name } : {}) }, loaded.checkFailed);
 }
 
 /**
@@ -1487,18 +1612,61 @@ export interface ServeOptions {
   readonly pin?: boolean;
 }
 
-/** Serve the protocol: one JSON request per input line, one JSON response per output line. */
+/** A response line; a result that cannot be serialized as JSON becomes an error response instead of a failed write. */
+function responseLine(response: MachineResponse): string {
+  try {
+    return `${JSON.stringify(response, (_key, value: unknown) => typeof value === "bigint" ? value.toString() : value)}\n`;
+  } catch (error) {
+    const fallback: MachineResponse = {
+      id: response.id, version: MACHINE_PROTOCOL_VERSION, ok: false, ...("method" in response && response.method ? { method: response.method } : {}),
+      error: { code: "internal", message: `the result could not be serialized: ${error instanceof Error ? error.message : String(error)}` },
+    };
+    return `${JSON.stringify(fallback)}\n`;
+  }
+}
+
+/**
+ * Serve the protocol: one JSON request per input line, one JSON response per
+ * output line. No request ends the session: a malformed line, a method that
+ * throws, a result that cannot be serialized, and an error raised outside
+ * any handler while the session runs are each answered with an error object,
+ * and the next line is read. The session ends with its input, or when the
+ * output can no longer be written.
+ */
 export async function serveMachineInterface(input: NodeJS.ReadableStream, output: NodeJS.WritableStream, options: ServeOptions = {}): Promise<void> {
   if (options.pin) pinWorkbenchDependencies(true);
+  const version = MACHINE_PROTOCOL_VERSION;
   const lines = createInterface({ input, crlfDelay: Infinity });
-  for await (const line of lines) {
-    if (!line.trim()) continue;
-    let request: unknown;
-    try { request = JSON.parse(line); }
-    catch (error) {
-      output.write(`${JSON.stringify({ id: null, version: MACHINE_PROTOCOL_VERSION, ok: false, error: { code: "invalid_request", message: `malformed JSON: ${error instanceof Error ? error.message : String(error)}` } })}\n`);
-      continue;
+  const respond = (response: MachineResponse): void => {
+    try { output.write(responseLine(response)); } catch { lines.close(); }
+  };
+  const onUnexpected = (error: unknown): void => {
+    respond({ id: null, version, ok: false, error: { code: "internal", message: `unexpected error outside a request: ${error instanceof Error ? error.message : String(error)}` } });
+  };
+  const onOutputError = (): void => lines.close();
+  process.on("uncaughtException", onUnexpected);
+  process.on("unhandledRejection", onUnexpected);
+  output.on("error", onOutputError);
+  try {
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      let request: unknown;
+      try { request = JSON.parse(line); }
+      catch (error) {
+        respond({ id: null, version, ok: false, error: { code: "invalid_request", message: `malformed JSON: ${error instanceof Error ? error.message : String(error)}` } });
+        continue;
+      }
+      let response: MachineResponse;
+      try { response = handleMachineRequest(request); }
+      catch (error) {
+        const id = request !== null && typeof request === "object" && !Array.isArray(request) ? (request as Partial<MachineRequest>).id : undefined;
+        response = { id: typeof id === "string" || typeof id === "number" ? id : null, version, ok: false, error: machineErrorBody(error) };
+      }
+      respond(response);
     }
-    output.write(`${JSON.stringify(handleMachineRequest(request))}\n`);
+  } finally {
+    process.off("uncaughtException", onUnexpected);
+    process.off("unhandledRejection", onUnexpected);
+    output.off("error", onOutputError);
   }
 }

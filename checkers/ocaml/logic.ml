@@ -18,6 +18,26 @@ let unique xs =
       Hashtbl.add h x () )
     xs
 
+(* The generic hash looks at only the first few elements of a list, so the
+   arena's vectors, which share long prefixes (contexts open with the same
+   hypotheses), would collide into one bucket and the duplicate check would
+   run quadratically. Hash every word instead. *)
+module Vector_table = Hashtbl.Make (struct
+  type t = int list
+
+  let equal = List.equal Int.equal
+
+  let hash xs = List.fold_left (fun h x -> (h * 1000003) lxor x) 0x811c9dc5 xs
+end)
+
+let unique_vectors xs =
+  let h = Vector_table.create 4096 in
+  List.iter
+    (fun x ->
+      require (not (Vector_table.mem h x)) "duplicate entry" ;
+      Vector_table.add h x () )
+    xs
+
 let natural s =
   String.length s > 0
   && (s = "0" || s.[0] <> '0')
@@ -35,6 +55,39 @@ type formula =
   | Or of formula * formula
   | Iff of formula * formula
   | Ex of formula
+
+(* Structural equality with a physical shortcut at every node. Formulas and
+   terms are shared from the program's tables, so most comparisons succeed on
+   identity; the polymorphic (=) walks both structures in full. *)
+let rec list_equal eq xs ys =
+  match (xs, ys) with
+  | [], [] -> true
+  | x :: xs, y :: ys -> eq x y && list_equal eq xs ys
+  | _ -> false
+
+let rec term_equal a b =
+  a == b
+  ||
+  match (a, b) with
+  | V x, V y -> String.equal x y
+  | B i, B j -> Int.equal i j
+  | N m, N n -> Z.equal m n
+  | App (f, xs), App (g, ys) -> String.equal f g && list_equal term_equal xs ys
+  | _ -> false
+
+let rec formula_equal a b =
+  a == b
+  ||
+  match (a, b) with
+  | False, False -> true
+  | Eq (s, t), Eq (u, v) -> term_equal s u && term_equal t v
+  | Pred (p, xs), Pred (q, ys) -> String.equal p q && list_equal term_equal xs ys
+  | Imp (a, b), Imp (c, d) | And (a, b), And (c, d) | Or (a, b), Or (c, d) | Iff (a, b), Iff (c, d) ->
+      formula_equal a c && formula_equal b d
+  | All a, All b | Ex a, Ex b -> formula_equal a b
+  | _ -> false
+
+let context_equal = list_equal formula_equal
 
 let app name args =
   match (name, args) with

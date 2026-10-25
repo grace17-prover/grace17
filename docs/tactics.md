@@ -40,11 +40,11 @@ ends with the natural-deduction rule schema its proof term reduces to, with
 |---|---|
 | [The first moves](#the-first-moves) | [`intro h`](#intro-h), [`intros x hx y hy`](#intros-x-hx-y-hy), [`exact fact`](#exact-fact), [`show P := fact`](#show-p-fact), [`assumption`](#assumption), [`rfl  /  reflexivity`](#rfl-reflexivity), [`apply fact`](#apply-fact), [`have h := fact with premises`](#have-h-fact-with-premises), [`fact with ⟨a, b⟩`](#fact-with-a-b), [`fact at terms with *`](#fact-at-terms-with), [`fact at terms with *{n}`](#fact-at-terms-with-n), [`have h : P := fact with *`](#have-h-p-fact-with), [`have h : P`](#have-h-p), [`have h : P by tactic`](#have-h-p-by-tactic), [`calc`](#calc), [`specialize h with x, hx`](#specialize-h-with-x-hx) |
 | [Logic and witnesses](#logic-and-witnesses) | [`constructor  /  split`](#constructor-split), [`refine ⟨a, ha, b, hb, _⟩`](#refine-a-ha-b-hb), [`left  /  right`](#left-right), [`witness t  /  use t`](#witness-t-use-t), [`rcases h with ⟨h₁, h₂, h₃⟩`](#rcases-h-with-h1-h2-h3), [`obtain ⟨x, hx, rfl⟩ := fact`](#obtain-x-hx-rfl-fact), [`cases h with hp \| hq`](#cases-h-with-hp-hq), [`rcases h with hp \| hq \| hr`](#rcases-h-with-hp-hq-hr), [`obtain ⟨x, hx, y, hy⟩ := fact`](#obtain-x-hx-y-hy-fact), [`exfalso`](#exfalso), [`by_contra h`](#bycontra-h), [`by_cases h : P`](#bycases-h-p), [`contradiction`](#contradiction), [`tauto`](#tauto) |
-| [Changing the view](#changing-the-view) | [`symm  /  symm at h`](#symm-symm-at-h), [`rw h  /  rewrite h  /  rw ← h`](#rw-h-rewrite-h-rw-h), [`rw [h₁, h₂] / rwa h`](#rw-h1-h2-rwa-h), [`rw under h at fact`](#rw-under-h-at-fact), [`simp [rules]`](#simp-rules), [`simpa [rules] using fact`](#simpa-rules-using-fact), [`unfold name`](#unfold-name), [`ext x`](#ext-x), [`clear h`](#clear-h), [`rename h => betterName`](#rename-h-bettername), [`revert h`](#revert-h) |
+| [Changing the view](#changing-the-view) | [`symm  /  symm at h`](#symm-symm-at-h), [`rw h  /  rewrite h  /  rw ← h`](#rw-h-rewrite-h-rw-h), [`rw [h₁, h₂] / rwa h`](#rw-h1-h2-rwa-h), [`rw under h at fact`](#rw-under-h-at-fact), [`simp [rules]`](#simp-rules), [`simpa [rules] using fact`](#simpa-rules-using-fact), [`unfold name`](#unfold-name), [`ext x`](#ext-x), [`clear h`](#clear-h), [`rename h => betterName`](#rename-h-bettername), [`revert h`](#revert-h), [`set x := t with h`](#set-x-t-with-h) |
 | [Search and automation](#search-and-automation) | [`exact?`](#exact), [`apply?`](#apply), [`rw?`](#rw), [`settle with rules`](#settle-with-rules), [`typecheck`](#typecheck), [`synthesize`](#synthesize), [`cc  /  congruence`](#cc-congruence), [`decide`](#decide), [`compute`](#compute) |
 | [Arithmetic](#arithmetic) | [`ring`](#ring), [`ring [h₁, h₂]`](#ring-h1-h2), [`ring_nf`](#ringnf), [`linear_combination 2 * h1 - h2`](#linearcombination-2-h1---h2), [`arith`](#arith), [`linarith`](#linarith) |
 | [Shaping a development](#shaping-a-development) | [`sorry`](#sorry), [`. tactic`](#tactic), [`tactic1; . tactic2`](#tactic1-tactic2), [`tactic solve(rule) := simp [$rule]`](#tactic-solverule-simp-rule) |
-| [Induction](#induction) | [`induction n [generalizing s ...] [with]`](#induction-n-generalizing-s-with), [`induction x using membership`](#induction-x-using-membership), [`induction x over A ordered by r certified by founded`](#induction-x-over-a-ordered-by-r-certified-by-founded) |
+| [Induction](#induction) | [`induction n [generalizing s ...] [with]`](#induction-n-generalizing-s-with), [`induction finite with G a`](#induction-finite-with-g-a), [`induction x using membership`](#induction-x-using-membership), [`induction x over A ordered by r certified by founded`](#induction-x-over-a-ordered-by-r-certified-by-founded) |
 
 ## The first moves
 
@@ -52,7 +52,7 @@ Most proofs are a handful of moves. Read the goal, expose its outer shape, and t
 
 ### `intro h`
 
-**Introduce an implication premise or quantified variable.** For a goal P → Q, intro h extends Γ with the named local hypothesis h : P and leaves Q to prove. For a goal ∀ x, P(x), intro x chooses a fresh arbitrary x and leaves P(x). Use intro x at h to specialize the leading ∀ in a local fact.
+**Introduce an implication premise or quantified variable.** For a goal P → Q, intro h extends Γ with the named local hypothesis h : P and leaves Q to prove. For a goal ∀ x, P(x), intro x chooses a fresh arbitrary x and leaves P(x). A goal stated through a defined predicate, or a membership t ∈ f(…) in a set-builder definition, whose body is an implication or a ∀ is opened one layer first. Use intro x at h to specialize the leading ∀ in a local fact.
 
 For a bounded universal goal `∀ q ∈ ℚ, P(q)`, `intro q` introduces the set and the next `intro` names its membership hypothesis; `intros q qRational` does both.
 
@@ -102,13 +102,15 @@ x and y are fresh; hx and hy are discharged
 
 ### `exact fact`
 
-**Finish with a fact whose statement is exactly the current goal.** The fact may be a local hypothesis, a theorem, or a theorem applied to arguments and premises. Carrier guards such as Nat(n + m) between or after the supplied premises are discharged on their own, by soft typing or from the context. Write theorem at terms with premises to consume leading ∀ binders and implications immediately. Equivalences expose .forward and .backward directions. For source theorems the at list is optional: exact theorem, exact theorem with h1, h2, and exact theorem with * infer the arguments from the goal, from the named premises in any order, and from uniquely matching local facts, including generated Nat and dependent List(A) guards. A bare exact theorem then discharges every requirement from local facts. Matching is structural, with a 2048-match limit, no unfolding or backtracking; an ambiguous match asks for explicit arguments. A local or derived predicate fact such as subset : A ⊆ B takes arguments through its definition (subset with x, hx), and evidence standing where a binder is expected instantiates the leading binders from the premise it matches. exact ⟨a, b⟩ is refine with every component supplied.
+**Finish with a fact whose statement is exactly the current goal.** The fact may be a local hypothesis, a theorem, or a theorem applied to arguments and premises. Carrier guards such as Nat(n + m) between or after the supplied premises are discharged on their own, by soft typing or from the context. Write theorem at terms with premises to consume leading ∀ binders and implications immediately. Equivalences expose .forward and .backward directions. For source theorems the at list is optional: exact theorem, exact theorem with h1, h2, and exact theorem with * infer the arguments from the goal, from the named premises in any order, and from uniquely matching local facts, including generated Nat and dependent List(A) guards. A bare exact theorem then discharges every requirement from local facts. The conclusion meets the goal structurally or through one layer of a predicate definition on either side, beneath the connectives included, so exact pair.member with h closes relates(w, x, y) from a conclusion (x, y) ∈ w and an annotated have h : t ∈ ℕ := thm with h takes a conclusion Nat(t); the parameters the goal fixes are known before a parenthesised entry is read. A bare rfl entry is the equation requirement whose open side the other fixes, so thm with finite, rfl reads cardinality(F) = n as n := cardinality(F). A theorem stated by a ∀, named bare or in parentheses, is instantiated against the requirement it fills, its own binders renamed apart from the names in scope; it waits for the entries that fix the parameters its requirement mentions, so the order of the list does not matter, and a bare theorem with requires clauses has them discharged from the context. A parenthesised application takes projections: (thm with h).left, .right, .forward, .backward. Matching is structural, with a 2048-match limit, no unfolding or backtracking; an ambiguous match asks for explicit arguments. A local or derived predicate fact such as subset : A ⊆ B takes arguments through its definition (subset with x, hx), and evidence standing where a binder is expected instantiates the leading binders from the premise it matches. exact ⟨a, b⟩ is refine with every component supplied.
 
 A proof expression may consume arguments immediately: mathematical terms after `at`, then checked premise facts after `with`, as in `exact transitive at x, y, z with hxy, hyz`. The same expression works after `have` and `apply`.
 
 For a source theorem, `exact theorem with *`, `show P := theorem with *`, and `have h := theorem with *` can omit `at`: the conclusion is matched against the goal when there is one, then uniquely matching local premises determine the remaining parameters. Matching is structural, indexed by formula head, and capped at 2,048 attempts; it does not unfold definitions, backchain, or choose between ambiguous substitutions. Typed parameters participate through their generated guards, and every guard still needs checked evidence. An explicit `at` list is the fallback.
 
 `exact theorem.forward with *` and `exact theorem.backward with *` infer parameters from the selected conclusion and unique local premise matches, including the selected antecedent, which still requires evidence. An implication or negation inside the selected conclusion remains intact.
+
+The conclusion meets the goal structurally or through one layer of a predicate definition on either side, beneath the connectives included: `exact pair.member with h` closes `relates(w, x, y)` from a conclusion `(x, y) ∈ w`, `have h : t ∈ ℕ := thm with h` takes a conclusion `Nat(t)`, and `apply` bridges a conclusion the same way once its premises are proved. A bare `rfl` entry is the equation requirement whose open side the other fixes, `thm with finite, rfl` reading `cardinality(F) = n` as `n := cardinality(F)`; a theorem stated by a `∀`, named bare or in parentheses, is instantiated against the requirement it fills; and a projection `h.right.left` opens the predicate definition of `h`. In an unannotated `have`, a parameter that occurs only in the conclusion is fixed by nothing: the error names it and offers the stated fact `have h : … := thm with facts` or an `at` list with holes, `thm at leftEnd, rightEnd, _, _ with edge`, where `_` leaves a parameter to the premises.
 
 ```g17
 -- f : P → Q, hP : P, goal: Q
@@ -185,7 +187,7 @@ Rule schema:
 
 ### `apply fact`
 
-**Use a theorem or local fact backwards from its conclusion.** For a declared theorem, bare apply infers parameters from the goal and uniquely matching local premises. Carrier guards it can discharge are discharged, and so are the section hypotheses in scope among the declared premises, as with * discharges them, so a section theorem applied under its own hypotheses opens only the goals they leave; the remaining premises become goals in their written order, from the first that is not a section hypothesis. The equivalence directions work the same way. A conclusion equal to the goal stays as it is, implication included. Ambiguous parameters need explicit at arguments, and anything supplied with with is checked first.
+**Use a theorem or local fact backwards from its conclusion.** For a declared theorem, bare apply infers parameters from the goal and uniquely matching local premises. Carrier guards it can discharge are discharged, and so are the section hypotheses in scope among the declared premises, as with * discharges them, so a section theorem applied under its own hypotheses opens only the goals they leave; the remaining premises become goals in their written order, from the first that is not a section hypothesis. The equivalence directions work the same way. A conclusion equal to the goal stays as it is, implication included; a conclusion that meets the goal through one layer of a predicate definition, (x, y) ∈ w for relates(w, x, y), is bridged once the premises are proved. Ambiguous parameters need explicit at arguments, and anything supplied with with is checked first.
 
 `apply theorem at args` makes the generated carrier guards the first goals, before the declared premises. When a premise needs its own derivation, prefer `have h : P` followed by `exact theorem at args with *`.
 
@@ -207,9 +209,11 @@ Rule schema:
 
 ### `have h := fact with premises`
 
-**Apply an available fact and give the result a local name.** The optional at list supplies mathematical terms. For source theorems, omit at and name local premises in any order: parameters are inferred by matching each premise against the requirement it fits, and in exact, show, and apply also by matching the conclusion against the goal. For example: have image := IsRingHom.image_comm_ring with source, target, hom. Matching is structural with no unfolding; a conflict or an undetermined parameter is an error asking for an at list. A trailing * fills the remaining premises after inference. Entries that are terms rather than local facts are read as quantified arguments. Omit with to keep an unspecialized fact.
+**Apply an available fact and give the result a local name.** The optional at list supplies mathematical terms. For source theorems, omit at and name local premises in any order: parameters are inferred by matching each premise against the requirement it fits, and in exact, show, and apply also by matching the conclusion against the goal. For example: have image := IsRingHom.image_comm_ring with source, target, hom. Matching is structural, and a premise stated through a defined predicate meets a requirement stated by its body, or the other way round, through one layer of the definition, so relates(w, x, y) fills the requirement (x, y) ∈ w, and a membership t ∈ f(…) in a set-builder definition opens through its membership law the same way; a numeral matches the constructor term of the same value; a parenthesised application among the premises is read first when its facts fix its parameters, and otherwise after the other entries, against the requirement it fills, so that its statement fixes the remaining parameters; a theorem stated by a ∀ waits the same way, so the order of the list does not matter. A conflict or an undetermined parameter is an error asking for an at list; a parameter that occurs only in the conclusion is named, with the stated form have h : … := thm with facts and an at list with holes, thm at G, _, _ with member, where _ leaves a parameter to the premises. A trailing * fills the remaining premises after inference. Entries that are terms rather than local facts are read as quantified arguments. Omit with to keep an unspecialized fact.
 
 Use `specialize` when the unspecialized fact is already on the board and you want to replace it; use `have ... with` when the applied result is the fact you want from the start.
+
+A premise meets its requirement through one layer of a predicate definition on either side, so `xy : relates(w, x, y)` fills `(x, y) ∈ w` without `unfold relates at xy`; a numeral such as `0` matches the constructor `zero` an induction case substitutes; and a parenthesised application, `thm with (inner with bound), h`, is read against the requirement it fills once the other entries have fixed what they can, so its statement can fix a parameter no other entry mentions. A theorem stated by a `∀` waits the same way, so the order of the list does not matter: `Joined.monotone with union2.subset_left, joined` reads `joined` first, and the waiting entries are read again until none can be placed; its own binders are renamed apart from the names in scope, and a bare theorem with `requires` clauses has them discharged from the context before its conclusion fills the requirement. A parenthesised application takes projections, `(thm with h).left`, `.right`, `.forward`, and `.backward`, and a trailing `with` or `at` list applies the projected fact.
 
 `have h := fact` without `with` binds an available fact unchanged. This is separate from `have h : P`, which opens a proof block for a new proposition.
 
@@ -230,7 +234,7 @@ the at and with arguments first use ∀E and →E to obtain P
 
 ### `fact with ⟨a, b⟩`
 
-**Supply a conjunction or existential premise in place.** An anonymous constructor is a proof expression wherever its proposition is known: in a with list, after exact or show, in an annotated have, and as a refine component. Nested constructors go through predicate definitions. When a requirement is a conjunction and the with list supplies its conjuncts in order, as difference.membership.backward with inSpace, notInjective does for x ∈ A ∧ x ∉ B, the entries are combined as ⟨inSpace, notInjective⟩ would be; a genuine mismatch keeps its message. Parentheses group a multi-premise application inside refine ⟨…⟩, where commas separate components. A local fact that is a transparent predicate application, such as subset : A ⊆ B, applies to arguments through its definition without unfolding it first.
+**Supply a conjunction or existential premise in place.** An anonymous constructor is a proof expression wherever its proposition is known: in a with list, after exact or show, in an annotated have, and as a refine component. Nested constructors go through predicate definitions. In an unannotated have, the components fix the parameters of the applied theorem as named entries do: have m := lemma.backward with ⟨hJ, extendsJ⟩ matches hJ and extendsJ against the conjuncts of the requirement, so no at list is needed and no context fact of the same shape can choose another instance. When a requirement is a conjunction and the with list supplies its conjuncts in order, as difference.membership.backward with inSpace, notInjective does for x ∈ A ∧ x ∉ B, the entries are combined as ⟨inSpace, notInjective⟩ would be; a genuine mismatch keeps its message. Parentheses group a multi-premise application inside refine ⟨…⟩, where commas separate components. A local fact that is a transparent predicate application, such as subset : A ⊆ B, applies to arguments through its definition without unfolding it first. When the definition is not a ∀ or an implication, Disjoint(X, Y) defined as X ∩ Y = ∅, and the library states a law <Predicate>.iff whose right side is one, Disjoint.iff : Disjoint(A, B) ↔ ∀ x ∈ A, ¬(x ∈ B), the fact applies through that law instead, so disjoint with v, member, vInY proves ⊥; the law is tried only when the direct application has no argument to take.
 
 ```g17
 -- ih : ∀ y, y ∈ H ∧ R(y, x) → P(y), hy : y ∈ H, earlier : R(y, x)
@@ -427,13 +431,15 @@ For P ↔ Q, the premises are Γ ⊢ P → Q and Γ ⊢ Q → P
 
 ### `refine ⟨a, ha, b, hb, _⟩`
 
-**Build nested witnesses and conjunctions in one pattern.** Grace17 follows transparent predicate definitions, ∃, ∧, and ↔ recursively. Terms fill existential witnesses, checked facts fill proposition leaves, and _ leaves a focused goal. Nested patterns such as ⟨⟨h.right.left, ?_⟩, ?_⟩ preserve grouping; ?_ leaves a proposition as a focused goal, and at a conjunction with entries still to come it stands for the first conjunct, so ⟨a, ha, ?_, ?_, hc⟩ fills A ∧ B ∧ C. Local facts support checked .left/.right projections, including nested paths. A fact proving a whole nested conjunction may occupy one entry. Each proof component supplies its expected proposition for bounded with * inference. A final existential component can be a complete proof. The elaborator emits each introduction separately.
+**Build nested witnesses and conjunctions in one pattern.** Grace17 follows transparent predicate definitions, the membership law of a set-builder definition at a goal t ∈ f(…), ∃, ∧, and ↔ recursively. Terms fill existential witnesses, checked facts fill proposition leaves, and _ leaves a focused goal. Nested patterns such as ⟨⟨h.right.left, ?_⟩, ?_⟩ preserve grouping; ?_ leaves a proposition as a focused goal, and at a conjunction with entries still to come it stands for the first conjunct, so ⟨a, ha, ?_, ?_, hc⟩ fills A ∧ B ∧ C. Local facts support checked .left/.right projections, including nested paths. A fact proving a whole nested conjunction may occupy one entry. Each proof component supplies its expected proposition for bounded with * inference. A final existential component can be a complete proof, a nested constructor with entries after it fills the first conjunct, a final _ at a conjunction leaves the whole of it, and a predicate met inside the constructor opens through its definition. The elaborator emits each introduction separately.
 
 Nested patterns such as `⟨⟨h.right.left, ?_⟩, ?_⟩` preserve grouping. `_` is a flattened leaf hole; `?_` leaves an entire proposition as a focused goal, including a conjunction or an existential whose witness is supplied later. `?_` is a hole for a proof; a term witness must be written out. Every hole must be discharged before QED.
 
 Local conjunction facts support `.left` and `.right`, nested as needed, in proof expressions, in `with` lists, and as rules for `rw`, `simp`, `simpa`, and `settle`. They require an explicit conjunction: unfold a named predicate first. A dotted path rooted in a local fact is resolved locally before global names and never searches the context.
 
 The final component may be an existing existential proof: `refine ⟨xs, list, spans, table⟩` replaces a final hole followed by `exact table`. Earlier existential entries must be written witnesses.
+
+A nested constructor with entries after it fills the first conjunct, so `⟨classes(X), ⟨X, member, rfl⟩, member⟩` proves `∃ C, (∃ Y, Y ∈ A ∧ C = classes(Y)) ∧ X ∈ A` with any term as the witness; a final `_` at a conjunction leaves the whole of it, so `refine ⟨hp, _⟩` into a set-builder whose condition is a conjunction leaves that conjunction as one goal; and a predicate met inside the constructor opens through its definition, its generated guards discharged from the context, as many layers as the shape demands: `exact ⟨A, h, h⟩` proves `Wrapped(A)` defined as `∃ B, Guarded(A, B)` with `Guarded` a conjunction, with no `unfold` first. An entry that proves the predicate itself, directly or through a definition, is taken as it stands.
 
 ```g17
 -- goal: ∃ x, x ∈ A ∧ ∃ y, y ∈ B ∧ R(x, y)
@@ -491,11 +497,15 @@ Rule schema:
 
 ### `rcases h with ⟨h₁, h₂, h₃⟩`
 
-**Open nested conjunctions or existentials in one checked step.** The pattern follows the logical structure recursively. A flat pattern descends through right-associated ∧ and ∃, nested brackets group entries, and _ ignores one. Parentheses may replace angle brackets.
+**Open nested conjunctions or existentials in one checked step.** The pattern follows the logical structure recursively. A flat pattern descends through right-associated ∧ and ∃, nested brackets group entries, and _ ignores one. Parentheses may replace angle brackets. A component may be a choice of alternatives, same | path: the disjunction that component binds is split once the rest of the pattern is opened, one branch per alternative, and each alternative is itself a pattern, so ⟨_, rfl | ⟨z, hz, rfl⟩⟩ opens three branches. A projection such as partition.right.left is a source too, opened through the predicate's definition, and so is an application, (thm with h) or the bare thm with h before the pattern's with. A fact t ∈ f(…) stated by membership in a set-builder definition is taken apart through its membership law, one layer, as a defined predicate is through its definition; the same law serves .left and .right projections of the fact.
 
 Flat entries follow the usual right-associated shape of `∧` and `∃`; nested brackets make a subpattern explicit; `_` discards an entry. The elaborator still emits each conjunction or existential elimination separately.
 
-Destructure a transparent predicate directly: `rcases h with ⟨…⟩` follows its definition, so an `unfold P at h` before it is unnecessary.
+Destructure a transparent predicate directly: `rcases h with ⟨…⟩` follows its definition, so an `unfold P at h` before it is unnecessary; a projection `h.right.left` through the definition is a source too. A fact `member : a ∈ pathReached(…)` stated by membership in a set-builder definition is taken apart through its membership law the same way, one layer, so `rcases member with ⟨vertex, same | ⟨P, subset, parity⟩⟩` needs no `unfold pathReached at member`; `member.left` and `member.right` project through the law too.
+
+A component may be a choice of alternatives, `⟨_, same | path⟩`: the disjunction that component binds is split once the rest of the pattern is opened, one branch per alternative, and each alternative is itself a pattern, so `⟨inA, same | rfl | ⟨z, hz, rfl⟩⟩` opens three branches.
+
+The subject may be a proof expression as well as a local fact: `rcases (thm with h) with rfl | rfl | rfl` and the bare `rcases thm with h with rfl | rfl | rfl` open the application's statement, the pattern following the last `with` outside the brackets; `cases (thm with h) with first | rest` takes the same subjects.
 
 ```g17
 -- h : P ∧ Q ∧ R
@@ -516,7 +526,7 @@ the recursive pattern abbreviates repeated conjunction elimination
 
 **Open data and substitute an equality immediately.** An rfl pattern consumes an equality that identifies a discovered variable, rewrites the goal and local facts, and keeps the representative equation out of the rest of the proof. It is equality elimination, used for unpacking structured objects. The side substituted is a variable not occurring in the other side; an equation with no such side is reported. A goal binder that would capture the replacement is renamed, not skipped.
 
-An `rfl` entry is equality elimination. If the packed data exposes `y = t` or `t = y`, the pattern substitutes away the discovered variable and rewrites the goal and local facts.
+An `rfl` entry is equality elimination. If the packed data exposes `y = t` or `t = y`, the pattern substitutes away the discovered variable and rewrites the goal and local facts, the facts the same pattern binds after it included: `obtain ⟨⟨⟨w, hw, rfl⟩, notLeft⟩, notRight⟩ := hX` with `hX : ((∃ w, w ∈ A ∧ X = f(w)) ∧ X ∉ F) ∧ X ≠ ∅` leaves `notLeft : f(w) ∉ F` and `notRight : f(w) ≠ ∅`.
 
 ```g17
 -- packed : ∃ y, P(y) ∧ y = x
@@ -580,9 +590,9 @@ nested disjunction elimination discharges all three branch hypotheses
 
 ### `obtain ⟨x, hx, y, hy⟩ := fact`
 
-**Name all the witnesses and facts inside a packed result.** This is the expression form of recursive rcases. It opens alternating existentials and conjunctions from left to right and each ∃E freshness condition is checked.
+**Name all the witnesses and facts inside a packed result.** This is the expression form of recursive rcases. It opens alternating existentials and conjunctions from left to right and each ∃E freshness condition is checked. Alternatives nest inside a component as in rcases: obtain ⟨inA, same | path⟩ := reached opens one branch per alternative.
 
-The pattern grammar is the same as for `rcases`: flat right-associated entries, nested brackets, `_`, and `rfl`. An outer witness remains in scope in nested proofs, so `obtain` rejects reusing its name there.
+The pattern grammar is the same as for `rcases`: flat right-associated entries, nested brackets, `_`, `rfl`, and alternatives inside a component. An outer witness remains in scope in nested proofs, so `obtain` rejects reusing its name there.
 
 ```g17
 -- packed : ∃ x, P(x) ∧ ∃ y, Q(x, y)
@@ -643,9 +653,9 @@ discharges the local hypothesis h : ¬P
 
 ### `by_cases h : P`
 
-**Split the goal on a proposition and its negation.** Two goals follow, the first with h : P and the second with h : ¬P, each taking a bullet as after cases; the name defaults to h. The split is excluded middle for P, reconstructed by checked classical double-negation elimination, so by_cases h : P is the idiom have split : P ∨ ¬P by tauto followed by cases split with h | h in one step.
+**Split the goal on a proposition and its negation.** Two goals follow, the first with h : P and the second with h : ¬P, each taking a bullet as after cases; the name defaults to h. The split is excluded middle for P, reconstructed by checked classical double-negation elimination, so by_cases h : P is the idiom have split : P ∨ ¬P by tauto followed by cases split with h | h in one step. The proposition may begin on the next line, more indented than the by_cases, as after have h :.
 
-`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it.
+`by_cases h : P` is the one-step form of `have split : P ∨ ¬P by tauto` followed by `cases split with h | h`. The proposition is read in the scope of the goal, so notation and soft types of the local context apply to it. With nothing after the colon, `by_cases h :` takes its proposition from the next, more indented line, as `have h :` does; a proposition may also break after an operator or a comma, or before an operator, like any other step.
 
 ```g17
 -- goal: x = y ∨ x ≠ y
@@ -683,9 +693,9 @@ search constructs the displayed natural-deduction steps
 
 ### `tauto`
 
-**Finish classical propositional reasoning.** Predicates, equalities, and quantified formulas are atoms. The proof is a case split on those atoms.
+**Finish classical propositional reasoning.** Predicates, equalities, and quantified formulas are atoms. An equation and its mirror image are one atom, so a = b, b = a, a ≠ b, and ¬(b = a) are decided together. The proof is a case split on those atoms. When the atoms alone do not decide the goal, set-builder membership atoms and membership in compound sets are opened one layer in the goal and the facts, so c ∈ fiber(A, C, r) and (r, c) ∈ A are decided together, and a bounded existential over a union, ∃ i ∈ G ∪ {a}, P(i), is settled by the logical search.
 
-`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error.
+`tauto` is complete for classical propositional logic. Equality, predicate, and quantified formulas are atoms; `∧`, `∨`, implication, equivalence, negation, and `⊥` are decided propositionally. An equation is the same atom in either orientation, so `a = b` and `b = a` are one atom, as are `a ≠ b` and `¬(b = a)`; from `h : a = b` the goal `¬(b ≠ a)` closes, and a lemma stated as `l = v ∨ r = v` meets a hypothesis `v ≠ l`. This is a reading of the atoms, not equality reasoning: `a = b` and `b = c` do not give `a = c`, which is for `cc`. Search branches on an atom only while the current partial valuation leaves the goal and all hypotheses undecided; each split is an instance of excluded middle, and each leaf is a natural-deduction proof. The default fuel is 65,536 search nodes, and exhaustion is an error. When the atoms alone do not decide the goal, every set-builder membership atom of the goal and the facts, `c ∈ fiber(A, C, r)`, is opened one layer by its membership law, and membership in `∪`, `∩`, `∖`, `{a}`, and `{a, b}` by the default laws, so `(r, c) ∈ A` and the opened atom are decided together; a bounded existential the opening leaves, `∃ i ∈ G ∪ {a}, (i, x) ∈ P`, is then settled by the logical search with those laws, which finds the witness `a` once the union is a disjunction.
 
 ```g17
 -- goal: ((P → Q) → P) → P
@@ -726,11 +736,15 @@ the at form stores the result as a local fact
 
 ### `rw h  /  rewrite h  /  rw ← h`
 
-**Rewrite forward or backward with an equality or an equivalence.** Add at localName to rewrite a local fact instead of the goal. rw moves with p, hp rewrites with the instance that application names, as have inst := moves with p, hp then rw inst would; a with list that does not apply is reported with the application rw read. A goal the rewrite makes reflexive is closed when the rewrite ends its branch, the script, a dedent, or a sibling bullet following it, as simp closes one; a step written after it in the same branch, rfl included, still finds the goal as written. A rule P ↔ Q, possibly under ∀ and premises, rewrites the subformula P of the goal or fact by Q, at every occurrence of the instance matched first, with the implications built from the connectives on the path; ← rewrites Q by P. A rule that selects nothing is reported with its sides and the goal or fact, printed with the notation in scope.
+**Rewrite forward or backward with an equality or an equivalence.** Add at localName to rewrite a local fact instead of the goal. rw moves with p, hp rewrites with the instance that application names, as have inst := moves with p, hp then rw inst would; the parameters the facts leave open are fixed by the one instance of the rule's rewritten side that occurs in the goal, or in the fact named after at, so rw crossing.restrict with edges needs no at list, and a side that occurs at several distinct instances is rewritten at each in turn; a with list that does not apply is reported with the application rw read. A parenthesised application, rw (thm with facts), is a rule too, in rw, rwa, and the rule lists of simp, and so are the explicit instantiations rw (thm at terms) and rw thm{x := t, …}, which choose one instance; after a rule, a bare at a, b names facts to rewrite, each in turn. A goal the rewrite makes reflexive is closed when the rewrite ends its branch, the script, a dedent, or a sibling bullet following it, as simp closes one; a step written after it in the same branch, rfl included, still finds the goal as written. A rule P ↔ Q, possibly under ∀ and premises, rewrites the subformula P of the goal or fact by Q, at every occurrence of the instance matched first, with the implications built from the connectives on the path; ← rewrites Q by P. A rule that selects nothing is reported with its sides and the goal or fact, printed with the notation in scope.
 
 Rewriting is equality elimination. A notation token names its underlying definition wherever a rule is expected.
 
-After `unfold`, local equalities may already have been applied to the exposed body, so a following `rw h` can report that the rule does not match; `cc` closes such goals directly.
+`rw thm with facts` fixes the parameters the facts leave open from the goal, or from the fact named after `at`: the rule's left side, or its right side under `←`, is matched against every subterm, and the one instance that occurs fixes them, so `rw crossing.restrict with edges` needs no `at` list; a side that occurs at several distinct instances is rewritten at each in turn, and an explicit instantiation chooses one: `rw (thm at terms)` and `rw thm{x := t}` are rules as `rw (thm with facts)` is, in `rw`, `rwa`, and the rule lists of `simp`. Several facts after `at`, `rw h at a, b`, are each rewritten; `rwa h at a, b` closes from whichever matches.
+
+`unfold` leaves local equalities unapplied, so `rw h` after `unfold f` finds the instance the definition exposed; `cc` closes a goal that follows from the context equalities directly.
+
+A local `∀` fact applied to arguments is a rule too: `rw h with v, hv` rewrites with the instance of `h : ∀ v ∈ V, f(v) = g(v)` that `v, hv` fix. The location after `at` may be a projection, `rw same at obstruction.right.right`: the projected fact is bound under that name first and then rewritten. A rule that matches nothing outside the binders of the goal or fact is applied under them, as `rw under` would, when neither side of the equation mentions the bound variable.
 
 ```g17
 -- hxy : x = y, goal: pair(x, x) = pair(y, y)
@@ -751,7 +765,7 @@ the backward form exchanges s and t
 
 ### `rw [h₁, h₂] / rwa h`
 
-**Rewrite with several rules in turn, or rewrite and close from the context.** rw [a, b, ← c] performs the single rewrites in order, on the goal or at a fact; a rule that fails is reported by its own name and located at the rule in the list. rwa h is rw h followed by closing the rewritten goal from a matching local fact; rwa h at fact rewrites the fact and then uses it to close the goal.
+**Rewrite with several rules in turn, or rewrite and close from the context.** A rewrite that ends its bullet branch and leaves an equality or an equivalence between identical sides closes the goal. rw [a, b, ← c] performs the single rewrites in order, on the goal or at a fact; a rule that fails is reported by its own name and located at the rule in the list. rwa h is rw h followed by closing the rewritten goal from a matching local fact; rwa h at fact rewrites the fact and then uses it to close the goal; rwa h at a, b rewrites every fact listed and closes from whichever matches.
 
 ```g17
 -- h1 : a = b, h2 : b = c, hc : Nat(c), goal: Nat(a)
@@ -769,7 +783,7 @@ each rule rewrites in turn; rwa then closes by hypothesis
 
 ### `rw under h at fact`
 
-**Rewrite safely inside a quantified proposition.** The explicit under form crosses ∀ or ∃ only when the equality's source and replacement do not depend on that binder's variable. It works on a goal or named fact and accepts ← for reverse rewriting. Plain rw does not look under binders. The rewrite is equality elimination; an equality that mentions the bound variable is not rewritten beneath it.
+**Rewrite safely inside a quantified proposition.** The explicit under form crosses ∀ or ∃ only when the equality's source and replacement do not depend on that binder's variable. It works on a goal or named fact and accepts ← for reverse rewriting. Plain rw looks under binders only when the rule matches nothing outside them. The rewrite is equality elimination; an equality that mentions the bound variable is not rewritten beneath it.
 
 ```g17
 -- h : a = b, fact : ∃ x, R(a, x)
@@ -788,13 +802,19 @@ x occurs free in neither s nor t; ∀ and reverse rewriting are analogous
 
 ### `simp [rules]`
 
-**Normalize, decide membership, and close with the logical search.** simp with rules is equivalent. It closes the goal when normalization, ground reasoning, or the logical search suffice; otherwise a checked proposition equivalence may replace the focused goal so simplification can continue incrementally. Membership in compound sets needs no rules: the visible membership characterizations and the Subset definition are instantiated where the goal's atoms match them, universal hypotheses are instantiated at the terms in play, and the result is decided by case analysis with congruence closure, so ext y then simp proves insert(x, V ∖ {x}) = V from x ∈ V. Other definitions are named, as in simp [pow]. Inside a logical goal the named equalities are applied to a bounded fixed point, so simp [fst.pair, snd.pair] reduces every layer of fst(fst(((a, b), c))) ∈ A and leaves a ∈ A for the next tactic. Add at h to simplify a proved proposition in place. Conditional rewrite hypotheses use context and soft typing by default; opt into recursive relief with simp (backchain := 2, work := 128) [rules]. Relief shares its work allowance and never splits cases. In a disjunction, the incremental pass may use negated sibling literals, discharging them in the reconstructed proof.
+**Normalize, decide membership, and close with the logical search.** A rule that is an equivalence, such as a membership law, is opened at every instance of a fact under simp […] at h, inside binders included, as unfold opens it; the law x ∉ ∅ and any rule stating a negation rewrite the atom to ⊥, which is absorbed: ⊥ ∧ P is ⊥, ⊥ ∨ P is P, and P ↔ ⊥ is ¬P. A residue the rewrites leave is closed when it is a propositional consequence of the context or a closed numeral computation, as 1 + 1 = 2 is. simp with rules is equivalent. It closes the goal when normalization, ground reasoning, or the logical search suffice; otherwise a checked proposition equivalence may replace the focused goal so simplification can continue incrementally. Membership in compound sets needs no rules: the laws of ∪, ∩, ∖, {a}, {a, b}, △, and ∅ are applied by default, in a goal and under simp at h alike, so x ∈ A ∖ {a} opens to x ∈ A ∧ x ≠ a everywhere; the visible membership characterizations and the Subset definition are instantiated where the goal's atoms match them, universal hypotheses are instantiated at the terms in play, and the result is decided by case analysis with congruence closure, so ext y then simp proves insert(x, V ∖ {x}) = V from x ∈ V, and C ∖ {f} ⊆ (T ∖ {f}) ∪ {e} follows by simp from C ⊆ T ∪ {e} and f ≠ e. Other definitions are named, as in simp [pow]. A predicate definition among the rules, simp [EvenSet] or simp [EvenSet] at h, is opened wherever the goal or fact mentions it, as unfold opens it. Inside a logical goal the named equalities are applied to a bounded fixed point, so simp [fst.pair, snd.pair] reduces every layer of fst(fst(((a, b), c))) ∈ A and leaves a ∈ A for the next tactic, or closes the goal when the context settles it. Add at h to simplify a proved proposition in place, or at h, k to simplify several in turn. Conditional rewrite hypotheses use context and soft typing by default; opt into recursive relief with simp (backchain := 2, work := 128) [rules]. Relief shares its work allowance and never splits cases. In a disjunction, the incremental pass may use negated sibling literals, discharging them in the reconstructed proof. A fact among the rules settles its atom everywhere, inside opened bodies and under binders, ⊤ for the fact and ⊥ for its negation; closed numerals are evaluated in any subformula; the truth values are absorbed; and the residue stays as the next goal whenever a rule made progress. A fact brought to ⊥ by simp […] at h closes the goal, and so does a residue the other facts of the context refute, x ∉ A beside hA : x ∈ A; a residue the context does not refute stands as the rules left it. An equation between distinct closed literals, 0 = 1, and an equation of ordered pairs with a distinct literal coordinate, (0, e) = (1, k), are ⊥ in every position, in a goal, inside a residue, and in a fact, so simp at h with h : 0 = 1 closes the goal. The Subset definition is instantiated with or without named rules. In the logical search a conjunction, an implication, and a universal goal are decomposed before any hypothesis is split, so the cost depends on the goal and the rules rather than on the number of unrelated hypotheses.
 
 `simp` normalizes with checked definitions, equalities, ground computation, and routine logical assembly. It evaluates closed `Bool` expressions and discharges many constructive propositional tautologies; for complete classical propositional reasoning use `tauto`.
 
 Incremental use: if the rules do not close the goal but a supplied equivalence changes the outer proposition, `simp` leaves the equivalent simplified proposition as the next goal and records the checked backward implication. If no outer equivalence applies, it can perform one equality rewrite inside a logical goal, including a negated condition, without rewriting beneath quantifiers or splitting cases. In a disjunction it may use the negations of sibling literals while rewriting one literal and discharges those assumptions in the reconstructed proof.
 
 `simp [rules] at h` forward-simplifies an arbitrary proved proposition through checked equivalences and equality transport: `simp [pair.membership] at h` turns `h : x ∈ pair(a, b)` into `h : x = a ∨ x = b`.
+
+A set-builder definition named among the rules, `simp [f] at h`, opens every `t ∈ f(…)` instance of the fact, as `simp [f.membership] at h` does; an equivalence such as `union2.membership` is opened at every instance too, under `∃` and `∀` included, so `simp [union2.membership, singleton.membership] at hf` turns `hf : x ∈ {a} ∪ {b}` into `hf : x = a ∨ x = b` in one step. The empty-set law is applied by default: `simp at h` with `h : a ∈ ∅ ∧ P` leaves `h : ⊥`.
+
+A fact named among the rules settles its atom wherever it occurs, inside opened set-builder bodies and under binders included: `he : e ∈ F` makes every `e ∈ F` of the goal `⊤` and `he : e ∉ F` makes it `⊥`, a universal fact `∀ x, x ∈ F` settles every instance, `t = t` is `⊤`, and a closed equation between numeral expressions is evaluated to `⊤` or `⊥` in any subformula, under `↔`, `∨`, `∧`, and `¬` included. The truth values are absorbed, `⊤ ∧ P`, `⊤ → P`, and `P ↔ ⊤` to `P`, `⊤ ∨ P` and `⊥ → P` to `⊤`, beside the laws for `⊥`, and what remains is decided propositionally, so `simp [Even.zero, Even.not_one]` decides a goal over those atoms. With rules, `simp` leaves the residue as the next goal whenever a rule made progress, so `simp [leftV, rightV]` on `leftEnd(e) ∈ V ∧ P ↔ rightEnd(e) ∈ V ∧ Q` leaves `P ↔ Q`, and reports an error only when nothing changed. An equality residue the rules closed is evaluated: `simp [h]` with `h : x = 2` proves `x = 1 + 1`. The same decision runs on a fact, and a fact brought to `⊥` closes the goal: `simp [difference.singleton_membership] at h` with `h : e ∈ F ∖ {e}` finishes the proof, as a conjunct `x ∈ ∅` or `x ≠ x` does. An equation between distinct closed literals, `0 = 1` or `1 = 0`, is `⊥` in every position, in a goal, inside a residue, and in a fact, where `simp at h` with `h : 0 = 1` closes the goal; so is an equation of ordered pairs with a distinct literal coordinate, `(0, e) = (1, k)` or `((e, 0), k) = ((e, 1), k)`, refuted through the injectivity of pairing, and a goal `(0, e) ≠ (1, k)` closes by `simp`. The Subset definition is instantiated with or without named rules, so `simp [QsubC, he, hf]` proves `(Q ∪ {e}) ∪ {f} ⊆ C` from `QsubC : Q ⊆ C`. In the logical search a conjunction, an implication, and a universal goal are decomposed before any hypothesis is split, so the disjunctions and existentials of an unrelated hypothesis cost one split beneath the decomposed goal at most, and the cost of the search depends on the goal and the rules rather than on the number of hypotheses.
+
+A predicate definition named among the rules is opened at every instance first, as `unfold` opens it, so `simp [EvenSet] at parity` turns every `EvenSet(A)` in `parity` into `Even(cardinality(A))` before the rest of the simplification; the equivalence rewriting that follows reaches the outer proposition.
 
 Conditional rewrite rules use direct contextual evidence and soft-type reasoning by default. Recursive relief needs explicit limits, `simp (backchain := 2, work := 128) [rules]`, also accepted by `simp ... at h` and `simpa`. `backchain` bounds recursive rule applications along a hypothesis path; `work` is one allowance shared across relief entries, attempted conclusions and conjuncts, contextual bindings, sibling guards, and the closure phases. Relief can select conjuncts of a rule conclusion and either direction of an equivalence, and may bind a rule variable absent from the conclusion by matching a hypothesis against a contextual fact; it never guesses witnesses or splits cases, and exhaustion leaves the rewrite unapplied.
 
@@ -836,9 +856,11 @@ the normalized fact must match the normalized goal
 
 ### `unfold name`
 
-**Expose one definition.** A defined predicate is unfolded wherever the goal mentions it: at the head, under ∧, ∨, →, and ¬, and inside a ∀ or ∃ whose bound variable the instance mentions. Add at h for a local fact. Notation such as % may name its underlying definition directly. A name declared at two arities means the one the goal, or the fact named by at, mentions.
+**Expose one definition.** The named definition is opened at every instance of the goal, or of the fact named by at h, in one call: under every connective and relation, inside arguments, and inside a ∀ or ∃ whose bound variable the instance mentions. A set-builder def f(…) : Set := { x ∈ A | φ } is its membership law, so unfold f opens every t ∈ f(…) instance into t ∈ A ∧ φ and reports when the goal or fact mentions f(…) only as a set: reason about f(…) on a side of = or ⊆ with ext. A defined predicate at the head of the goal or fact is opened through its definition, with its generated carrier guards supplied or peeled. Nothing else changes: local equalities are never applied, so the result depends on the definition alone and not on the context; bring a context equality h in afterwards with rw h, with simp [name, h], or close from the context with cc. A definition the goal or fact does not mention is reported. Notation such as % may name its underlying definition directly. A name declared at two arities means the one the goal, or the fact named by at, mentions. unfold name at a, b opens the definition in each fact listed.
 
-`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` also rewrites with local equalities in the exposed body.
+A set-builder `def f(…) : Set := { x ∈ A | φ }` has its membership law as its definition, so `unfold f` opens every `t ∈ f(…)` instance of the goal or fact into `t ∈ A ∧ φ`. When the only mentions of `f(…)` are as a set, on a side of `=` or `⊆`, `unfold f` reports that it opens membership instances and that `ext` is the way to reason about `f(…)` as a set.
+
+`unfold` handles predicate definitions and defining equations alike, so `unfold nat.succ` exposes a compact numeral as its von Neumann set `union(pair(n, pair(n, n)))` in a checked equality without changing the evaluator's native representation. `unfold` never rewrites with local equalities: after `unfold f`, a context equality `h` is applied by `rw h` or by `simp [f, h]`, and `cc` closes a goal the context equalities settle. Every instance opens in one call, so a second `unfold f` on the same goal or fact reports that there is nothing left to unfold. `unfold f at a, b` opens the definition in each fact named.
 
 ```g17
 -- goal mentions a % b
@@ -928,6 +950,27 @@ Rule schema:
 ────────────  →I
 Γ ⊢ P → Q
 discharges the local hypothesis h : P
+```
+
+### `set x := t with h`
+
+**Name a term, and write the name for it in the goal.** x is a fresh variable and h : x = t a new local fact; every occurrence of t in the goal becomes x, and later steps may write x for t. Facts already proved keep t: rw h at fact, or ← h, moves between the two spellings. The proof of the renamed goal under h is generalized over x and instantiated at t, so nothing is assumed.
+
+`set` is the usual way to shorten a term that recurs through a proof: after `set C := A ∩ B with hC`, the goal reads `C` wherever it read `A ∩ B`, `hC : C = A ∩ B` is a local fact, and the following steps write `C`. The name must be new, and `t` is read in the scope of the step, so it may mention the variables introduced so far. Facts proved earlier keep the original term; `rw hC at fact` renames one, and `rw ← hC` restores the term in the goal. Taking the name apart again needs no step: the equation is the only thing that binds it.
+
+```g17
+-- goal: A ∩ B ⊆ B ∪ (A ∩ B)
+set C := A ∩ B with hC
+-- hC : C = A ∩ B, goal: C ⊆ B ∪ C
+```
+
+Rule schema:
+
+```text
+Γ, h : x = t ⊢ P(x)
+───────────────────  ∀I ∀E refl
+Γ ⊢ P(t)
+x fresh; the renamed goal is generalized over x and instantiated at t
 ```
 
 ## Search and automation
@@ -1056,12 +1099,15 @@ search is indexed, tabled, cycle-checked, and bounded
 
 ### `cc  /  congruence`
 
-**Finish a ground equality or predicate congruence.** Congruence closure by union-find, then an equality proof assembled from the facts it used.
+**Finish a ground equality or predicate congruence.** Congruence closure by union-find, then an equality proof assembled from the facts it used. A disequality goal, or a denied predicate, is assumed and refuted from the conflict it creates with the local equalities.
 
-`cc` chains local equalities, closes function congruences, transports positive predicate facts across congruent arguments, and derives arbitrary goals from a congruent disequality or a positive/negative predicate conflict. The explanation is built from the original equalities, equality transitivity and symmetry, function congruence, and equality elimination. `cc` does no quantifier instantiation and no conditional rewriting; use `specialize`, `rw`, and `simp` for those.
+`cc` chains local equalities, closes function congruences, transports positive predicate facts across congruent arguments, and derives arbitrary goals from a congruent disequality or a positive/negative predicate conflict. A disequality goal `s ≠ t`, or a denied predicate `¬P(t)`, is assumed and refuted: the equation or predicate joins the facts and ⊥ follows from the conflict it creates, so `rightEnd(e) ≠ v` follows from `leftEnd(e) = rightEnd(e)` and `leftEnd(e) ≠ v`. The explanation is built from the original equalities, equality transitivity and symmetry, function congruence, and equality elimination. `cc` does no quantifier instantiation and no conditional rewriting; use `specialize`, `rw`, and `simp` for those.
 
 ```g17
 -- h : x = y, goal: f(g(x)) = f(g(y))
+cc
+-- loop : leftEnd(e) = rightEnd(e), atV : leftEnd(e) ≠ v
+-- goal: rightEnd(e) ≠ v
 cc
 ```
 
@@ -1213,17 +1259,22 @@ h₁ : p₁ = q₁ ∈ Γ    h₂ : p₂ = q₂ ∈ Γ
 
 ### `arith`
 
-**Finish supported natural equalities and affine order goals.** This includes cancellation, weakening, mixed strict and weak bounds, and checked Fourier-Motzkin elimination with integer tightening: exact eliminations are preferred, and a comparison whose coefficients share a factor is divided through with a rounded constant, each step a checked quotient lemma, so parity and divisibility contradictions close. On a ⊥ goal arith refutes the hypotheses; on a disequality it introduces the equation and refutes; on a conjunction it splits and settles each conjunct, so a list of index inequalities is one line; and when the goal itself is out of reach, contradictory bounds among the hypotheses close it. A disequality of distinct literals, 1 ≠ 0, and a hypothesis equating distinct literals need no order theory: they close in any module.
+**Finish supported natural equalities and affine order goals.** This includes cancellation, weakening, mixed strict and weak bounds, and checked Fourier-Motzkin elimination with integer tightening: exact eliminations are preferred, and a comparison whose coefficients share a factor is divided through with a rounded constant, each step a checked quotient lemma, so parity and divisibility contradictions close. On a ⊥ goal arith refutes the hypotheses; on a disequality it introduces the equation and refutes; on a conjunction it splits and settles each conjunct, so a list of index inequalities is one line; and when the goal itself is out of reach, contradictory bounds among the hypotheses close it. A disequality of distinct literals, 1 ≠ 0, and a hypothesis equating distinct literals need no order theory: they close in any module. Two equations meeting through succ or a common summand cancel, so cardinality(F) = succ(cardinality(F ∖ {e})) and cardinality(F) = succ(k) give cardinality(F ∖ {e}) = k. A cardinality is a natural atom from Finite(X) in context, and the right side of a bound a ≤ b or a < b from its typed left side, so k ≤ cardinality(X) needs no further typing. An equality whose sides bound each other is closed by antisymmetry with the bounds the comparison search finds, local equations such as c = 1 substituted, and succ(t) is read as t + 1 inside comparisons. When the bounds alone are consistent, a disequality a ≠ b among the hypotheses whose sides are literals or atoms of the bounds is a case split by trichotomy, the equal case closed by the disequality and the strict cases refuted as bounds, so d ≠ 0 and d ≠ 1 give 2 ≤ d; at most three splits nest.
 
-For equalities `arith` combines goal-relevant hypotheses with the semiring normalizer, applies antisymmetry to matching opposite bounds, and keeps an indexed equality graph for repeated nested cancellation. For comparisons it normalizes each side to a sparse affine form and runs exact Fourier–Motzkin elimination: strict Nat order is converted by the checked equivalence `a < b ↔ a + 1 ≤ b`, equalities enter as two weak comparisons, and every Nat atom receives `0 ≤ x`. The procedure is complete for inconsistency over the nonnegative rationals with Nat's unit gap; it is narrower than Presburger arithmetic, since a contradiction that depends only on a congruence obstruction needs cuts it does not perform. It reports exhaustion above 16,384 projected constraints or a scalar expansion above 4,096.
+For equalities `arith` combines goal-relevant hypotheses with the semiring normalizer, applies antisymmetry to matching opposite bounds, and keeps an indexed equality graph for repeated nested cancellation. Within one class of that graph two successors cancel by injectivity and two sums with a common summand by the cancellation laws, so `cardinality(F) = succ(cardinality(F ∖ {e}))` and `cardinality(F) = succ(k)` give `cardinality(F ∖ {e}) = k`, and a hypothesis stated with `succ` meets one stated with `+ 1`. When no bound on the goal sides matches verbatim, each side is bounded by the other through the comparison search, which substitutes local equations such as `c = 1` into the bounds, so `cardinality(T) + c ≤ cardinality(V)`, `cardinality(V) ≤ cardinality(T) + c`, and `c = 1` give `cardinality(T) + 1 = cardinality(V)` by antisymmetry. Inside comparisons `succ(t)` is read as `t + 1`, so `k < succ(n)` serves as `k + 1 ≤ n + 1`. For comparisons it normalizes each side to a sparse affine form and runs exact Fourier–Motzkin elimination: strict Nat order is converted by the checked equivalence `a < b ↔ a + 1 ≤ b`, equalities enter as two weak comparisons, and every Nat atom receives `0 ≤ x`. The procedure is complete for inconsistency over the nonnegative rationals with Nat's unit gap; it is narrower than Presburger arithmetic, since a contradiction that depends only on a congruence obstruction needs cuts it does not perform. It reports exhaustion above 16,384 projected constraints or a scalar expansion above 4,096.
 
 `arith` makes one linear context pass, shares an indexed soft-type prover across operand checks, and partitions constraints into independent atom components, searching the goal component first.
+
+An opaque term such as `cardinality(X)` is a natural atom when `Nat(t)`, `t ∈ ℕ`, or a library typing rule settles it from the local facts: `Finite(X)` in context types `cardinality(X)` through `cardinality.nat`, with no `have` needed. The right side of a local bound `a ≤ b` or `a < b` is typed from its left side by `LessEqual.natural_right` and `Less.natural_right`, chased through chains of bounds, so `k ≤ cardinality(X)` with `k : Nat` admits `cardinality(X)` without a finiteness fact. `linarith` on naturals types its atoms the same way. When the bounds alone are consistent, a disequality `a ≠ b` among the hypotheses is a case split: by `Less.trichotomy`, `a < b ∨ a = b ∨ b < a`, the equal case closed by the disequality and the strict cases refuted as bounds, so `d ≠ 0` and `d ≠ 1` give `2 ≤ d`, and `a ≤ b`, `b ≤ a + 1`, and `a ≠ b` give `b = a + 1`. Only a disequality whose sides are literals or atoms of the bounds in play takes part, the denied goal included, at most three splits nest, and a denied bound in the context, `¬(a ≤ b)`, is read as the opposite bound.
 
 ```g17
 -- hx : x > 3, hy : y > 2
 -- goal: x + y > 4
 arith
 -- goal: a ≠ a + 1 ∧ a + 1 ≠ 2 * a
+arith
+-- removed : cardinality(F) = succ(cardinality(F ∖ {e})), size : cardinality(F) = succ(k)
+-- goal: cardinality(F ∖ {e}) = k
 arith
 ```
 
@@ -1238,11 +1289,11 @@ the certificate is built from the ordered-additive lemmas
 
 ### `linarith`
 
-**Decide linear inequalities over the reals and rationals, and Nat or ordered-ring affine goals.** Over the reals, linarith negates the goal, runs Fourier-Motzkin elimination over the atoms of the local comparisons, and emits a certificate from the checked order laws (realLe.add, realLess.add and their mixed forms) and one commutative-ring identity, closed by irreflexivity. Goals may be ≤, <, =, a negated comparison, or ⊥. Facts may be comparisons, real equalities, and conjunctions of them, and 0 < 1 is supplied whenever 1 occurs. Over the rationals the same elimination runs on the strict order: facts are rational comparisons s < t and equalities, goals may be <, =, ¬(s < t), or ⊥, and comparison or equality goals are settled by trichotomy with each remaining case refuted. Addition, subtraction, negation, scaling by a numeral, and division by a nonzero numeral are interpreted, the last through the identity t = k * (t / k) proved from the field laws, so 0 < x gives 0 < x / 2; every other term, including a product, is an atom, so state nonlinear facts such as 0 ≤ x * y first. Nat uses the same checked affine elimination as arith, and ordered-ring instances use their OrderedAdditiveGroup laws.
+**Decide linear inequalities over the reals and rationals, and Nat or ordered-ring affine goals.** Over the reals, linarith negates the goal, runs Fourier-Motzkin elimination over the atoms of the local comparisons, and emits a certificate from the checked order laws (realLe.add, realLess.add and their mixed forms) and one commutative-ring identity, closed by irreflexivity. Goals may be ≤, <, =, a negated comparison, or ⊥. Facts may be comparisons, real equalities, and conjunctions of them, and 0 < 1 is supplied whenever 1 occurs. Over the rationals the same elimination runs on the strict order: facts are rational comparisons s < t and equalities, goals may be <, =, ¬(s < t), or ⊥, and comparison or equality goals are settled by trichotomy with each remaining case refuted. Addition, subtraction, negation, scaling by a numeral, and division by a nonzero numeral are interpreted, the last through the identity t = k * (t / k) proved from the field laws, so 0 < x gives 0 < x / 2; every other term, including a product, is an atom, so state nonlinear facts such as 0 ≤ x * y first. Nat uses the same checked affine elimination as arith, with the same refutation of the hypotheses and disequality splits when a natural bound is out of direct reach, and ordered-ring instances use their OrderedAdditiveGroup laws.
 
 Over the reals, `linarith` accepts goals `s ≤ t`, `s < t`, `s = t` (by antisymmetry), `¬(s ≤ t)`, `¬(s < t)`, and `⊥`, and uses local comparisons, real equalities, and conjunctions of them, plus `0 < 1` whenever `1` occurs. It negates the goal, eliminates atoms by Fourier–Motzkin with integer multipliers, and emits a certificate from `realLe.add`, `realLess.add`, their mixed forms, one ring identity, and irreflexivity. Products are atoms: establish `0 ≤ x * y` first with a library lemma when a goal needs it.
 
-Over `Nat`, `linarith` is the same checked affine elimination as `arith`. For an abstract carrier it queries the instance registry for `OrderedAdditiveGroup(A, add, zero, neg, le)`, projecting from an `OrderedRing` instance or hypothesis through a checked theorem; the carrier, operation graphs, and relation are read from that proof.
+Over `Nat`, `linarith` is the same checked affine elimination as `arith`. For an abstract carrier it queries the instance registry for `OrderedAdditiveGroup(A, add, zero, neg, le)`, projecting from an `OrderedRing` instance or hypothesis through a checked theorem; the carrier, operation graphs, and relation are read from that proof. On a natural bound in a natural context, `linarith` falls back to the refutation of the hypotheses with the denied goal among them, disequality splits included, as `arith` does.
 
 ```g17
 -- ab : a ≤ b, bound : c ≤ a - b
@@ -1347,13 +1398,13 @@ expansion happens before checking
 
 ## Induction
 
-Three forms of induction, one for each kind of structure that decreases: a datatype, set membership, or a well-founded relation.
+Four forms of induction, one for each kind of structure that decreases: a datatype, a finite set, set membership, or a well-founded relation.
 
 ### `induction n [generalizing s ...] [with]`
 
-**Follow the constructors of an inductive datatype and optionally strengthen the hypothesis.** The successor case of a natural number may be written | k + 1 using ih =>, and its goal is then stated with k + 1 rather than succ(k). Place this first in the proof block; recursive fields receive hypotheses named by using. Requirements depending on the induction variable are automatically moved into the motive, even without generalizing; introduce them in each branch, and supply them when using the recursive hypothesis. Generalized declared variables may occur before or after n. Their soft types, dependent binders, and dependent requirements move into the motive, so each recursive hypothesis works for every new value. The optional with changes nothing; an internal auxiliary theorem restores the public binder order.
+**Follow the constructors of an inductive datatype and optionally strengthen the hypothesis.** The successor case of a natural number may be written | k + 1 using ih =>, and its goal is then stated with k + 1 rather than succ(k). Steps written before it run first, and each fact they prove that mentions neither n nor a generalized variable stays available by name in every case; a fact mentioning one is reported at its line; recursive fields receive hypotheses named by using. Requirements depending on the induction variable are automatically moved into the motive, even without generalizing; introduce them in each branch, and supply them when using the recursive hypothesis. Generalized declared variables may occur before or after n. Their soft types, dependent binders, and dependent requirements move into the motive, so each recursive hypothesis works for every new value. The optional with changes nothing; an internal auxiliary theorem restores the public binder order.
 
-Place `induction n` first in the proof block. Requirements depending on `n` or on a generalized variable are moved into the motive, even without `generalizing`; introduce them at the start of each branch, and the recursive hypothesis takes the corresponding requirements for the smaller argument. Independent requirements stay available by name.
+Place `induction n` first in the proof block. Requirements depending on `n` or on a generalized variable are moved into the motive, even without `generalizing`; introduce them at the start of each branch, and the recursive hypothesis takes the corresponding requirements for the smaller argument. Independent requirements stay available by name. Steps written between `proof` and `induction n` run first, against the theorem's premises: each fact they prove that mentions neither `n` nor a generalized variable is kept in every case under its name when a case names it (a case declaring the name again proves its own fact), as a premise of the motive discharged by its proof and admitted through an auxiliary theorem reported with the theorem; a fact mentioning one is reported at its `have` line: prove such a fact inside the cases instead.
 
 Each constructor is a branch `| C(fields) using ih₁, ih₂ => tactics`, with one hypothesis per recursive field in field order and a full tactic sequence allowed after `=>`. A field typed by a datatype parameter adds membership in that carrier to the branch.
 
@@ -1376,6 +1427,42 @@ Rule schema:
 Γ ⊢ P(zero)    Γ, k : Nat, ih : ∀ s, P(k, s) ⊢ ∀ s, P(succ(k), s)
 ─────────────────────────────────────────────────────────────────  Nat-ind
 Γ, n : Nat ⊢ ∀ s, P(n, s)
+```
+
+### `induction finite with G a`
+
+**Build a finite set from ∅ by adjoining one element at a time.** finite proves Finite(F); the goal P(F) becomes P(∅) and the step P(G ∪ {a}) from ih : P(G), for G ⊆ E finite and a ∈ E outside G, where E is the ambient set of a fact F ⊆ E in context, else F itself. The case | empty => opens the first goal; | insert using ih => opens the second with G, GSubset, GFinite, a, aMember, aFresh, and ih introduced, or names all five facts: | insert using subset, finite, member, fresh, ih =>. Plain bullets with intros work as well. The family { G ∈ 𝒫(E) | P(G) } is a separation helper per use, and the proof applies Finite.induction.
+
+The hypothesis `finite : Finite(F)` names the set, and a fact `F ⊆ E` in context makes `E` the ambient set; without one the induction runs inside `F` itself, so the step's `G ⊆ F` carries the facts about `F` down to `G`. The family `{ G ∈ 𝒫(E) | P(G) }` is a separation helper `name.family` defined per use, hidden from the proof; its membership law unpacks membership to `P(G)`, and the proof applies the library's `Finite.induction`.
+
+`| empty =>` opens the goal `P(∅)`. `| insert using ih =>` opens `P(G ∪ {a})` with `G`, `GSubset : G ⊆ E`, `GFinite : Finite(G)`, `a`, `aMember : a ∈ E`, `aFresh : a ∉ G`, and `ih : P(G)` introduced; `| insert using subset, finite, member, fresh, ih =>` names all five facts in that order. Plain bullets take the two goals as well, the second as `∀ G ⊆ E, Finite(G) → ∀ a ∈ E, a ∉ G → P(G) → P(G ∪ {a})` for `intros`. Assumptions about `F` stay in context, and the names after `with` must be fresh.
+
+```g17 fragment
+theorem count_exists (F : Set)
+  requires finite : Finite(F)
+  shows ∃ n, Nat(n) ∧ cardinality(F) = n
+proof
+  induction finite with G a
+  | empty =>
+    refine ⟨zero, Naturals.constructor.zero, ?_⟩
+    exact cardinality.empty
+  | insert using ih =>
+    obtain ⟨n, natural, size⟩ := ih
+    have same : insert(a, G) = G ∪ {a}
+      ext y
+      simp
+    have counted := cardinality.insert with GFinite, aFresh
+    rw [same, size] at counted
+    refine ⟨succ(n), Naturals.constructor.succ with natural, counted⟩
+```
+
+Rule schema:
+
+```text
+Γ ⊢ P(∅)    Γ, G ⊆ E, Finite(G), a ∈ E, a ∉ G, ih : P(G) ⊢ P(G ∪ {a})
+─────────────────────────────────────────────────────────────────────  Finite-ind
+Γ, finite : Finite(F), F ⊆ E ⊢ P(F)
+the family { G ∈ 𝒫(E) | P(G) } is a separation helper per use
 ```
 
 ### `induction x using membership`

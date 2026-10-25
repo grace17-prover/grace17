@@ -1,0 +1,251 @@
+-- Lifting even sets and even covers from the contraction of an edge e: an
+-- even set of the contraction lifts with or without e, and when e lies in a
+-- cut of two edges an even cover of the contraction lifts to one of the
+-- graph.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.Flows.Lifting
+import Contraction
+
+-- An even set of the contraction lifts to the graph, with or without e: the
+-- two ends of e have degrees of equal parity in it.
+theorem contraction.lift_even (V E leftEnd rightEnd e F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires edge : e ∈ E
+  requires even : EvenEdgeSet(contractionPartition(V, leftEnd, rightEnd, e),
+    contractedLeft(V, E, leftEnd, rightEnd, e),
+    contractedRight(V, E, leftEnd, rightEnd, e), F)
+  requires edges : F ⊆ E ∖ {e}
+  shows EvenEdgeSet(V, leftEnd, rightEnd, F) ∨
+    EvenEdgeSet(V, leftEnd, rightEnd, F ∪ {e})
+proof
+  obtain ⟨finite, degrees⟩ := even
+  obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, e, edge
+  have partition := contractionPartition.partition with graph, edge
+  have endClass : {leftEnd(e), rightEnd(e)} ∈
+      contractionPartition(V, leftEnd, rightEnd, e)
+    rw ← contraction.class_end with graph, edge
+    exact (classOf.member with partition, leftIn).left
+  -- Away from the ends of e a vertex is its own class, with its own degree.
+  have away : ∀ v ∈ V, v ≠ leftEnd(e) → v ≠ rightEnd(e) →
+      Even(degreeIn(leftEnd, rightEnd, F, v))
+    intros v hv left right
+    have single := contraction.class_apart with graph, edge, hv, left, right
+    have class : {v} ∈ contractionPartition(V, leftEnd, rightEnd, e)
+      rw ← single
+      exact (classOf.member with partition, hv).left
+    rw ← degreeIn.contraction_singleton with graph, edge, edges, class
+    exact degrees with {v}, class
+  by_cases loop : leftEnd(e) = rightEnd(e)
+  . -- A loop merges nothing, so F itself is even.
+    left
+    refine ⟨finite, _⟩
+    intros v hv
+    by_cases atEnd : v = leftEnd(e)
+    . rw [← loop, pair.self] at endClass
+      rw atEnd
+      rw ← degreeIn.contraction_singleton with graph, edge, edges, endClass
+      exact degrees with {leftEnd(e)}, endClass
+    . have atRight : v ≠ rightEnd(e) by cc
+      exact away with v, hv, atEnd, atRight
+  . -- The class of the two ends has the sum of their degrees, so the two
+    -- degrees have the same parity.
+    have sum := degreeIn.contraction_pair
+      with graph, edge, finite, edges, loop
+    have evenSum := degrees with {leftEnd(e), rightEnd(e)}, endClass
+    rw sum at evenSum
+    have parity := (Even.add_iff at degreeIn(leftEnd, rightEnd, F, leftEnd(e)),
+      degreeIn(leftEnd, rightEnd, F, rightEnd(e))).forward with evenSum
+    by_cases evenLeft : Even(degreeIn(leftEnd, rightEnd, F, leftEnd(e)))
+    . left
+      have evenRight := parity.forward with evenLeft
+      refine ⟨finite, _⟩
+      intros v hv
+      by_cases atLeft : v = leftEnd(e)
+      . rw atLeft
+        exact evenLeft
+      . by_cases atRight : v = rightEnd(e)
+        . rw atRight
+          exact evenRight
+        . exact away with v, hv, atLeft, atRight
+    . -- Both degrees are odd, and e adds one end at each of them.
+      right
+      have oddLeft := (Odd.iff_not_even
+        at degreeIn(leftEnd, rightEnd, F, leftEnd(e))).backward with evenLeft
+      have notRight : ¬Even(degreeIn(leftEnd, rightEnd, F, rightEnd(e)))
+        intro evenRight
+        exact evenLeft with (parity.backward with evenRight)
+      have oddRight := (Odd.iff_not_even
+        at degreeIn(leftEnd, rightEnd, F, rightEnd(e))).backward with notRight
+      have absent : ¬e ∈ F
+        intro inF
+        have other := edges with e, inF
+        simp at other
+      have apart : Disjoint(F, {e}) by simp [Disjoint.iff, absent]
+      refine ⟨(Finite.union with finite, Finite.singleton), _⟩
+      intros v hv
+      rw degreeIn.union_disjoint with finite, Finite.singleton, apart
+      by_cases atLeft : v = leftEnd(e)
+      . rw [atLeft, (degreeIn.end_left with loop, rfl), Even.add_one_iff]
+        exact oddLeft
+      . by_cases atRight : v = rightEnd(e)
+        . rw [atRight, (degreeIn.end_right with loop, rfl), Even.add_one_iff]
+          exact oddRight
+        . have leftAway : leftEnd(e) ≠ v by cc
+          have rightAway : rightEnd(e) ≠ v by cc
+          have zero : degreeIn(leftEnd, rightEnd, F, v) + 0 =
+              degreeIn(leftEnd, rightEnd, F, v) by ring
+          rw [(degreeIn.absent with leftAway, rightAway), zero]
+          exact away with v, hv, atLeft, atRight
+
+-- The lift of an even set F of the contraction: F itself when that is even
+-- in the graph, and otherwise F with e.
+def liftedSet (V leftEnd rightEnd e F : Set) : Set :=
+  F ∪ { x ∈ {e} | ¬EvenEdgeSet(V, leftEnd, rightEnd, F) }
+
+theorem liftedSet.cases (V leftEnd rightEnd e F : Set)
+  shows (EvenEdgeSet(V, leftEnd, rightEnd, F) ∧
+      liftedSet(V, leftEnd, rightEnd, e, F) = F) ∨
+    (¬EvenEdgeSet(V, leftEnd, rightEnd, F) ∧
+      liftedSet(V, leftEnd, rightEnd, e, F) = F ∪ {e})
+proof
+  unfold liftedSet
+  by_cases even : EvenEdgeSet(V, leftEnd, rightEnd, F)
+  . left
+    refine ⟨even, _⟩
+    have none : liftedSet.family(V, leftEnd, rightEnd, e, F) = ∅
+      ext x
+      simp [liftedSet.family, even]
+    rw [none, union2.right_empty]
+  . right
+    refine ⟨even, _⟩
+    have all : liftedSet.family(V, leftEnd, rightEnd, e, F) = {e}
+      ext x
+      simp [liftedSet.family, even]
+    rw all
+
+theorem liftedSet.even (V E leftEnd rightEnd e F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires edge : e ∈ E
+  requires even : EvenEdgeSet(contractionPartition(V, leftEnd, rightEnd, e),
+    contractedLeft(V, E, leftEnd, rightEnd, e),
+    contractedRight(V, E, leftEnd, rightEnd, e), F)
+  requires edges : F ⊆ E ∖ {e}
+  shows EvenEdgeSet(V, leftEnd, rightEnd, liftedSet(V, leftEnd, rightEnd, e, F))
+    ∧ F ⊆ liftedSet(V, leftEnd, rightEnd, e, F)
+    ∧ liftedSet(V, leftEnd, rightEnd, e, F) ⊆ E
+proof
+  have lifted := contraction.lift_even
+    with graph, finiteVertices, edge, even, edges
+  have cases := liftedSet.cases at V, leftEnd, rightEnd, e, F
+  have edgesE : F ⊆ E := Subset.transitive with edges, difference.subset_left
+  rcases cases with ⟨evenF, same⟩ | ⟨oddF, same⟩
+  . rw same
+    exact ⟨evenF, Subset.reflexive, edgesE⟩
+  . rw same
+    have evenUnion : EvenEdgeSet(V, leftEnd, rightEnd, F ∪ {e})
+      rcases lifted with evenF | evenUnion
+      . exfalso
+        exact oddF with evenF
+      . exact evenUnion
+    have inE : {e} ⊆ E := singleton.subset_iff.backward with edge
+    refine ⟨evenUnion, union2.subset_left, _⟩
+    exact Subset.union2_iff.backward with ⟨edgesE, inE⟩
+
+-- When e lies in a cut {e, f} of the graph, every lifted even set holding f
+-- holds e, so a cover of the contraction lifts to a cover of the graph.
+theorem contraction.lift_cover (V E leftEnd rightEnd e f X F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires cut : X ⊆ V ∧ crossing(leftEnd, rightEnd, E, X) = {e, f} ∧
+    e ≠ f
+  requires cover : EvenCover(contractionPartition(V, leftEnd, rightEnd, e),
+    E ∖ {e}, contractedLeft(V, E, leftEnd, rightEnd, e),
+    contractedRight(V, E, leftEnd, rightEnd, e), F)
+  shows ∃ G, EvenCover(V, E, leftEnd, rightEnd, G)
+proof
+  obtain ⟨bound, cutEdges, distinct⟩ := cut
+  obtain ⟨function, even, covers⟩ := cover
+  have endsE := Graph.ends with graph
+  have cutInE := crossing.subset at leftEnd, rightEnd, E, X
+  have eInCut : e ∈ crossing(leftEnd, rightEnd, E, X)
+    rw cutEdges
+    exact pair.left
+  have fInCut : f ∈ crossing(leftEnd, rightEnd, E, X)
+    rw cutEdges
+    exact pair.right
+  have eInE := cutInE with e, eInCut
+  have fNotE : ¬f ∈ {e}
+    intro same
+    rw singleton.membership at same
+    cc
+  have fOther : f ∈ E ∖ {e} :=
+    difference.membership.backward with (cutInE with f, fInCut), fNotE
+  -- Every coordinate lifts to an even set of the graph inside E.
+  have lifts : ∀ i ∈ 3,
+      EvenEdgeSet(V, leftEnd, rightEnd,
+        liftedSet(V, leftEnd, rightEnd, e, F(i)))
+      ∧ F(i) ⊆ liftedSet(V, leftEnd, rightEnd, e, F(i))
+      ∧ liftedSet(V, leftEnd, rightEnd, e, F(i)) ⊆ E
+    intros i hi
+    have edgesI : F(i) ⊆ E ∖ {e} := powerset.membership_iff.forward
+      with (FunctionBetween.apply_closed with function, hi)
+    exact liftedSet.even
+      with graph, finiteVertices, eInE, (even with i, hi), edgesI
+  have zero : 0 ∈ 3 by simp [membership.three]
+  have one : 1 ∈ 3 by simp [membership.three]
+  have two : 2 ∈ 3 by simp [membership.three]
+  have mem0 : liftedSet(V, leftEnd, rightEnd, e, F(0)) ∈ 𝒫(E) :=
+    powerset.membership_iff.backward with (lifts with 0, zero).right.right
+  have mem1 : liftedSet(V, leftEnd, rightEnd, e, F(1)) ∈ 𝒫(E) :=
+    powerset.membership_iff.backward with (lifts with 1, one).right.right
+  have mem2 : liftedSet(V, leftEnd, rightEnd, e, F(2)) ∈ 𝒫(E) :=
+    powerset.membership_iff.backward with (lifts with 2, two).right.right
+  have values := tripleMap.value with mem0, mem1, mem2
+  have valueAt : ∀ i ∈ 3,
+      tripleMap(𝒫(E), liftedSet(V, leftEnd, rightEnd, e, F(0)),
+      liftedSet(V, leftEnd, rightEnd, e, F(1)),
+      liftedSet(V, leftEnd, rightEnd, e, F(2)))(i) =
+      liftedSet(V, leftEnd, rightEnd, e, F(i))
+    intros i hi
+    have cases := membership.three.forward with hi
+    rcases cases with rfl | rfl | rfl
+    . exact values.left
+    . exact values.right.left
+    . exact values.right.right
+  witness tripleMap(𝒫(E), liftedSet(V, leftEnd, rightEnd, e, F(0)),
+    liftedSet(V, leftEnd, rightEnd, e, F(1)),
+    liftedSet(V, leftEnd, rightEnd, e, F(2)))
+  refine ⟨(tripleMap.function with mem0, mem1, mem2), _, _⟩
+  . intros i hi
+    have value := valueAt with i, hi
+    rw value
+    exact (lifts with i, hi).left
+  . intros g hg
+    by_cases same : g = e
+    . -- The lifted set holding f is even and meets the cut {e, f} in f, so
+      -- it holds e as well.
+      obtain ⟨i, hi, inF⟩ := covers with f, fOther
+      obtain ⟨evenI, growI, inI⟩ := lifts with i, hi
+      have value := valueAt with i, hi
+      refine ⟨i, hi, _⟩
+      rw [value, same]
+      have both := EvenEdgeSet.two_cut
+        with finiteVertices, evenI, bound, inI, endsE, cutEdges, distinct
+      exact both.backward with (growI with f, inF)
+    . have gNotE : ¬g ∈ {e}
+        intro inE
+        rw singleton.membership at inE
+        exact same with inE
+      obtain ⟨i, hi, inF⟩ :=
+        covers with g, (difference.membership.backward with hg, gNotE)
+      have value := valueAt with i, hi
+      refine ⟨i, hi, _⟩
+      rw value
+      exact (lifts with i, hi).right.left with g, inF

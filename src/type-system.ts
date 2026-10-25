@@ -631,6 +631,7 @@ function prepareRuleProver(
   visibility?: ScopeVisibility,
 ): RefinementProver | InstanceProver {
   const available = expandFacts(kernel, assumptions, facts, visibility);
+  const naturality = rejectAmbiguity ? undefined : naturalMembershipRules(kernel, visibility);
   // Instances are selected by name before they reach this prover; the
   // certified type rules are selected here, by the declarations the scope sees.
   const selectRules = (rules: readonly TypeRule[]): readonly TypeRule[] =>
@@ -773,6 +774,17 @@ function prepareRuleProver(
     if (cached === false || negatives.get(key)) { counters.memoHits += 1; return undefined; }
     const direct = directFacts.get(key);
     if (direct) { memo.set(key, direct); return direct; }
+    // `n ∈ ℕ` from `Nat(n)` by the library's `nat.omega`: a guard stated
+    // either way is met by a fact stated the other way.
+    if (!rejectAmbiguity && naturality?.omega && wantedPredicate === naturality.membership && wantedArguments.length === 2 &&
+        termCanonical(wantedArguments[1]!) === termCanonical(naturality.omega.carrier)) {
+      const natural = solve([wantedArguments[0]!], naturality.natural, depth + 1);
+      if (natural) {
+        const proof = impElim(iffElimLeft(at(theorem(naturality.omega.name), wantedArguments[0]!)), natural);
+        memo.set(key, proof);
+        return proof;
+      }
+    }
     if (!rejectAmbiguity && !refinementTermsFit(wantedArguments)) { exhausted = true; return undefined; }
     if (!rejectAmbiguity && (depth > 256 || counters.goalsVisited >= 4096 ||
       counters.rulesConsidered >= 100_000)) { exhausted = true; return undefined; }
@@ -1383,7 +1395,100 @@ function expandFacts(
   };
   assumptions.forEach(formula => add({ formula, proof: { rule: "assumption", formula } }));
   proofs.forEach(proof => add({ formula: kernel.checkProof(proof, assumptions), proof }));
+  result.push(...naturalMembershipFacts(kernel, result, visibility));
   return result;
+}
+
+/**
+ * The library's naturality of membership, found by name: `nat.omega`,
+ * `∀ n, Nat(n) ↔ n ∈ ℕ`, and `natural.member`, `∀ n, Nat(n) → ∀ i, i ∈ n →
+ * Nat(i)`, read off their statements so the predicate and ℕ are never named here.
+ */
+export interface NaturalMembershipRules {
+  readonly natural: string;
+  readonly membership: string;
+  readonly omega?: { readonly name: string; readonly carrier: Term };
+  readonly member?: { readonly name: string };
+}
+const naturalMembershipRuleCache = new WeakMap<Kernel, { size: number; rules: NaturalMembershipRules | undefined }>();
+export function naturalMembershipRules(kernel: Kernel, visibility?: ScopeVisibility): NaturalMembershipRules | undefined {
+  let cached = naturalMembershipRuleCache.get(kernel);
+  if (!cached || cached.size !== kernel.theorems.size) {
+    let rules: NaturalMembershipRules | undefined;
+    for (const [name, statement] of kernel.theorems) {
+      if (name === "nat.omega" || name.endsWith(".nat.omega")) {
+        if (statement.tag !== "forall" || statement.body.tag !== "iff") continue;
+        const { left, right } = statement.body;
+        if (left.tag !== "pred" || left.args.length !== 1 || left.args[0]!.tag !== "var" || left.args[0]!.name !== statement.variable) continue;
+        if (right.tag !== "pred" || right.args.length !== 2 || right.args[0]!.tag !== "var" || right.args[0]!.name !== statement.variable) continue;
+        if (rules && (rules.natural !== left.pred || rules.membership !== right.pred)) continue;
+        rules = { ...rules, natural: left.pred, membership: right.pred, omega: { name, carrier: right.args[1]! } };
+      } else if (name === "natural.member" || name.endsWith(".natural.member")) {
+        if (statement.tag !== "forall" || statement.body.tag !== "imp") continue;
+        const guard = statement.body.left, inner = statement.body.right;
+        if (guard.tag !== "pred" || guard.args.length !== 1 || guard.args[0]!.tag !== "var" || guard.args[0]!.name !== statement.variable) continue;
+        if (inner.tag !== "forall" || inner.body.tag !== "imp") continue;
+        const membership = inner.body.left, conclusion = inner.body.right;
+        if (membership.tag !== "pred" || membership.args.length !== 2 || membership.args[0]!.tag !== "var" ||
+            membership.args[0]!.name !== inner.variable || membership.args[1]!.tag !== "var" || membership.args[1]!.name !== statement.variable) continue;
+        if (conclusion.tag !== "pred" || conclusion.pred !== guard.pred || conclusion.args.length !== 1 ||
+            conclusion.args[0]!.tag !== "var" || conclusion.args[0]!.name !== inner.variable) continue;
+        if (rules && (rules.natural !== guard.pred || rules.membership !== membership.pred)) continue;
+        rules = { ...rules, natural: guard.pred, membership: membership.pred, member: { name } };
+      }
+    }
+    cached = { size: kernel.theorems.size, rules };
+    naturalMembershipRuleCache.set(kernel, cached);
+  }
+  const rules = cached.rules;
+  if (!rules || !visibility) return rules;
+  const omega = rules.omega && visibility.declaration(rules.omega.name) ? rules.omega : undefined;
+  const member = rules.member && visibility.declaration(rules.member.name) ? rules.member : undefined;
+  if (!omega && !member) return undefined;
+  return { natural: rules.natural, membership: rules.membership, ...(omega ? { omega } : {}), ...(member ? { member } : {}) };
+}
+
+/**
+ * Membership carries naturality: from `i ∈ ℕ`, and from `i ∈ k` with
+ * `Nat(k)` among the facts, `Nat(i)` by the library's lemmas, chased in
+ * rounds so `k ∈ ℕ` and `i ∈ k` type both. Nothing is derived where the
+ * lemmas are not in scope.
+ */
+function naturalMembershipFacts(kernel: Kernel, available: readonly AvailableFact[], visibility?: ScopeVisibility): AvailableFact[] {
+  const rules = naturalMembershipRules(kernel, visibility);
+  if (!rules || (!rules.omega && !rules.member)) return [];
+  const natural = new Map<string, Proof>();
+  const memberships: { readonly element: Term; readonly set: Term; readonly proof: Proof }[] = [];
+  for (const item of available) {
+    if (item.formula.tag !== "pred") continue;
+    if (item.formula.pred === rules.natural && item.formula.args.length === 1) natural.set(termCanonical(item.formula.args[0]!), item.proof);
+    else if (item.formula.pred === rules.membership && item.formula.args.length === 2) {
+      memberships.push({ element: item.formula.args[0]!, set: item.formula.args[1]!, proof: item.proof });
+    }
+  }
+  if (memberships.length === 0) return [];
+  const derived: AvailableFact[] = [];
+  let pending = memberships;
+  for (let round = 0; pending.length > 0 && round < memberships.length; round += 1) {
+    const remaining: typeof memberships = [];
+    for (const item of pending) {
+      const key = termCanonical(item.element);
+      if (natural.has(key)) continue;
+      let proof: Proof | undefined;
+      if (rules.omega && termCanonical(item.set) === termCanonical(rules.omega.carrier)) {
+        proof = impElim(iffElimRight(at(theorem(rules.omega.name), item.element)), item.proof);
+      } else if (rules.member) {
+        const setNatural = natural.get(termCanonical(item.set));
+        if (setNatural) proof = impElim(at(impElim(at(theorem(rules.member.name), item.set), setNatural), item.element), item.proof);
+      }
+      if (!proof) { remaining.push(item); continue; }
+      natural.set(key, proof);
+      derived.push({ formula: pred(rules.natural, item.element), proof });
+    }
+    if (remaining.length === pending.length) break;
+    pending = remaining;
+  }
+  return derived;
 }
 
 function matchTerm(pattern: Term, target: Term, variables: ReadonlySet<string>, substitution: Map<string, Term>): boolean {
@@ -1441,17 +1546,46 @@ export function proveLiteralDisequality(kernel: Kernel, left: Term, right: Term)
   return m < n ? impIntro(goal, impElim(ascending, assume(goal))) : impIntro(goal, impElim(ascending, symm(assume(goal))));
 }
 
-/** The literal-distinctness proof of a goal `m ≠ n` (that is, `m = n → ⊥`), when it is one. */
-export function proveLiteralDistinctnessGoal(kernel: Kernel, goal: Formula): Proof | undefined {
-  if (goal.tag !== "imp" || goal.right.tag !== "bottom" || goal.left.tag !== "eq") return undefined;
-  return proveLiteralDisequality(kernel, goal.left.left, goal.left.right);
+// Ordered pairs with a distinct literal coordinate are distinct: `(0, e) =
+// (1, k)` is refuted through the injectivity of pairing, one layer at a
+// time, so a nested pair `((e, 0), k) = ((e, 1), k)` is refuted too.
+const ORDERED_PAIR_INJECTIVE = "Grace.Cumulus.Set.Relation.orderedPair.injective";
+
+/**
+ * A proof of `left = right → ⊥` when the terms are distinct natural
+ * literals, or ordered pairs whose coordinates are so refuted at some
+ * depth; undefined otherwise, or when the laws are not in the kernel.
+ */
+export function proveClosedDisequality(kernel: Kernel, left: Term, right: Term, depth = 8): Proof | undefined {
+  const literal = proveLiteralDisequality(kernel, left, right);
+  if (literal) return literal;
+  if (depth === 0 || left.tag !== "app" || right.tag !== "app" || left.fn !== right.fn) return undefined;
+  if (left.fn.slice(left.fn.lastIndexOf(".") + 1) !== "orderedPair" || left.args.length !== 2 || right.args.length !== 2) return undefined;
+  if (!kernel.theorems.has(ORDERED_PAIR_INJECTIVE)) return undefined;
+  const [a, b] = left.args as [Term, Term];
+  const [c, d] = right.args as [Term, Term];
+  const coordinates = [[a, c, andElimLeft], [b, d, andElimRight]] as const;
+  for (const [x, y, project] of coordinates) {
+    const distinct = proveClosedDisequality(kernel, x, y, depth - 1);
+    if (!distinct) continue;
+    const equal = eq(left, right);
+    const injective = impElim(at(theorem(ORDERED_PAIR_INJECTIVE), a, b, c, d), assume(equal));
+    return impIntro(equal, impElim(distinct, project(injective)));
+  }
+  return undefined;
 }
 
-/** A proof of ⊥ from a fact `m = n` between distinct literals, when one of the facts is such an equation. */
+/** The literal-distinctness proof of a goal `m ≠ n` (that is, `m = n → ⊥`), when it is one; pairs of such literals included. */
+export function proveLiteralDistinctnessGoal(kernel: Kernel, goal: Formula): Proof | undefined {
+  if (goal.tag !== "imp" || goal.right.tag !== "bottom" || goal.left.tag !== "eq") return undefined;
+  return proveClosedDisequality(kernel, goal.left.left, goal.left.right);
+}
+
+/** A proof of ⊥ from a fact `m = n` between distinct literals, or pairs of them, when one of the facts is such an equation. */
 export function refuteLiteralEquation(kernel: Kernel, facts: readonly { readonly formula: Formula; readonly proof: Proof }[]): Proof | undefined {
   for (const fact of facts) {
     if (fact.formula.tag !== "eq") continue;
-    const distinct = proveLiteralDisequality(kernel, fact.formula.left, fact.formula.right);
+    const distinct = proveClosedDisequality(kernel, fact.formula.left, fact.formula.right);
     if (distinct) return impElim(distinct, fact.proof);
   }
   return undefined;

@@ -67,7 +67,7 @@ const expected: Record<string, string> = {
   "Grace.Cumulus.Geometry.BanachTarski.banachTarski.restricted":
     "Paradoxical(restrictAction(motionAction, Motions, unitBall), Motions, unitBall)",
   "Grace.Cumulus.Geometry.BanachTarski.banachTarski.two_balls_part":
-    "∃ C, C ⊆ unitBall ∧ Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
+    "∃ C ⊆ unitBall, Equidecomposable(motionAction, Motions, ℝ³, C, unitBall ∪ shiftedBall)",
 };
 
 interface Audit {

@@ -747,8 +747,14 @@ export function qualifiedSymbolCompletions(symbolNames, beforeCursor) {
 }
 
 /** Resolve an authored reference without letting a same-named theorem shadow a call. */
-/** A successfully checked module is proven even when it is only an import facade. */
+/**
+ * A successfully checked module is proven even when it is only an import
+ * facade. The amber state marks the file's own obligations: a `sorry` in one
+ * of its proofs. A proof that is complete but cites an admitted theorem of
+ * another file is dependent, not admitted; the admissions it rests on are
+ * reported on the theorem itself, not on the file.
+ */
 export function checkedFileProofState(summary) {
   if (!summary) return undefined;
-  return (summary.admittedSorries ?? summary.sorries) ? "sorry" : "proven";
+  return summary.sorries ? "sorry" : "proven";
 }

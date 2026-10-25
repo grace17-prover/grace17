@@ -116,6 +116,9 @@ export function resolveApplied(link: DeclarationLink, rest: string): Declaration
   return matching.length === 1 ? matching[0]! : matching.length > 1 ? severalLink(link.name, matching) : link;
 }
 
+// Function symbols of the set-theoretic foundation (docs/foundations.md).
+const foundationSymbols = new Set(["empty", "pair", "union", "powerset", "omega", "choose"]);
+
 // Words of the language itself; inline code using them is not a reference.
 const reservedWords = new Set([
   "module", "import", "open", "export", "namespace", "section", "variable", "hypothesis", "end",
@@ -148,7 +151,11 @@ export function rewriteHref(href: string, ctx: RenderContext): string {
   if (ctx.external.has(path)) return ctx.external.get(path)! + suffix;
   if (path.endsWith(".md")) {
     const name = path.split("/").at(-1)!;
-    if (name === "README.md") return (path.startsWith("../") ? ctx.prefix : "index.html") + suffix;
+    // The repository README is the site's front page; another README
+    // (`../checkers/README.md`) is a repository file.
+    if (path === "README.md") return "index.html" + suffix;
+    if (path === "../README.md") return ctx.prefix + suffix;
+    if (name === "README.md") return repo + path.slice(3) + suffix;
     return name.replace(/\.md$/, ".html") + suffix;
   }
   const lib = /^\.\.\/(lib\/.+\.g17)$/.exec(path);
@@ -233,7 +240,9 @@ export function renderMarkdown(markdown: string, ctx: RenderContext): { html: st
   renderer.codespan = ({ text }) => {
     const raw = unescapeEntities(text);
     const head = /^[\p{L}_][\p{L}\p{N}_']*(?:\.[\p{L}_][\p{L}\p{N}_']*)*/u.exec(raw)?.[0];
-    const found = head && ctx.declarations?.get(head);
+    // The foundation's own symbols, `choose(A)` or `union(A)`, are not
+    // library declarations, whatever a module happens to name alike.
+    const found = head && !foundationSymbols.has(head) && ctx.declarations?.get(head);
     const link = found && resolveApplied(found, raw.slice(head.length));
     // A bare name is a declaration only when it stands alone or is applied:
     // `one : carrier` and `mul : carrier × carrier → carrier` spell a field

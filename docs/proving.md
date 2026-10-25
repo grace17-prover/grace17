@@ -36,7 +36,19 @@ proof
 The `module` line names the file, the `import` line brings in the compact
 default library, and everything after that is mathematics. A theorem's
 parameters introduce the objects under discussion, `requires` lists the
-assumptions, and `shows` gives the claim. The `proof` block constructs
+assumptions, and `shows` gives the claim. A parameter list that grows long
+may continue on the lines beneath the header, more indented, with the break
+after a comma or before the closing parenthesis:
+
+```g17
+theorem equality.copy_again (x y : Set,
+    z : Set)
+  requires h : x = y
+  shows x = y
+proof
+  exact h
+```
+ The `proof` block constructs
 evidence for that claim, here by pointing at the assumption. Only after the
 resulting proof term passes the kernel does the theorem become a checked fact
 that later proofs may use with `exact`, `apply`, `specialize`, rewriting, and
@@ -130,7 +142,8 @@ shape, and take the next small step:
 
 `by_cases h : P` is `have split : P ∨ ¬P by tauto` followed by `cases
 split with h | h` in one step: two goals, the first with `h : P`, the
-second with `h : ¬P`, each taking a bullet. `exact`, `show P := fact`,
+second with `h : ¬P`, each taking a bullet; a long proposition may begin
+on the next, more indented line after `by_cases h :`, as after `have h :`. `exact`, `show P := fact`,
 `apply`, `assumption`, `have`, `unfold`, `rfl`, `compute`, and `simp`
 provide the usual proof assembly and computation steps. `simp [f, h]` normalizes with checked definitions, equalities, and
 ground computation, and closes a logical goal when its search succeeds; `rw h` rewrites forward and `rw ← h` backward; `symm`
@@ -161,9 +174,16 @@ equalities stay out of the rest of the proof. The side substituted is the
 one that is a variable not occurring in the other; an equation with no such
 side is reported, since `rfl` needs a variable to substitute. A goal binder
 that would capture the replacement, `∀ V ∈ B, …` under `W = V`, is renamed
-rather than skipped. The entry also stands for a disjunct: `rcases h with
+rather than skipped. The substitution waits until the whole pattern is
+bound, so it reaches the facts bound after the `rfl` as well as before it.
+The entry also stands for a disjunct: `rcases h with
 rfl | ⟨x, hx, rfl⟩` substitutes the first alternative's equation in its
-branch and opens the second alternative's data in the other.
+branch and opens the second alternative's data in the other. Alternatives
+nest inside a component: `rcases reached with ⟨_, same | path⟩` opens the
+conjunction and then splits the disjunction its second component binds,
+one branch per alternative, and each alternative is itself a pattern, so
+`⟨inA, same | rfl | ⟨z, hz, rfl⟩⟩` opens three branches; `obtain` takes the
+same patterns.
 
 Disjunction patterns may name every leaf at once:
 
@@ -175,7 +195,13 @@ rcases comparison with less | equal | greater
 ```
 
 The written disjunction may associate to the left or right. Grace17 reconstructs
-the nested `∨E` proof in either case.
+the nested `∨E` proof in either case. The subject of `rcases`, `cases`, and
+`obtain` is a local fact, a projection of one, or a proof expression:
+`rcases (three.cases with h) with rfl | rfl | rfl`, or bare, `rcases
+three.cases with h with rfl | rfl | rfl`, the pattern following the last
+`with` outside the brackets. A parenthesised application is likewise the
+head of a further application, `exact (Disjoint.iff.forward with h) with u,
+hu, inX`.
 
 Construction has the matching `refine` form. It follows transparent predicate
 definitions and recursively assembles nested `∃`, `∧`, and `↔` goals. A term
@@ -206,8 +232,15 @@ conjunction facts support `.left` and `.right`, nested as needed. Projections
 work in proof expressions (`exact`, `have`, `apply`, `with`) and as rules for
 `rw`, `simp`, and `simpa`. They can be applied to arguments, for
 example `h.right at x with hx`, and an equivalence obtained by projection
-supports `.forward` and `.backward`. They need a visible conjunction, so
-unfold a named predicate first. Exact local names take priority; a dotted path
+supports `.forward` and `.backward`. A parenthesised application takes the
+same projections wherever a proof expression is accepted: `exact
+(quotientEnd.membership.forward with member).left`, `have h := (split with
+linked).right`, and `(pair.iff at F, u, v).backward with ⟨hu, hv⟩` project
+the application's statement, through a defined predicate whose body is a
+conjunction, and apply the result to any `with` or `at` list that follows. A fact stated by a defined predicate
+whose body is a conjunction projects through the definition, so
+`partition.right.left` needs no `unfold Partition at partition` first, in
+proof expressions and as the source of `rcases` and `cases`. Exact local names take priority; a dotted path
 rooted in a local fact is resolved locally before global names, following only
 the written path.
 
@@ -319,7 +352,14 @@ way and the goal is φ. A guard that
 cannot be discharged stays as a premise of the named fact, or as the first
 goal of an `apply`, where a line can prove it. Conflicting substitutions and
 undetermined parameters produce an error asking for an `at` list, which is
-always the fallback.
+always the fallback. In an unannotated `have`, a parameter that occurs only
+in the conclusion is fixed by nothing, `leftEnd` and `rightEnd` in `have h
+:= Joined.of_edge with edge`; the error names such parameters and the two
+forms that fix them: the stated fact `have h : … := Joined.of_edge with
+edge`, and an `at` list with holes, `Joined.of_edge at leftEnd, rightEnd,
+_, _ with edge`, where `_` leaves a parameter to the premises and the
+written terms stand by position. An `at` list with holes names every
+parameter.
 
 A bare `exact theorem` with an inferred instantiation discharges every
 requirement from local facts, as `with *` does; the error names the first
@@ -334,7 +374,16 @@ Three more forms keep applications on one line. An anonymous constructor
 conjunction or existential premise is supplied in place: `ih with y, ⟨hy,
 earlier⟩`, `exact absent with ⟨J, hJ⟩`, and `have m : P := lemma.backward
 with ⟨hJ, extendsJ⟩`; nested constructors go through predicate definitions,
-as in `exact ⟨⟨x, hx⟩, hx⟩` for `Nonempty(S) ∧ x ∈ S`. When a requirement
+as in `exact ⟨⟨x, hx⟩, hx⟩` for `Nonempty(S) ∧ x ∈ S`. In an unannotated
+`have`, where no goal fixes the parameters, the components of the
+constructor fix them as named entries do: `have m := lemma.backward with
+⟨hJ, extendsJ⟩` matches `hJ` and `extendsJ` against the conjuncts of the
+requirement, nested constructors against nested conjunctions, and a
+witness term against an existential, so no `at` list is needed and no
+context fact of the same shape can choose another instance. A component
+that meets its conjunct only through a definition does not take part,
+and the constructor is checked against the premise once the parameters
+are known from the goal or the other entries. When a requirement
 is a conjunction and the `with` list supplies its conjuncts in order, they
 are combined as the constructor would combine them, so `exact
 difference.membership.backward with inSpace, notInjective` proves `x ∈ A ∖
@@ -342,6 +391,50 @@ B` from `inSpace : x ∈ A` and `notInjective : x ∉ B`; an entry that fits
 no conjunct is still reported as matching no requirement. Parentheses group a
 multi-premise application inside `refine ⟨…⟩`, where commas separate
 components: `refine ⟨y, yInB, (constantFunction.relates with xInA, yInB)⟩`.
+A parenthesised application inside a `with` list is a premise too: when its
+own parameters are fixed by its facts, it is read first and its statement
+fixes the outer parameters as a named fact does; when they need its
+expected proposition, as in `Joined.monotone with
+(difference.subset_of_subset with bound), joinedC`, it is read after the
+other entries have fixed what they can, against the requirement it fills,
+and its statement then fixes the rest, so no named `have` is needed first.
+A premise stated through a defined predicate meets a requirement stated by
+the predicate's body, and the other way round, through one layer of the
+definition: `degreeWeights.membership.forward with xy` accepts `xy :
+relates(w, x, y)` for the requirement `(x, y) ∈ w` without an `unfold
+relates at xy` first, and the evidence is bridged by the definition when
+the application is checked. The goal meets the conclusion the same way,
+through one layer on either side and beneath the connectives: `exact
+degreeWeights.membership.backward with ⟨…⟩` proves `relates(w, x, y)` from
+a conclusion `(x, y) ∈ w`, `apply quotientEnd.membership.backward` opens
+its premises on such a goal, `have weight : degreeIn(…) ∈ ℕ :=
+degreeIn.natural with finite` takes the conclusion `Nat(degreeIn(…))`, and
+`exact EvenSet.symmetricDifference with …` on `Even(cardinality(X △ Y)) ↔
+…` opens `EvenSet` beneath the `↔`; the parameters the goal fixes are
+known before a parenthesised entry is read. A bare `rfl` entry is the
+equation requirement whose open side the other fixes, so `thm with finite,
+rfl, ends` reads `cardinality(F) = n` as `n := cardinality(F)`. A theorem
+stated by a `∀`, named bare or in parentheses, is instantiated against the
+requirement it fills, `Finite.subset with finite, difference.subset_left`
+matching `A ∖ B ⊆ A` against `X ∖ Y ⊆ X`; a binder the requirement leaves
+open is not guessed. Its own binders are renamed apart from the names in
+scope first, so `intersection.subset_left`, stated over `A` and `B`, fills
+`B ∩ C ⊆ B` under parameters `A B C`. The order of the list does not
+matter: an entry that fits no requirement yet waits for the entries that
+fix the parameters its requirement mentions, named facts, constructors,
+and applications with an `at` list included, and the waiting entries are
+read again until none can be placed, so `Joined.monotone with
+union2.subset_left, joined` reads `joined` first, and `natSum.add_pointwise
+with finite, indicatorMap.natural, indicatorMap.natural, agree` lets
+`agree` fix `u` and `t` before the two bare theorems are instantiated. A
+bare theorem with `requires` clauses is read as an application with no
+explicit premises: its requirements are discharged from the context, as a
+bare `exact theorem` discharges them, and its conclusion fills the
+requirement; a bare entry that still fits nothing is reported with the
+first requirement left open. A numeral in a requirement matches the
+constructor term of the same value, so `HasCardinality.empty_of_zero with
+has` accepts `has : HasCardinality(F, zero)` as an induction case states
+it, and an inequality `a ≠ b` is matched as the negated equation it is.
 A local fact that is a transparent predicate application applies to
 arguments through its definition, so `subset : A ⊆ B` gives `subset with x,
 hx` without an `unfold Subset at subset` first; a predicate an application
@@ -434,6 +527,22 @@ proof
   constructor
   . exact diagonal
   . exact diagonal
+```
+
+A term that recurs through a proof is given a name by `set x := t with h`:
+`x` is a fresh variable, `h : x = t` a local fact, and the goal reads `x`
+wherever it read `t`, so the following steps may write `x`. Facts proved
+earlier keep `t`; `rw h at fact` renames one of them, and `rw ← h` restores
+the term in the goal. The proof of the renamed goal is generalized over `x`
+and instantiated at `t`, so nothing is assumed.
+
+```g17 import=Grace.Cumulus.Main
+theorem named_intersection (A B : Set)
+  shows A ∩ B ⊆ B ∪ (A ∩ B)
+proof
+  set C := A ∩ B with hC
+  intros x hx
+  simp [hx]
 ```
 
 Local proposition blocks may nest. A dedent resumes the surrounding goal;
@@ -575,14 +684,34 @@ ambiguous compositions are rejected.
 backward, `rw [h₁, h₂]` rewrites with each rule in turn, and `rw moves with
 p, hp` rewrites with the instance that application names, as `have inst :=
 moves with p, hp` followed by `rw inst` would; a `with` list that does not
-apply is reported with the application `rw` read. `unfold name`
+apply is reported with the application `rw` read. The parameters the facts
+leave open are fixed by the goal, or by the fact named after `at`: after the
+named premises fix what they can, the rule's left side (its right side for
+`rw ←`) is matched against the subterms of the goal, and the one instance
+that occurs fixes the rest, so `rw crossing.restrict with edges` on the
+goal `crossing(leftEnd, rightEnd, F, X) = {e}` needs no `at leftEnd,
+rightEnd, E, F, X`; a side that occurs at several distinct instances is
+rewritten at each in turn, so `rw indicatorMap.value with hv` rewrites
+both `indicatorMap({leftEnd(e)}, X)(v)` and `indicatorMap({rightEnd(e)},
+X)(v)`, and the error stays only for facts that conflict. The same holds
+for `rwa` and `rw … at h`. A parenthesised application, `rw (thm with
+facts)`, is a rule wherever a rule name is, including `rwa` and the rule
+lists of `simp`, `simp at`, and `simpa`; so are the explicit
+instantiations `rw (thm at terms)` and `rw thm{x := t, …}`, which choose
+one instance. `unfold name`
 exposes one definition. `rwa h` rewrites and then closes the goal from a
 matching local fact, and `rwa h at fact` rewrites the fact and uses it. Transformation tactics
 accept a common `at h` location suffix: `unfold Subset at hAB`, `rw hxy at h`,
-and `simp [add] at h` transform a named hypothesis. `rw under h at fact`
+and `simp [add] at h` transform a named hypothesis, and several facts may
+be listed, `rw h at a, b`, `simp [add] at a, b`, `unfold Subset at a, b`,
+each transformed in turn; `rwa h at a, b` closes from whichever matches. `rw under h at fact`
 rewrites through an unopened `∀` or `∃` when neither side of the instantiated
 equality depends on the bound variable; the same form works on a goal and with
-`←`.
+`←`, and plain `rw` falls back to it when the rule matches nothing outside
+the binders. A location may be a projection, `rw same at
+obstruction.right.right`: the projected fact is bound under that name and
+rewritten. A local `∀` fact applied to arguments, `rw h with v, hv`, is a
+rule as a theorem application is.
 
 A rule `P ↔ Q`, possibly under `∀` and premises, rewrites too: `rw h` replaces
 the subformula `P` of the goal, or of the fact named by `at`, by `Q` at every
@@ -594,11 +723,25 @@ with the notation in scope: `rewrite rule pow_zero (x ^ 0 = G.one) does not
 match the goal x = x`. In `rw [a, b, c]` the failing rule is reported by its
 own name and located at that rule.
 
-`unfold` handles both predicate definitions and equations, and unfolds a
-defined predicate wherever the goal mentions it: at the head, under `∧`,
-`∨`, `→`, and `¬`, and inside a `∀` or `∃` whose bound variable the
-instance mentions. The foundational equations can expose a compact numeral
-as a von Neumann set:
+A set-builder `def f(…) : Set := { x ∈ A | φ }` is defined by its membership
+law, so `unfold f` opens every `t ∈ f(…)` instance into `t ∈ A ∧ φ`; when the
+goal or fact mentions `f(…)` only as a set, on a side of `=` or `⊆`, `unfold f`
+says so and `ext` is the way in. The law also serves the tactics that follow a
+predicate definition one layer: `rcases member with ⟨vertex, rest⟩`, `obtain`,
+and `cases` take a fact `member : a ∈ f(…)` apart through it, `member.left` and
+`member.right` project through it, `refine ⟨vertex, _⟩` and `exact ⟨vertex, h⟩`
+build a goal `a ∈ f(…)` through it, `intro` opens a goal `a ∈ f(…)` whose
+body is an implication, and `member with args` applies a fact whose body is a
+`∀`, so none of these needs an `unfold f` first. A comprehension standing as an argument in a
+`def` body, as in `⋃({ X ∈ P | v ∈ X })`, is a helper definition `name.family`
+over the same parameters, with its law `name.family.membership`.
+
+`unfold` handles both predicate definitions and equations, and opens the
+named definition at every instance of the goal, or of the fact named by
+`at`, in one call: under every connective and relation, inside arguments,
+and inside a `∀` or `∃` whose bound variable the instance mentions. A
+definition the goal or fact does not mention is reported. The foundational
+equations can expose a compact numeral as a von Neumann set:
 
 ```g17
 lemma two.encoding
@@ -609,9 +752,11 @@ proof
 ```
 
 The compact numeral stays the evaluator's native representation; unfolding
-produces one equality proof. `unfold` also rewrites with local equalities in
-the exposed body, so a following `rw h` may find nothing left to rewrite; `cc`
-closes such goals directly.
+produces one equality proof. `unfold` never rewrites with local equalities,
+so the exposed body depends on the definition alone and not on the context:
+a following `rw h` finds the instance the definition exposed, `simp [f, h]`
+unfolds and rewrites in one step, and `cc` closes a goal the context
+equalities settle.
 
 A power with a literal exponent, `t ^ k` for `k ≤ 16`, is expanded by
 `ring` and `ring_nf` into its product over ℕ, ℤ, ℚ, ℝ, and bundled rings,
@@ -640,7 +785,7 @@ no outer equivalence applies, it rewrites with the named equalities inside a
 logical goal, including a negated condition, repeating on the result to a
 bounded fixed point, so `simp [fst.pair, snd.pair]` reduces every layer of
 `fst(fst(((a, b), c))) ∈ A` and leaves `a ∈ A` as the residual goal for
-later tactics. This fallback needs evidence for conditional rules and does not
+later tactics, or closes the goal when the context settles it. This fallback needs evidence for conditional rules and does not
 rewrite beneath quantifiers or introduce case splits. For example:
 
 ```g17
@@ -653,7 +798,30 @@ The first line may expose the pointwise subset obligation; the second can then
 simplify membership in the quotient.
 
 `simp at` works on any proved proposition, forward-simplifying it through
-equivalences and equality transport. So `simp [pair.membership] at h` changes
+equivalences and equality transport. An equivalence among the rules, a
+membership law or a set-builder definition, is opened at every instance of the
+fact, under `∃` and `∀` included, so `simp [union2.membership,
+singleton.membership] at hf` opens both layers in one step; the empty-set law
+is applied by default and `⊥` is absorbed, so `h : a ∈ ∅ ∧ P` becomes `h : ⊥`,
+and a fact brought to `⊥` closes the goal: `simp at h` with `h : e ∈ F ∖ {e}`
+finishes the proof, as a conjunct `x ≠ x` does. The laws of `∪`, `∩`, `∖`, `{a}`,
+`{a, b}`, `△`, and `∅` are applied by default, on the goal and under `simp at h`
+alike, so `x ∈ A ∖ {a}` opens to `x ∈ A ∧ x ≠ a` wherever it stands, and
+`C ∖ {f} ⊆ (T ∖ {f}) ∪ {e}` follows by a bare `simp` from `C ⊆ T ∪ {e}` and
+`f ≠ e`. A residue of `simp […] at h` that the other facts of the context
+refute, `x ∉ A` beside `hA : x ∈ A`, closes the goal too; a residue the context
+does not refute stands as the rules left it.
+A fact named among the rules settles its atom wherever it occurs, inside opened
+set-builder bodies and under binders included, `⊤` for `he : e ∈ F` and `⊥` for
+`he : e ∉ F`; a closed equation between numeral expressions is evaluated in any
+subformula; the truth values are absorbed, `⊤ ∧ P`, `⊤ → P`, and `P ↔ ⊤` to
+`P`; and what remains is decided propositionally, so `simp [Even.zero,
+Even.not_one]` decides a goal over those atoms. With rules, `simp` leaves the
+residue as the next goal whenever a rule made progress and reports an error only
+when nothing changed.
+On a goal, the residue the rewrites leave is closed when it is a propositional
+consequence of the context or a closed numeral computation such as `1 + 1 = 2`.
+So `simp [pair.membership] at h` changes
 `h : x in pair(a, b)` into `h : x = a or x = b`.
 
 For a disjunction, the incremental goal simplifier can use the negations of
@@ -747,19 +915,27 @@ have representative_less : rationalRepresentativeLess(u, v)
 
 ## Choosing an induction form
 
-Grace17 has three induction invocations. They start from different
+Grace17 has four induction invocations. They start from different
 mathematical structure:
 
 | What is decreasing? | Invocation | Shape after the invocation |
 |---|---|---|
 | a declared datatype value | `induction n` or `induction n generalizing s with` | one named branch per constructor |
+| a finite set, one element at a time | `induction finite with G a` | `| empty =>` for `P(∅)`, `| insert using ih =>` for `P(G ∪ {a})` |
 | membership in the set-theoretic universe | `induction x using membership` | introduce `current`, then the member hypothesis `ih` |
 | an arbitrary relation on a set | `induction x over A ordered by r certified by founded` | introduce `x`, `hx`, then the predecessor hypothesis `ih` |
 
 ### Structural induction on a datatype
 
-Place `induction n` as the first command in the proof block, immediately below
-the `proof` keyword. List any declared variables whose values must remain
+Place `induction n` at the start of the proof block, below the `proof`
+keyword. Steps written before it run first, against the theorem's premises:
+each fact they prove that mentions neither `n` nor a generalized variable is
+kept in every case under its name when a case names it (a case that declares
+the name again proves its own fact); a kept fact is a hypothesis of the
+induction's statement, admitted through an auxiliary theorem reported with the
+theorem, so a fact no case needs is left out. A fact mentioning `n` or a
+generalized variable is reported at its `have` line, since no case could use
+it; prove such a fact inside the cases instead. List any declared variables whose values must remain
 arbitrary after `generalizing`; they may occur before or after `n`. The optional
 final `with` names the cases in the usual spelling. Their soft-type premises,
 dependent binders, and requirements depending on `n` or on a generalized
@@ -809,6 +985,54 @@ proof
     rfl
   | Bool.true => simp [not]
 ```
+
+### Induction over a finite set
+
+A finite set is built from `∅` by adjoining one element at a time. With a
+hypothesis `finite : Finite(F)` and the goal `P(F)`,
+
+```g17
+induction finite with G a
+```
+
+leaves `P(∅)` and `P(G ∪ {a})` for a finite `G` and a new point `a`,
+with `ih : P(G)`. A fact `F ⊆ E` in context makes `E` the ambient set,
+so `G ⊆ E` and `a ∈ E`; without one the induction runs inside `F`
+itself, and the step's `G ⊆ F` carries the facts about `F` down to `G`
+through subset lemmas. The names after `with` must be fresh. The case
+header `| empty =>` opens the first goal, and `| insert using ih =>`
+opens the second with `G`, `GSubset : G ⊆ E`, `GFinite : Finite(G)`,
+`a`, `aMember : a ∈ E`, `aFresh : a ∉ G`, and `ih` introduced, named
+after the chosen variables; `| insert using subset, finite, member, fresh,
+ih =>` names all five facts in that order. Plain bullets take the two goals
+as well, the second as `∀ G ⊆ E, Finite(G) → ∀ a ∈ E, a ∉ G → P(G) →
+P(G ∪ {a})` for `intros`. The property closed under adjoining an element
+need not be wrapped as a theorem over the size of `F`:
+
+```g17 import=Grace.Cumulus.Cardinal.Counting
+theorem count_exists (F : Set)
+  requires finite : Finite(F)
+  shows ∃ n, Nat(n) ∧ cardinality(F) = n
+proof
+  induction finite with G a
+  | empty =>
+    refine ⟨zero, Naturals.constructor.zero, ?_⟩
+    exact cardinality.empty
+  | insert using ih =>
+    obtain ⟨n, natural, size⟩ := ih
+    have same : insert(a, G) = G ∪ {a}
+      ext y
+      simp
+    have counted := cardinality.insert with GFinite, aFresh
+    rw [same, size] at counted
+    refine ⟨succ(n), Naturals.constructor.succ with natural, counted⟩
+```
+
+The tactic applies the library's `Finite.induction` to the family
+`{ G ∈ 𝒫(E) | P(G) }`, a separation helper `name.family` defined per use;
+its membership law unpacks membership in the family to `P(G)`, so the
+proof is theorem applications and the kernel's rules, and it replays in the
+external checkers.
 
 ### Membership induction from Foundation
 
@@ -877,7 +1101,12 @@ and quantified formulas are treated as atoms; `and`, `or`, implication,
 equivalence, negation, and `⊥` are decided propositionally. The search branches
 on an atom only while the current partial valuation leaves the goal and all
 hypotheses undecided. Each split is a proof of excluded middle, and each leaf
-is a natural-deduction proof.
+is a natural-deduction proof. An equation is the same atom in either
+orientation: `a = b` and `b = a` are one atom, as are `a ≠ b` and `¬(b = a)`,
+so from `h : a = b` the goal `¬(b ≠ a)` closes, and a lemma stated as
+`leftEnd(e) = v ∨ rightEnd(e) = v` meets a hypothesis `v ≠ leftEnd(e)` without
+reorienting it first. This is a reading of the atoms, not equality reasoning:
+`a = b` and `b = c` do not give `a = c`, which is for `cc`.
 
 ```g17
 theorem Peirce (x y z w : Set)
@@ -1172,6 +1401,14 @@ A binder may also be typed by a mixfix notation that begins with a colon:
 a hypothesis in scope or by instance synthesis. See
 [mixfix predicates](notation.md#mixfix-predicates).
 
+Membership in a natural number, and in ℕ, carries naturality to every guard.
+With `k : Nat` in scope and `index : i ∈ k`, as `intros i index` leaves
+under `∀ i ∈ k, …`, a theorem applied at `i` has its `Nat(i)` guard met from
+`index` through the library's `natural.member`, and a fact `n ∈ ℕ` meets a
+guard `Nat(n)` as a fact `Nat(n)` meets a guard `n ∈ ℕ`, through `nat.omega`;
+no conversion step is written. The two lemmas are found by name, so this
+holds wherever the module importing them is in scope.
+
 Grace17 also supports bounded quantifiers. They abbreviate:
 
 ```g17
@@ -1332,6 +1569,17 @@ results; exported theorem dependencies include the axiom; the CLI prints a
 warning; and the Workbench shows an amber admitted state instead of the green
 proof-complete state. A check containing `sorry` succeeds so downstream work
 can continue. Nothing with a `sorry` belongs in Cumulus.
+
+An admission propagates through citation: a theorem whose proof is complete
+but cites an admitted theorem, of its own module or an imported one, depends
+on that admission, and the axiom appears among its dependencies. Such a
+theorem is *dependent*, not admitted: it has no obligation of its own, and
+its file is not amber for it, but what it rests on is reported. The machine
+interface reports the three cases as the statuses `proved`, `admitted` (a
+`sorry` of the proof's own), and `dependent`; the CLI prints a note naming
+the admissions that complete proofs depend on; and a theorem's own `sorries`
+list, in the Workbench and the protocol, holds every admission it rests on,
+own or inherited.
 
 ## Proof maps
 

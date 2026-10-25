@@ -26,7 +26,7 @@ if (!shard) { console.error("--shard expects i/n"); process.exit(2); }
 const shardIndex = Number(shard[1]) - 1;
 const shardCount = Number(shard[2]);
 const concurrency = Number(option("--concurrency") ?? Math.max(1, Math.min(2, cpus().length >> 1)));
-const heap = option("--heap") ?? "6144";
+const heap = option("--heap") ?? "8192";
 // `--exclude a,b` leaves out every test file whose name contains one of the
 // pieces, before sharding, so a heavy file can run in its own job.
 const excluded = (option("--exclude") ?? "").split(",").map(item => item.trim()).filter(Boolean);
@@ -50,7 +50,12 @@ function runOne(name: string): Promise<void> {
     const fileStarted = performance.now();
     const child = spawn(process.execPath, [
       `--max-old-space-size=${heap}`, "--disable-warning=ExperimentalWarning", ...preload, "--test", join(tests, name),
-    ], { stdio: ["ignore", "pipe", "pipe"] });
+    ], {
+      stdio: ["ignore", "pipe", "pipe"],
+      // The processes a test spawns (a compile of the library, a checker) get
+      // the same heap as the test itself, as they do under the CI workflow.
+      env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${heap}` },
+    });
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });

@@ -1,0 +1,530 @@
+-- Decompositions of the edge set into k colour classes, the tree-packing
+-- condition of Tutte and Nash-Williams, and partitions of the vertex set as
+-- they refine along a decomposition.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Decompositions
+import Multigraph.Trees
+import Multigraph.Quotient
+import Multigraph.Subgraph
+
+-- Section: Decompositions, packings, and the packing condition.
+
+-- A k-decomposition: T assigns to every colour i ∈ k an edge class, and the
+-- classes partition E.
+predicate Decomposition (E T : Set, k : Nat) :=
+  FunctionBetween(T, k, 𝒫(E)) ∧ (∀ e ∈ E, ∃ i ∈ k, e ∈ T(i)) ∧
+  (∀ i ∈ k, ∀ j ∈ k, i ≠ j → Disjoint(T(i), T(j)))
+
+-- A tree packing: k pairwise edge-disjoint spanning trees inside E, one
+-- for each colour i ∈ k; they need not exhaust E.
+predicate TreePacking (V E leftEnd rightEnd : Set, k : Nat) :=
+  ∃ T, FunctionBetween(T, k, 𝒫(E)) ∧
+    (∀ i ∈ k, ∀ j ∈ k, i ≠ j → Disjoint(T(i), T(j))) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i)))
+
+-- Every partition P of V is joined by at least k(|P| − 1) edges.
+predicate PackingCondition (V E leftEnd rightEnd : Set, k : Nat) :=
+  ∀ P, Partition(V, P) →
+    k * (cardinality(P) - 1) ≤
+      cardinality(crossingClasses(P, leftEnd, rightEnd, E))
+
+-- F connects every class of P from within, by its edges inside the class.
+predicate InternallyConnected (leftEnd rightEnd F P : Set) :=
+  ∀ X ∈ P, Connects(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X))
+
+-- Section: Partitions and their crossing edges.
+
+theorem Partition.finite (V P : Set)
+  requires finiteVertices : Finite(V)
+  requires partition : Partition(V, P)
+  shows Finite(P)
+proof
+  have subset : P ⊆ 𝒫(V)
+    intros X class
+    exact powerset.membership_iff.backward
+      with (partition.left with X, class).left
+  exact Finite.subset with (Finite.powerset with finiteVertices), subset
+
+-- A vertex lies in a class of a partition exactly when that class is its own.
+theorem classOf.eq_iff_member (V P Y v : Set)
+  requires partition : Partition(V, P)
+  requires class : Y ∈ P
+  requires vertex : v ∈ V
+  shows classOf(P, v) = Y ↔ v ∈ Y
+proof
+  constructor
+  . intro same
+    rw ← same
+    exact (classOf.member with partition, vertex).right
+  . intro member
+    exact classOf.eq_of_member with partition.right.left, class, member
+
+theorem crossingClasses.subset (P leftEnd rightEnd F : Set)
+  shows crossingClasses(P, leftEnd, rightEnd, F) ⊆ F
+proof
+  intros e edge
+  exact edge.left
+
+theorem crossingClasses.finite (P leftEnd rightEnd F : Set)
+  requires finite : Finite(F)
+  shows Finite(crossingClasses(P, leftEnd, rightEnd, F))
+proof
+  exact Finite.subset with finite, crossingClasses.subset
+
+theorem crossingClasses.monotone (P leftEnd rightEnd F G : Set)
+  requires subset : F ⊆ G
+  shows crossingClasses(P, leftEnd, rightEnd, F) ⊆
+    crossingClasses(P, leftEnd, rightEnd, G)
+proof
+  intros e edge
+  exact ⟨(subset with e, edge.left), edge.right⟩
+
+theorem crossingClasses.union (P leftEnd rightEnd F G : Set)
+  shows crossingClasses(P, leftEnd, rightEnd, F ∪ G) =
+    crossingClasses(P, leftEnd, rightEnd, F) ∪
+      crossingClasses(P, leftEnd, rightEnd, G)
+proof
+  ext e
+  simp [crossingClasses]
+
+-- Section: Refining a partition by the components inside its classes.
+
+-- Refining P by the components of F within each class.
+def refinements (leftEnd rightEnd F P : Set) : Set :=
+  { componentsBy(X, leftEnd, rightEnd,
+      inside(leftEnd, rightEnd, F, X)) | X ∈ P }
+def refineBy (leftEnd rightEnd F P : Set) : Set :=
+  ⋃(refinements(leftEnd, rightEnd, F, P))
+
+-- A class of the refinement is a component of some class of P.
+theorem refineBy.membership (leftEnd rightEnd F P Y : Set)
+  shows Y ∈ refineBy(leftEnd, rightEnd, F, P) ↔
+    ∃ X ∈ P,
+      Y ∈ componentsBy(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X))
+proof
+  unfold refineBy
+  rw union.membership
+  constructor
+  . intro inUnion
+    obtain ⟨Z, inFamily, inZ⟩ := inUnion
+    obtain ⟨X, class, rfl⟩ := inFamily
+    exact ⟨X, class, inZ⟩
+  . intro inComponents
+    obtain ⟨X, class, member⟩ := inComponents
+    witness componentsBy(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X))
+    exact ⟨⟨X, class, rfl⟩, member⟩
+
+theorem refineBy.partition (V leftEnd rightEnd F P : Set)
+  requires partition : Partition(V, P)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows Partition(V, refineBy(leftEnd, rightEnd, F, P))
+proof
+  obtain ⟨classes, apart, covers⟩ := partition
+  constructor
+  -- A component of a class is a nonempty subset of the class, so of V.
+  . intros Y inRefined
+    obtain ⟨X, class, inComponents⟩ :=
+      refineBy.membership.forward with inRefined
+    have componentPartition := componentsBy.partition
+      at X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X)
+      with inside.ends
+    obtain ⟨subsetX, nonempty⟩ :=
+      componentPartition.left with Y, inComponents
+    exact ⟨(Subset.transitive with subsetX, (classes with X, class).left),
+      nonempty⟩
+  constructor
+  -- Two components of one class are disjoint as components; of different
+  -- classes, as subsets of disjoint classes.
+  . intros Y inY Z inZ different
+    obtain ⟨X, classX, inComponentsX⟩ := refineBy.membership.forward with inY
+    obtain ⟨W, classW, inComponentsW⟩ := refineBy.membership.forward with inZ
+    by_cases same : X = W
+    . rw ← same at inComponentsW
+      have componentPartition := componentsBy.partition
+        at X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X)
+        with inside.ends
+      exact componentPartition.right.left
+        with Y, inComponentsX, Z, inComponentsW, different
+    . obtain ⟨u, _, rfl⟩ := inComponentsX
+      obtain ⟨w, _, rfl⟩ := inComponentsW
+      have apartXW := apart with X, classX, W, classW, same
+      exact Disjoint.of_subset_right with
+        (Disjoint.of_subset_left with apartXW, componentBy.subset),
+        componentBy.subset
+  -- Every vertex lies in its component within its class.
+  . intros v inV
+    obtain ⟨X, class, inX⟩ := covers with v, inV
+    have contains := componentsBy.contains
+      at X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), v with inX
+    witness componentBy(X, leftEnd, rightEnd,
+      inside(leftEnd, rightEnd, F, X), v)
+    exact ⟨(refineBy.membership.backward with ⟨X, class, contains⟩),
+      (componentBy.self with inX)⟩
+
+theorem refineBy.refines (leftEnd rightEnd F P : Set)
+  shows Refines(refineBy(leftEnd, rightEnd, F, P), P)
+proof
+  intros Y inRefined
+  obtain ⟨X, class, u, _, rfl⟩ := refineBy.membership.forward with inRefined
+  exact ⟨X, class, componentBy.subset⟩
+
+-- The refinement is P itself exactly when F connects each class from within.
+theorem refineBy.fixed_iff (V leftEnd rightEnd F P : Set)
+  requires partition : Partition(V, P)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  shows refineBy(leftEnd, rightEnd, F, P) = P ↔
+    InternallyConnected(leftEnd, rightEnd, F, P)
+proof
+  obtain ⟨classes, apart, covers⟩ := partition
+  constructor
+  -- Fixed: the component of u within its class X is a class of P meeting X
+  -- at u, so it is X, and every vertex of X is joined to u.
+  . intros fixed X class u inX v inV
+    have contains := componentsBy.contains
+      at X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), u with inX
+    have inRefined := refineBy.membership.backward with ⟨X, class, contains⟩
+    rw fixed at inRefined
+    have whole :
+        componentBy(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), u)
+          = X
+      by_contra different
+      have apartComponent := apart with
+        componentBy(X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), u),
+        inRefined, X, class, different
+      have self := componentBy.self
+        at X, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, X), u with inX
+      have apartAll := Disjoint.iff.forward with apartComponent
+      exact apartAll with u, self, inX
+    rw ← whole at inV
+    exact inV.right
+  -- Connected: the components of a connected class are the class alone.
+  . intro internal
+    ext Y
+    rw refineBy.membership
+    constructor
+    . intro inRefined
+      obtain ⟨X, class, inComponents⟩ := inRefined
+      have single := componentsBy.connected_subset with (internal with X, class)
+      have same := singleton.membership.forward
+        with (single with Y, inComponents)
+      rw same
+      exact class
+    . intro class
+      obtain ⟨u, inY⟩ :=
+        Nonempty.of_ne_empty with (classes with Y, class).right
+      have whole := componentBy.eq_vertices with (internal with Y, class), inY
+      have contains := componentsBy.contains
+        at Y, leftEnd, rightEnd, inside(leftEnd, rightEnd, F, Y), u with inY
+      rw whole at contains
+      exact ⟨Y, class, contains⟩
+
+-- Section: Connectivity passes to the quotient by a partition.
+
+-- Joined vertices have joined classes in the quotient: the union of a set of
+-- classes closed under the quotient edges of F is closed under F.
+theorem Joined.quotient (V E P leftEnd rightEnd F u v : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  requires first : u ∈ V
+  requires second : v ∈ V
+  requires joined : Joined(leftEnd, rightEnd, F, u, v)
+  shows Joined(quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd), F,
+    classOf(P, u), classOf(P, v))
+proof
+  intros A start closed
+  have classes : A ∩ P ⊆ P := intersection.subset_right
+  have closedUnion : ClosedUnder(leftEnd, rightEnd, F, ⋃(A ∩ P))
+    intros e inF
+    have inE := edges with e, inF
+    obtain ⟨leftValue, rightValue⟩ :=
+      quotientEnd.value with graph, partition, inE
+    obtain ⟨leftIn, rightIn⟩ := Graph.ends with graph, e, inE
+    have leftClass := (classOf.member with partition, leftIn).left
+    have rightClass := (classOf.member with partition, rightIn).left
+    have balanced := closed with e, inF
+    rw [leftValue, rightValue] at balanced
+    rw [(classOf.mem_union_iff with partition, classes, leftIn),
+      (classOf.mem_union_iff with partition, classes, rightIn)]
+    simp [balanced, leftClass, rightClass]
+  have startUnion : u ∈ ⋃(A ∩ P)
+    have class := (classOf.member with partition, first).left
+    rw classOf.mem_union_iff with partition, classes, first
+    simp [start, class]
+  have reached := joined with ⋃(A ∩ P), startUnion, closedUnion
+  rw classOf.mem_union_iff with partition, classes, second at reached
+  exact reached.left
+
+theorem Connects.quotient (V E P leftEnd rightEnd F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  shows Connects(P, quotientEnd(E, P, leftEnd), quotientEnd(E, P, rightEnd), F)
+proof
+  intros X classX Y classY
+  obtain ⟨u, inX⟩ :=
+    Nonempty.of_ne_empty with (partition.left with X, classX).right
+  obtain ⟨v, inY⟩ :=
+    Nonempty.of_ne_empty with (partition.left with Y, classY).right
+  have uIn := (partition.left with X, classX).left with u, inX
+  have vIn := (partition.left with Y, classY).left with v, inY
+  have classU := classOf.eq_of_member with partition.right.left, classX, inX
+  have classV := classOf.eq_of_member with partition.right.left, classY, inY
+  have joined := Joined.quotient with
+    graph, partition, edges, uIn, vIn, (connected with u, uIn, v, vIn)
+  rwa [classU, classV] at joined
+
+theorem quotientEnd.ends (V E P leftEnd rightEnd F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  shows ∀ e ∈ F,
+    quotientEnd(E, P, leftEnd)(e) ∈ P ∧ quotientEnd(E, P, rightEnd)(e) ∈ P
+proof
+  exact ends_in.subset with
+    (Graph.ends with (quotientEnd.graph with graph, partition)), edges
+
+-- A connected edge set crosses a partition in at least |P| − 1 edges: its
+-- crossing edges connect the quotient, which has |P| vertices.
+theorem crossingClasses.lower_bound (V E P leftEnd rightEnd F : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires partition : Partition(V, P)
+  requires edges : F ⊆ E
+  requires connected : Connects(V, leftEnd, rightEnd, F)
+  shows cardinality(P) ≤
+    cardinality(crossingClasses(P, leftEnd, rightEnd, F)) + 1
+proof
+  have finiteClasses := Partition.finite with finiteVertices, partition
+  have crossingEdges : crossingClasses(P, leftEnd, rightEnd, F) ⊆ E :=
+    Subset.transitive with crossingClasses.subset, edges
+  have finiteCrossing := Finite.subset with finiteEdges, crossingEdges
+  have ends := quotientEnd.ends with graph, partition, crossingEdges
+  have connectedQuotient :=
+    (Connects.quotient_iff with graph, partition, edges).forward
+      with (Connects.quotient with graph, partition, edges, connected)
+  have lower := componentsBy.lower_bound
+    with finiteClasses, finiteCrossing, ends
+  have one := componentsBy.le_one_of_connected with connectedQuotient
+  arith
+
+-- Section: Necessity of the packing condition.
+
+theorem sub.one_le_of_le_add_one (a b : Nat)
+  requires below : a ≤ b + 1
+  shows a - 1 ≤ b
+proof
+  have shape := natural.zero_or_successor at a
+  rcases shape with zero | ⟨q, natural, rfl⟩
+  . rw [zero, sub.zero_left]
+    arith
+  . rw [sub.one, predecessor.succ]
+    arith
+
+-- The first j colour classes together.
+def coloursBelow (T : Set, j : Nat) → Set
+  | T, zero => ∅
+  | T, succ(m) => coloursBelow(T, m) ∪ T(m)
+
+-- The first j trees of a packing lie in E, miss every later colour, and
+-- cross a partition in at least j(|P| − 1) edges, one tree at a time.
+theorem coloursBelow.count (V E P leftEnd rightEnd T : Set, k j : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires partition : Partition(V, P)
+  requires function : FunctionBetween(T, k, 𝒫(E))
+  requires apart : ∀ i ∈ k, ∀ j ∈ k, i ≠ j → Disjoint(T(i), T(j))
+  requires trees : ∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))
+  requires below : j ≤ k
+  shows coloursBelow(T, j) ⊆ E ∧
+    (∀ i ∈ k, j ≤ i → Disjoint(coloursBelow(T, j), T(i))) ∧
+    j * (cardinality(P) - 1) ≤
+      cardinality(crossingClasses(P, leftEnd, rightEnd, coloursBelow(T, j)))
+proof
+  induction j
+  | zero =>
+    intro below
+    unfold coloursBelow
+    refine ⟨empty.subset, _, _⟩
+    . intros i inK order
+      exact Disjoint.empty_left
+    . have finiteCrossing := crossingClasses.finite
+        at P, leftEnd, rightEnd, ∅ with Finite.empty
+      have finiteClasses := Partition.finite with finiteVertices, partition
+      rw mul.left_zero
+      arith
+  | succ(m) using ih =>
+    intro below
+    have earlier : m ≤ k by arith
+    obtain ⟨subsetE, apartBelow, count⟩ := ih with earlier
+    have less : m < k by arith
+    have inK := membership.of_Less at m, k with *, less
+    have classE : T(m) ⊆ E := powerset.membership_iff.forward with
+      (FunctionBetween.apply_closed with function, inK)
+    have tree := trees with m, inK
+    unfold coloursBelow
+    refine ⟨(Subset.union2_iff.backward with ⟨subsetE, classE⟩), _, _⟩
+    . intros i inK2 order
+      have later : m ≤ i by arith
+      have distinct : m ≠ i by arith
+      exact Disjoint.union2_iff.backward with
+        ⟨(apartBelow with i, inK2, later),
+          (apart with m, inK, i, inK2, distinct)⟩
+    . -- The crossing edges of the new tree are disjoint from those so far,
+      -- and number at least |P| − 1.
+      have apartClass := apartBelow with m, inK, (LessEqual.reflexive at m)
+      have apartCrossing : Disjoint(crossingClasses(P, leftEnd, rightEnd,
+          coloursBelow(T, m)), crossingClasses(P, leftEnd, rightEnd, T(m))) :=
+        Disjoint.of_subset_right with
+          (Disjoint.of_subset_left with apartClass, crossingClasses.subset),
+          crossingClasses.subset
+      have finiteBelow := crossingClasses.finite
+        at P, leftEnd, rightEnd, coloursBelow(T, m)
+        with (Finite.subset with finiteEdges, subsetE)
+      have finiteClass := crossingClasses.finite
+        at P, leftEnd, rightEnd, T(m)
+        with (Finite.subset with finiteEdges, classE)
+      have sum := cardinality.union_disjoint
+        with finiteBelow, finiteClass, apartCrossing
+      have lower := crossingClasses.lower_bound with
+        graph, finiteVertices, finiteEdges, partition, classE, tree.right.left
+      have finiteClasses := Partition.finite with finiteVertices, partition
+      have bound := sub.one_le_of_le_add_one with lower
+      have step := mul.succ_left at m, cardinality(P) - 1
+      rw [crossingClasses.union, sum, step]
+      arith
+
+-- Necessity of the packing condition: a tree meets every partition in at
+-- least |P| − 1 crossing edges, and the k trees are disjoint.
+theorem TreePacking.condition (V E leftEnd rightEnd : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires packing : TreePacking(V, E, leftEnd, rightEnd, k)
+  shows PackingCondition(V, E, leftEnd, rightEnd, k)
+proof
+  intros P partition
+  obtain ⟨T, function, apart, trees⟩ := packing
+  obtain ⟨subsetE, _, count⟩ := coloursBelow.count with
+    graph, finiteVertices, finiteEdges, partition, function, apart, trees,
+    (LessEqual.reflexive at k)
+  have finiteClasses := Partition.finite with finiteVertices, partition
+  have finiteCrossing := crossingClasses.finite
+    at P, leftEnd, rightEnd, E with finiteEdges
+  have finiteBelow := crossingClasses.finite
+    at P, leftEnd, rightEnd, coloursBelow(T, k)
+    with (Finite.subset with finiteEdges, subsetE)
+  have bound := cardinality.monotone with finiteCrossing,
+    (crossingClasses.monotone with subsetE)
+  arith
+
+-- Section: A spanning tree internally connected on a partition.
+
+-- When T connects each class of P from within, the edges of T inside the
+-- classes have exactly the classes as components.
+theorem componentBy.eq_class (V leftEnd rightEnd T P X u : Set)
+  requires partition : Partition(V, P)
+  requires ends : ∀ e ∈ T, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires internal : InternallyConnected(leftEnd, rightEnd, T, P)
+  requires class : X ∈ P
+  requires member : u ∈ X
+  shows componentBy(V, leftEnd, rightEnd,
+    T ∖ crossingClasses(P, leftEnd, rightEnd, T), u) = X
+proof
+  have apart := partition.right.left
+  have subsetV := (partition.left with X, class).left
+  -- X is closed under the edges inside classes: such an edge has both ends
+  -- in one class.
+  have closed : ClosedUnder(leftEnd, rightEnd,
+      T ∖ crossingClasses(P, leftEnd, rightEnd, T), X)
+    intros e edge
+    obtain ⟨inT, uncrossed⟩ := edge
+    obtain ⟨leftIn, rightIn⟩ := ends with e, inT
+    have same : classOf(P, leftEnd(e)) = classOf(P, rightEnd(e))
+      by_contra different
+      exact uncrossed with ⟨inT, different⟩
+    rw [← (classOf.eq_iff_member with partition, class, leftIn),
+      ← (classOf.eq_iff_member with partition, class, rightIn), same]
+  -- The edges of T inside X lie inside the classes.
+  have insideSubset : inside(leftEnd, rightEnd, T, X) ⊆
+      T ∖ crossingClasses(P, leftEnd, rightEnd, T)
+    intros e edge
+    obtain ⟨inT, leftX, rightX⟩ := edge
+    have leftClass := classOf.eq_of_member with apart, class, leftX
+    have rightClass := classOf.eq_of_member with apart, class, rightX
+    refine ⟨inT, _⟩
+    intro crossed
+    have different := crossed.right
+    cc
+  ext v
+  constructor
+  . intro inComponent
+    exact inComponent.right with X, member, closed
+  . intro inX
+    have joined := internal with X, class, u, member, v, inX
+    exact ⟨(subsetV with v, inX), (Joined.monotone with insideSubset, joined)⟩
+
+theorem componentsBy.eq_classes (V leftEnd rightEnd T P : Set)
+  requires partition : Partition(V, P)
+  requires ends : ∀ e ∈ T, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires internal : InternallyConnected(leftEnd, rightEnd, T, P)
+  shows componentsBy(V, leftEnd, rightEnd,
+    T ∖ crossingClasses(P, leftEnd, rightEnd, T)) = P
+proof
+  ext X
+  constructor
+  . intro inComponents
+    obtain ⟨u, inV, rfl⟩ := inComponents
+    obtain ⟨Y, classY, inY⟩ := partition.right.right with u, inV
+    rw componentBy.eq_class with partition, ends, internal, classY, inY
+    exact classY
+  . intro class
+    obtain ⟨u, inX⟩ :=
+      Nonempty.of_ne_empty with (partition.left with X, class).right
+    have inV := (partition.left with X, class).left with u, inX
+    rw ← (componentBy.eq_class with partition, ends, internal, class, inX)
+    exact componentsBy.contains with inV
+
+-- A spanning tree internally connected on P crosses P in exactly |P| − 1
+-- edges: its uncrossing edges form a forest with the classes as components,
+-- so they number |V| − |P|.
+theorem SpanningTree.crossing_count (V leftEnd rightEnd T P : Set)
+  requires finiteVertices : Finite(V)
+  requires partition : Partition(V, P)
+  requires ends : ∀ e ∈ T, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires tree : SpanningTree(V, leftEnd, rightEnd, T)
+  requires internal : InternallyConnected(leftEnd, rightEnd, T, P)
+  shows cardinality(crossingClasses(P, leftEnd, rightEnd, T)) + 1 =
+    cardinality(P)
+proof
+  obtain ⟨finite, _, count⟩ := tree
+  have restSubset := difference.subset_left
+    at T, crossingClasses(P, leftEnd, rightEnd, T)
+  have restFinite := Finite.subset with finite, restSubset
+  have restEnds := ends_in.subset with ends, restSubset
+  have finiteCrossing := crossingClasses.finite
+    at P, leftEnd, rightEnd, T with finite
+  have finiteClasses := Partition.finite with finiteVertices, partition
+  have forest := Forest.subset with
+    (SpanningTree.forest with finiteVertices, ends, tree), restSubset
+  have components := componentsBy.eq_classes with partition, ends, internal
+  have upper := Forest.edge_bound with finiteVertices, restEnds, forest
+  have lower := componentsBy.lower_bound
+    with finiteVertices, restFinite, restEnds
+  rw components at upper, lower
+  have cover : (T ∖ crossingClasses(P, leftEnd, rightEnd, T)) ∪
+      crossingClasses(P, leftEnd, rightEnd, T) = T
+    have crossingSubset := crossingClasses.subset at P, leftEnd, rightEnd, T
+    ext e
+    simp
+  have sum := cardinality.union_disjoint with
+    restFinite, finiteCrossing, Disjoint.difference_left
+  rw cover at sum
+  arith

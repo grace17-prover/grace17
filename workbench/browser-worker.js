@@ -92,6 +92,10 @@ async function ensureInstalled(rootModule) {
 // from source, it is compiled and stored in this browser, in a quiet moment
 // after the requests that needed it have been answered.
 const keepThresholdMilliseconds = 1500;
+// Compiling a long tail blocks the worker's queue for as long as minutes and
+// holds its memory; such a prefix is better served by a bundled checkpoint.
+const keepModuleLimit = 8;
+const keepMillisecondsLimit = 3000;
 const keepDatabase = "grace17-workbench-checkpoints";
 const keepStore = "checkpoints";
 const keepBudget = 400 * 1024 * 1024;
@@ -103,6 +107,7 @@ function scheduleKeep(files, activeName) {
 async function keep(files, activeName) {
   const plan = dependencyCheckpointPlan(files, "ZFG", activeName);
   if (!plan?.exact || (plan.elaboratedMilliseconds ?? 0) < keepThresholdMilliseconds) return;
+  if ((plan.elaborated ?? 0) > keepModuleLimit || (plan.elaboratedMilliseconds ?? 0) > keepMillisecondsLimit) return;
   if (await hasKept(plan.key)) return;
   const exported = exportDependencyCheckpoint(files, "ZFG", activeName);
   if (!exported) return;

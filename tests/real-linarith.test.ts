@@ -141,3 +141,22 @@ proof
 ` }], [library]);
   assert.ok(kernel.theorems.has("Scalars.doubled") && kernel.theorems.has("Scalars.cancel"));
 });
+
+test("linarith refutes an equation of real literals, with or without intro", () => {
+  const kernel = createZfKernel();
+  loadModuleSourceGraph(kernel, [{ file: "Literals.g17", source: `module Literals
+import Grace.Cumulus.Real.Natural
+
+theorem two_nonzero
+  shows (2:R) ≠ 0
+proof
+  intro zero
+  linarith
+
+theorem five_nonzero
+  shows (5:R) ≠ 0
+proof
+  linarith
+` }], [library]);
+  assert.ok(kernel.theorems.has("Literals.two_nonzero") && kernel.theorems.has("Literals.five_nonzero"));
+});

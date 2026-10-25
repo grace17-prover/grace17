@@ -1,0 +1,280 @@
+-- The cycle double cover of an even double cover: replacing each even set
+-- by the cycles of a chosen decomposition gives a family of cycles holding
+-- every edge exactly twice.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.CycleCover
+import Cycles
+import Set.Choice
+
+predicate CycleDoubleCover (V E leftEnd rightEnd H I : Set) :=
+  Finite(I) ∧ FunctionBetween(H, I, 𝒫(E)) ∧
+  (∀ i ∈ I, Cycle(V, leftEnd, rightEnd, H(i))) ∧
+  (∀ e ∈ E, multiplicity(H, I, e) = 2)
+
+-- Replacing each even set of a double cover by its cycles gives a cycle
+-- double cover, indexed by the pairs (i, C) with C a cycle of the chosen
+-- decomposition of H(i). An edge is held by exactly one cycle of each even
+-- set holding it, so the indices holding it correspond to those of the
+-- original cover.
+
+-- The edges of an even double cover are finitely many: every edge lies in
+-- one of the finitely many even sets of the cover.
+theorem EvenDoubleCover.finite_edges (V E leftEnd rightEnd H I : Set)
+  requires cover : EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+  shows Finite(E)
+proof
+  obtain ⟨finiteI, family, evens, twice⟩ := cover
+  have finiteImage :=
+    Finite.function_image with family, finiteI, Subset.reflexive
+  have members : ∀ S ∈ functionImage(H, I, 𝒫(E)), Finite(S)
+    intros S hS
+    obtain ⟨_, i, hi, rfl⟩ := hS
+    exact (evens with i, hi).left
+  have finiteUnion := Finite.big_union with finiteImage, members
+  have inside : E ⊆ ⋃(functionImage(H, I, 𝒫(E)))
+    intros e he
+    have count := twice with e, he
+    have inhabited : holding(H, I, e) ≠ ∅
+      intro empty
+      unfold multiplicity at count
+      rw [empty, cardinality.empty] at count
+      arith
+    obtain ⟨i, hi⟩ := Nonempty.of_ne_empty with inhabited
+    have parts := holding.membership.forward with hi
+    have image : H(i) ∈ functionImage(H, I, 𝒫(E)) :=
+      ⟨(FunctionBetween.apply_closed with family, parts.left), i, parts.left,
+        rfl⟩
+    exact union.membership.backward with ⟨H(i), image, parts.right⟩
+  exact Finite.subset with finiteUnion, inside
+
+-- The decompositions of an edge set into cycles, and a chosen one.
+def cycleDecompositions (V leftEnd rightEnd F : Set) : Set :=
+  { D ∈ 𝒫(𝒫(F)) | Finite(D) ∧
+    (∀ C ∈ D, Cycle(V, leftEnd, rightEnd, C)) ∧
+    (∀ C ∈ D, ∀ B ∈ D, C ≠ B → Disjoint(C, B)) ∧ ⋃(D) = F }
+
+def chosenCycles (V leftEnd rightEnd F : Set) : Set :=
+  choose(cycleDecompositions(V, leftEnd, rightEnd, F))
+
+theorem chosenCycles.decomposes (V leftEnd rightEnd F : Set)
+  requires finiteVertices : Finite(V)
+  requires ends : ∀ e ∈ F, leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires even : EvenEdgeSet(V, leftEnd, rightEnd, F)
+  shows chosenCycles(V, leftEnd, rightEnd, F) ∈
+    cycleDecompositions(V, leftEnd, rightEnd, F)
+proof
+  obtain ⟨D, finiteD, cycles, apart, covers⟩ :=
+    EvenEdgeSet.cycle_decomposition with finiteVertices, ends, even
+  have inside : D ∈ 𝒫(𝒫(F))
+    apply powerset.membership_iff.backward
+    intros C hC
+    apply powerset.membership_iff.backward
+    rw ← covers
+    exact union.subset_of_member with hC
+  have member : D ∈ cycleDecompositions(V, leftEnd, rightEnd, F) :=
+    ⟨inside, finiteD, cycles, apart, covers⟩
+  have inhabited : Nonempty(cycleDecompositions(V, leftEnd, rightEnd, F)) :=
+    ⟨D, member⟩
+  unfold chosenCycles
+  exact choose.member with inhabited
+
+-- In an even double cover every H(i) has its chosen decomposition.
+theorem chosenCycles.of_cover (V E leftEnd rightEnd H I i : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires cover : EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+  requires index : i ∈ I
+  shows chosenCycles(V, leftEnd, rightEnd, H(i)) ∈
+    cycleDecompositions(V, leftEnd, rightEnd, H(i))
+proof
+  have ends := Graph.ends with graph
+  have edges : H(i) ⊆ E := powerset.membership_iff.forward
+    with (FunctionBetween.apply_closed with cover.right.left, index)
+  exact chosenCycles.decomposes with finiteVertices,
+    (ends_in.subset with ends, edges), (cover.right.right.left with i, index)
+
+-- The pairs (i, C) with C a cycle of the chosen decomposition of H(i), and
+-- the family sending (i, C) to C.
+def cycleIndex (V E leftEnd rightEnd H I : Set) : Set :=
+  { p ∈ I × 𝒫(E) |
+    snd(p) ∈ chosenCycles(V, leftEnd, rightEnd, H(fst(p))) }
+
+theorem cycleIndex.second (V E leftEnd rightEnd H I p : Set)
+  requires member : p ∈ cycleIndex(V, E, leftEnd, rightEnd, H, I)
+  shows snd(p) ∈ 𝒫(E)
+proof
+  obtain ⟨_, i, hi, C, hC, rfl⟩ := product.membership.forward
+    with member.left
+  rw snd.pair
+  exact hC
+
+defgraph cycleFamily (V E leftEnd rightEnd H I : Set)
+  (p ∈ cycleIndex(V, E, leftEnd, rightEnd, H, I)) : 𝒫(E) := snd(p)
+proof
+  exact cycleIndex.second with member
+
+-- An index holding e is a pair (i, C) with i holding e and C a cycle of
+-- the chosen decomposition of H(i) through e.
+theorem cycleIndex.holding (V E leftEnd rightEnd H I e p : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires cover : EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+  requires member : p ∈ holding(cycleFamily(V, E, leftEnd, rightEnd, H, I),
+    cycleIndex(V, E, leftEnd, rightEnd, H, I), e)
+  shows ∃ i ∈ I, ∃ C ∈ chosenCycles(V, leftEnd, rightEnd, H(i)),
+    p = (i, C) ∧ e ∈ C ∧ e ∈ H(i)
+proof
+  have inIndex := member.left
+  have holds := member.right
+  rw cycleFamily.value with inIndex at holds
+  obtain ⟨_, i, hi, C, hC, shape⟩ := product.membership.forward
+    with inIndex.left
+  have inChosen := inIndex.right
+  rw [shape, snd.pair, fst.pair] at inChosen
+  rw [shape, snd.pair] at holds
+  obtain ⟨_, _, _, _, covers⟩ :=
+    chosenCycles.of_cover with graph, finiteVertices, cover, hi
+  have inH : e ∈ H(i)
+    rw ← covers
+    exact union.membership.backward with ⟨C, inChosen, holds⟩
+  exact ⟨i, hi, C, inChosen, shape, holds, inH⟩
+
+-- The first projection is a bijection from the indices (i, C) holding e to
+-- the indices i holding e: the cycle C of H(i) through e is unique.
+def cycleProjection (V E leftEnd rightEnd H I e : Set) : Set :=
+  { r ∈ holding(cycleFamily(V, E, leftEnd, rightEnd, H, I),
+      cycleIndex(V, E, leftEnd, rightEnd, H, I), e) × holding(H, I, e) |
+    snd(r) = fst(fst(r)) }
+
+theorem cycleProjection.bijective (V E leftEnd rightEnd H I e : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires cover : EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+  shows BijectiveBetween(cycleProjection(V, E, leftEnd, rightEnd, H, I, e),
+    holding(cycleFamily(V, E, leftEnd, rightEnd, H, I),
+      cycleIndex(V, E, leftEnd, rightEnd, H, I), e),
+    holding(H, I, e))
+proof
+  have family := cover.right.left
+  have function : FunctionBetween(cycleProjection(V, E, leftEnd, rightEnd,
+      H, I, e), holding(cycleFamily(V, E, leftEnd, rightEnd, H, I),
+      cycleIndex(V, E, leftEnd, rightEnd, H, I), e), holding(H, I, e))
+    constructor
+    . intros r hr
+      exact hr.left
+    . constructor
+      . intros x y xy z xz
+        have valueY := xy.right
+        have valueZ := xz.right
+        simp [fst.pair, snd.pair] at valueY, valueZ
+        cc
+      . intros p hp
+        obtain ⟨i, hi, C, hC, shape, holds, inH⟩ :=
+          cycleIndex.holding with graph, finiteVertices, cover, hp
+        have target : i ∈ holding(H, I, e) := ⟨hi, inH⟩
+        refine ⟨i, target, ?_⟩
+        apply cycleProjection.membership.backward
+        refine ⟨(product.pair with hp, target), ?_⟩
+        rw shape
+        simp [fst.pair, snd.pair]
+  constructor
+  . refine ⟨function, ?_⟩
+    -- Two indices with the same first coordinate i are cycles of the
+    -- decomposition of H(i) both through e, hence equal.
+    intros x hx y hy z hz xz yz
+    obtain ⟨i, hi, C, hC, shapeX, holdsX, _⟩ :=
+      cycleIndex.holding with graph, finiteVertices, cover, hx
+    obtain ⟨j, hj, B, hB, shapeY, holdsY, _⟩ :=
+      cycleIndex.holding with graph, finiteVertices, cover, hy
+    have valueX := xz.right
+    have valueY := yz.right
+    simp [fst.pair, snd.pair] at valueX, valueY
+    have same : i = j by cc
+    rw ← same at hB
+    obtain ⟨_, _, _, apart, _⟩ :=
+      chosenCycles.of_cover with graph, finiteVertices, cover, hi
+    have equal : C = B
+      by_contra different
+      have disjoint := apart with C, hC, B, hB, different
+      rw Disjoint.iff at disjoint
+      exact disjoint with e, holdsX, holdsY
+    rw [shapeX, shapeY, same, equal]
+  . refine ⟨function, ?_⟩
+    -- An index i holding e: e lies in some cycle C of H(i), and (i, C)
+    -- holds e.
+    intros i hi
+    have inI := hi.left
+    have inH := hi.right
+    obtain ⟨inPowerset, _, _, _, covers⟩ :=
+      chosenCycles.of_cover with graph, finiteVertices, cover, inI
+    have inUnion : e ∈ ⋃(chosenCycles(V, leftEnd, rightEnd, H(i)))
+      rw covers
+      exact inH
+    obtain ⟨C, hC, holds⟩ := union.membership.forward with inUnion
+    have cyclesIn : chosenCycles(V, leftEnd, rightEnd, H(i)) ⊆ 𝒫(H(i)) :=
+      powerset.membership_iff.forward with inPowerset
+    have edges : H(i) ⊆ E := powerset.membership_iff.forward
+      with (FunctionBetween.apply_closed with family, inI)
+    have inside : C ⊆ E := Subset.transitive
+      with (powerset.membership_iff.forward with (cyclesIn with C, hC)), edges
+    have inIndex : (i, C) ∈ cycleIndex(V, E, leftEnd, rightEnd, H, I)
+      refine ⟨(product.pair with inI,
+        (powerset.membership_iff.backward with inside)), ?_⟩
+      rw [snd.pair, fst.pair]
+      exact hC
+    have inHolding : (i, C) ∈ holding(cycleFamily(V, E, leftEnd, rightEnd,
+        H, I), cycleIndex(V, E, leftEnd, rightEnd, H, I), e)
+      refine ⟨inIndex, ?_⟩
+      rw [(cycleFamily.value with inIndex), snd.pair]
+      exact holds
+    refine ⟨(i, C), inHolding, ?_⟩
+    apply cycleProjection.membership.backward
+    refine ⟨(product.pair with inHolding, hi), ?_⟩
+    simp [fst.pair, snd.pair]
+
+theorem EvenDoubleCover.to_cycles (V E leftEnd rightEnd H I : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires cover : EvenDoubleCover(V, E, leftEnd, rightEnd, H, I)
+  shows ∃ K, ∃ J, CycleDoubleCover(V, E, leftEnd, rightEnd, K, J)
+proof
+  have finiteE := EvenDoubleCover.finite_edges with cover
+  obtain ⟨finiteI, family, evens, twice⟩ := cover
+  have indexSubset : cycleIndex(V, E, leftEnd, rightEnd, H, I) ⊆ I × 𝒫(E)
+    intros p hp
+    exact hp.left
+  have finiteIndex := Finite.subset
+    with (Finite.product with finiteI, (Finite.powerset with finiteE)),
+      indexSubset
+  witness cycleFamily(V, E, leftEnd, rightEnd, H, I)
+  witness cycleIndex(V, E, leftEnd, rightEnd, H, I)
+  refine ⟨finiteIndex, cycleFamily.function, ?_, ?_⟩
+  . -- Each index (i, C) names a cycle C of H(i).
+    intros p hp
+    rw cycleFamily.value with hp
+    obtain ⟨_, i, hi, C, hC, shape⟩ := product.membership.forward
+      with hp.left
+    have inChosen := hp.right
+    rw [shape, snd.pair, fst.pair] at inChosen
+    rw [shape, snd.pair]
+    obtain ⟨_, _, cycles, _, _⟩ :=
+      chosenCycles.of_cover with graph, finiteVertices, cover, hi
+    exact cycles with C, inChosen
+  . -- The indices holding e correspond to the two indices of the cover
+    -- holding e.
+    intros e he
+    have count := twice with e, he
+    unfold multiplicity at count
+    unfold multiplicity
+    rw ← count
+    have bijective :=
+      cycleProjection.bijective at V, E, leftEnd, rightEnd, H, I, e
+        with graph, finiteVertices, cover
+    have finiteSource : Finite(holding(cycleFamily(V, E, leftEnd, rightEnd,
+        H, I), cycleIndex(V, E, leftEnd, rightEnd, H, I), e)) :=
+      Finite.subset with finiteIndex, holding.subset
+    exact cardinality.bijective with finiteSource, bijective

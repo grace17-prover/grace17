@@ -250,6 +250,14 @@ interface AvailableFact {
 
 class SettleSearchLimit extends Error {}
 
+/** An equation without variables that mentions a numeral under a function. */
+export function closedNumeralEquation(formula: Extract<Formula, { tag: "eq" }>): boolean {
+  if (freeFormulaVariables(formula).size) return false;
+  const literalUnderFunction = (term: Term): boolean =>
+    term.tag === "app" && term.args.some(item => item.tag === "nat" || literalUnderFunction(item));
+  return literalUnderFunction(formula.left) || literalUnderFunction(formula.right);
+}
+
 function preserveSettleSearchLimit(error: unknown): void {
   if (error instanceof SettleSearchLimit) throw error;
 }
@@ -782,9 +790,13 @@ export function simplifyEqualityFact(kernel: Kernel, proof: Proof, options: Simp
   const original = kernel.checkProof(proof, assumptions);
   if (original.tag !== "eq") throw new Error("simp at currently requires an equality hypothesis");
   const logicalRules = Array.isArray(options.using) ? options.using : [];
+  // A context fact whose proof is still being discharged, such as a
+  // destructured witness, does not check on its own and is left out.
   const facts: AvailableFact[] = expandFacts(kernel, [
     ...assumptions.map(formula => ({ formula, proof: assume(formula) })),
-    ...(options.facts ?? []).map(item => ({ formula: kernel.checkProof(item, assumptions), proof: item })),
+    ...(options.facts ?? []).flatMap(item => {
+      try { return [{ formula: kernel.checkProof(item, assumptions), proof: item }]; } catch { return []; }
+    }),
   ], options.visibility);
   const explicit = Array.isArray(options.using)
     ? indexRules(options.using.flatMap(item => {
@@ -966,6 +978,11 @@ function settleLogical(
     const refuted = refuteLiteralEquation(kernel, available);
     if (refuted) return wanted.tag === "bottom" ? refuted : falseElim(wanted, refuted);
     if (wanted.tag === "eq" && termCanonical(wanted.left) === termCanonical(wanted.right)) return refl(wanted.left);
+    // A closed equation between numeral expressions is evaluated, so
+    // `1 + 1 = 2` closes by computation inside a logical goal.
+    if (wanted.tag === "eq" && closedNumeralEquation(wanted)) {
+      try { return kernel.proveComputation(wanted.left, wanted.right); } catch {}
+    }
     const grounded = tryGround(wanted, context, available.map(fact => fact.proof));
     if (grounded) return grounded;
     // Total fuel alone permits a long branch to retain quadratic context/key
@@ -999,9 +1016,34 @@ function settleLogical(
         if (formulaEquals(kernel.checkProof(proof, context), wanted)) return proof;
       } catch (error) { preserveSettleSearchLimit(error); }
     }
-    // Eliminate data-bearing hypotheses before committing to an introduction
-    // rule.  In particular, to prove P ∨ Q from R ∨ S we must split R ∨ S
-    // first; greedily choosing P would incorrectly require P in both cases.
+    // The invertible introductions come first: a conjunction, an
+    // implication, and a universal are decomposed before any hypothesis is
+    // split, which loses nothing and keeps the case analysis below out of
+    // the goals that never needed it. The context's disjunctions are then
+    // split only beneath the decomposed goal, so an unrelated hypothesis
+    // `P ∨ Q` costs one split at most once rather than at every level.
+    if (wanted.tag === "and") return andIntro(solve(wanted.left, context, available), solve(wanted.right, context, available));
+    if (wanted.tag === "imp") {
+      const fact = { formula: wanted.left, proof: assume(wanted.left) };
+      const nextContext = [...context, wanted.left];
+      const learned = forwardRuleFacts(kernel, expandFacts(kernel, [fact], visibility), rules, nextContext);
+      return impIntro(wanted.left, solve(wanted.right, nextContext, [...available, ...learned]));
+    }
+    if (wanted.tag === "forall") {
+      // The bound variable is renamed when it occurs free in the context,
+      // as a definition's bound name may coincide with a theorem parameter.
+      const taken = new Set([
+        ...context.flatMap(formula => [...freeFormulaVariables(formula)]),
+        ...available.flatMap(fact => [...freeFormulaVariables(fact.formula)]),
+      ]);
+      if (!taken.has(wanted.variable)) return forallIntro(wanted.variable, solve(wanted.body, context, available));
+      let fresh = `${wanted.variable}_`;
+      while (taken.has(fresh) || freeFormulaVariables(wanted.body).has(fresh)) fresh += "_";
+      return forallIntro(fresh, solve(substituteFormula(wanted.body, wanted.variable, v(fresh)), context, available));
+    }
+    // Eliminate data-bearing hypotheses before committing to a choice.  In
+    // particular, to prove P ∨ Q from R ∨ S we must split R ∨ S first;
+    // greedily choosing P would incorrectly require P in both cases.
     for (let index = 0; index < available.length; index += 1) {
       const disjunction = available[index]!;
       if (disjunction.formula.tag !== "or") continue;
@@ -1041,29 +1083,10 @@ function settleLogical(
         );
       } catch (error) { preserveSettleSearchLimit(error); }
     }
-    if (wanted.tag === "and") return andIntro(solve(wanted.left, context, available), solve(wanted.right, context, available));
     if (wanted.tag === "or") {
       try { return orIntroLeft(solve(wanted.left, context, available), wanted.right); }
       catch (error) { preserveSettleSearchLimit(error); }
       return orIntroRight(wanted.left, solve(wanted.right, context, available));
-    }
-    if (wanted.tag === "imp") {
-      const fact = { formula: wanted.left, proof: assume(wanted.left) };
-      const nextContext = [...context, wanted.left];
-      const learned = forwardRuleFacts(kernel, expandFacts(kernel, [fact], visibility), rules, nextContext);
-      return impIntro(wanted.left, solve(wanted.right, nextContext, [...available, ...learned]));
-    }
-    if (wanted.tag === "forall") {
-      // The bound variable is renamed when it occurs free in the context,
-      // as a definition's bound name may coincide with a theorem parameter.
-      const taken = new Set([
-        ...context.flatMap(formula => [...freeFormulaVariables(formula)]),
-        ...available.flatMap(fact => [...freeFormulaVariables(fact.formula)]),
-      ]);
-      if (!taken.has(wanted.variable)) return forallIntro(wanted.variable, solve(wanted.body, context, available));
-      let fresh = `${wanted.variable}_`;
-      while (taken.has(fresh) || freeFormulaVariables(wanted.body).has(fresh)) fresh += "_";
-      return forallIntro(fresh, solve(substituteFormula(wanted.body, wanted.variable, v(fresh)), context, available));
     }
     if (wanted.tag === "exists") {
       const candidates = uniqueTerms([
@@ -1367,7 +1390,7 @@ function formulaTerms(formula: Formula): Term[] {
   }
 }
 
-function matchFormula(
+export function matchFormula(
   pattern: Formula,
   target: Formula,
   variables: ReadonlySet<string>,

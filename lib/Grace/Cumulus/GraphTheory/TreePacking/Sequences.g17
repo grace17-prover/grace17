@@ -1,0 +1,541 @@
+-- Kaiser's proof of the tree-packing theorem begins with the partition
+-- sequence of a decomposition: starting from the trivial partition, each
+-- step refines the current partition by the components of the first colour
+-- disconnected inside a class, and the sequence grows strictly until it
+-- stabilises at a partition on which every colour is internally connected.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Sequences
+import Decompositions
+import Nat.Least
+import Combinatorics.InclusionExclusion
+
+-- The class of a colour is a set of edges.
+theorem Decomposition.class_subset (E T i : Set, k : Nat)
+  requires decomposition : Decomposition(E, T, k)
+  requires colour : i ∈ k
+  shows T(i) ⊆ E
+proof
+  exact powerset.membership_iff.forward with
+    (FunctionBetween.apply_closed with decomposition.left, colour)
+
+-- The class of a colour has its ends in V.
+theorem Decomposition.ends (V E leftEnd rightEnd T i : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires colour : i ∈ k
+  shows ∀ e ∈ T(i), leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+proof
+  exact ends_in.subset with (Graph.ends with graph),
+    (Decomposition.class_subset with decomposition, colour)
+
+-- The least colour whose class is not internally connected on P, or k when
+-- every colour is: the colour c_i of the proof.
+def disconnectedColour (leftEnd rightEnd T P : Set, k : Nat) : Set :=
+  { i ∈ k | ¬InternallyConnected(leftEnd, rightEnd, T(i), P) }
+
+theorem disconnectedColour.subset (leftEnd rightEnd T P : Set, k : Nat)
+  shows disconnectedColour(leftEnd, rightEnd, T, P, k) ⊆ ℕ
+proof
+  intros i member
+  have natural := natural.member at k with i, member.left
+  exact nat.omega.forward with natural
+
+-- When some colour is disconnected, the least one is a colour below k that
+-- is not internally connected.
+theorem disconnectedColour.least (leftEnd rightEnd T P : Set, k : Nat)
+  requires some : disconnectedColour(leftEnd, rightEnd, T, P, k) ≠ ∅
+  shows leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k)) ∈ k ∧
+    ¬InternallyConnected(leftEnd, rightEnd,
+      T(leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k))), P)
+proof
+  have inhabited := Nonempty.of_ne_empty with some
+  exact leastNatural.member with inhabited, disconnectedColour.subset
+
+-- With no disconnected colour every colour is internally connected.
+theorem disconnectedColour.empty_iff (leftEnd rightEnd T P : Set, k : Nat)
+  shows disconnectedColour(leftEnd, rightEnd, T, P, k) = ∅ ↔
+    (∀ i ∈ k, InternallyConnected(leftEnd, rightEnd, T(i), P))
+proof
+  constructor
+  . intros none i colour
+    by_contra disconnected
+    have member : i ∈ disconnectedColour(leftEnd, rightEnd, T, P, k) :=
+      ⟨colour, disconnected⟩
+    rw none at member
+    simp at member
+  . intro internal
+    ext i
+    constructor
+    . intro member
+      exfalso
+      exact member.right with (internal with i, member.left)
+    . intro member
+      simp [union2.membership, singleton.membership] at member
+
+-- The partition sequence P_0 = {V}, P_{n+1} = P_n refined by the least
+-- disconnected colour, fixed once every colour is internally connected.
+def partitionStep (V leftEnd rightEnd T P : Set, k : Nat) : Set :=
+  { X ∈ 𝒫(V) |
+    (disconnectedColour(leftEnd, rightEnd, T, P, k) = ∅ ∧ X ∈ P) ∨
+    (disconnectedColour(leftEnd, rightEnd, T, P, k) ≠ ∅ ∧
+      X ∈ refineBy(leftEnd, rightEnd,
+        T(leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k))), P)) }
+
+def partitionSequence (V leftEnd rightEnd T : Set, k n : Nat) → Set
+  | V, leftEnd, rightEnd, T, k, zero => {V}
+  | V, leftEnd, rightEnd, T, k, succ(m) =>
+    partitionStep(V, leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, m), k)
+
+-- The step keeps P when every colour is internally connected, and
+-- otherwise refines it along the least disconnected colour.
+theorem partitionStep.fixed (V leftEnd rightEnd T P : Set, k : Nat)
+  requires partition : Partition(V, P)
+  requires none : disconnectedColour(leftEnd, rightEnd, T, P, k) = ∅
+  shows partitionStep(V, leftEnd, rightEnd, T, P, k) = P
+proof
+  ext X
+  constructor
+  . intro member
+    obtain ⟨_, fixed | refined⟩ := member
+    . exact fixed.right
+    . exfalso
+      exact refined.left with none
+  . intro class
+    have subset := (partition.left with X, class).left
+    refine ⟨(powerset.membership_iff.backward with subset), _⟩
+    left
+    exact ⟨none, class⟩
+
+theorem partitionStep.refined (V leftEnd rightEnd T P : Set, k : Nat)
+  requires partition : Partition(V, P)
+  requires ends :
+    ∀ e ∈ T(leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k))),
+      leftEnd(e) ∈ V ∧ rightEnd(e) ∈ V
+  requires some : disconnectedColour(leftEnd, rightEnd, T, P, k) ≠ ∅
+  shows partitionStep(V, leftEnd, rightEnd, T, P, k) =
+    refineBy(leftEnd, rightEnd,
+      T(leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k))), P)
+proof
+  have refined := refineBy.partition with partition, ends
+  ext X
+  constructor
+  . intro member
+    obtain ⟨_, fixed | refinedX⟩ := member
+    . exfalso
+      exact some with fixed.left
+    . exact refinedX.right
+  . intro class
+    have subset := (refined.left with X, class).left
+    refine ⟨(powerset.membership_iff.backward with subset), _⟩
+    right
+    exact ⟨some, class⟩
+
+theorem partitionStep.partition (V E leftEnd rightEnd T P : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires partition : Partition(V, P)
+  shows Partition(V, partitionStep(V, leftEnd, rightEnd, T, P, k))
+proof
+  by_cases none : disconnectedColour(leftEnd, rightEnd, T, P, k) = ∅
+  . rw partitionStep.fixed with partition, none
+    exact partition
+  . obtain ⟨colour, _⟩ := disconnectedColour.least with none
+    have ends := Decomposition.ends with graph, decomposition, colour
+    rw partitionStep.refined with partition, ends, none
+    exact refineBy.partition with partition, ends
+
+-- A fixed step has no disconnected colour: refining along one would change
+-- the partition, since that colour is not internally connected.
+theorem partitionStep.fixed_colours (V E leftEnd rightEnd T P : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  requires partition : Partition(V, P)
+  requires fixed : partitionStep(V, leftEnd, rightEnd, T, P, k) = P
+  shows ∀ i ∈ k, InternallyConnected(leftEnd, rightEnd, T(i), P)
+proof
+  apply disconnectedColour.empty_iff.forward
+  by_contra some
+  obtain ⟨colour, disconnected⟩ := disconnectedColour.least with some
+  have ends := Decomposition.ends with graph, decomposition, colour
+  rw partitionStep.refined with partition, ends, some at fixed
+  have internal := (refineBy.fixed_iff with partition, ends).forward with fixed
+  exact disconnected with internal
+
+theorem partitionSequence.zero (V leftEnd rightEnd T : Set, k : Nat)
+  shows partitionSequence(V, leftEnd, rightEnd, T, k, 0) = {V}
+proof
+  simp [partitionSequence]
+
+theorem partitionSequence.succ (V leftEnd rightEnd T : Set, k n : Nat)
+  shows partitionSequence(V, leftEnd, rightEnd, T, k, succ(n)) =
+    partitionStep(V, leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, n), k)
+proof
+  simp [partitionSequence]
+
+theorem partitionSequence.partition (V E leftEnd rightEnd T : Set, k n : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  shows Partition(V, partitionSequence(V, leftEnd, rightEnd, T, k, n))
+proof
+  induction n
+  | zero =>
+    rw partitionSequence.zero
+    constructor
+    . intros X member
+      rw (singleton.membership.forward with member)
+      exact ⟨Subset.reflexive, nonempty⟩
+    constructor
+    . intros X memberX Y memberY different
+      have sameX := singleton.membership.forward with memberX
+      have sameY := singleton.membership.forward with memberY
+      exfalso
+      cc
+    . intros v inV
+      exact ⟨V, singleton.self, inV⟩
+  | succ(m) using ih =>
+    rw partitionSequence.succ
+    exact partitionStep.partition with graph, decomposition, ih
+
+theorem partitionSequence.refines (V E leftEnd rightEnd T : Set, k n : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires decomposition : Decomposition(E, T, k)
+  shows Refines(partitionSequence(V, leftEnd, rightEnd, T, k, succ(n)),
+    partitionSequence(V, leftEnd, rightEnd, T, k, n))
+proof
+  rw partitionSequence.succ
+  intros X member
+  obtain ⟨_, fixed | refined⟩ := member
+  . exact ⟨X, fixed.right, Subset.reflexive⟩
+  . have refines : Refines(refineBy(leftEnd, rightEnd,
+        T(leastNatural(disconnectedColour(leftEnd, rightEnd, T,
+          partitionSequence(V, leftEnd, rightEnd, T, k, n), k))),
+        partitionSequence(V, leftEnd, rightEnd, T, k, n)),
+      partitionSequence(V, leftEnd, rightEnd, T, k, n)) := refineBy.refines
+    exact refines with X, refined.right
+
+-- Two classes of a partition sharing a vertex are one class.
+theorem Partition.eq_of_member (V P X Y v : Set)
+  requires partition : Partition(V, P)
+  requires classX : X ∈ P
+  requires classY : Y ∈ P
+  requires inX : v ∈ X
+  requires inY : v ∈ Y
+  shows X = Y
+proof
+  by_contra different
+  exact partition.right.left with X, classX, Y, classY, different, v, inX, inY
+
+-- The class map v ↦ classOf(P, v) sends V onto the classes of P, so a
+-- partition of a finite set has at most |V| classes.
+defgraph classMap (V P : Set) (v ∈ V) : 𝒫(⋃(P)) := classOf(P, v)
+proof
+  apply powerset.membership_iff.backward
+  have classes : classesContaining(P, v) ⊆ P
+    intros X class
+    exact class.left
+  unfold classOf
+  exact union.monotone with classes
+
+theorem classMap.image (V P : Set)
+  requires partition : Partition(V, P)
+  shows functionImage(classMap(V, P), V, 𝒫(⋃(P))) = P
+proof
+  ext X
+  constructor
+  . intro inImage
+    obtain ⟨_, v, inV, rfl⟩ := inImage
+    rw classMap.value with inV
+    exact (classOf.member with partition, inV).left
+  . intro class
+    obtain ⟨v, inX⟩ :=
+      Nonempty.of_ne_empty with (partition.left with X, class).right
+    have inV := (partition.left with X, class).left with v, inX
+    have value := classMap.value at V, P, v with inV
+    rw (classOf.eq_of_member with partition.right.left, class, inX) at value
+    have inPowerset : X ∈ 𝒫(⋃(P)) :=
+      powerset.membership_iff.backward with (union.subset_of_member with class)
+    symm at value
+    exact ⟨inPowerset, v, inV, value⟩
+
+theorem Partition.cardinality_le (V P : Set)
+  requires finiteVertices : Finite(V)
+  requires partition : Partition(V, P)
+  shows cardinality(P) ≤ cardinality(V)
+proof
+  have bound := cardinality.image_le with
+    (classMap.function at V, P), Subset.reflexive, finiteVertices
+  rwa classMap.image with partition at bound
+
+-- The coarse class of a class Y of a refinement: the class of P holding Y.
+def coarseClasses (P Y : Set) : Set := { X ∈ P | Y ⊆ X }
+
+def coarseClass (P Y : Set) : Set := ⋃(coarseClasses(P, Y))
+
+theorem coarseClass.membership (P Y z : Set)
+  shows z ∈ coarseClass(P, Y) ↔ ∃ X ∈ P, Y ⊆ X ∧ z ∈ X
+proof
+  simp [coarseClass, coarseClasses, union.membership]
+
+theorem coarseClass.eq_of_subset (V P X Y : Set)
+  requires partition : Partition(V, P)
+  requires class : X ∈ P
+  requires subset : Y ⊆ X
+  requires nonempty : Y ≠ ∅
+  shows coarseClass(P, Y) = X
+proof
+  obtain ⟨v, inY⟩ := Nonempty.of_ne_empty with nonempty
+  ext z
+  rw coarseClass.membership
+  constructor
+  . intro inUnion
+    obtain ⟨W, classW, subsetW, inW⟩ := inUnion
+    have same := Partition.eq_of_member with
+      partition, classW, class, (subsetW with v, inY), (subset with v, inY)
+    rw same at inW
+    exact inW
+  . intro inX
+    exact ⟨X, class, subset, inX⟩
+
+defgraph coarseMap (P Q : Set) (Y ∈ Q) : 𝒫(⋃(P)) := coarseClass(P, Y)
+proof
+  apply powerset.membership_iff.backward
+  have classes : coarseClasses(P, Y) ⊆ P
+    intros X class
+    exact class.left
+  unfold coarseClass
+  exact union.monotone with classes
+
+theorem coarseMap.value_of_subset (V P Q X Y : Set)
+  requires partition : Partition(V, P)
+  requires finer : Partition(V, Q)
+  requires classX : X ∈ P
+  requires classY : Y ∈ Q
+  requires subset : Y ⊆ X
+  shows coarseMap(P, Q)(Y) = X
+proof
+  rw coarseMap.value with classY
+  exact coarseClass.eq_of_subset with
+    partition, classX, subset, (finer.left with Y, classY).right
+
+theorem Refines.transitive (P Q R : Set)
+  requires first : Refines(P, Q)
+  requires second : Refines(Q, R)
+  shows Refines(P, R)
+proof
+  intros X class
+  obtain ⟨Y, classY, subsetY⟩ := first with X, class
+  obtain ⟨Z, classZ, subsetZ⟩ := second with Y, classY
+  exact ⟨Z, classZ, (Subset.transitive with subsetY, subsetZ)⟩
+
+-- A proper refinement puts two classes of Q inside one class of P: were
+-- every class of P to hold at most one class of Q, that class would fill
+-- it, and Q would be P.
+theorem Refines.two_classes (V P Q : Set)
+  requires partition : Partition(V, P)
+  requires finer : Partition(V, Q)
+  requires refines : Refines(Q, P)
+  requires different : Q ≠ P
+  shows ∃ X ∈ P, ∃ Y ∈ Q, ∃ Z ∈ Q, Y ≠ Z ∧ Y ⊆ X ∧ Z ⊆ X
+proof
+  by_contra none
+  have fills : ∀ X ∈ P, ∀ Y ∈ Q, Y ⊆ X → Y = X
+    intros X classX Y classY subset
+    apply Subset.antisymmetric with subset
+    intros w inX
+    have inV := (partition.left with X, classX).left with w, inX
+    obtain ⟨Z, classZ, inZ⟩ := finer.right.right with w, inV
+    obtain ⟨W, classW, subsetZ⟩ := refines with Z, classZ
+    have sameX := Partition.eq_of_member with
+      partition, classW, classX, (subsetZ with w, inZ), inX
+    rw sameX at subsetZ
+    have sameY : Y = Z
+      by_contra distinct
+      exact none with
+        ⟨X, classX, Y, classY, Z, classZ, distinct, subset, subsetZ⟩
+    rw sameY
+    exact inZ
+  apply different
+  ext X
+  constructor
+  . intro classX
+    obtain ⟨Y, classY, subset⟩ := refines with X, classX
+    rw (fills with Y, classY, X, classX, subset)
+    exact classY
+  . intro classX
+    obtain ⟨v, inX⟩ :=
+      Nonempty.of_ne_empty with (partition.left with X, classX).right
+    have inV := (partition.left with X, classX).left with v, inX
+    obtain ⟨Y, classY, inY⟩ := finer.right.right with v, inV
+    obtain ⟨W, classW, subsetY⟩ := refines with Y, classY
+    have sameX := Partition.eq_of_member with
+      partition, classW, classX, (subsetY with v, inY), inX
+    rw sameX at subsetY
+    rw ← (fills with X, classX, Y, classY, subsetY)
+    exact classY
+
+-- A proper refinement of a partition of a finite set has strictly more
+-- classes: the coarse-class map from Q onto P identifies two classes, so
+-- P is already the image of Q less one class.
+theorem Refines.cardinality_lt (V P Q : Set)
+  requires finiteVertices : Finite(V)
+  requires partition : Partition(V, P)
+  requires finer : Partition(V, Q)
+  requires refines : Refines(Q, P)
+  requires different : Q ≠ P
+  shows cardinality(P) < cardinality(Q)
+proof
+  obtain ⟨X, classX, Y, classY, Z, classZ, distinct, subsetY, subsetZ⟩ :=
+    Refines.two_classes with partition, finer, refines, different
+  have finiteP := Partition.finite with finiteVertices, partition
+  have finiteQ := Partition.finite with finiteVertices, finer
+  have rest := difference.subset_left at Q, {Y}
+  have finiteRest := Finite.subset with finiteQ, rest
+  have function := coarseMap.function at P, Q
+  have covered : P ⊆ functionImage(coarseMap(P, Q), Q ∖ {Y}, 𝒫(⋃(P)))
+    intros W classW
+    obtain ⟨v, inW⟩ :=
+      Nonempty.of_ne_empty with (partition.left with W, classW).right
+    have inV := (partition.left with W, classW).left with v, inW
+    obtain ⟨U, classU, inU⟩ := finer.right.right with v, inV
+    have inPowerset : W ∈ 𝒫(⋃(P)) :=
+      powerset.membership_iff.backward with (union.subset_of_member with classW)
+    by_cases same : U = Y
+    . -- v lies in Y ⊆ X, so W is X, the coarse class of Z as well.
+      rw same at inU
+      have sameW := Partition.eq_of_member with
+        partition, classW, classX, inW, (subsetY with v, inU)
+      have inRest : Z ∈ Q ∖ {Y} by simp [classZ, distinct]
+      have value := coarseMap.value_of_subset with
+        partition, finer, classX, classZ, subsetZ
+      refine ⟨inPowerset, Z, inRest, _⟩
+      rw [value, sameW]
+    . have inRest : U ∈ Q ∖ {Y} by simp [classU, same]
+      obtain ⟨R, classR, subsetU⟩ := refines with U, classU
+      have sameW := Partition.eq_of_member with
+        partition, classW, classR, inW, (subsetU with v, inU)
+      have value := coarseMap.value_of_subset with
+        partition, finer, classR, classU, subsetU
+      refine ⟨inPowerset, U, inRest, _⟩
+      rw [value, sameW]
+  have finiteImage := Finite.function_image with function, finiteRest, rest
+  have lower := cardinality.monotone with finiteImage, covered
+  have upper := cardinality.image_le with function, rest, finiteRest
+  have removed := cardinality.remove_add_one with finiteQ, classY
+  arith
+
+-- While the sequence keeps moving it gains a class at every step.
+theorem partitionSequence.grows (V E leftEnd rightEnd T : Set, k n : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  requires moving : ∀ i ∈ n,
+    partitionSequence(V, leftEnd, rightEnd, T, k, succ(i)) ≠
+      partitionSequence(V, leftEnd, rightEnd, T, k, i)
+  shows n + 1 ≤ cardinality(partitionSequence(V, leftEnd, rightEnd, T, k, n))
+proof
+  induction n
+  | zero =>
+    intro moving
+    rw [partitionSequence.zero, cardinality.singleton]
+    arith
+  | succ(m) using ih =>
+    intro moving
+    have earlier : ∀ i ∈ m,
+        partitionSequence(V, leftEnd, rightEnd, T, k, succ(i)) ≠
+          partitionSequence(V, leftEnd, rightEnd, T, k, i)
+      intros i member
+      have inSucc : i ∈ succ(m) by simp [member]
+      exact moving with i, inSucc
+    have bound := ih with earlier
+    have self : m ∈ succ(m) by simp
+    have step := moving with m, self
+    have coarse :
+        Partition(V, partitionSequence(V, leftEnd, rightEnd, T, k, m)) :=
+      partitionSequence.partition with graph, nonempty, decomposition
+    have fine :
+        Partition(V, partitionSequence(V, leftEnd, rightEnd, T, k, succ(m))) :=
+      partitionSequence.partition with graph, nonempty, decomposition
+    have refines := partitionSequence.refines
+      at V, E, leftEnd, rightEnd, T, k, m with graph, decomposition
+    have less := Refines.cardinality_lt with
+      finiteVertices, coarse, fine, refines, step
+    arith
+
+-- A strictly refining chain of partitions of a finite set has at most |V|
+-- steps, so the sequence is fixed from some stage on.
+theorem partitionSequence.stabilises (V E leftEnd rightEnd T : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  shows ∃ n ∈ ℕ, n ≤ cardinality(V) ∧
+    partitionSequence(V, leftEnd, rightEnd, T, k, succ(n)) =
+      partitionSequence(V, leftEnd, rightEnd, T, k, n)
+proof
+  by_contra none
+  have natV := cardinality.nat with finiteVertices
+  -- Were no stage up to |V| fixed, stage |V| + 1 would have |V| + 2 classes.
+  have moving : ∀ i ∈ succ(cardinality(V)),
+      partitionSequence(V, leftEnd, rightEnd, T, k, succ(i)) ≠
+        partitionSequence(V, leftEnd, rightEnd, T, k, i)
+    intros i member
+    have natural := natural.member at succ(cardinality(V)) with i, member
+    have less := Less.of_membership at i, succ(cardinality(V)) with member
+    have below : i ≤ cardinality(V) by arith
+    intro fixed
+    exact none with ⟨i, (nat.omega.forward with natural), below, fixed⟩
+  have grown := partitionSequence.grows with
+    graph, finiteVertices, nonempty, decomposition, moving
+  have stage : Partition(V,
+      partitionSequence(V, leftEnd, rightEnd, T, k, succ(cardinality(V)))) :=
+    partitionSequence.partition with graph, nonempty, decomposition
+  have bound := Partition.cardinality_le with finiteVertices, stage
+  arith
+
+-- Once fixed, the sequence stays fixed.
+theorem partitionSequence.fixed_from (V leftEnd rightEnd T : Set, k n d : Nat)
+  requires fixed : partitionSequence(V, leftEnd, rightEnd, T, k, succ(n)) =
+    partitionSequence(V, leftEnd, rightEnd, T, k, n)
+  shows partitionSequence(V, leftEnd, rightEnd, T, k, n + d) =
+    partitionSequence(V, leftEnd, rightEnd, T, k, n)
+proof
+  induction d
+  | zero =>
+    rw add.right_unit
+  | succ(m) using ih =>
+    rw [add.succ_right, partitionSequence.succ, ih, ← partitionSequence.succ]
+    exact fixed
+
+-- The stable partition P_∞ and, on it, every colour is internally connected.
+def stablePartition (V leftEnd rightEnd T : Set, k : Nat) : Set :=
+  partitionSequence(V, leftEnd, rightEnd, T, k, cardinality(V))
+
+theorem stablePartition.internal (V E leftEnd rightEnd T : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires decomposition : Decomposition(E, T, k)
+  shows ∀ i ∈ k, InternallyConnected(leftEnd, rightEnd, T(i),
+    stablePartition(V, leftEnd, rightEnd, T, k))
+proof
+  obtain ⟨n, natural, below, fixed⟩ := partitionSequence.stabilises with
+    graph, finiteVertices, nonempty, decomposition
+  have nNat := nat.omega.backward with natural
+  obtain ⟨d, dNat, sum⟩ := below
+  have same := partitionSequence.fixed_from at V, leftEnd, rightEnd, T, k, n, d
+    with fixed
+  rw partitionSequence.succ at fixed
+  have internal := partitionStep.fixed_colours with graph, decomposition,
+    (partitionSequence.partition with graph, nonempty, decomposition), fixed
+  intros i colour
+  unfold stablePartition
+  rw [← sum, same]
+  exact internal with i, colour

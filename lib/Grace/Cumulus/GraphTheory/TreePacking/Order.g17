@@ -1,0 +1,401 @@
+-- The order on decompositions: T precedes U when their partition sequences
+-- and chosen colours agree below some stage at which U is strictly coarser
+-- or chooses a larger colour. A finite family of decompositions into trees
+-- and a rest has a maximal member.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.TreePacking.Order
+import LastColour
+
+-- The least natural of the empty set is ∅, so leastNatural(S) is a natural
+-- for every set S of naturals, inhabited or not.
+theorem leastNatural.empty
+  shows leastNatural(∅) = ∅
+proof
+  unfold leastNatural
+  have none : leastNatural.candidates(∅) = ∅
+    ext n
+    constructor
+    . intro member
+      exfalso
+      exact set.empty with member.right.left
+    . intro member
+      exfalso
+      exact set.empty with member
+  rw none
+  exact union.empty
+
+theorem leastNatural.natural (S : Set)
+  requires naturals : S ⊆ ℕ
+  shows Nat(leastNatural(S))
+proof
+  by_cases empty : S = ∅
+  . rw [empty, leastNatural.empty, ← nat.zero]
+    exact Naturals.constructor.zero
+  . have inhabited := Nonempty.of_ne_empty with empty
+    have member := leastNatural.member with inhabited, naturals
+    exact nat.omega.backward with (naturals with leastNatural(S), member)
+
+-- A term named by a variable, to shorten long proofs.
+theorem exists_eq (x : Set)
+  shows ∃ c, c = x
+proof
+  witness x
+  rfl
+
+-- The colour chosen at a stage: the least disconnected colour, or k once
+-- every colour is internally connected, as the least of the disconnected
+-- colours with k adjoined.
+def stageColour (leftEnd rightEnd T P : Set, k : Nat) : Set :=
+  leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k})
+
+theorem stageColour.subset (leftEnd rightEnd T P : Set, k : Nat)
+  shows disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k} ⊆ ℕ
+proof
+  intros i member
+  simp at member
+  have subset := disconnectedColour.subset at leftEnd, rightEnd, T, P, k
+  rcases member with colour | same
+  . exact subset with i, colour
+  . rw same
+    exact nat.omega.forward at k with *
+
+theorem stageColour.inhabited (leftEnd rightEnd T P : Set, k : Nat)
+  shows Nonempty(disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k})
+proof
+  have member : k ∈ disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k}
+    by simp
+  exact ⟨k, member⟩
+
+theorem stageColour.natural (leftEnd rightEnd T P : Set, k : Nat)
+  shows Nat(stageColour(leftEnd, rightEnd, T, P, k))
+proof
+  unfold stageColour
+  exact leastNatural.natural with stageColour.subset
+
+theorem stageColour.member (leftEnd rightEnd T P : Set, k : Nat)
+  shows stageColour(leftEnd, rightEnd, T, P, k) ∈
+    disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k}
+proof
+  unfold stageColour
+  exact leastNatural.member with stageColour.inhabited, stageColour.subset
+
+theorem stageColour.least (leftEnd rightEnd T P x : Set, k : Nat)
+  requires member : x ∈ disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k}
+  shows stageColour(leftEnd, rightEnd, T, P, k) ≤ x
+proof
+  have subset := stageColour.subset at leftEnd, rightEnd, T, P, k
+  have xNat := nat.omega.backward with (subset with x, member)
+  unfold stageColour
+  exact leastNatural.least with stageColour.inhabited, subset, member
+
+-- The chosen colour is k exactly when every colour is internally connected,
+-- and otherwise the least disconnected colour.
+theorem stageColour.of_none (leftEnd rightEnd T P : Set, k : Nat)
+  requires none : disconnectedColour(leftEnd, rightEnd, T, P, k) = ∅
+  shows stageColour(leftEnd, rightEnd, T, P, k) = k
+proof
+  have member := stageColour.member at leftEnd, rightEnd, T, P, k
+  rw none at member
+  simp at member
+  exact member
+
+theorem stageColour.of_some (leftEnd rightEnd T P : Set, k : Nat)
+  requires some : disconnectedColour(leftEnd, rightEnd, T, P, k) ≠ ∅
+  shows stageColour(leftEnd, rightEnd, T, P, k) =
+    leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k))
+proof
+  have inhabited := Nonempty.of_ne_empty with some
+  have subsetColours := disconnectedColour.subset at leftEnd, rightEnd, T, P, k
+  have chosen := leastNatural.member with inhabited, subsetColours
+  have chosenNat := leastNatural.natural with subsetColours
+  have stageNat := stageColour.natural at leftEnd, rightEnd, T, P, k
+  have chosenIn :
+      leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k)) ∈
+        disconnectedColour(leftEnd, rightEnd, T, P, k) ∪ {k} by simp [chosen]
+  have below := stageColour.least with chosenIn
+  have member := stageColour.member at leftEnd, rightEnd, T, P, k
+  simp at member
+  have above : leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k)) ≤
+      stageColour(leftEnd, rightEnd, T, P, k)
+    rcases member with inColours | isK
+    . exact leastNatural.least with inhabited, subsetColours, inColours
+    . rw isK
+      have less := Less.of_membership
+        at leastNatural(disconnectedColour(leftEnd, rightEnd, T, P, k)), k
+        with chosen.left
+      arith
+  exact LessEqual.antisymmetric with below, above
+
+-- The order on decompositions, as in the paper: T precedes T' when the
+-- partition sequences and the chosen colours agree below some stage j, and
+-- at j the partition of T' is strictly coarser or the colour of T' is larger.
+predicate Precedes (V leftEnd rightEnd T U : Set, k : Nat) :=
+  ∃ j ∈ ℕ, (∀ i ∈ j,
+      partitionSequence(V, leftEnd, rightEnd, T, k, i) =
+        partitionSequence(V, leftEnd, rightEnd, U, k, i) ∧
+      stageColour(leftEnd, rightEnd, T,
+          partitionSequence(V, leftEnd, rightEnd, T, k, i), k) =
+        stageColour(leftEnd, rightEnd, U,
+          partitionSequence(V, leftEnd, rightEnd, U, k, i), k)) ∧
+    ((Refines(partitionSequence(V, leftEnd, rightEnd, T, k, j),
+        partitionSequence(V, leftEnd, rightEnd, U, k, j)) ∧
+      partitionSequence(V, leftEnd, rightEnd, T, k, j) ≠
+        partitionSequence(V, leftEnd, rightEnd, U, k, j)) ∨
+     (partitionSequence(V, leftEnd, rightEnd, T, k, j) =
+        partitionSequence(V, leftEnd, rightEnd, U, k, j) ∧
+      stageColour(leftEnd, rightEnd, T,
+          partitionSequence(V, leftEnd, rightEnd, T, k, j), k) <
+        stageColour(leftEnd, rightEnd, U,
+          partitionSequence(V, leftEnd, rightEnd, U, k, j), k)))
+
+-- The order is strict: no decomposition precedes itself, since at the stage
+-- j the partition would differ from itself or the colour be below itself.
+theorem Precedes.irreflexive (V leftEnd rightEnd T : Set, k : Nat)
+  shows ¬Precedes(V, leftEnd, rightEnd, T, T, k)
+proof
+  intro precedes
+  obtain ⟨j, _, _, step⟩ := precedes
+  rcases step with ⟨_, different⟩ | ⟨_, less⟩
+  . exact different with rfl
+  . have natural := stageColour.natural at leftEnd, rightEnd, T,
+      partitionSequence(V, leftEnd, rightEnd, T, k, j), k
+    exact Less.irreflexive with natural, less
+
+-- Agreement of partitions and chosen colours below a stage composes, up to
+-- the earlier of the two stages.
+theorem Precedes.agree_below (V leftEnd rightEnd T U W : Set, k j l n : Nat)
+  requires first : ∀ i ∈ j,
+    partitionSequence(V, leftEnd, rightEnd, T, k, i) =
+      partitionSequence(V, leftEnd, rightEnd, U, k, i) ∧
+    stageColour(leftEnd, rightEnd, T,
+        partitionSequence(V, leftEnd, rightEnd, T, k, i), k) =
+      stageColour(leftEnd, rightEnd, U,
+        partitionSequence(V, leftEnd, rightEnd, U, k, i), k)
+  requires second : ∀ i ∈ l,
+    partitionSequence(V, leftEnd, rightEnd, U, k, i) =
+      partitionSequence(V, leftEnd, rightEnd, W, k, i) ∧
+    stageColour(leftEnd, rightEnd, U,
+        partitionSequence(V, leftEnd, rightEnd, U, k, i), k) =
+      stageColour(leftEnd, rightEnd, W,
+        partitionSequence(V, leftEnd, rightEnd, W, k, i), k)
+  requires boundJ : n ≤ j
+  requires boundL : n ≤ l
+  shows ∀ i ∈ n,
+    partitionSequence(V, leftEnd, rightEnd, T, k, i) =
+      partitionSequence(V, leftEnd, rightEnd, W, k, i) ∧
+    stageColour(leftEnd, rightEnd, T,
+        partitionSequence(V, leftEnd, rightEnd, T, k, i), k) =
+      stageColour(leftEnd, rightEnd, W,
+        partitionSequence(V, leftEnd, rightEnd, W, k, i), k)
+proof
+  intros i member
+  have iNat := natural.member at n with i, member
+  have less := Less.of_membership at i, n with member
+  have belowJ : i < j by arith
+  have belowL : i < l by arith
+  obtain ⟨sameTU, coloursTU⟩ :=
+    first with i, (membership.of_Less at i, j with *, belowJ)
+  obtain ⟨sameUW, coloursUW⟩ :=
+    second with i, (membership.of_Less at i, l with *, belowL)
+  constructor
+  . rw [sameTU, sameUW]
+  . rw [coloursTU, coloursUW]
+
+-- Transitivity: the stage of the composed comparison is the earlier of the
+-- two stages; at an equal stage the two partition drops compose by a strict
+-- count, and the two colour drops by the order of ℕ.
+theorem Precedes.transitive (V E leftEnd rightEnd T U W : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires decompositionT : Decomposition(E, T, k)
+  requires decompositionU : Decomposition(E, U, k)
+  requires decompositionW : Decomposition(E, W, k)
+  requires first : Precedes(V, leftEnd, rightEnd, T, U, k)
+  requires second : Precedes(V, leftEnd, rightEnd, U, W, k)
+  shows Precedes(V, leftEnd, rightEnd, T, W, k)
+proof
+  obtain ⟨j, jNatural, agreeTU, stepTU⟩ := first
+  obtain ⟨l, lNatural, agreeUW, stepUW⟩ := second
+  have jNat := nat.omega.backward with jNatural
+  have lNat := nat.omega.backward with lNatural
+  have order := Less.trichotomy at j, l with *
+  rcases order with before | same | after
+  . -- The first comparison decides, since U and W still agree at stage j.
+    have inL := membership.of_Less at j, l with *, before
+    obtain ⟨sameUW, coloursUW⟩ := agreeUW with j, inL
+    have below : j ≤ l by arith
+    refine ⟨j, jNatural, (Precedes.agree_below with
+      agreeTU, agreeUW, (LessEqual.reflexive at j), below), ?_⟩
+    rw [coloursUW, sameUW] at stepTU
+    exact stepTU
+  . -- Equal stages: the drops compose.
+    rw under same at agreeTU
+    rw same at stepTU
+    refine ⟨l, lNatural, (Precedes.agree_below with agreeTU, agreeUW,
+      (LessEqual.reflexive at l), (LessEqual.reflexive at l)), ?_⟩
+    have partitionT : Partition(V,
+        partitionSequence(V, leftEnd, rightEnd, T, k, l)) :=
+      partitionSequence.partition with graph, nonempty, decompositionT
+    have partitionU : Partition(V,
+        partitionSequence(V, leftEnd, rightEnd, U, k, l)) :=
+      partitionSequence.partition with graph, nonempty, decompositionU
+    have partitionW : Partition(V,
+        partitionSequence(V, leftEnd, rightEnd, W, k, l)) :=
+      partitionSequence.partition with graph, nonempty, decompositionW
+    rcases stepTU with ⟨refinesTU, differentTU⟩ | ⟨sameTU, lessTU⟩
+    . rcases stepUW with ⟨refinesUW, differentUW⟩ | ⟨sameUW, lessUW⟩
+      . -- Two strict refinements: the class counts strictly increase twice.
+        left
+        refine ⟨(Refines.transitive with refinesTU, refinesUW), ?_⟩
+        have dropTU := Refines.cardinality_lt with
+          finiteVertices, partitionU, partitionT, refinesTU, differentTU
+        have dropUW := Refines.cardinality_lt with
+          finiteVertices, partitionW, partitionU, refinesUW, differentUW
+        have finiteU := Partition.finite with finiteVertices, partitionU
+        have finiteW := Partition.finite with finiteVertices, partitionW
+        intro sameTW
+        rw sameTW at dropTU
+        arith
+      . left
+        rw sameUW at refinesTU, differentTU
+        exact ⟨refinesTU, differentTU⟩
+    . rcases stepUW with ⟨refinesUW, differentUW⟩ | ⟨sameUW, lessUW⟩
+      . left
+        rw ← sameTU at refinesUW, differentUW
+        exact ⟨refinesUW, differentUW⟩
+      . right
+        have naturalT := stageColour.natural at leftEnd, rightEnd, T,
+          partitionSequence(V, leftEnd, rightEnd, T, k, l), k
+        have naturalU := stageColour.natural at leftEnd, rightEnd, U,
+          partitionSequence(V, leftEnd, rightEnd, U, k, l), k
+        have naturalW := stageColour.natural at leftEnd, rightEnd, W,
+          partitionSequence(V, leftEnd, rightEnd, W, k, l), k
+        constructor
+        . rw [sameTU, sameUW]
+        . exact Less.transitive with naturalT, naturalU, naturalW,
+            lessTU, lessUW
+  . -- The second comparison decides, since T and U still agree at stage l.
+    have inJ := membership.of_Less at l, j with *, after
+    obtain ⟨sameTU, coloursTU⟩ := agreeTU with l, inJ
+    have below : l ≤ j by arith
+    refine ⟨l, lNatural, (Precedes.agree_below with
+      agreeTU, agreeUW, below, (LessEqual.reflexive at l)), ?_⟩
+    rw [← coloursTU, ← sameTU] at stepUW
+    exact stepUW
+
+-- A nonempty finite family of decompositions has a maximal member: adjoin
+-- the members one at a time, keeping the old maximal element unless the new
+-- one lies above it.
+theorem Precedes.exists_maximal (V E leftEnd rightEnd S : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires nonempty : V ≠ ∅
+  requires finite : Finite(S)
+  requires members : ∀ T ∈ S, Decomposition(E, T, k)
+  shows S ≠ ∅ →
+    ∃ T ∈ S, ∀ U ∈ S, ¬Precedes(V, leftEnd, rightEnd, T, U, k)
+proof
+  induction finite with G a
+  | empty =>
+    intro inhabited
+    exfalso
+    exact inhabited with rfl
+  | insert using ih =>
+    intro _
+    have aIn : a ∈ G ∪ {a} by simp
+    have decompositionA := members with a, aMember
+    by_cases emptyG : G = ∅
+    . refine ⟨a, aIn, ?_⟩
+      intros U member above
+      rw emptyG at member
+      simp at member
+      rw member at above
+      exact Precedes.irreflexive with above
+    . obtain ⟨M, inG, maximal⟩ := ih with emptyG
+      have decompositionM := members with M, (GSubset with M, inG)
+      by_cases better : Precedes(V, leftEnd, rightEnd, M, a, k)
+      . -- a is maximal: a member above a would lie above M.
+        refine ⟨a, aIn, ?_⟩
+        intros U member above
+        simp at member
+        rcases member with inG2 | same
+        . have decompositionU := members with U, (GSubset with U, inG2)
+          have chain := Precedes.transitive with graph, finiteVertices,
+            nonempty, decompositionM, decompositionA, decompositionU,
+            better, above
+          exact maximal with U, inG2, chain
+        . rw same at above
+          exact Precedes.irreflexive with above
+      . have mIn : M ∈ G ∪ {a} by simp [inG]
+        refine ⟨M, mIn, ?_⟩
+        intros U member above
+        simp at member
+        rcases member with inG2 | same
+        . exact maximal with U, inG2, above
+        . rw same at above
+          exact better with above
+
+-- The decompositions into succ(k) colours whose first k colours are trees:
+-- a finite family, as a set of subsets of succ(k) × 𝒫(E).
+def treeDecompositions (V E leftEnd rightEnd : Set, k : Nat) : Set :=
+  { T ∈ 𝒫(succ(k) × 𝒫(E)) | Decomposition(E, T, succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))) }
+
+theorem treeDecompositions.finite (V E leftEnd rightEnd : Set, k : Nat)
+  requires finiteEdges : Finite(E)
+  shows Finite(treeDecompositions(V, E, leftEnd, rightEnd, k))
+proof
+  have subset : treeDecompositions(V, E, leftEnd, rightEnd, k) ⊆
+      𝒫(succ(k) × 𝒫(E))
+    intros T member
+    exact member.left
+  have finiteIndex : Finite(succ(k)) := Finite.natural at succ(k)
+  have finiteProduct := Finite.product with
+    finiteIndex, (Finite.powerset with finiteEdges)
+  exact Finite.subset with (Finite.powerset with finiteProduct), subset
+
+-- The order is a strict partial order on the finitely many decompositions,
+-- so a maximal one exists among those whose first k colours are trees.
+theorem Precedes.maximal (V E leftEnd rightEnd : Set, k : Nat)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteVertices : Finite(V)
+  requires finiteEdges : Finite(E)
+  requires nonempty : V ≠ ∅
+  requires some : ∃ T, Decomposition(E, T, succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i)))
+  shows ∃ T, Decomposition(E, T, succ(k)) ∧
+    (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, T(i))) ∧
+    ¬(∃ U, Decomposition(E, U, succ(k)) ∧
+      (∀ i ∈ k, SpanningTree(V, leftEnd, rightEnd, U(i))) ∧
+      Precedes(V, leftEnd, rightEnd, T, U, succ(k)))
+proof
+  obtain ⟨T₀, decomposition₀, trees₀⟩ := some
+  have finiteFamily := treeDecompositions.finite
+    at V, E, leftEnd, rightEnd, k with finiteEdges
+  have members : ∀ T ∈ treeDecompositions(V, E, leftEnd, rightEnd, k),
+      Decomposition(E, T, succ(k))
+    intros T member
+    exact member.right.left
+  have inhabited : treeDecompositions(V, E, leftEnd, rightEnd, k) ≠ ∅
+    apply Nonempty.ne_empty
+    witness T₀
+    have relation : T₀ ⊆ succ(k) × 𝒫(E) := decomposition₀.left.left
+    exact ⟨(powerset.membership_iff.backward with relation),
+      decomposition₀, trees₀⟩
+  have step := Precedes.exists_maximal with
+    graph, finiteVertices, nonempty, finiteFamily, members
+  obtain ⟨T, member, maximal⟩ := step with inhabited
+  obtain ⟨_, decomposition, trees⟩ := member
+  refine ⟨T, decomposition, trees, ?_⟩
+  intro worse
+  obtain ⟨U, decompositionU, treesU, precedes⟩ := worse
+  have relation : U ⊆ succ(k) × 𝒫(E) := decompositionU.left.left
+  have memberU : U ∈ treeDecompositions(V, E, leftEnd, rightEnd, k) :=
+    ⟨(powerset.membership_iff.backward with relation),
+      decompositionU, treesU⟩
+  exact maximal with U, memberU, precedes

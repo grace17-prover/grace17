@@ -1,0 +1,113 @@
+-- Double covers of a multigraph: an indexed family of even edge sets holding
+-- every edge exactly twice. Two-element labels on the edges with even local
+-- multiplicity give one.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.GraphTheory.DoubleCover.Covers
+import Multigraph.Trees
+
+-- Cubic and loopless: every vertex meets three edge ends, no edge is a loop.
+predicate Cubic (V E leftEnd rightEnd : Set) :=
+  (∀ v ∈ V, degreeIn(leftEnd, rightEnd, E, v) = 3) ∧
+  (∀ e ∈ E, leftEnd(e) ≠ rightEnd(e))
+
+-- The indices of the family H whose member holds e, and their number.
+def holding (H I e : Set) : Set := { i ∈ I | e ∈ H(i) }
+def multiplicity (H I e : Set) : Set := cardinality(holding(H, I, e))
+
+predicate EvenDoubleCover (V E leftEnd rightEnd H I : Set) :=
+  Finite(I) ∧ FunctionBetween(H, I, 𝒫(E)) ∧
+  (∀ i ∈ I, EvenEdgeSet(V, leftEnd, rightEnd, H(i))) ∧
+  (∀ e ∈ E, multiplicity(H, I, e) = 2)
+
+theorem holding.subset (H I e : Set)
+  shows holding(H, I, e) ⊆ I
+proof
+  intros i hi
+  exact hi.left
+
+-- Two-element labels: P(e) ⊆ L has two elements, and at every vertex each
+-- label s is carried by an even number of incident ends. The family
+-- H(s) = {e | s ∈ P(e)} is then an even double cover.
+def labelClass (E P s : Set) : Set := { e ∈ E | s ∈ P(e) }
+def labelledEnds (leftEnd rightEnd E P v s : Set) : Set :=
+  { p ∈ incidentEnds(leftEnd, rightEnd, E, v) | s ∈ P(fst(p)) }
+
+theorem labelClass.subset (E P s : Set)
+  shows labelClass(E, P, s) ⊆ E
+proof
+  intros e he
+  exact he.left
+
+defgraph labelFamily (E P L : Set) (s ∈ L) : 𝒫(E) := labelClass(E, P, s)
+proof
+  exact powerset.membership_iff.backward with labelClass.subset
+
+-- The ends of the class of s at v are the ends at v labelled s.
+theorem labelClass.incidentEnds (leftEnd rightEnd E P v s : Set)
+  shows incidentEnds(leftEnd, rightEnd, labelClass(E, P, s), v) =
+    labelledEnds(leftEnd, rightEnd, E, P, v, s)
+proof
+  ext p
+  constructor
+  . intro hp
+    obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp
+    have ends := incidentEnds.pair.forward with hp
+    refine ⟨(incidentEnds.pair.backward with ⟨he.left, ends.right⟩), ?_⟩
+    rw fst.pair
+    exact he.right
+  . intro hp
+    obtain ⟨e, he, i, hi, rfl⟩ := incidentEnds.shape with hp.left
+    have ends := incidentEnds.pair.forward with hp.left
+    have label := hp.right
+    rw fst.pair at label
+    exact incidentEnds.pair.backward with ⟨⟨he, label⟩, ends.right⟩
+
+-- The labels holding e are exactly its pair P(e).
+theorem labelFamily.holding (E P L e : Set)
+  requires labels : P : E → 𝒫(L)
+  requires edge : e ∈ E
+  shows holding(labelFamily(E, P, L), L, e) = P(e)
+proof
+  have inside : P(e) ⊆ L := powerset.membership_iff.forward
+    with (FunctionBetween.apply_closed with labels, edge)
+  ext i
+  constructor
+  . intro hi
+    have parts := holding.membership.forward with hi
+    rw labelFamily.value with parts.left at parts
+    exact (labelClass.membership.forward with parts.right).right
+  . intro hi
+    have inL := inside with i, hi
+    refine ⟨inL, ?_⟩
+    rw labelFamily.value with inL
+    exact ⟨edge, hi⟩
+
+theorem labels.double_cover (V E leftEnd rightEnd P L : Set)
+  requires graph : Graph(V, E, leftEnd, rightEnd)
+  requires finiteEdges : Finite(E)
+  requires finiteLabels : Finite(L)
+  requires labels : FunctionBetween(P, E, 𝒫(L)) ∧
+    (∀ e ∈ E, cardinality(P(e)) = 2)
+  requires balanced : ∀ v ∈ V, ∀ s ∈ L,
+    EvenSet(labelledEnds(leftEnd, rightEnd, E, P, v, s))
+  shows EvenDoubleCover(V, E, leftEnd, rightEnd, labelFamily(E, P, L), L)
+proof
+  refine ⟨finiteLabels, labelFamily.function, ?_, ?_⟩
+  . -- Each class is even: its ends at v are the ends labelled s there.
+    intros s hs
+    rw labelFamily.value with hs
+    constructor
+    . exact Finite.subset with finiteEdges, labelClass.subset
+    . intros v hv
+      unfold degreeIn
+      rw labelClass.incidentEnds
+      exact balanced with v, hv, s, hs
+  . -- Each edge is held by its two labels.
+    intros e he
+    unfold multiplicity
+    rw labelFamily.holding with labels.left, he
+    exact labels.right with e, he

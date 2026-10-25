@@ -25,7 +25,6 @@ test("coprimality and inverse existence cover signs and zero or unit moduli", ()
 proof
   unfold IntegerCoprime
   simp [integerGCD, integerNatAbs.ofNat, integerNatAbs.ofNegativeNat]
-  compute
 
 theorem inverse_${i}
   shows ∃ u, Integer(u) ∧ IntegerCongruent(${modulus}, ${x} * u, integerOne)
@@ -46,7 +45,6 @@ test("noncoprime inputs cannot acquire an inverse through the converse", () => {
 proof
   have actual : integerGCD(${x}, ${modulus}) = ${g}
   . simp [integerGCD, integerNatAbs.ofNat, integerNatAbs.ofNegativeNat]
-    compute
   have impossible : ${g} ≠ 1
   . intro equal
     have less : ${g === 0 ? "0 < 1" : `1 < ${g}`}

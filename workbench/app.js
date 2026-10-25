@@ -205,7 +205,7 @@ const symbolResolutionCache = new Map();
 
 renderTabs();
 if (activeId) {
-  activateFile(activeId, false);
+  activateFile(activeId, false, false);
   // Dependency elaboration begins immediately and runs off the UI thread. The
   // subsequent check reuses the content-addressed checkpoint and admits only the
   // active editor leaf.
@@ -847,7 +847,7 @@ function restoreSavedSession() {
   currentError = null;
   fileErrors.clear();
   if (activeId) {
-    activateFile(activeId, false);
+    activateFile(activeId, false, false);
     prepareThenCheckActive();
   } else {
     persistWorkspace();
@@ -984,9 +984,10 @@ function renderProjectExplorer() {
   }));
 }
 
-function activateFile(id, focus = true) {
+function activateFile(id, focus = true, recheck = true) {
   const file = files.find(item => item.id === id);
   if (!file) return;
+  const changed = activeId !== id;
   if (activeId !== id) {
     // Async responses own the buffer that launched them. Moving to another
     // buffer invalidates both checks and dependency preparation immediately.
@@ -1017,6 +1018,10 @@ function activateFile(id, focus = true) {
   populateTheorems();
   syncGoalToCursor();
   if (focus) source.focus();
+  // A buffer whose result is not the current one has no goals to show: a
+  // check launched for it earlier was invalidated by moving away, so check it
+  // again (callers that schedule their own check pass recheck = false).
+  if (recheck && changed && result && resultActiveFile !== file.name) prepareThenCheckActive();
 }
 
 function closeFileNow(id) {
@@ -1114,7 +1119,7 @@ import Grace.Cumulus.Main
 ` };
   files.push(file);
   openIds.push(file.id);
-  activateFile(file.id);
+  activateFile(file.id, true, false);
   scheduleCheck(0);
 }
 
@@ -1137,7 +1142,7 @@ async function openFiles(opened) {
     if (!openIds.includes(nextActiveId)) openIds.push(nextActiveId);
   }
   currentError = null;
-  activateFile(nextActiveId);
+  activateFile(nextActiveId, true, false);
   setStatus(`${opened.length} ${opened.length === 1 ? "file" : "files"} opened`);
   scheduleCheck(0);
 }
@@ -2377,10 +2382,13 @@ function goToDefinition(symbol) {
   if (!file) return;
   persistWorkspace();
   const changedFile = activeId !== file.id;
-  activateFile(file.id, false);
+  activateFile(file.id, false, false);
   jumpToLine(symbol.line);
   setStatus(`Definition · ${symbol.short}`);
-  if (changedFile) scheduleCheck(0);
+  // Another file's import closure is prepared off the UI thread before the
+  // check, as when it is opened from a link; a bare check would elaborate it
+  // inside the check and can exhaust the worker.
+  if (changedFile) prepareThenCheckActive();
 }
 
 function jumpToSorrySite(theorem, index) {
@@ -2520,7 +2528,7 @@ function openLinkedProof() {
       const model = modelFor(file);
       if (model.getValue() !== target.source) model.setValue(target.source);
     }
-    activateFile(file.id, false);
+    activateFile(file.id, false, false);
     const line = Math.min(target.line, file.source.split("\n").length);
     jumpToLine(line);
     settleLinkedLine(file.id, line);

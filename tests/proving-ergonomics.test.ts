@@ -253,7 +253,6 @@ theorem nestedMembership (a b c A : Set)
   shows fst(fst(((a, b), c))) ∈ A
 proof
   simp [fst.pair, snd.pair]
-  exact ha
 
 theorem nestedFact (a b c A : Set)
   requires h : snd(fst(((a, b), c))) ∈ A

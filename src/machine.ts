@@ -71,16 +71,19 @@ export function compileProofMachine(exported: MachineProofExport): ProofMachineP
 }
 
 /** Link many theorem certificates into one shared-arena, single-pass module tape. */
-export function compileProofModule(exports: readonly MachineProofExport[]): ProofMachineModuleProgram {
-  if (exports.length === 0) throw new KernelError("Cannot compile an empty proof module");
-  const environment = exports[0]!.environment;
-  if (exports.some(item => item.environment !== environment)) throw new KernelError("Cannot link proofs from different environments");
+export function compileProofModule(exports: Iterable<MachineProofExport>): ProofMachineModuleProgram {
   const arena = new Arena();
   const code: number[][] = [];
   const theorems: [number, number][] = [];
+  let environment: string | undefined;
+  // Exports are consumed as they come, so a caller may produce them one
+  // theorem at a time and let each go once it is on the tape.
   for (const exported of exports) {
+    environment ??= exported.environment;
+    if (exported.environment !== environment) throw new KernelError("Cannot link proofs from different environments");
     theorems.push([arena.symbolId(exported.theorem), appendProof(arena, code, exported)]);
   }
+  if (environment === undefined) throw new KernelError("Cannot compile an empty proof module");
   const program: ProofMachineModuleProgram = {
     version: 4,
     environment,
@@ -772,9 +775,12 @@ class Arena {
     this.results = new Int32Array(program?.code.length ?? 0);
     if (!program) return;
     program.symbols.forEach(value => { this.symbolMap.set(value, this.symbols.length); this.symbols.push(value); });
-    program.terms.forEach(node => this.internTermNode([...node]));
-    program.formulas.forEach(node => this.internFormulaNode([...node]));
-    program.contexts.forEach(node => this.internContextIds([...node]));
+    // A decoded program is deeply frozen and the arena only reads its
+    // nodes, so they are adopted as they are: copying a million of them
+    // doubled the memory of a library-wide verification.
+    program.terms.forEach(node => this.internTermNode(node as number[]));
+    program.formulas.forEach(node => this.internFormulaNode(node as number[]));
+    program.contexts.forEach(node => this.internContextIds(node as number[]));
   }
   validateSignature(kernel: Kernel, termCount: number, formulaCount: number): void {
     for (let index = 0; index < termCount; index += 1) {

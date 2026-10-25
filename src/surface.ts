@@ -17,9 +17,10 @@ import { compute,
 import { CARRIER_ARGUMENT_FUNCTIONS, formatFormula, formatTerm, fromSuperscript, registerStructureMember, ringNumeralValue, structureMember, structureProjection as structureFieldSymbol, type CarrierNotation, type FunctionNotation, type OperationNotation, type PredicateNotation, type PrettyOptions, type RingNotation, type RingPiece, type ScopedArgument } from "./pretty.ts";
 import { evaluateNative, nativeValueToTerm } from "./runtime.ts";
 import { InstanceResolutionError, InstanceResolutionLimitError, prepareInstanceProver, prepareRefinementProver, proveRefinement, type InstanceProver, type InstanceSynthesisResult, type RefinementProver, forkTypeIndex, moveTypeIndex,
-  functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, proveLiteralDistinctnessGoal, refuteLiteralEquation, registerGuardPredicate,
+  functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, proveClosedDisequality, proveLiteralDistinctnessGoal, refuteLiteralEquation, registerGuardPredicate,
   type GuardFact, type ScopeVisibility,
 } from "./type-system.ts";
+import { closedNumeralEquation, matchFormula } from "./tactics.ts";
 import { createSimpSession, prepareRewrites, rewriteFact, rewriteGoal, RewriteMismatch, settle, simplifyEqualityFact, simplifyEqualityGoal, simplifyFormulaFact, simplifyFormulaGoal, type GoalRewrite, type PreparedRewrites, type SettleStats } from "./tactics.ts";
 import { excludedMiddle, proveCongruence, proveTautology } from "./decision-procedures.ts";
 import { proveRealLinearArithmetic } from "./real-linarith.ts";
@@ -371,6 +372,8 @@ interface SurfaceScope {
   readonly resolution?: NameResolutionIndex;
   readonly visibleModules?: ReadonlySet<string>;
   readonly line?: number;
+  /** The theorems the module declares, by name as written, with their header lines: a forward reference is reported as such. */
+  readonly laterDeclarations?: ReadonlyMap<string, number>;
   /** How the current declaration's text uses each receiver: the fields written on it and the applications it is an argument of. */
   readonly dottedFields?: ReadonlyMap<string, ReceiverUses>;
   readonly binderTypes?: ReadonlyMap<string, Binder>;
@@ -1012,8 +1015,16 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   const exportedOpens: string[] = [];
   let notationDeclarations = 0;
   let currentBlock: readonly SourceLine[] = [];
+  // Every theorem header of the module with its line, so a proof citing a
+  // theorem declared beneath it is told so rather than sent to the library.
+  const declaredTheoremLines = new Map<string, number>();
+  for (const item of lines) {
+    const declared = /^(?:theorem|lemma|instance)\s+(\S+)/u.exec(item.text);
+    if (declared && !declaredTheoremLines.has(declared[1]!)) declaredTheoremLines.set(surfaceSymbol(declared[1]!), item.number);
+  }
 
   const scope = (pendingFunction?: string): SurfaceScope => ({
+    laterDeclarations: declaredTheoremLines,
     dottedFields: dottedFieldsOf(currentBlock),
     rings: sections.flatMap(frame => frame.rings),
     sectionBindings: () => sections.flatMap(frame => frame.bindings),
@@ -1032,10 +1043,14 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     // on the more indented lines beneath it.
     let clauseSpan = 1;
     let line = lines[cursor]!;
-    if (/^(?:hypothesis|variable)\s/u.test(line.text)) {
+    // A theorem header whose binder list is still open, `theorem t (A B : Set,`,
+    // continues on the more indented lines beneath it until it closes.
+    const wrappedHeader = /^(?:theorem|lemma|instance)\s/u.test(line.text);
+    if (/^(?:hypothesis|variable)\s/u.test(line.text) || (wrappedHeader && openParentheses(line.text) > 0)) {
       while (cursor + clauseSpan < lines.length) {
         const next = lines[cursor + clauseSpan]!;
         if (next.narrative || next.indent <= line.indent) break;
+        if (wrappedHeader && openParentheses(line.text) <= 0) break;
         line = { ...line, text: `${line.text} ${next.text}`, columnEnd: next.columnEnd };
         clauseSpan += 1;
       }
@@ -1284,7 +1299,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     }
     let end = cursor + 1;
     while (end < lines.length && !/^(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|structure|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/.test(lines[end]!.text)) end += 1;
-    let block = lines.slice(cursor, end);
+    let block = clauseSpan > 1 ? [line, ...lines.slice(cursor + clauseSpan, end)] : lines.slice(cursor, end);
     currentBlock = block;
     if (sections.length) {
       const theoremHeader = /^(theorem|lemma|instance)\s+(\S+)(.*)$/.exec(line.text);
@@ -3707,31 +3722,69 @@ function elaborateExplicitDefinition(kernel: Kernel, block: readonly SourceLine[
   const resultType = resultDescriptor.type;
   const environment = surfaceEnvironments.get(kernel)!;
   environment.signatures.set(name, {
-    kind: "function", parameters: binders, resultType, resultTypeArguments: resultDescriptor.arguments,
+    kind: "function", parameters: binders, resultType,
+    ...(resultDescriptor.arguments ? { resultTypeArguments: resultDescriptor.arguments } : {}),
   });
+  // A bounded separation `{ x ∈ A | φ }` defined under `target`.
+  const defineSeparation = (target: string, binderSource: string, conditionSource: string,
+    membership: readonly [string, number]): void => {
+    const [operator, index] = membership;
+    const element = binderSource.slice(0, index).trim();
+    if (!SIMPLE_IDENTIFIER.test(element)) throw new SurfaceError(header.number, "malformed comprehension variable");
+    const bound = parseTerm(binderSource.slice(index + operator.length), kernel, variables, header.number, scope);
+    const conditionVariables = new Set(variables);
+    conditionVariables.add(element);
+    const boundFormula = pred("in", v(element), bound);
+    const conditionScope = {
+      ...scope,
+      localFormulas: () => [...(scope.localFormulas?.() ?? []), boundFormula],
+    };
+    const condition = parseFormula(conditionSource, kernel, conditionVariables, header.number, conditionScope);
+    kernel.defineSubset(target, binders.map(item => item.name), element, bound, condition);
+  };
+  const boundedMembership = (binderSource: string): readonly [string, number] | undefined =>
+    [" in ", "∈"].map(operator => [operator, findTopLevel(binderSource, operator)] as const)
+      .find(([, index]) => index >= 0);
   const comprehension = /^\{\s*(.+)\s*\}$/.exec(rhs!.trim());
   const comprehensionPieces = comprehension ? splitTopLevel(comprehension[1]!, "|") : [];
   try {
+    // A comprehension standing as an argument, as in `⋃({ X ∈ P | v ∈ X })`,
+    // is a helper set definition `name.family` over the same parameters,
+    // with its membership property, and the body applies it.
+    let body = rhs!;
+    if (!(comprehension && comprehensionPieces.length === 2)) {
+      let count = 0;
+      for (let open = body.indexOf("{"); open >= 0; open = body.indexOf("{", open + 1)) {
+        let depth = 0;
+        let close = -1;
+        for (let index = open; index < body.length; index += 1) {
+          const character = body[index];
+          if (character === "{" || character === "(" || character === "[") depth += 1;
+          else if (character === "}" || character === ")" || character === "]") { depth -= 1; if (depth === 0) { close = index; break; } }
+        }
+        if (close < 0) break;
+        const pieces = splitTopLevel(body.slice(open + 1, close), "|");
+        const membership = pieces.length === 2 ? boundedMembership(pieces[0]!) : undefined;
+        if (!membership) continue;
+        count += 1;
+        const helperRaw = `${rawName}.family${count > 1 ? count : ""}`;
+        const helper = qualifyDeclaration(surfaceSymbol(helperRaw), scope, { kernel, kind: "function", arity: binders.length });
+        environment.signatures.set(helper, {
+          kind: "function", parameters: binders, resultType: "Set", resultTypeArguments: undefined,
+        });
+        defineSeparation(helper, pieces[0]!, pieces[1]!, membership);
+        const application = `${helperRaw}(${binders.map(item => item.name).join(", ")})`;
+        body = `${body.slice(0, open)}${application}${body.slice(close + 1)}`;
+        open += application.length - 1;
+      }
+    }
     if (comprehension && comprehensionPieces.length === 2) {
       if (resultType !== "Set") throw new SurfaceError(header.number, "a set comprehension must have result type Set");
       const pieces = comprehensionPieces;
       const binderSource = pieces[0]!;
-      const membership = [" in ", "∈"].map(operator => [operator, findTopLevel(binderSource, operator)] as const)
-        .find(([, index]) => index >= 0);
+      const membership = boundedMembership(binderSource);
       if (membership) {
-        const [operator, index] = membership;
-        const element = binderSource.slice(0, index).trim();
-        if (!SIMPLE_IDENTIFIER.test(element)) throw new SurfaceError(header.number, "malformed comprehension variable");
-        const bound = parseTerm(binderSource.slice(index + operator.length), kernel, variables, header.number, scope);
-        const conditionVariables = new Set(variables);
-        conditionVariables.add(element);
-        const boundFormula = pred("in", v(element), bound);
-        const conditionScope = {
-          ...scope,
-          localFormulas: () => [...(scope.localFormulas?.() ?? []), boundFormula],
-        };
-        const condition = parseFormula(pieces[1]!, kernel, conditionVariables, header.number, conditionScope);
-        kernel.defineSubset(name, binders.map(item => item.name), element, bound, condition);
+        defineSeparation(name, binderSource, pieces[1]!, membership);
       } else {
         // Replacement image: `{ expression | x in A }`. The functionality
         // certificate is generated from equality and replayed by the kernel.
@@ -3764,7 +3817,7 @@ function elaborateExplicitDefinition(kernel: Kernel, block: readonly SourceLine[
         });
       }
     } else {
-      kernel.defineFunction(name, binders.map(item => item.name), parseTerm(rhs!, kernel, variables, header.number, scope));
+      kernel.defineFunction(name, binders.map(item => item.name), parseTerm(body, kernel, variables, header.number, scope));
     }
   } catch (error) {
     if (error instanceof SurfaceError) throw error;
@@ -4398,7 +4451,7 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
     !line.text.startsWith("ext ") &&
     !line.text.startsWith("simp") && !line.text.startsWith("ring") && !line.text.startsWith("linear_combination ") && !line.text.startsWith("rewrite ") && !line.text.startsWith("rw ") && !line.text.startsWith("rwa ") &&
     !line.text.startsWith("cases ") && !line.text.startsWith("rcases ") && !line.text.startsWith("clear ") &&
-    !line.text.startsWith("rename ") && !line.text.startsWith("revert ") && !line.text.startsWith("symm at ") &&
+    !line.text.startsWith("rename ") && !line.text.startsWith("revert ") && !line.text.startsWith("symm at ") && !line.text.startsWith("set ") &&
     !["left", "right", "constructor", "split", "assumption", "contradiction", "exfalso", "by_contra", "reflexivity", "rfl", "symm", "compute", "decide", "ring", "arith", "linarith", "tauto", "cc", "congruence", "sorry"].includes(line.text) &&
     !isUserTacticInvocation(kernel, line.text, scope));
   if (stray) {
@@ -4554,7 +4607,57 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   });
 
   const outerBinders = binders.filter(item => item.name !== inductionVariable && !generalizedSet.has(item.name));
-  const outerRequirements = parsedRequirements.filter(item => !dependentRequirements.includes(item));
+  // The steps between `proof` and the induction clause are run first, and
+  // each fact they prove that mentions neither the induction variable nor a
+  // generalized one is kept in every case, as a premise of the motive
+  // discharged by its proof. A fact that mentions one is reported at its line.
+  const prefixSteps = joinTacticContinuations(block.filter(line => line.number > (proofLines[0]?.number ?? shows.number) &&
+    line.number < inductionLine.number && !line.narrative && !line.text.startsWith("shows ") && !line.text.startsWith("requires ")))
+    .flatMap(splitTacticLine);
+  const keptFacts: { readonly name: string; readonly formula: Formula; readonly proof: Proof }[] = [];
+  let prefixTrace: TacticTraceStep[] = [];
+  if (prefixSteps.length) {
+    const seedAssumptions = [...binderAssumptions(binders), ...requirements];
+    const seed: TacticScriptSeed = {
+      assumptions: seedAssumptions,
+      locals: new Map(requirements.map((formula, index) => [parsedRequirements[index]!.name ?? `requirement${index + 1}`, { formula, proof: assume(formula) }])),
+      variables: new Set(binders.map(item => item.name)),
+    };
+    keptFactsCapture = undefined;
+    const capture: SourceLine = { number: inductionLine.number, text: "__keep_facts", indent: inductionLine.indent };
+    const prefix = elaborateTacticTheorem(kernel, name, binders, requirements, parsedRequirements.map(item => item.name),
+      eq(v(inductionVariable), v(inductionVariable)), [...prefixSteps, capture], scope, seed, [], scopeEntries);
+    const captured = keptFactsCapture;
+    keptFactsCapture = undefined;
+    if (!captured) throw new SurfaceError(inductionLine.number, "the steps before induction must leave the goal open for it");
+    prefixTrace = (prefix?.trace.steps ?? []).filter(step => step.command !== "__keep_facts");
+    for (const [factName, local] of captured) {
+      if (seed.locals.get(factName)?.formula === local.formula) continue;
+      const free = freeFormulaVariables(local.formula);
+      const dependent = [inductionVariable, ...generalizedSet].find(variable => free.has(variable));
+      if (dependent) {
+        const origin = prefixSteps.find(step => new RegExp(`^have\\s+${factName}(?:\\s|:|$)`, "u").test(step.text)) ?? inductionLine;
+        throw new SurfaceError(origin.number,
+          `fact ${factName} mentions the induction variable ${dependent}, so the induction cases cannot keep it; ` +
+          `prove it inside the cases, or state it before induction without ${dependent}`);
+      }
+      // A fact no case names is not kept: keeping one makes it a hypothesis
+      // of the induction's statement, which is then admitted through an
+      // auxiliary theorem, and the proofs that never use it need none.
+      const escaped = factName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const caseLines = block.filter(line => line.number > inductionLine.number);
+      const named = caseLines.some(line =>
+        new RegExp(`(^|[^\\p{L}\\p{N}_'.])${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
+      // A case that declares the name again proves its own fact.
+      const redeclared = caseLines.some(line =>
+        new RegExp(`^\\s*(?:\\.\\s*)?(?:have|obtain|set|rcases)\\s+${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
+      if (!named || redeclared) continue;
+      keptFacts.push({ name: factName, formula: local.formula, proof: local.proof });
+    }
+  }
+  const keptProofs = new Map(keptFacts.map(item => [formulaCanonical(item.formula), item.proof]));
+  const outerRequirements = [...parsedRequirements.filter(item => !dependentRequirements.includes(item)),
+    ...keptFacts.map(item => ({ name: item.name, formula: item.formula }))];
   const outerAssumptions = [...binderAssumptions(outerBinders), ...outerRequirements.map(item => item.formula)];
   const generalizedAssumptions = [
     ...binderAssumptions(generalizedBinders),
@@ -4601,7 +4704,7 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   }
   const branchGoals = caseLines.map(line => inductionCaseState(
     kernel, line, generalizedGoal, motive, inductionVariable, outerAssumptions, inductionDatatype, inductionParameters, scope, outerRequirements));
-  const traceSteps: TacticTraceStep[] = [{
+  const traceSteps: TacticTraceStep[] = [...prefixTrace, {
     ...inductionStep, after: { goals: branchGoals },
   }];
   const cases: Extract<Proof, { rule: "induction" }>["cases"] = [];
@@ -4705,7 +4808,7 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   bodyProof = forallElim(bodyProof, v(inductionVariable));
   const inductionAssumption = pred(inductionDatatype.predicate, ...inductionParameters, v(inductionVariable));
   bodyProof = impElim(bodyProof, assume(inductionAssumption));
-  for (const assumption of outerAssumptions) bodyProof = impElim(bodyProof, assume(assumption));
+  for (const assumption of outerAssumptions) bodyProof = impElim(bodyProof, keptProofs.get(formulaCanonical(assumption)) ?? assume(assumption));
   for (const binder of generalizedBinders) bodyProof = forallElim(bodyProof, v(binder.name));
   for (const assumption of generalizedAssumptions) bodyProof = impElim(bodyProof, assume(assumption));
   let proof = targetAssumptions.reduceRight<Proof>((result, assumption) => impIntro(assumption, result), bodyProof);
@@ -4840,7 +4943,20 @@ interface ParsedRequirement {
 type DestructurePattern =
   | { readonly tag: "bind"; readonly name: string }
   | { readonly tag: "substitute" }
-  | { readonly tag: "tuple"; readonly items: readonly DestructurePattern[] };
+  | { readonly tag: "tuple"; readonly items: readonly DestructurePattern[] }
+  | { readonly tag: "alternatives"; readonly items: readonly DestructurePattern[] };
+
+/** A disjunction an alternatives component has bound, split once the rest of the pattern is taken apart. */
+interface DestructureSplit { readonly name: string; readonly patterns: readonly DestructurePattern[] }
+
+/** The proof state a pattern leaves, with the disjunctions still to split. */
+interface DestructuredState {
+  goal: Formula;
+  assumptions: Formula[];
+  locals: Map<string, LocalProof>;
+  wrap: (proof: Proof) => Proof;
+  splits: DestructureSplit[];
+}
 
 /** Parse the recursive pattern language shared by `obtain` and `rcases`. */
 function parseDestructurePattern(text: string, line: number): DestructurePattern {
@@ -4851,6 +4967,13 @@ function parseDestructurePattern(text: string, line: number): DestructurePattern
     const items = splitPatternItems(source.slice(1, -1));
     if (items.length < 2) throw new SurfaceError(line, "a destructuring pattern needs at least two entries");
     return { tag: "tuple", items: items.map(item => parseDestructurePattern(item, line)) };
+  }
+  // Alternatives inside a component, `⟨_, same | path⟩`, split the
+  // disjunction that component binds.
+  const alternatives = splitPatternItems(source, "|");
+  if (alternatives.length >= 2) {
+    if (alternatives.some(item => !item)) throw new SurfaceError(line, `malformed destructuring pattern ${source}`);
+    return { tag: "alternatives", items: alternatives.map(item => parseDestructurePattern(item, line)) };
   }
   if (source === "rfl") return { tag: "substitute" };
   if (source !== "_" && !SIMPLE_IDENTIFIER.test(source)) {
@@ -4992,6 +5115,18 @@ function splitTacticLine(line: SourceLine): readonly SourceLine[] {
       const trimmed = raw.trim();
       const bulletWidth = /^\.\s*/.exec(trimmed)?.[0].length ?? 0;
       const text = trimmed.slice(bulletWidth);
+      // A case header of an induction over a finite set, `| empty =>` or
+      // `| insert using ih =>`, opens a branch as a bullet does; a tactic
+      // written after the arrow is the first step of that branch.
+      const caseHeader = FINITE_INDUCTION_CASE_HEADER.exec(trimmed);
+      if (caseHeader) {
+        pieces.push({ text: caseHeader[1]!, start: start + leading, end: start + leading + caseHeader[1]!.length,
+          indent: line.indent + 2, bullet: true });
+        if (caseHeader[2]) pieces.push({ text: caseHeader[2], start: index - trailing - caseHeader[2].length,
+          end: index - trailing, indent: line.indent + 2, bullet: false });
+        start = index + 1;
+        continue;
+      }
       // The command following a bullet begins inside that branch. Preserve
       // its effective indentation for nested `have` and `calc` bodies.
       if (text) pieces.push({ text, start: start + leading, end: index - trailing,
@@ -5005,8 +5140,16 @@ function splitTacticLine(line: SourceLine): readonly SourceLine[] {
       columnStart: (line.columnStart ?? 1) + piece.start,
       columnEnd: (line.columnStart ?? 1) + piece.end,
     };
+    // `simp [rules] at a, b` and `unfold name at a, b` are the sequence of
+    // single steps, one per fact.
+    const factList = /^((?:simp(?:\s+\(backchain[^)]*\))?(?:\s+with\s+.+?|\s*\[.*?\])?|unfold\s+\S+)\s+at\s+)([\p{L}_][\p{L}\p{M}\p{N}_']*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_']*)+)$/u.exec(piece.text);
+    if (factList) {
+      return splitTopLevel(factList[2]!, ",").map((name, index) => ({
+        ...base, ...(index > 0 ? { bullet: undefined } : {}), text: `${factList[1]}${name.trim()}`,
+      }));
+    }
     // rw [a, b, ← c] (at h) is the sequence of single rewrites.
-    const list = /^(rewrite|rw|rwa)\s+(under\s+)?\[(.*)\](\s+at\s+[\p{L}_][\p{L}\p{M}\p{N}_']*)?$/u.exec(piece.text);
+    const list = /^(rewrite|rw|rwa)\s+(under\s+)?\[(.*)\](\s+at\s+[\p{L}_][\p{L}\p{M}\p{N}_']*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_']*)*)?$/u.exec(piece.text);
     const rules = list ? splitTopLevel(list[3]!, ",").map(item => item.trim()).filter(Boolean) : [];
     if (list && rules.length > 1) {
       // Only the first rewrite of the list begins the bullet; the rest
@@ -5058,10 +5201,14 @@ function joinTacticContinuations(lines: readonly SourceLine[]): readonly SourceL
       // operator continues the step above it, as does any more-indented
       // line after a step that never opens a block of its own.
       const leadingClause = indented && /^(?:with|at|using)\b/u.test(line.text);
+      // `by …` after a `have h : P` whose proposition wrapped onto the line
+      // above supplies the proof of that proposition; `by` is never a step.
+      const leadingBy = indented && /^by\b/u.test(line.text) && /^have\s/u.test(previous.text) &&
+        findTopLevel(previous.text, ":=") < 0 && findTopLevelWord(previous.text, "by") < 0;
       const leadingOperator = indented && CONTINUATION_OPERATOR_START.test(line.text);
       const openStep = indented && !line.bullet && !line.text.startsWith("|") && !/^\.\s/u.test(line.text) &&
         !STEP_KEYWORD_START.test(line.text) && BLOCKLESS_STEP.test(previous.text) && !tacticLineOpensBlock(previous.text);
-      if (balance > 0 || indentedContinuation || leadingClause || leadingOperator || openStep) {
+      if (balance > 0 || indentedContinuation || leadingClause || leadingBy || leadingOperator || openStep) {
         result[result.length - 1] = { ...previous, text: `${previous.text} ${line.text}` };
         continue;
       }
@@ -5082,7 +5229,7 @@ const STEP_KEYWORD_START = new RegExp("^(?:" + [
   "exact", "apply", "witness", "use", "refine", "show", "specialize", "obtain", "rewrite", "rw", "rwa", "unfold", "intro",
   "intros", "symm", "settle", "have", "calc", "simp", "simpa", "ring", "ring_nf", "linarith", "arith", "tauto", "cc",
   "congruence", "left", "right", "constructor", "split", "assumption", "contradiction", "exfalso", "by_contra", "by_cases",
-  "reflexivity", "rfl", "compute", "decide", "sorry", "cases", "rcases", "clear", "rename", "revert", "induction", "ext",
+  "reflexivity", "rfl", "compute", "decide", "sorry", "cases", "rcases", "clear", "rename", "revert", "set", "induction", "ext",
   "linear_combination", "typecheck", "synthesize", "exact\\?", "apply\\?", "rw\\?",
 ].join("|") + ")(?:\\s|$)", "u");
 
@@ -5092,12 +5239,16 @@ function tacticLineOpensBlock(text: string): boolean {
 }
 
 function tacticLineNeedsContinuation(text: string): boolean {
+  // A case header of an induction over a finite set opens a branch.
+  if (text.startsWith("|")) return false;
   // The premise wildcard completes an application; it is not multiplication.
   // In a bullet branch the next tactic is indented relative to `. have ...`.
   if (/(?:\bwith|,)\s*\*\s*$/u.test(text)) return false;
   // `have h :` with nothing after the colon takes its proposition from the
-  // next, more indented line.
+  // next, more indented line; `by_cases h :` reads its proposition the
+  // same way, so a long case split need not be wrapped in parentheses.
   if (/^have\s+[\p{L}_][\p{L}\p{M}\p{N}_]*\s*:$/u.test(text)) return true;
+  if (/^by_cases\s+[\p{L}_][\p{L}\p{M}\p{N}_']*\s*:$/u.test(text)) return true;
   return /[,]\s*$/.test(text) ||
     new RegExp(`(?:\\bat|\\bwith|\\busing|:=|=>|${CONTINUATION_OPERATORS}|\\band|\\bor)\\s*$`, "u").test(text) ||
     /^(?:exact|apply|rewrite|rw|unfold|have|specialize|obtain|cases|rcases|clear|rename|revert|witness|use)\s*$/.test(text);
@@ -5222,6 +5373,53 @@ function inductionCaseState(
 }
 
 /** Elaborate a sequential tactic script into an ordinary primitive proof term. */
+/** A case header of an induction over a finite set, with its inline tactic. */
+const FINITE_INDUCTION_CASE_HEADER =
+  /^(\|\s*(?:empty|insert\s+using\s+[\p{L}_][\p{L}\p{M}\p{N}_]*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_]*)*)\s*=>)\s*(.*)$/u;
+
+/** The case a goal opened by `induction finite with G a` stands for. */
+const finiteInductionCases = new WeakMap<TacticGoal, {
+  readonly label: "empty" | "insert";
+  readonly member: string;
+  readonly point: string;
+}>();
+
+/**
+ * The library shape an induction over a finite set follows: the theorem
+ * `Finite.induction` with its predicate and constructor symbols, read from
+ * its statement `∀ E S, ∅ ∈ S → (∀ F ⊆ E, Finite(F) → ∀ a ∈ E, a ∉ F →
+ * F ∈ S → F ∪ {a} ∈ S) → ∀ F ⊆ E, Finite(F) → F ∈ S`.
+ */
+function finiteInductionShape(kernel: Kernel, line: number, scope: SurfaceScope): {
+  readonly induction: string; readonly finite: string; readonly subset: string;
+  readonly union2: string; readonly singleton: string; readonly empty: Term;
+} {
+  const counting = "Grace.Cumulus.Cardinal.Counting.Finite.induction";
+  const induction = kernel.theorems.has(counting) ? counting
+    : resolveExisting("Finite.induction", scope, candidate => kernel.theorems.has(candidate), line, "finite-set induction theorem");
+  const statement = kernel.theorems.get(induction)!;
+  const malformed = (): SurfaceError => new SurfaceError(line, `${induction} does not have the shape of Finite.induction`);
+  if (statement.tag !== "forall" || statement.body.tag !== "forall" || statement.body.body.tag !== "imp") throw malformed();
+  const base = statement.body.body.left;
+  const rest = statement.body.body.right;
+  if (base.tag !== "pred" || base.pred !== "in" || rest.tag !== "imp" || rest.left.tag !== "forall") throw malformed();
+  const step = rest.left.body;
+  if (step.tag !== "imp" || step.left.tag !== "pred" || step.right.tag !== "imp" || step.right.left.tag !== "pred" ||
+    step.right.right.tag !== "forall") throw malformed();
+  let tail: Formula = step.right.right.body;
+  for (let count = 0; count < 3; count += 1) {
+    if (tail.tag !== "imp") throw malformed();
+    tail = tail.right;
+  }
+  if (tail.tag !== "pred" || tail.pred !== "in") throw malformed();
+  const adjoined = tail.args[0]!;
+  if (adjoined.tag !== "app" || adjoined.args[1]?.tag !== "app") throw malformed();
+  return {
+    induction, finite: step.right.left.pred, subset: step.left.pred,
+    union2: adjoined.fn, singleton: adjoined.args[1].fn, empty: base.args[0]!,
+  };
+}
+
 function elaborateTacticTheorem(
   kernel: Kernel,
   name: string,
@@ -5470,12 +5668,13 @@ function elaborateTacticTheorem(
     sourceProof: Proof,
     replaceableName?: string,
     shadowLocals = false,
-  ): { goal: Formula; assumptions: Formula[]; locals: Map<string, LocalProof>; wrap: (proof: Proof) => Proof } => {
+  ): DestructuredState => {
     let assumptions = [...current.assumptions];
     const locals = new Map(current.locals);
     let goal = current.goal;
     if (replaceableName) locals.delete(replaceableName);
     let wrap = (proof: Proof): Proof => proof;
+    const splits: DestructureSplit[] = [];
 
     const match = (activePattern: DestructurePattern, formula: Formula, proof: Proof): void => {
       if (activePattern.tag === "substitute") {
@@ -5494,23 +5693,18 @@ function elaborateTacticTheorem(
         }
         const reverse = !leftVariable && rightVariable;
         const eliminated = (leftVariable ? formula.left : formula.right) as Extract<Term, { tag: "var" }>;
-        const facts = [...locals.values()].map(item => item.proof);
-        if (freeFormulaVariables(goal).has(eliminated.name)) {
-          const rewrittenGoal = rewriteGoal(kernel, goal, proof, assumptions, facts, reverse, true, undefined, visibility);
-          goal = rewrittenGoal.goal;
-          const previousWrap = wrap;
-          wrap = body => previousWrap(rewrittenGoal.lift(body));
-        }
-        for (const [name, local] of [...locals]) {
-          if (local.proof === proof) { locals.delete(name); continue; }
-          if (!freeFormulaVariables(local.formula).has(eliminated.name)) continue;
-          try {
-            locals.set(name, rewriteFact(kernel, local.proof, proof, assumptions,
-              [...locals.values()].filter(item => item !== local).map(item => item.proof), reverse, true, undefined, visibility));
-          } catch {
-            // A fact not mentioning the eliminated variable remains valid.
-          }
-        }
+        // The substitution waits until the whole pattern is bound, so that
+        // it reaches the facts bound after it as well as before it.
+        substitutions.push({ proof, reverse, eliminated });
+        return;
+      }
+      if (activePattern.tag === "alternatives") {
+        // The disjunction is bound under a hidden name and split once the
+        // rest of the pattern has been taken apart.
+        const forbidden = new Set([...variables, ...locals.keys()]);
+        const name = freshSurfaceVariable("alternatives", forbidden);
+        locals.set(name, { formula, proof });
+        splits.push({ name, patterns: activePattern.items });
         return;
       }
       if (activePattern.tag === "bind") {
@@ -5523,9 +5717,10 @@ function elaborateTacticTheorem(
       }
       if (formula.tag === "pred") {
         try {
-          let unfolded = unfoldFormula(kernel, resolveProof(kernel, formula.pred, line.number, scope),
-            { formula, proof }, assumptions, line.number);
-          const generatedGuards = predicateSoftGuardCount(formula.pred, kernel, scope);
+          const opening = atomOpeningRule(kernel, scope, line.number, formula);
+          if (!opening) throw new Error("no opening rule");
+          let unfolded = unfoldFormula(kernel, opening.rule, { formula, proof }, assumptions, line.number);
+          const generatedGuards = opening.guards;
           for (let index = 0; index < generatedGuards && unfolded.formula.tag === "and"; index += 1) {
             unfolded = { formula: unfolded.formula.right, proof: andElimRight(unfolded.proof) };
           }
@@ -5566,8 +5761,28 @@ function elaborateTacticTheorem(
         `pattern has more entries than ${formatFormula(formula)} can provide`);
     };
 
+    const substitutions: { proof: Proof; reverse: boolean; eliminated: Extract<Term, { tag: "var" }> }[] = [];
     match(pattern, sourceFormula, sourceProof);
-    return { goal, assumptions, locals, wrap };
+    for (const { proof, reverse, eliminated } of substitutions) {
+      const facts = [...locals.values()].map(item => item.proof);
+      if (freeFormulaVariables(goal).has(eliminated.name)) {
+        const rewrittenGoal = rewriteGoal(kernel, goal, proof, assumptions, facts, reverse, true, undefined, visibility);
+        goal = rewrittenGoal.goal;
+        const previousWrap = wrap;
+        wrap = body => previousWrap(rewrittenGoal.lift(body));
+      }
+      for (const [name, local] of [...locals]) {
+        if (local.proof === proof) { locals.delete(name); continue; }
+        if (!freeFormulaVariables(local.formula).has(eliminated.name)) continue;
+        try {
+          locals.set(name, rewriteFact(kernel, local.proof, proof, assumptions,
+            [...locals.values()].filter(item => item !== local).map(item => item.proof), reverse, true, undefined, visibility));
+        } catch {
+          // A fact not mentioning the eliminated variable remains valid.
+        }
+      }
+    }
+    return { goal, assumptions, locals, wrap, splits };
   };
 
   const destructureProof = (
@@ -5579,10 +5794,78 @@ function elaborateTacticTheorem(
     replaceableName?: string,
     shadowLocals = false,
   ): void => {
-    const { goal, assumptions, locals, wrap } =
-      destructureState(line, current, pattern, sourceFormula, sourceProof, replaceableName, shadowLocals);
-    replaceWith(line, [{ goal, assumptions, locals }], ([body]) => wrap(body!));
+    const expanded = expandSplits(line,
+      destructureState(line, current, pattern, sourceFormula, sourceProof, replaceableName, shadowLocals));
+    replaceWith(line, expanded.branches.map(branch => ({ goal: branch.goal, assumptions: branch.assumptions, locals: branch.locals })),
+      proofs => expanded.combine(proofs));
   };
+
+  /**
+   * The branches a destructured state opens: an alternatives component
+   * `same | path` inside a pattern splits its disjunction, each
+   * alternative taken apart by its own pattern, which may split again.
+   * `combine` rebuilds the proof of the original goal from the branch
+   * proofs, in order, by disjunction elimination.
+   */
+  function expandSplits(
+    line: SourceLine,
+    state: DestructuredState,
+  ): { branches: DestructuredState[]; combine: (proofs: readonly Proof[]) => Proof } {
+    const [split, ...rest] = state.splits;
+    if (!split) return { branches: [state], combine: ([proof]) => state.wrap(proof!) };
+    let local = state.locals.get(split.name)!;
+    const locals = new Map(state.locals);
+    locals.delete(split.name);
+    // A defined predicate splits through its definition.
+    if (local.formula.tag === "pred") {
+      const unfolded = unfoldPredicateFact(kernel, scope, line.number, local, state.assumptions, ["or"]);
+      if (unfolded) local = unfolded;
+    }
+    const alternatives: Formula[] = [];
+    const collectAlternatives = (formula: Formula): void => {
+      if (formula.tag === "or") {
+        collectAlternatives(formula.left);
+        collectAlternatives(formula.right);
+      } else alternatives.push(formula);
+    };
+    if (split.patterns.length === 2 && local.formula.tag === "or") {
+      alternatives.push(local.formula.left, local.formula.right);
+    } else collectAlternatives(local.formula);
+    if (alternatives.length !== split.patterns.length) {
+      throw new SurfaceError(line.number,
+        `pattern has ${split.patterns.length} alternatives but ${formatFormula(local.formula)} has ${alternatives.length}`);
+    }
+    const branches: DestructuredState[] = [];
+    const combines: ((proofs: readonly Proof[]) => Proof)[] = [];
+    const counts: number[] = [];
+    alternatives.forEach((alternative, index) => {
+      const assumptions = [...state.assumptions, alternative];
+      const inner = destructureState(line, { goal: state.goal, assumptions, locals },
+        split.patterns[index]!, alternative, assume(alternative), undefined, true);
+      const expanded = expandSplits(line, { ...inner, splits: [...rest, ...inner.splits] });
+      branches.push(...expanded.branches);
+      combines.push(expanded.combine);
+      counts.push(expanded.branches.length);
+    });
+    const combine = (proofs: readonly Proof[]): Proof => {
+      let cursor = 0;
+      const branchProofs = combines.map((item, index) => {
+        const slice = proofs.slice(cursor, cursor + counts[index]!);
+        cursor += counts[index]!;
+        return item(slice);
+      });
+      if (split.patterns.length === 2) return state.wrap(orElim(local.proof, branchProofs[0]!, branchProofs[1]!));
+      let position = 0;
+      const assemble = (formula: Formula, disjunction: Proof): Proof => {
+        if (formula.tag !== "or") return branchProofs[position++]!;
+        return orElim(disjunction,
+          assemble(formula.left, assume(formula.left)),
+          assemble(formula.right, assume(formula.right)));
+      };
+      return state.wrap(assemble(local.formula, local.proof));
+    };
+    return { branches, combine };
+  }
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex]!;
@@ -5845,7 +6128,7 @@ function elaborateTacticTheorem(
     if (simpa) {
       const ruleText = simpa[1] ?? simpa[2] ?? "";
       const names = ruleText.trim() ? splitTopLevel(ruleText, ",").map(item => item.trim()) : [];
-      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions })]));
+      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions }) ?? applicationRule(kernel, item, current, variables, line.number, scope, current.goal)]));
       const localRules = [...selectedLocals.values()].flatMap(item => item ? [item.proof] : []);
       const external = names.filter(item => !selectedLocals.get(item));
       const sourceProof = parseProofExpression(kernel, simpa[3]!, current, variables, line.number, scope);
@@ -5897,34 +6180,77 @@ function elaborateTacticTheorem(
       if (!local) throw new SurfaceError(line.number, `unknown local proof ${localName}`);
       const ruleText = simpAt[1] ?? simpAt[2] ?? "";
       const names = ruleText.trim() ? splitTopLevel(ruleText, ",").map(item => item.trim()) : [];
-      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions })]));
+      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions }) ?? applicationRule(kernel, item, current, variables, line.number, scope, local?.formula)]));
       const localRules = [...selectedLocals.values()].flatMap(item => item ? [item.proof] : []);
       const external = names.filter(item => !selectedLocals.get(item));
+      const externalRules = withNegationEquivalences(kernel,
+        resolveRules(kernel, external, line.number, scope), current.assumptions);
+      const defaults = withNegationEquivalences(kernel, defaultSimpRules(kernel, line.number, scope), current.assumptions);
+      const otherFacts = [...current.locals.values()].filter(item => item !== local).map(item => item.proof);
+      // A predicate definition or an equivalence named among the rules is
+      // opened wherever the fact mentions it, under binders included, as
+      // `unfold` opens it, before the rewriting that reaches only the
+      // fact's outer proposition.
+      const opened = unfoldNamedPredicates(kernel, local, [...defaults, ...externalRules],
+        current.assumptions, otherFacts, visibility, variables);
+      // An equation between distinct closed literals, or ordered pairs with
+      // such a coordinate, refutes the context outright, before the context
+      // equalities could rewrite it into a triviality.
+      if (opened.formula.tag === "eq") {
+        const distinct = proveClosedDisequality(kernel, opened.formula.left, opened.formula.right);
+        if (distinct) { close(line, falseElim(current.goal, impElim(distinct, opened.proof))); continue; }
+      }
       const simplifyOptions = createSimpSession({
         backchain, visibility,
-        using: [...defaultSimpRules(kernel, line.number, scope), ...resolveRules(kernel, external, line.number, scope), ...localRules],
+        using: [...defaults, ...externalRules, ...localRules],
         assumptions: current.assumptions,
-        facts: [...current.locals.values()].filter(item => item !== local).map(item => item.proof),
+        facts: otherFacts,
       });
-      const simplified = local.formula.tag === "eq"
-        ? simplifyEqualityFact(kernel, local.proof, simplifyOptions)
-        : simplifyFormulaFact(kernel, local.proof, simplifyOptions);
-      current.locals.set(localName, simplified);
+      // An equality the opening produced is normalized further when the
+      // context allows; the opened fact stands otherwise.
+      const simplified = opened.formula.tag === "eq"
+        ? ((): LocalProof => {
+            try { return simplifyEqualityFact(kernel, opened.proof, simplifyOptions); }
+            catch (error) { if (opened === local) throw error; return opened; }
+          })()
+        : simplifyFormulaFact(kernel, opened.proof, simplifyOptions);
+      const absorbed = absorbBottom(simplified.formula);
+      let result: LocalProof = absorbed
+        ? { formula: absorbed.formula, proof: absorbed.forward(simplified.proof) }
+        : simplified;
+      // The atoms the rules settle are decided in the fact as in a goal; a
+      // fact that comes to ⊥ closes the goal.
+      const decided = decideTruthValues(kernel, result.formula,
+        [...defaults, ...externalRules, ...localRules], current.assumptions, variables);
+      if (decided) result = { formula: decided.formula, proof: decided.forward(result.proof) };
+      if (result.formula.tag === "bottom") { close(line, falseElim(current.goal, result.proof)); continue; }
+      // A residue the other facts of the context refute, x ∉ A beside
+      // hA : x ∈ A, closes the goal too; otherwise the residue stands as
+      // the rules alone left it.
+      if (otherFacts.length) {
+        const refuted = decideTruthValues(kernel, result.formula,
+          [...defaults, ...externalRules, ...localRules, ...otherFacts], current.assumptions, variables);
+        if (refuted?.formula.tag === "bottom") { close(line, falseElim(current.goal, refuted.forward(result.proof))); continue; }
+      }
+      current.locals.set(localName, result);
       continue;
     }
     const simp = command === "simp" ? "" :
       (/^simp\s+with\s+(.+)$/.exec(command)?.[1] ?? /^simp\s*\[(.*)\]$/.exec(command)?.[1]);
     if (simp !== undefined) {
       const names = simp.trim() ? splitTopLevel(simp, ",").map(item => item.trim()) : [];
-      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions })]));
+      const selectedLocals = new Map(names.map(item => [item, resolveLocalProof(current.locals, item, line.number, { kernel, scope, assumptions: current.assumptions }) ?? applicationRule(kernel, item, current, variables, line.number, scope, current.goal)]));
       const localRules = [...selectedLocals.values()].flatMap(item => item ? [item.proof] : []);
       const external = names.filter(item => !selectedLocals.get(item));
-      const rules = [...defaultSimpRules(kernel, line.number, scope), ...resolveRules(kernel, external, line.number, scope), ...localRules];
+      const rules = withNegationEquivalences(kernel,
+        [...defaultSimpRules(kernel, line.number, scope), ...resolveRules(kernel, external, line.number, scope), ...localRules],
+        current.assumptions);
       if (current.goal.tag !== "eq") {
         const options = createSimpSession({
           backchain, visibility,
-          // A bare simp unfolds subset goals by itself, as settle does.
-          using: names.length ? rules : [...rules, ...defaultSettleRules(kernel, line.number, scope)],
+          // A subset goal is unfolded by itself, as settle does, with or
+          // without named rules.
+          using: [...rules, ...defaultSettleRules(kernel, line.number, scope)],
           assumptions: current.assumptions, facts: [...current.locals.values()].map(item => item.proof),
           ground: defaultGroundRules(kernel, line.number, scope),
           // `simp` closes a logical goal with the full search when it can,
@@ -5968,12 +6294,49 @@ function elaborateTacticTheorem(
             if (lifts.length) { replaceWith(line, [{ goal: target }], ([proof]) => finish(proof!)); continue; }
             throw closingError;
           }
-          try {
-            const simplified = simplifyFormulaGoal(kernel, current.goal, options);
-            replaceWith(line, [{ goal: simplified.goal }], ([proof]) => simplified.lift(proof!));
-          } catch {
-            throw closingError;
+          // The residue after the checked rewrites, taken to a bounded
+          // fixed point with ⊥ absorbed, is closed when the search or the
+          // propositional decision over its atoms settles it; otherwise it
+          // is the next goal.
+          let target: Formula = current.goal;
+          const lifts: Array<(proof: Proof) => Proof> = [];
+          const seen = new Set<string>();
+          // The atoms the rules settle become ⊤ or ⊥ wherever they occur,
+          // closed numerals are evaluated, and the truth values are absorbed.
+          const decide = (): void => {
+            const decided = decideTruthValues(kernel, target, rules, current.assumptions, variables);
+            if (decided) { target = decided.formula; lifts.push(decided.backward); }
+          };
+          decide();
+          for (let step = 0; step < 64; step += 1) {
+            const key = canonical(target);
+            if (seen.has(key)) break;
+            seen.add(key);
+            let rewritten: GoalRewrite;
+            try { rewritten = simplifyFormulaGoal(kernel, target, options); } catch { break; }
+            if (formulaEquals(rewritten.goal, target)) break;
+            target = rewritten.goal;
+            lifts.push(rewritten.lift);
+            const absorbed = absorbBottom(target);
+            if (absorbed) { target = absorbed.formula; lifts.push(absorbed.backward); }
+            decide();
           }
+          if (!lifts.length) throw closingError;
+          const finish = (proof: Proof): Proof => {
+            for (let index = lifts.length - 1; index >= 0; index -= 1) proof = lifts[index]!(proof);
+            return proof;
+          };
+          if (isTruth(target)) { close(line, finish(truthProof())); continue; }
+          let evidence: Proof | undefined;
+          try { evidence = settle(kernel, target, options); } catch {}
+          if (!evidence) {
+            try {
+              evidence = proveTautology(kernel, target, current.assumptions,
+                [...current.locals.values()].map(item => item.proof));
+            } catch {}
+          }
+          if (evidence) close(line, finish(evidence));
+          else replaceWith(line, [{ goal: target }], ([proof]) => finish(proof!));
         }
         continue;
       }
@@ -5986,19 +6349,25 @@ function elaborateTacticTheorem(
       });
       if (simplified.goal.tag === "eq" && formulaEquals(simplified.goal, eq(simplified.goal.left, simplified.goal.left))) {
         close(line, simplified.lift(refl(simplified.goal.left)));
-      } else {
-        replaceWith(line, [{ goal: simplified.goal }], ([proof]) => simplified.lift(proof!));
+        continue;
       }
+      // A residue the rules closed, 2 = 1 + 1 after h : x = 2, is evaluated.
+      if (simplified.goal.tag === "eq" && freeFormulaVariables(simplified.goal).size === 0) {
+        try { close(line, simplified.lift(kernel.proveComputation(simplified.goal.left, simplified.goal.right))); continue; } catch {}
+      }
+      replaceWith(line, [{ goal: simplified.goal }], ([proof]) => simplified.lift(proof!));
       continue;
     }
     // rwa h is rw h followed by closing the rewritten goal from the context;
     // rwa h at fact rewrites the fact and then uses it.
     const rewriteAndClose = /^rwa\s+(.+)$/u.exec(command);
     if (rewriteAndClose) {
-      const target = /\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_']*)$/u.exec(rewriteAndClose[1]!)?.[1];
+      // Several facts after `at` are each rewritten, and the goal closes
+      // from whichever of them matches.
+      const target = /\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_']*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_']*)*)$/u.exec(rewriteAndClose[1]!)?.[1];
       const scriptLines = [
         { number: line.number, text: `rw ${rewriteAndClose[1]}`, indent: line.indent + 2 },
-        { number: line.number, text: target ? `exact ${target}` : "assumption", indent: line.indent + 2 },
+        { number: line.number, text: target && !target.includes(",") ? `exact ${target}` : "assumption", indent: line.indent + 2 },
       ].flatMap(splitTacticLine);
       const nested = elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
         { assumptions: current.assumptions, locals: current.locals, variables: current.variables })!;
@@ -6012,7 +6381,8 @@ function elaborateTacticTheorem(
       const underBinders = payload.startsWith("under ");
       if (underBinders) payload = payload.slice(6).trim();
       let target: string | undefined;
-      const targetMatch = /^(.*?)\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)$/u.exec(payload);
+      // A location is a local fact, or a projection of one, `h.right.left`.
+      const targetMatch = /^(.*?)\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_]*(?:\.(?:left|right))*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_]*(?:\.(?:left|right))*)*)$/u.exec(payload);
       if (targetMatch) { payload = targetMatch[1]!.trim(); target = targetMatch[2]!; }
       if (payload.startsWith("[") && payload.endsWith("]")) payload = payload.slice(1, -1).trim();
       const direction = /^(←|<-)\s*(.+)$/u.exec(payload);
@@ -6020,59 +6390,106 @@ function elaborateTacticTheorem(
     }
     if (rewrite) {
       const reverse = Boolean(rewrite[1]);
-      const reference = rewrite[2]!.trim();
+      let reference = rewrite[2]!.trim();
+      // `rw (thm with facts)` groups an application as a rule, as a with
+      // list does; the parentheses carry no further meaning here.
+      while (outerParenthesized(reference)) reference = reference.slice(1, -1).trim();
       const localRule = resolveLocalProof(current.locals, reference, line.number, { kernel, scope, assumptions: current.assumptions });
       // `rw moves with p, hp` rewrites with the instance the application
-      // names, as `have inst := moves with p, hp` followed by `rw inst` does.
-      const applied = !localRule && findTopLevelWord(reference, "with") >= 0;
-      let candidates: readonly Proof[];
-      if (applied) {
-        const head = reference.slice(0, findTopLevelWord(reference, "with")).trim();
-        const ruleName = /^(.*?)(?:\s+at\s.*)?$/u.exec(head)?.[1]?.trim() ?? head;
-        try {
-          candidates = [parseProofExpression(kernel, reference, current, variables, line.number, scope)];
-        } catch (error) {
-          if (!(error instanceof SurfaceError)) throw error;
-          throw new SurfaceError(line.number,
-            `rw takes a fact or rule, optionally applied with \`at terms\` and \`with facts\`, ` +
-            `and \`at hypothesis\` after it names the hypothesis to rewrite; ` +
-            `\`rw ${reference}${rewrite[3] ? ` at ${rewrite[3]}` : ""}\` rewrites with ${ruleName} applied to ` +
-            `${reference.slice(findTopLevelWord(reference, "with") + 4).trim()}, which failed: ${error.message}`);
-        }
-      } else candidates = localRule ? [localRule.proof] : resolveRules(kernel, [reference], line.number, scope);
+      // names, as `have inst := moves with p, hp` followed by `rw inst` does;
+      // so do the explicit instantiations `rw (thm at terms)` and
+      // `rw thm{x := t}`.
+      const applied = !localRule && (findTopLevelWord(reference, "with") >= 0 ||
+        findTopLevelWord(reference, "at") >= 0 || reference.endsWith("}"));
+      // The facts named after `at` are rewritten in turn; the goal otherwise.
+      const locations = rewrite[3] ? splitTopLevel(rewrite[3], ",").map(item => item.trim()) : [undefined];
       let rewritten: ReturnType<typeof rewriteGoal> | undefined;
-      let lastError: unknown;
-      for (const candidate of candidates) {
-        try {
-          if (rewrite[3]) {
-            const local = current.locals.get(rewrite[3]!);
-            if (!local) throw new SurfaceError(line.number, `unknown local proof ${rewrite[3]}`);
-            const transformed = rewriteFact(kernel, local.proof, candidate, current.assumptions,
-              [...current.locals.values()].filter(item => item !== local).map(item => item.proof), reverse, rewrite[4], undefined, visibility);
-            current.locals.set(rewrite[3]!, transformed);
-            rewritten = { goal: current.goal, lift: proof => proof };
-            break;
+      for (const location of locations) {
+        // A projection as the location, `at h.right.right`, is bound under
+        // that name first and the bound fact is rewritten.
+        const local = location
+          ? resolveLocalProof(current.locals, location, line.number, { kernel, scope, assumptions: current.assumptions })
+          : undefined;
+        if (location && !local) throw new SurfaceError(line.number, `unknown local proof ${location}`);
+        if (location && local && !current.locals.has(location)) current.locals.set(location, local);
+        let candidates: readonly Proof[];
+        // A rule named by a definition is the first of its equations that
+        // applies; the instances of a rule's side that a with list leaves
+        // open are each rewritten in turn.
+        let everyCandidate = false;
+        if (applied) {
+          const withIndex = findTopLevelWord(reference, "with");
+          const head = (withIndex >= 0 ? reference.slice(0, withIndex) : reference).trim();
+          const ruleName = /^(.*?)(?:\s+at\s.*|\{.*)?$/u.exec(head)?.[1]?.trim() ?? head;
+          // The goal, or the fact being rewritten, fixes the parameters the
+          // facts leave open: the rule's rewritten side must occur in it.
+          const rewriteTarget = { formula: local ? local.formula : current.goal, reverse };
+          try {
+            try {
+              candidates = [parseProofExpression(kernel, reference, current, variables, line.number, scope, { rewriteTarget })];
+            } catch (error) {
+              if (!(error instanceof RewriteInstancesError)) throw error;
+              candidates = error.instances.map(instance => parseProofExpression(kernel, reference, current, variables,
+                line.number, scope, { rewriteTarget, rewriteInstance: instance }));
+              everyCandidate = true;
+            }
+          } catch (error) {
+            if (!(error instanceof SurfaceError)) throw error;
+            throw new SurfaceError(line.number,
+              `rw takes a fact or rule, optionally applied with \`at terms\` and \`with facts\`, ` +
+              `and \`at hypothesis\` after it names the hypothesis to rewrite; ` +
+              `\`rw ${reference}${rewrite[3] ? ` at ${rewrite[3]}` : ""}\` rewrites with ${ruleName} applied to ` +
+              `${reference.slice(ruleName.length).trim().replace(/^with\s+/u, "")}, which failed: ${error.message}`);
           }
-          rewritten = rewriteGoal(kernel, current.goal, candidate, current.assumptions,
-            [...current.locals.values()].map(item => item.proof), reverse, rewrite[4], undefined, visibility);
-          break;
-        } catch (error) { lastError = error; }
-      }
-      if (!rewritten) {
-        // The rule and its target are shown as the goal panel shows them,
-        // with the notation the hypotheses in scope supply.
-        if (lastError instanceof RewriteMismatch) {
-          const facts = [...current.assumptions, ...[...current.locals.values()].map(item => item.formula)];
-          const options = goalDisplayOptions(kernel, scope, facts, [current.goal, lastError.target]);
-          const where = rewrite[3]
-            ? `${rewrite[3]} : ${formatFormula(lastError.target, options)}`
-            : `the goal ${formatFormula(lastError.target, options)}`;
-          throw new SurfaceError(line.number,
-            `rewrite rule ${reference} (${formatFormula(lastError.rule, options)}) does not match ${where}`);
+        } else candidates = localRule ? [localRule.proof] : resolveRules(kernel, [reference], line.number, scope);
+        rewritten = undefined;
+        let lastError: unknown;
+        // A rule that matches nothing outside the binders is tried under
+        // them, as `rw under` does, when the written form is plain `rw`.
+        const attempt = <T>(run: (underBinders: boolean) => T): T => {
+          try {
+            return run(rewrite[4]);
+          } catch (error) {
+            if (rewrite[4] || !(error instanceof RewriteMismatch)) throw error;
+            try { return run(true); } catch { throw error; }
+          }
+        };
+        for (const candidate of candidates) {
+          try {
+            if (location) {
+              const before = current.locals.get(location)!;
+              const transformed = attempt(underBinders => rewriteFact(kernel, before.proof, candidate, current.assumptions,
+                [...current.locals.values()].filter(item => item !== before).map(item => item.proof), reverse, underBinders, undefined, visibility));
+              current.locals.set(location, transformed);
+              rewritten = { goal: current.goal, lift: proof => proof };
+            } else {
+              const previous = rewritten;
+              const step = attempt(underBinders => rewriteGoal(kernel, previous?.goal ?? current.goal, candidate, current.assumptions,
+                [...current.locals.values()].map(item => item.proof), reverse, underBinders, undefined, visibility));
+              rewritten = previous ? { goal: step.goal, lift: proof => previous.lift(step.lift(proof)) } : step;
+            }
+            if (!everyCandidate) break;
+          } catch (error) {
+            lastError = error;
+            if (everyCandidate) { rewritten = undefined; break; }
+          }
         }
-        throw new SurfaceError(line.number, lastError instanceof Error ? lastError.message : "rewrite rule did not match");
+        if (!rewritten) {
+          // The rule and its target are shown as the goal panel shows them,
+          // with the notation the hypotheses in scope supply.
+          if (lastError instanceof RewriteMismatch) {
+            const facts = [...current.assumptions, ...[...current.locals.values()].map(item => item.formula)];
+            const options = goalDisplayOptions(kernel, scope, facts, [current.goal, lastError.target]);
+            const where = location
+              ? `${location} : ${formatFormula(lastError.target, options)}`
+              : `the goal ${formatFormula(lastError.target, options)}`;
+            throw new SurfaceError(line.number,
+              `rewrite rule ${reference} (${formatFormula(lastError.rule, options)}) does not match ${where}`);
+          }
+          throw new SurfaceError(line.number, lastError instanceof Error ? lastError.message : "rewrite rule did not match");
+        }
       }
-      if (rewrite[3]) continue;
+      if (rewrite[3] || !rewritten) continue;
       // A goal the rewrite makes reflexive is closed when the rewrite ends
       // its branch: the script ends, the next step is dedented, or it begins
       // a sibling bullet. A step that follows in the same branch, `rfl` or
@@ -6081,6 +6498,12 @@ function elaborateTacticTheorem(
       const endsBranch = !next || next.indent < line.indent || (next.bullet === true && next.indent <= line.indent);
       if (endsBranch && rewritten.goal.tag === "eq" && termEquals(rewritten.goal.left, rewritten.goal.right)) {
         close(line, rewritten.lift(refl(rewritten.goal.left)));
+        continue;
+      }
+      // An equivalence between identical sides is reflexive as an equality is.
+      if (endsBranch && rewritten.goal.tag === "iff" && formulaEquals(rewritten.goal.left, rewritten.goal.right)) {
+        const side = rewritten.goal.left;
+        close(line, rewritten.lift(iffIntro(impIntro(side, assume(side)), impIntro(side, assume(side)))));
         continue;
       }
       replaceWith(line, [{ goal: rewritten.goal }], ([proof]) => rewritten!.lift(proof!));
@@ -6103,9 +6526,21 @@ function elaborateTacticTheorem(
       const rule = resolveProof(kernel, definitionReference, line.number,
         targetFormula ? { ...scope, goal: () => targetFormula } : scope, true);
       const generatedGuards = predicateSoftGuardCount(definitionReference, kernel, scope);
+      // One rule for every shape of goal or fact: the named definition is
+      // opened at every instance, under any connective or relation and
+      // inside arguments, and nothing else changes. A head instance goes
+      // first, through the definition's equivalence with its generated
+      // guards peeled (for a fact) or supplied (for a goal); the pass over
+      // the rest reaches every remaining instance. Local facts discharge a
+      // rule's premises only; they never rewrite, so the result does not
+      // depend on which equalities are in context.
+      const rules = definitionEquations(kernel, rule);
+      const otherFacts = (except?: LocalProof): Proof[] =>
+        [...current.locals.values()].filter(item => item !== except).map(item => item.proof);
       if (unfold[2]) {
         const local = current.locals.get(unfold[2]!);
         if (!local) throw new SurfaceError(line.number, `unknown local proof ${unfold[2]}`);
+        let head: LocalProof | undefined;
         try {
           let unfolded = unfoldFormula(kernel, rule, local, current.assumptions, line.number);
           // Generated domain guards are recoverable from the original
@@ -6114,12 +6549,20 @@ function elaborateTacticTheorem(
           for (let index = 0; index < generatedGuards && unfolded.formula.tag === "and"; index += 1) {
             unfolded = { formula: unfolded.formula.right, proof: andElimRight(unfolded.proof) };
           }
-          current.locals.set(unfold[2]!, unfolded);
-        } catch {
-          current.locals.set(unfold[2]!, rewriteFact(kernel, local.proof, rule, current.assumptions,
-            [...current.locals.values()].filter(item => item !== local).map(item => item.proof), false, false, undefined, visibility));
+          head = unfolded;
+        } catch { head = undefined; }
+        const start = head ?? local;
+        const rest = unfoldThroughout(kernel, start.formula, rules, current.assumptions,
+          otherFacts(local), visibility, variables);
+        if (!head && !rest) {
+          throw new SurfaceError(line.number,
+            `unfold ${unfold[1]} finds nothing to unfold in ${unfold[2]} : ${formatFormula(local.formula)}` +
+            setBuilderUnfoldHint(kernel, rule, unfold[1]!, local.formula));
         }
+        current.locals.set(unfold[2]!,
+          rest ? { formula: rest.formula, proof: rest.forward(start.proof) } : start);
       } else {
+        let head: { readonly formula: Formula; readonly fold: (proof: Proof) => Proof } | undefined;
         if (current.goal.tag === "pred") {
           try {
             const unfolded = unfoldGoal(kernel, rule, current.goal, current.assumptions, line.number);
@@ -6141,29 +6584,22 @@ function elaborateTacticTheorem(
               rebuild = proof => previous(andIntro(evidence, proof));
               reduced = reduced.right;
             }
-            replaceWith(line, [{ goal: reduced }], ([proof]) => impElim(unfolded.fold, rebuild(proof!)));
-          } catch {
-            const rewritten = rewriteGoal(kernel, current.goal, rule, current.assumptions,
-              [...current.locals.values()].map(item => item.proof), false, false, undefined, visibility);
-            replaceWith(line, [{ goal: rewritten.goal }], ([proof]) => rewritten.lift(proof!));
-          }
-        } else if (current.goal.tag === "eq") {
-          const unfolded = simplifyEqualityGoal(kernel, current.goal, {
-            using: resolveRules(kernel, [definitionReference], line.number, scope), assumptions: current.assumptions,
-            facts: [...current.locals.values()].map(item => item.proof), visibility,
-          });
-          replaceWith(line, [{ goal: unfolded.goal }], ([proof]) => unfolded.lift(proof!));
-        } else {
-          // A defined predicate under ∧, ∨, →, ¬, ∀, or ∃: every instance in
-          // the goal is unfolded, through the connectives and the binders.
-          const unfolded = unfoldThroughout(kernel, current.goal, rule, current.assumptions,
-            [...current.locals.values()].map(item => item.proof), visibility, variables);
-          if (!unfolded) {
-            throw new SurfaceError(line.number,
-              `unfold ${unfold[1]} finds nothing to unfold in the goal ${formatFormula(current.goal)}`);
-          }
-          replaceWith(line, [{ goal: unfolded.goal }], ([proof]) => unfolded.lift(proof!));
+            head = { formula: reduced, fold: proof => impElim(unfolded.fold, rebuild(proof)) };
+          } catch { head = undefined; }
         }
+        const start = head?.formula ?? current.goal;
+        const rest = unfoldThroughout(kernel, start, rules, current.assumptions,
+          otherFacts(), visibility, variables);
+        if (!head && !rest) {
+          throw new SurfaceError(line.number,
+            `unfold ${unfold[1]} finds nothing to unfold in the goal ${formatFormula(current.goal)}` +
+            setBuilderUnfoldHint(kernel, rule, unfold[1]!, current.goal));
+        }
+        const fold = head?.fold;
+        replaceWith(line, [{ goal: rest?.formula ?? start }], ([proof]) => {
+          const inner = rest ? rest.backward(proof!) : proof!;
+          return fold ? fold(inner) : inner;
+        });
       }
       continue;
     }
@@ -6396,13 +6832,20 @@ function elaborateTacticTheorem(
         premises.push(formula.left);
         formula = formula.right;
       }
-      if (!formulaEquals(formula, current.goal)) {
+      // The residual conclusion may meet the goal through a definition, as
+      // `(x, y) ∈ w` meets `relates(w, x, y)`: the bridge is applied once
+      // the premises are supplied.
+      const residual = formula;
+      const bridge = formulaEquals(residual, current.goal) ? undefined
+        : (established: Proof): Proof | undefined =>
+          bridgeDefinition(kernel, scope, line.number, established, residual, current.goal, current.assumptions, current.locals);
+      if (bridge && !bridge(assume(residual))) {
         throw new SurfaceError(line.number, `applied proof concludes ${formatFormula(formula)}, not ${formatFormula(current.goal)}`);
       }
       if (premises.length === 0) { close(line, proof); continue; }
       replaceWith(line, premises.map(premise => ({ goal: premise })), arguments_ => {
         arguments_.forEach(argument => { proof = impElim(proof, argument); });
-        return proof;
+        return bridge ? bridge(proof) ?? proof : proof;
       });
       continue;
     }
@@ -6430,6 +6873,167 @@ function elaborateTacticTheorem(
       replaceWith(at, [{ goal: unfolded.formula }], ([proof]) => unfolded.fold(proof!));
       return true;
     };
+    // `induction finite with G a`: the goal P(F), F the finite set of the
+    // hypothesis, by `Finite.induction` applied to the family
+    // `{ G ∈ 𝒫(E) | P(G) }`, E the ambient set of a fact `F ⊆ E` in context
+    // or F itself. The family is a separation helper `name.family` defined
+    // per use; its membership law unpacks `G ∈ family` to `P(G)`, so the
+    // two goals are `P(∅)` and the step over `G ∪ {a}`.
+    const finiteInduction = /^induction\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)\s+with\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)$/u.exec(command);
+    if (finiteInduction) {
+      const [, hypothesisName, memberName, pointName] = finiteInduction as unknown as [string, string, string, string];
+      const shape = finiteInductionShape(kernel, line.number, scope);
+      const isFinite = (formula: Formula): formula is Formula & { tag: "pred" } =>
+        formula.tag === "pred" && formula.pred === shape.finite && formula.args.length === 1 && formula.args[0]!.tag === "var";
+      const named = current.locals.get(hypothesisName);
+      const fact = named ?? (variables.has(hypothesisName)
+        ? current.assumptions.flatMap(formula => isFinite(formula) && (formula.args[0] as { name: string }).name === hypothesisName
+          ? [{ formula, proof: assume(formula) }] : []).at(0)
+        : undefined);
+      if (!fact) throw new SurfaceError(line.number, `unknown hypothesis ${hypothesisName}; induction over a finite set expects a hypothesis Finite(F)`);
+      if (!isFinite(fact.formula)) {
+        throw new SurfaceError(line.number,
+          `induction over a finite set expects a hypothesis Finite(F) for a variable F; ${hypothesisName} proves ${formatFormula(fact.formula)}`);
+      }
+      const target = fact.formula.args[0] as Term & { tag: "var" };
+      const forbidden = new Set<string>(variables);
+      freeFormulaVariables(current.goal).forEach(item => forbidden.add(item));
+      current.assumptions.forEach(item => freeFormulaVariables(item).forEach(variable => forbidden.add(variable)));
+      if (memberName === pointName) throw new SurfaceError(line.number, "induction over a finite set needs two distinct fresh names after with");
+      for (const chosen of [memberName, pointName]) {
+        if (forbidden.has(chosen)) throw new SurfaceError(line.number, `induction name ${chosen} is already in scope; choose a fresh name`);
+      }
+      const isBound = (formula: Formula): formula is Formula & { tag: "pred" } =>
+        formula.tag === "pred" && formula.pred === shape.subset && formula.args.length === 2 && termEquals(formula.args[0]!, target);
+      const bound = [...current.locals.values()].find(item => isBound(item.formula))
+        ?? current.assumptions.flatMap(formula => isBound(formula) ? [{ formula, proof: assume(formula) }] : []).at(0);
+      const library = (full: string, short: string): Proof =>
+        kernel.theorems.has(full) ? theorem(full) : resolveProof(kernel, short, line.number, scope);
+      const ambient: Term = bound ? (bound.formula as Formula & { tag: "pred" }).args[1]! : target;
+      const boundProof: Proof = bound ? bound.proof
+        : at(library("Grace.Cumulus.Set.Basic.Set.Subset.reflexive", "Subset.reflexive"), target);
+      const powersetLaw = library("Grace.Cumulus.Set.Core.powerset.membership_iff", "powerset.membership_iff");
+      const powersetStatement = kernel.checkProof(powersetLaw, []);
+      const powersetName = powersetStatement.tag === "forall" && powersetStatement.body.tag === "forall" &&
+        powersetStatement.body.body.tag === "iff" && powersetStatement.body.body.left.tag === "pred" &&
+        powersetStatement.body.body.left.args[1]?.tag === "app" ? powersetStatement.body.body.left.args[1].fn : "powerset";
+      const emptySubset = library("Grace.Cumulus.Set.Core.empty.subset", "empty.subset");
+      const unionSubset = library("Grace.Cumulus.Set.Core.union2.subset", "union2.subset");
+      // The membership law of the singleton symbol Finite.induction uses:
+      // `∀ x, ∀ a, x ∈ {a} ↔ x = a`.
+      const singletonLawName = [
+        "Grace.Cumulus.Set.Basic.Set.singleton.membership", "Grace.Cumulus.Set.Finite.FiniteSet.singleton.membership",
+        "bootstrap.singleton.membership", ...kernel.theorems.keys(),
+      ].find(candidate => {
+        const statement = kernel.theorems.get(candidate);
+        return statement?.tag === "forall" && statement.body.tag === "forall" && statement.body.body.tag === "iff" &&
+          statement.body.body.left.tag === "pred" && statement.body.body.left.pred === "in" &&
+          statement.body.body.left.args[1]?.tag === "app" && statement.body.body.left.args[1].fn === shape.singleton &&
+          statement.body.body.left.args[1].args.length === 1 && statement.body.body.right.tag === "eq" &&
+          formulaEquals(statement.body.body.right, eq(statement.body.body.left.args[0]!, statement.body.body.left.args[1].args[0]!));
+      });
+      if (!singletonLawName) throw new SurfaceError(line.number, `no membership law for ${shape.singleton} is in scope`);
+      const singletonLaw = theorem(singletonLawName);
+      const member = v(memberName);
+      const point = v(pointName);
+      const motive = substituteFormula(current.goal, target.name, member);
+      const motiveAt = (term: Term): Formula => substituteFormula(motive, memberName, term);
+      const adjoined = app(shape.union2, member, app(shape.singleton, point));
+      const memberSubset = pred(shape.subset, member, ambient);
+      const memberFinite = pred(shape.finite, member);
+      const pointMember = pred("in", point, ambient);
+      const pointFresh = imp(pred("in", point, member), bottom);
+      const stepGoal = forall(memberName, imp(memberSubset, imp(memberFinite,
+        forall(pointName, imp(pointMember, imp(pointFresh, imp(motive, motiveAt(adjoined))))))));
+      const free = new Set([...freeFormulaVariables(motive), ...freeTermVariables(ambient)]);
+      const parameters = [...forbidden].filter(item => free.has(item) && item !== memberName);
+      const helperBase = `${name || qualifyDeclaration("finiteInduction", scope)}.family`;
+      let helper = helperBase;
+      for (let count = 2; kernel.functions.has(helper) || kernel.theorems.has(helper) || kernel.definitions.has(helper); count += 1) {
+        helper = `${helperBase}${count}`;
+      }
+      kernel.defineSubset(helper, parameters, memberName, app(powersetName, ambient), motive);
+      const family = app(helper, ...parameters.map(v));
+      const membership = (term: Term): Proof => at(definition(helper, "membership"), ...parameters.map(v), term);
+      const inPowerset = (term: Term, subsetProof: Proof): Proof =>
+        impElim(iffElimRight(at(powersetLaw, term, ambient)), subsetProof);
+      replaceWith(line, [{ goal: motiveAt(shape.empty) }, { goal: stepGoal }], ([baseProof, stepProof]) => {
+        const baseFamily = impElim(iffElimRight(membership(shape.empty)),
+          andIntro(inPowerset(shape.empty, at(emptySubset, ambient)), baseProof!));
+        // The step of Finite.induction is built over names distinct from the
+        // ones the branch generalized, so the branch proof is instantiated
+        // under assumptions it does not mention.
+        const taken = new Set([...forbidden, memberName, pointName]);
+        const stepMemberName = freshSurfaceVariable(`${memberName}Step`, taken);
+        taken.add(stepMemberName);
+        const stepPointName = freshSurfaceVariable(`${pointName}Step`, taken);
+        taken.add(stepPointName);
+        const stepMember = v(stepMemberName);
+        const stepPoint = v(stepPointName);
+        const stepAdjoined = app(shape.union2, stepMember, app(shape.singleton, stepPoint));
+        const stepSubset = pred(shape.subset, stepMember, ambient);
+        const stepFinite = pred(shape.finite, stepMember);
+        const stepPointMember = pred("in", stepPoint, ambient);
+        const stepPointFresh = imp(pred("in", stepPoint, stepMember), bottom);
+        const stepFamilyMember = pred("in", stepMember, family);
+        const motiveProof = andElimRight(impElim(iffElimLeft(membership(stepMember)), assume(stepFamilyMember)));
+        let advanced: Proof = forallElim(stepProof!, stepMember);
+        advanced = impElim(advanced, assume(stepSubset));
+        advanced = impElim(advanced, assume(stepFinite));
+        advanced = forallElim(advanced, stepPoint);
+        advanced = impElim(advanced, assume(stepPointMember));
+        advanced = impElim(advanced, assume(stepPointFresh));
+        advanced = impElim(advanced, motiveProof);
+        // {a} ⊆ E from a ∈ E, through the unfolded subset relation.
+        const singletonGoal = pred(shape.subset, app(shape.singleton, stepPoint), ambient);
+        const unfolded = unfoldPredicateGoal(kernel, scope, line.number, singletonGoal, [], new Map(), ["forall", "imp"]);
+        if (!unfolded || unfolded.formula.tag !== "forall" || unfolded.formula.body.tag !== "imp") {
+          throw new SurfaceError(line.number, `cannot unfold ${formatFormula(singletonGoal)} to a membership condition`);
+        }
+        const element = unfolded.formula.variable;
+        const elementMember = unfolded.formula.body.left;
+        const alias = freshSurfaceVariable("pointAlias", new Set([...taken, element]));
+        const elementEquation = impElim(iffElimLeft(at(singletonLaw, v(element), stepPoint)), assume(elementMember));
+        const elementIn = eqElim(elementEquation, alias, pred("in", v(alias), ambient), assume(stepPointMember), true);
+        const pointSubset = unfolded.fold(forallIntro(element, impIntro(elementMember, elementIn)));
+        const adjoinedSubset = impElim(impElim(at(unionSubset, stepMember, app(shape.singleton, stepPoint), ambient),
+          assume(stepSubset)), pointSubset);
+        const adjoinedFamily = impElim(iffElimRight(membership(stepAdjoined)),
+          andIntro(inPowerset(stepAdjoined, adjoinedSubset), advanced));
+        const stepFamily = forallIntro(stepMemberName, impIntro(stepSubset, impIntro(stepFinite,
+          forallIntro(stepPointName, impIntro(stepPointMember, impIntro(stepPointFresh, impIntro(stepFamilyMember, adjoinedFamily)))))));
+        const all = impElim(impElim(at(theorem(shape.induction), ambient, family), baseFamily), stepFamily);
+        const targetFamily = impElim(impElim(forallElim(all, target), boundProof), fact.proof);
+        return andElimRight(impElim(iffElimLeft(membership(target)), targetFamily));
+      });
+      finiteInductionCases.set(pending[0]!, { label: "empty", member: memberName, point: pointName });
+      finiteInductionCases.set(pending[1]!, { label: "insert", member: memberName, point: pointName });
+      continue;
+    }
+    // The case headers of an induction over a finite set: `| empty =>` names
+    // nothing; `| insert using ih =>` introduces G, a, the hypothesis ih,
+    // and the facts GSubset, GFinite, aMember, aFresh, or all five by name.
+    const finiteCase = /^\|\s*(empty|insert)(?:\s+using\s+(.+?))?\s*=>$/u.exec(command);
+    if (finiteCase) {
+      const opened = finiteInductionCases.get(current);
+      if (!opened) throw new SurfaceError(line.number, "a case header `| empty =>` or `| insert using ih =>` follows `induction finite with G a`");
+      if (opened.label !== finiteCase[1]) {
+        throw new SurfaceError(line.number, `expected the \`| ${opened.label}${opened.label === "insert" ? " using ih" : ""} =>\` case here`);
+      }
+      if (opened.label === "empty") {
+        if (finiteCase[2]) throw new SurfaceError(line.number, "the empty case of an induction over a finite set has no hypothesis to name");
+        continue;
+      }
+      const given = (finiteCase[2] ?? "").split(/[\s,]+/u).filter(Boolean);
+      const names = given.length === 5 ? given
+        : given.length === 1 ? [`${opened.member}Subset`, `${opened.member}Finite`, `${opened.point}Member`, `${opened.point}Fresh`, given[0]!]
+        : undefined;
+      if (!names) {
+        throw new SurfaceError(line.number,
+          "`| insert using ih =>` names the induction hypothesis, or all five facts: `| insert using subset, finite, member, fresh, ih =>`");
+      }
+      command = `intros ${opened.member} ${names[0]} ${names[1]} ${opened.point} ${names[2]} ${names[3]} ${names[4]}`;
+    }
     const intros = /^intros\s+(.+)$/u.exec(command);
     if (intros) {
       const names = intros[1]!.split(/[\s,]+/u).filter(Boolean);
@@ -6532,12 +7136,16 @@ function elaborateTacticTheorem(
       }
       let refineGoal = current.goal;
       let foldRefinement = (proof: Proof): Proof => proof;
-      if (refineGoal.tag === "pred") {
+      // A predicate goal opens through its definition, its generated guards
+      // discharged from the context, when the body is a constructor shape;
+      // so does a predicate met inside the constructor, Wrapped(A) opening
+      // to ∃ B, Guarded(A, B) and then Guarded(A, B) to its conjunction.
+      const openConstructor = (target: Formula): { reduced: Formula; fold: (proof: Proof) => Proof } | undefined => {
+        if (target.tag !== "pred") return undefined;
         try {
-          const predicateName = refineGoal.pred;
-          const unfolded = unfoldGoal(kernel,
-            resolveProof(kernel, predicateName, line.number, scope), refineGoal,
-            current.assumptions, line.number);
+          const opening = atomOpeningRule(kernel, scope, line.number, target);
+          if (!opening) throw new Error("not a transparent constructor");
+          const unfolded = unfoldGoal(kernel, opening.rule, target, current.assumptions, line.number);
           let reduced = unfolded.formula;
           let rebuild = (proof: Proof): Proof => proof;
           const facts = [
@@ -6545,7 +7153,7 @@ function elaborateTacticTheorem(
             ...current.locals.values(),
           ];
           for (let index = 0;
-            index < predicateSoftGuardCount(predicateName, kernel, scope) && reduced.tag === "and";
+            index < opening.guards && reduced.tag === "and";
             index += 1) {
             const evidence = facts.find(item => formulaEquals(item.formula, reduced.left))?.proof ??
               (reduced.left.tag === "pred" && reduced.left.args.length > 0
@@ -6559,13 +7167,15 @@ function elaborateTacticTheorem(
             reduced = reduced.right;
           }
           if (reduced.tag === "exists" || reduced.tag === "and" || reduced.tag === "iff") {
-            refineGoal = reduced;
-            foldRefinement = proof => impElim(unfolded.fold, rebuild(proof));
+            return { reduced, fold: proof => impElim(unfolded.fold, rebuild(proof)) };
           }
         } catch {
           // Keep the authored goal when it is not a transparent constructor.
         }
-      }
+        return undefined;
+      };
+      const opened = openConstructor(refineGoal);
+      if (opened) ({ reduced: refineGoal, fold: foldRefinement } = opened);
       let cursor = 0;
       const holes: Formula[] = [];
       const build = (formula: Formula, entryPosition = true): ((proofs: readonly Proof[]) => Proof) => {
@@ -6574,7 +7184,11 @@ function elaborateTacticTheorem(
         // first conjunct; the entries after it fill the rest, as ⟨a, ?_, c⟩
         // for A ∧ B ∧ C reads. A final hole stands for everything left.
         const descends = formula.tag === "and" && cursor < entries.length - 1;
-        if (entryPosition && next === "?_" && !descends) {
+        // A final `_` at a conjunction or an equivalence likewise leaves
+        // the whole of it, as ⟨hp, _⟩ into a set-builder whose condition is
+        // a conjunction reads.
+        const wholeHole = next === "?_" || (next === "_" && (formula.tag === "and" || formula.tag === "iff"));
+        if (entryPosition && wholeHole && !descends) {
           cursor += 1;
           const index = holes.length;
           holes.push(formula);
@@ -6588,19 +7202,36 @@ function elaborateTacticTheorem(
           cursor += 1;
           return () => proof;
         }
-        if (entryPosition && next?.startsWith("⟨") && next.endsWith("⟩")) {
+        // A nested constructor with entries after it fills the first
+        // conjunct, as ⟨⟨x, hx, rfl⟩, b⟩ for (∃ x, …) ∧ B reads.
+        if (next?.startsWith("⟨") && next.endsWith("⟩")) {
+          // With entries after it, the nested constructor fills the first
+          // conjunct and the entries after it fill the rest; a predicate
+          // whose definition is a conjunction opens first.
+          const after = cursor < entries.length - 1;
+          let shape: Formula = formula;
+          let foldShape = (proof: Proof): Proof => proof;
+          if (after && formula.tag === "pred") {
+            const layer = openConstructor(formula);
+            if (layer && layer.reduced.tag === "and") { shape = layer.reduced; foldShape = layer.fold; }
+          }
+          const target = after && shape.tag === "and" ? shape.left : formula;
           const outerEntries = entries, outerCursor = cursor;
           entries = splitTopLevel(next.slice(1, -1), ",").map(item => item.trim());
           if (entries.length < 2 || entries.some(item => !item)) {
             throw new SurfaceError(line.number, "nested refine expects at least two constructor entries");
           }
           cursor = 0;
-          const nested = build(formula, false);
+          const nested = build(target, false);
           if (cursor !== entries.length) {
             throw new SurfaceError(line.number, "nested refine has unused constructor entries");
           }
           entries = outerEntries;
           cursor = outerCursor + 1;
+          if (target !== formula) {
+            const right = build((shape as Extract<Formula, { readonly tag: "and" }>).right);
+            return proofs => foldShape(andIntro(nested(proofs), right(proofs)));
+          }
           return nested;
         }
         // A final existential component may already have a complete proof.
@@ -6634,7 +7265,8 @@ function elaborateTacticTheorem(
           const evidence = build(instance);
           return proofs => existsIntro(formula.variable, formula.body, witness, evidence(proofs));
         }
-        if ((formula.tag === "and" || formula.tag === "iff") && entries[cursor] !== "_") {
+        if ((formula.tag === "and" || formula.tag === "iff") && entries[cursor] !== "_" &&
+          !(descends && entries[cursor]?.startsWith("⟨"))) {
           try {
             const proof = parseProofExpression(kernel, entries[cursor]!, current, variables, line.number, scope,
               { expectedConclusion: formula });
@@ -6657,13 +7289,43 @@ function elaborateTacticTheorem(
           const backward = build(imp(formula.right, formula.left));
           return proofs => iffIntro(forward(proofs), backward(proofs));
         }
+        // A predicate with more entries than one still to place opens
+        // through its definition, as the constructor's shape demands.
+        // A keyword entry, `assumption`, `rfl`, or a `by` block, is the
+        // predicate's own evidence and opens nothing.
+        const keywordEntry = next === "assumption" || next === "rfl" || next === "reflexivity" || /^by\b/.test(next ?? "");
+        if (formula.tag === "pred" && cursor < entries.length - 1 && next !== "_" && next !== "?_" && !keywordEntry) {
+          const layer = openConstructor(formula);
+          if (layer) {
+            // The entry is the predicate's own evidence when it proves it,
+            // directly or through a definition; the layer opens otherwise.
+            let direct: Proof | undefined;
+            try {
+              const proof = parseProofExpression(kernel, next!, current, variables, line.number, scope,
+                { expectedConclusion: formula });
+              const actual = kernel.checkProof(proof, current.assumptions);
+              direct = formulaEquals(actual, formula) ? proof
+                : bridgeDefinition(kernel, scope, line.number, proof, actual, formula, current.assumptions, current.locals);
+            } catch {
+              // Not a proof reference: the entries fill the opened layer.
+            }
+            if (direct) {
+              cursor += 1;
+              const evidence = direct;
+              return () => evidence;
+            }
+            const inner = build(layer.reduced);
+            return proofs => layer.fold(inner(proofs));
+          }
+        }
         const entry = entries[cursor];
         if (entry === undefined) {
           throw new SurfaceError(line.number,
             `refine needs evidence for ${formatFormula(formula)}`);
         }
         cursor += 1;
-        if (entry === "_") {
+        // A hole in any position, `_` or `?_`, is a goal left to the next lines.
+        if (entry === "_" || entry === "?_") {
           const index = holes.length;
           holes.push(formula);
           return proofs => proofs[index]!;
@@ -6708,7 +7370,26 @@ function elaborateTacticTheorem(
       else replaceWith(line, holes.map(goal => ({ goal })), proofs => foldRefinement(assemble(proofs)));
       continue;
     }
-    const disjunctionCases = /^(?:cases|rcases)\s+(\S+)\s+with\s+(.+\|.+)$/u.exec(command);
+    // The subject of `cases` and `rcases` is a local fact, a projection of
+    // one, or a proof expression: `(thm with h)` parenthesised, or
+    // `thm with h` bare, the pattern following the last top-level `with`.
+    const casesCommand = /^(cases|rcases)\s+(.+)$/su.exec(command);
+    const casesWith = casesCommand ? lastTopLevelWord(casesCommand[2]!, "with") : -1;
+    const casesSubject = casesWith > 0 ? casesCommand![2]!.slice(0, casesWith).trim() : undefined;
+    const casesPattern = casesWith > 0 ? casesCommand![2]!.slice(casesWith + 4).trim() : undefined;
+    const subjectProof = (text: string): LocalProof => {
+      const named = resolveLocalProof(current.locals, text, line.number, { kernel, scope, assumptions: current.assumptions });
+      if (named) return named;
+      if (/^[\p{L}_][\p{L}\p{M}\p{N}_.]*$/u.test(text) && !current.locals.has(text.split(".")[0]!)) {
+        try { resolveProof(kernel, text, line.number, scope); } catch {
+          throw new SurfaceError(line.number, `unknown local proof ${text}`);
+        }
+      }
+      const proof = parseProofExpression(kernel, text, current, variables, line.number, scope);
+      return { proof, formula: kernel.checkProof(proof, current.assumptions) };
+    };
+    const disjunctionCases = casesSubject && casesPattern && /\|/u.test(casesPattern)
+      ? [command, casesSubject, casesPattern] : undefined;
     // Each alternative takes a name, or a pattern: `rfl` substitutes its
     // equation and `⟨x, hx, rfl⟩` opens the alternative's data.
     const alternativePatterns = disjunctionCases
@@ -6723,8 +7404,7 @@ function elaborateTacticTheorem(
         }
       });
       const names = patterns.map(item => item.tag === "bind" ? item.name : "_");
-      let local = current.locals.get(source);
-      if (!local) throw new SurfaceError(line.number, `unknown local proof ${source}`);
+      let local = subjectProof(source);
       // A defined predicate splits through its definition.
       if (local.formula.tag === "pred") {
         const unfolded = unfoldPredicateFact(kernel, scope, line.number, local, current.assumptions, ["or"]);
@@ -6744,23 +7424,33 @@ function elaborateTacticTheorem(
         throw new SurfaceError(line.number,
           `cases has ${names.length} names but ${source} has ${alternatives.length} alternatives`);
       }
-      const wraps: ((proof: Proof) => Proof)[] = [];
-      const specifications = alternatives.map((alternative, index) => {
+      const combines: ((proofs: readonly Proof[]) => Proof)[] = [];
+      const counts: number[] = [];
+      const specifications = alternatives.flatMap((alternative, index) => {
         const pattern = patterns[index]!;
         const assumptions = [...current.assumptions, alternative];
         if (pattern.tag === "bind") {
           const locals = new Map(current.locals);
           if (pattern.name !== "_") locals.set(pattern.name, { formula: alternative, proof: assume(alternative) });
-          wraps.push(proof => proof);
-          return { goal: current.goal, assumptions, locals };
+          combines.push(([proof]) => proof!);
+          counts.push(1);
+          return [{ goal: current.goal, assumptions, locals }];
         }
         const state = destructureState(line, { goal: current.goal, assumptions, locals: current.locals },
           pattern, alternative, assume(alternative), undefined, true);
-        wraps.push(state.wrap);
-        return { goal: state.goal, assumptions: state.assumptions, locals: state.locals };
+        // A pattern with alternatives of its own opens further branches.
+        const expanded = expandSplits(line, state);
+        combines.push(expanded.combine);
+        counts.push(expanded.branches.length);
+        return expanded.branches.map(branch => ({ goal: branch.goal, assumptions: branch.assumptions, locals: branch.locals }));
       });
       replaceWith(line, specifications, branches => {
-        const proofs = branches.map((proof, index) => wraps[index]!(proof!));
+        let offset = 0;
+        const proofs = combines.map((combine, index) => {
+          const slice = branches.slice(offset, offset + counts[index]!);
+          offset += counts[index]!;
+          return combine(slice);
+        });
         if (names.length === 2) {
           if (local.formula.tag !== "or") throw new Error("malformed disjunction");
           return orElim(local.proof, proofs[0]!, proofs[1]!);
@@ -6776,22 +7466,24 @@ function elaborateTacticTheorem(
       });
       continue;
     }
-    const recursiveCases = /^rcases\s+(\S+)\s+with\s+(.+)$/u.exec(command);
+    const recursiveCases = casesCommand?.[1] === "rcases" && casesSubject && casesPattern
+      ? [command, casesSubject, casesPattern] : undefined;
     if (recursiveCases) {
       const source = recursiveCases[1]!;
-      const local = current.locals.get(source);
-      if (!local) throw new SurfaceError(line.number, `unknown local proof ${source}`);
-      destructureProof(line, current, parseDestructurePattern(recursiveCases[2]!, line.number), local.formula, local.proof, source, true);
+      const local = subjectProof(source);
+      destructureProof(line, current, parseDestructurePattern(recursiveCases[2]!, line.number), local.formula, local.proof,
+        current.locals.has(source) ? source : undefined, true);
       continue;
     }
-    const casesConjunction = /^cases\s+(\S+)\s+with\s+(\S+)\s+(?:and|∧)\s+(\S+)$/u.exec(command);
+    const casesConjunction = casesCommand?.[1] === "cases" && casesSubject && casesPattern
+      ? /^(\S+)\s+(?:and|∧)\s+(\S+)$/u.exec(casesPattern) && [command, casesSubject, ...casesPattern.split(/\s+/u).filter((_, index) => index !== 1)]
+      : undefined;
     if (casesConjunction) {
       const source = casesConjunction[1]!;
       const leftName = casesConjunction[2]!.trim();
       const rightName = casesConjunction[3]!.trim();
       if (![leftName, rightName].every(name => SIMPLE_IDENTIFIER.test(name))) throw new SurfaceError(line.number, "malformed conjunction case names");
-      const local = current.locals.get(source);
-      if (!local) throw new SurfaceError(line.number, `unknown local proof ${source}`);
+      const local = subjectProof(source);
       if (local.formula.tag !== "and") throw new SurfaceError(line.number, `cases requires ${source} to prove a conjunction`);
       const locals = new Map(current.locals);
       locals.set(leftName, { formula: local.formula.left, proof: andElimLeft(local.proof) });
@@ -6820,6 +7512,27 @@ function elaborateTacticTheorem(
       current.locals.set(rename[2]!, local);
       continue;
     }
+    // `set x := t with h` names the term t by a fresh variable x with the
+    // equation h : x = t, and writes x for t in the goal. The proof of the
+    // renamed goal under h is generalized over x and instantiated at t.
+    const setCommand = /^set\s+([\p{L}_][\p{L}\p{M}\p{N}_']*)\s*:=\s*(.+?)\s+with\s+([\p{L}_][\p{L}\p{M}\p{N}_']*)$/u.exec(command);
+    if (setCommand) {
+      const [, name, termText, equationName] = setCommand as unknown as [string, string, string, string];
+      if (variables.has(name) || current.locals.has(name) || kernel.functions.has(name)) {
+        throw new SurfaceError(line.number, `set cannot name ${name}: ${name} is already in scope`);
+      }
+      if (current.locals.has(equationName)) throw new SurfaceError(line.number, `local proof ${equationName} already exists`);
+      const term = parseTerm(termText, kernel, variables, line.number, scope);
+      const variable = v(name);
+      const equation = eq(variable, term);
+      const goal = replaceFormulaSubterm(current.goal, term, variable);
+      const locals = new Map(current.locals);
+      locals.set(equationName, { formula: equation, proof: assume(equation) });
+      replaceWith(line, [{ goal, assumptions: [...current.assumptions, equation], locals }],
+        ([body]) => impElim(forallElim(forallIntro(name, impIntro(equation, body!)), term), refl(term)));
+      pending[0]!.variables.add(name);
+      continue;
+    }
     const revert = /^revert\s+(\S+)$/.exec(command);
     if (revert) {
       const local = current.locals.get(revert[1]!);
@@ -6835,6 +7548,13 @@ function elaborateTacticTheorem(
     }
     if (command === "exfalso") {
       replaceWith(line, [{ goal: bottom }], ([absurdity]) => falseElim(current.goal, absurdity!));
+      continue;
+    }
+    // The steps written before an `induction` clause run against a trivial
+    // goal; this internal step hands their facts to the induction cases.
+    if (command === "__keep_facts" && current.goal.tag === "eq") {
+      keptFactsCapture = new Map(current.locals);
+      close(line, refl(current.goal.left));
       continue;
     }
     // `by_contra` or `by_contra h` assumes the negation of the goal under
@@ -6875,10 +7595,32 @@ function elaborateTacticTheorem(
       continue;
     }
     if (command === "tauto") {
-      close(line, proveTautology(
-        kernel, current.goal, current.assumptions, [...current.locals.values()].map(item => item.proof),
-      ));
-      continue;
+      const factProofs = [...current.locals.values()].map(item => item.proof);
+      try {
+        close(line, proveTautology(kernel, current.goal, current.assumptions, factProofs));
+        continue;
+      } catch (error) {
+        // A set-builder membership atom, `c ∈ fiber(A, C, r)`, and the
+        // membership in a compound set are opened one layer in the goal
+        // and the facts, so the opened atom and `(r, c) ∈ A` are decided
+        // together; a bounded existential the opening leaves is settled by
+        // the logical search with those laws.
+        const opened = tautologyOpening(kernel, current, line, scope, visibility);
+        if (!opened) throw error;
+        let proof: Proof | undefined;
+        try { proof = proveTautology(kernel, opened.goal, current.assumptions, opened.facts); } catch {}
+        if (!proof) {
+          try {
+            proof = settle(kernel, opened.goal, {
+              using: opened.rules, assumptions: current.assumptions, facts: opened.facts, visibility, fuel: 1_000,
+              ground: defaultGroundRules(kernel, line.number, scope),
+            });
+          } catch {}
+        }
+        if (!proof) throw error;
+        close(line, opened.lift(proof));
+        continue;
+      }
     }
     if (command === "cc" || command === "congruence") {
       close(line, proveCongruence(
@@ -7103,7 +7845,8 @@ function elaborateTacticTheorem(
       const combined = scaled.reduce((left, right) => congr(presentation.add, left, right));
       const combinedFormula = kernel.checkProof(combined, current.assumptions);
       if (combinedFormula.tag !== "eq") throw new SurfaceError(line.number, "internal linear combination did not produce an equality");
-      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions, [], visibility);
+      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions,
+        arithmeticTypingFacts(current.locals), visibility);
       const combinedLeft = normalizeNaturalSemiring(kernel, combinedFormula.left, line.number, scope, current.assumptions, polynomialRefinements);
       const combinedRight = normalizeNaturalSemiring(kernel, combinedFormula.right, line.number, scope, current.assumptions, polynomialRefinements);
       const goalLeft = normalizeNaturalSemiring(kernel, current.goal.left, line.number, scope, current.assumptions, polynomialRefinements);
@@ -7175,7 +7918,8 @@ function elaborateTacticTheorem(
     if (ringWith) {
       if (current.goal.tag !== "eq") throw new SurfaceError(line.number, "ring [rules] requires an equality goal");
       const presentation = naturalLinearArithmeticPresentation(kernel, line.number, scope);
-      const refinements = prepareRefinementProver(kernel, current.assumptions, [], visibility);
+      const refinements = prepareRefinementProver(kernel, current.assumptions,
+        arithmeticTypingFacts(current.locals), visibility);
       const normalize = (term: Term): SemiringNormalForm =>
         normalizeNaturalSemiring(kernel, term, line.number, scope, current.assumptions, refinements);
       interface Monomial { coefficient: bigint; readonly atoms: Map<string, { readonly term: Term; power: number }> }
@@ -7304,7 +8048,9 @@ function elaborateTacticTheorem(
       const normalizeTerms = (terms: readonly Term[]) =>
         normalizeCommutativeRing(kernel, terms, current.assumptions,
           [...current.locals.values()].map(item => item.proof), scope, line.number);
-      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions, [], visibility);
+      // Local Nat(t) and t ∈ ℕ facts type the opaque atoms of the goal.
+      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions,
+        arithmeticTypingFacts(current.locals), visibility);
       if (ringNormalForm[1]) {
         const local = current.locals.get(ringNormalForm[1]);
         if (!local) throw new SurfaceError(line.number, `unknown local proof ${ringNormalForm[1]}`);
@@ -7412,7 +8158,9 @@ function elaborateTacticTheorem(
           continue;
         }
       }
-      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions, [], visibility);
+      // Local Nat(t) and t ∈ ℕ facts type the opaque atoms of the goal.
+      const polynomialRefinements = prepareRefinementProver(kernel, current.assumptions,
+        arithmeticTypingFacts(current.locals), visibility);
       if (ring[1]) {
         const local = current.locals.get(ring[1]);
         if (!local) throw new SurfaceError(line.number, `unknown local proof ${ring[1]}`);
@@ -7460,9 +8208,12 @@ function elaborateTacticTheorem(
           relevantEqualities.push(item.proof);
         }
       }
+      // The typing facts reach settle's guard prover only; they are not
+      // equalities, so they add no rewrite.
       close(line, settle(kernel, current.goal, {
         using: preparedRingRules(kernel, line.number, scope), assumptions: current.assumptions, visibility,
-        facts: relevantEqualities, useContextEqualities: false, fuel: 50_000,
+        facts: [...relevantEqualities, ...arithmeticTypingFacts(current.locals)],
+        useContextEqualities: false, fuel: 50_000,
       }));
       continue;
     }
@@ -7470,30 +8221,52 @@ function elaborateTacticTheorem(
     // and closes with irreflexivity.
     // `arith` on a disequality introduces it and refutes; on a conjunction it
     // splits and settles each conjunct, so a list of index inequalities is
-    // one line.
-    if (command === "arith" && (current.goal.tag === "and" || (current.goal.tag === "imp" && current.goal.right.tag === "bottom"))) {
+    // one line. `linarith` treats a disequality the same way; its real and
+    // rational procedures already refute a ⊥ goal from an equation.
+    const disequality = current.goal.tag === "imp" && current.goal.right.tag === "bottom" &&
+      current.goal.left.tag === "eq";
+    if ((command === "arith" && (current.goal.tag === "and" || (current.goal.tag === "imp" && current.goal.right.tag === "bottom"))) ||
+        (command === "linarith" && disequality)) {
       const script = current.goal.tag === "and"
         ? ["constructor", ". arith", ". arith"]
-        : ["intro __arithNegated", "arith"];
+        : ["intro __arithNegated", command];
       const scriptLines = script.map(text => ({ number: line.number, text, indent: line.indent + 2 })).flatMap(splitTacticLine);
       const nested = elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
         { assumptions: current.assumptions, locals: current.locals, variables: current.variables })!;
       close(line, nested.proof);
       continue;
     }
+    // `linarith` on ⊥ is arith's refutation when no hypothesis compares in
+    // an ordered structure, where its own real, rational and ordered-ring
+    // procedures apply; those facts are `relates` atoms.
+    const naturalContext = (): boolean => ![...current.locals.values()].some(item =>
+      item.formula.tag === "pred" && item.formula.pred === "relates") &&
+      !current.assumptions.some(item => item.tag === "pred" && item.pred === "relates");
     // On any other goal, arith first tries the goal itself and then, when
     // that fails, refutes the hypotheses: contradictory bounds close any goal.
-    if (command === "arith" && current.goal.tag !== "bottom") {
+    // `linarith` on a natural bound in a natural context does the same.
+    const naturalBoundGoal = (): boolean => {
+      if (current.goal.tag !== "pred" || current.goal.args.length !== 2) return false;
+      const presentation = naturalLinearArithmeticPresentation(kernel, line.number, scope);
+      return current.goal.pred === presentation.less || current.goal.pred === presentation.lessEqual;
+    };
+    if ((command === "arith" || (command === "linarith" && naturalContext() && naturalBoundGoal())) && current.goal.tag !== "bottom") {
       const attempt = (script: readonly string[]): Proof => elaborateTacticTheorem(kernel, "", [], [], [], current.goal,
         script.map(text => ({ number: line.number, text, indent: line.indent + 2 })).flatMap(splitTacticLine), scope,
         { assumptions: current.assumptions, locals: current.locals, variables: current.variables })!.proof;
       let direct: unknown;
       try { close(line, attempt(["__arith_direct"])); continue; }
       catch (error) { if (!(error instanceof SurfaceError)) throw error; direct = error; }
-      try { close(line, attempt(["exfalso", "arith"])); continue; }
+      // The denied goal stays in the context, so its atoms select the
+      // disequalities the refutation may split on.
+      try { close(line, attempt(["by_contra __arithDenied", "arith"])); continue; }
       catch (error) { if (!(error instanceof SurfaceError)) throw error; throw direct; }
     }
-    if (command === "arith" && current.goal.tag === "bottom") {
+    // `__arith_refuteN` is the refutation beneath N further disequality
+    // splits; `arith` and `linarith` on ⊥ start with three.
+    const refuting = /^__arith_refute(\d)$/.exec(command);
+    const splitBudget = refuting ? Number(refuting[1]) : 3;
+    if ((command === "arith" || refuting || (command === "linarith" && naturalContext())) && current.goal.tag === "bottom") {
       // An equation between distinct literals, `1 = 0`, refutes by itself,
       // without the order theory.
       const refuted = refuteLiteralEquation(kernel, [
@@ -7501,22 +8274,47 @@ function elaborateTacticTheorem(
         ...current.assumptions.map(formula => ({ formula, proof: assume(formula) })),
       ]);
       if (refuted) { close(line, refuted); continue; }
-      if (!resolveOptional("Less.irreflexive", scope, candidate => kernel.theorems.has(candidate))) {
+      const irreflexive = resolveOptional("Less.irreflexive", scope, candidate => kernel.theorems.has(candidate));
+      if (!irreflexive && command !== "linarith") {
         throw new SurfaceError(line.number, "arith on a ⊥ goal needs Less.irreflexive; import Grace.Cumulus.Nat.Order");
       }
-      const scriptLines = [
-        { number: line.number, text: "have __arithRefuted : 0 < 0 by arith", indent: line.indent + 2 },
-        { number: line.number, text: "exact Less.irreflexive at 0 with *, __arithRefuted", indent: line.indent + 2 },
-      ].flatMap(splitTacticLine);
-      const nested = elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
-        { assumptions: current.assumptions, locals: current.locals, variables: current.variables })!;
-      close(line, nested.proof);
-      continue;
+      if (irreflexive) {
+        // The bound 0 < 0 is sought by the linear procedure alone: the
+        // general `arith` on it would refute the hypotheses again through
+        // this very path.
+        const scriptLines = [
+          { number: line.number, text: "have __arithRefuted : 0 < 0 by __arith_direct", indent: line.indent + 2 },
+          { number: line.number, text: "exact Less.irreflexive at 0 with *, __arithRefuted", indent: line.indent + 2 },
+        ].flatMap(splitTacticLine);
+        const refute = (): Proof => elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
+          { assumptions: current.assumptions, locals: current.locals, variables: current.variables })!.proof;
+        // When the bounds alone are consistent, a disequality `a ≠ b`
+        // between atoms of the comparison facts is a case split
+        // `a < b ∨ a = b ∨ b < a` by trichotomy, the middle case closed by
+        // the disequality and the others refuted beneath it; at most three
+        // such splits nest, and only disequalities whose sides are literals
+        // or atoms of the bounds take part.
+        const refuteOrSplit = (): Proof => {
+          try { return refute(); }
+          catch (error) {
+            if (!(error instanceof SurfaceError) || splitBudget === 0) throw error;
+            const split = arithDisequalitySplit(kernel, current, line, scope, visibility, splitBudget - 1);
+            if (!split) throw error;
+            return split;
+          }
+        };
+        if (command !== "linarith") { close(line, refuteOrSplit()); continue; }
+        // linarith keeps its own procedures: an equation of real literals,
+        // 2 = 0, is refuted below when the natural refutation finds nothing.
+        try { close(line, refuteOrSplit()); continue; }
+        catch (error) { if (!(error instanceof SurfaceError)) throw error; }
+      }
     }
     if (command === "arith" || command === "__arith_direct" || command === "linarith") {
-      const refinementFacts = [...current.locals.values()]
-        .filter(item => item.formula.tag === "pred" || item.formula.tag === "and")
-        .map(item => item.proof);
+      const refinementFacts = [
+        ...arithmeticTypingFacts(current.locals),
+        ...orderTypingFacts(kernel, current.locals, current.assumptions, visibility, scope),
+      ];
       const refinements = prepareRefinementProver(kernel, current.assumptions, refinementFacts, visibility);
       // Real linear arithmetic: Fourier-Motzkin elimination over the local
       // comparisons, emitted as a certificate of checked order laws and one
@@ -8968,6 +9766,23 @@ function elaborateTacticTheorem(
           const item = kind === "le" ? comparison(left, right, local.proof) : strictToWeak(left, right, local.proof);
           if (item) originals.push(item);
         }
+        // A denied bound in the context, `¬(a ≤ b)` or `¬(a < b)`, is the
+        // opposite bound, as the negated goal is.
+        for (const local of current.locals.values()) {
+          const formula = local.formula;
+          if (formula.tag !== "imp" || formula.right.tag !== "bottom" || formula.left.tag !== "pred") continue;
+          const kind = comparisonKind(formula.left);
+          if (!kind) continue;
+          const [left, right] = formula.left.args as [Term, Term];
+          if (kind === "le") {
+            const theoremProof = typed(presentation.lessOfNotLessEqual, [left, right]);
+            const item = theoremProof ? strictToWeak(right, left, impElim(theoremProof, local.proof)) : undefined;
+            if (item) originals.push(item);
+          } else {
+            const theoremProof = typed(presentation.lessEqualOfNotLess, [left, right]);
+            if (theoremProof) originals.push(comparison(right, left, impElim(theoremProof, local.proof)));
+          }
+        }
         const equalityToComparison = (left: Term, right: Term, proof: Proof): LinearComparison | undefined => {
           const reflexive = typed(presentation.lessEqualReflexive, [left]);
           if (!reflexive) return undefined;
@@ -8978,12 +9793,37 @@ function elaborateTacticTheorem(
             proof, variable, pred(presentation.lessEqual, left, v(variable)), reflexive,
           ));
         };
+        // An equation whose side the prover cannot type, t = 1 for an opaque
+        // t with no Nat(t) in reach, cannot enter as two comparisons; it
+        // still substitutes that side into the comparison facts, which is
+        // what rewriting by hand does, and asks nothing of t.
+        const substituted = (source: Term, target: Term, equality: Proof): void => {
+          if (naturalValue(source) !== undefined) return;
+          for (const local of current.locals.values()) {
+            const kind = comparisonKind(local.formula);
+            if (!kind || local.formula.tag !== "pred") continue;
+            const left = replaceSubterm(local.formula.args[0]!, source, target);
+            const right = replaceSubterm(local.formula.args[1]!, source, target);
+            if (left === local.formula.args[0] && right === local.formula.args[1]) continue;
+            let variable = "__arithSubstituted";
+            const forbidden = new Set([...freeFormulaVariables(local.formula), ...freeTermVariables(target)]);
+            while (forbidden.has(variable)) variable += "_";
+            const motive = pred(local.formula.pred,
+              replaceSubterm(local.formula.args[0]!, source, v(variable)),
+              replaceSubterm(local.formula.args[1]!, source, v(variable)));
+            const proof = eqElim(equality, variable, motive, local.proof);
+            const item = kind === "le" ? comparison(left, right, proof) : strictToWeak(left, right, proof);
+            if (item) originals.push(item);
+          }
+        };
         for (const local of current.locals.values()) {
           if (local.formula.tag !== "eq") continue;
           const forward = equalityToComparison(local.formula.left, local.formula.right, local.proof);
           const backward = equalityToComparison(local.formula.right, local.formula.left, symm(local.proof));
           if (forward) originals.push(forward);
+          else substituted(local.formula.left, local.formula.right, local.proof);
           if (backward) originals.push(backward);
+          else substituted(local.formula.right, local.formula.left, symm(local.proof));
         }
         const negatedGoal = assume(not(current.goal));
         let opposite: LinearComparison | undefined;
@@ -9305,9 +10145,22 @@ function elaborateTacticTheorem(
         try {
           normalizedEquality = settle(kernel, current.goal, {
             using: preparedRingRules(kernel, line.number, scope), assumptions: current.assumptions, visibility,
-            facts, useContextEqualities: false, fuel: 50_000,
+            facts: [...facts, ...refinementFacts], useContextEqualities: false, fuel: 50_000,
           });
           break;
+        } catch {}
+      }
+      // The ring rewrites leave succ(t) and t + 1 apart; the semiring
+      // normalizer reads both as t + 1, so succ(k) + 1 = succ(succ(k))
+      // closes without a bridge lemma. It is tried only after settle fails,
+      // and an atom it cannot type leaves the equality graph below to decide.
+      if (!normalizedEquality) {
+        try {
+          const goalLeft = normalizeNaturalSemiring(kernel, current.goal.left, line.number, scope,
+            current.assumptions, refinements);
+          const goalRight = normalizeNaturalSemiring(kernel, current.goal.right, line.number, scope,
+            current.assumptions, refinements);
+          if (termEquals(goalLeft.term, goalRight.term)) normalizedEquality = calc(goalLeft.proof, symm(goalRight.proof));
         } catch {}
       }
       if (normalizedEquality) {
@@ -9343,12 +10196,15 @@ function elaborateTacticTheorem(
       interface ArithmeticEdge { readonly term: Term; readonly proof: Proof }
       const graph = new Map<string, ArithmeticEdge[]>();
       const knownEdges = new Set<string>();
+      const nodeTerms = new Map<string, Term>();
       const addEdge = (from: Term, to: Term, proof: Proof): void => {
         const fromKey = termCanonical(from);
         const toKey = termCanonical(to);
         const key = `${fromKey}\u0000${toKey}`;
         if (knownEdges.has(key)) return;
         knownEdges.add(key);
+        nodeTerms.set(fromKey, from);
+        nodeTerms.set(toKey, to);
         const edges = graph.get(fromKey) ?? [];
         edges.push({ term: to, proof });
         graph.set(fromKey, edges);
@@ -9388,6 +10244,93 @@ function elaborateTacticTheorem(
           addEquality(derivedFormula, derivedProof);
         }
       }
+      // succ(t) and t + 1 are one node of the graph: every term it holds, and
+      // both goal sides, are joined to their semiring normal form, so a
+      // hypothesis stated with succ meets a goal stated with + 1.
+      const joined = new Set<string>();
+      const joinNormalForm = (term: Term): void => {
+        const key = termCanonical(term);
+        if (joined.has(key)) return;
+        joined.add(key);
+        try {
+          const normal = normalizeNaturalSemiring(kernel, term, line.number, scope, current.assumptions, refinements);
+          if (!termEquals(normal.term, term)) addEquality(eq(term, normal.term), normal.proof);
+        } catch {}
+      };
+      const nodes = [current.goal.left, current.goal.right, ...[...graph.values()].flat().map(edge => edge.term)];
+      for (const node of nodes) joinNormalForm(node);
+      // Two successors, or two sums with a common summand, in one class of
+      // the graph cancel to an equation between their remaining parts, so
+      // cardinality(F) = succ(cardinality(F ∖ {e})) and cardinality(F) =
+      // succ(k) give cardinality(F ∖ {e}) = k. A successor cancels by
+      // injectivity, with no typing; a summand needs Nat on the parts. The
+      // parts join the graph with their normal forms, and the pass repeats
+      // while it adds an edge.
+      const successorInjective = resolveOptional("Naturals.injective.succ", scope, candidate => kernel.theorems.has(candidate));
+      const unary = (term: Term): Term | undefined =>
+        term.tag === "app" && term.args.length === 1 && term.fn === presentation.successor ? term.args[0] : undefined;
+      for (let pass = 0; pass < 4; pass += 1) {
+        let added = false;
+        const classified = new Set<string>();
+        for (const rootKey of [...graph.keys()]) {
+          if (classified.has(rootKey)) continue;
+          const members: { readonly term: Term; readonly path: Proof }[] = [{ term: nodeTerms.get(rootKey)!, path: refl(nodeTerms.get(rootKey)!) }];
+          classified.add(rootKey);
+          for (let cursor = 0; cursor < members.length; cursor += 1) {
+            const member = members[cursor]!;
+            for (const edge of graph.get(termCanonical(member.term)) ?? []) {
+              const edgeKey = termCanonical(edge.term);
+              if (classified.has(edgeKey)) continue;
+              classified.add(edgeKey);
+              members.push({ term: edge.term, path: calc(member.path, edge.proof) });
+            }
+          }
+          const cancelled = (left: Term, right: Term, proof: () => Proof | undefined): void => {
+            const leftKey = termCanonical(left);
+            const rightKey = termCanonical(right);
+            if (leftKey === rightKey || knownEdges.has(`${leftKey}\u0000${rightKey}`)) return;
+            const derived = proof();
+            if (!derived) return;
+            addEquality(eq(left, right), derived);
+            joinNormalForm(left);
+            joinNormalForm(right);
+            added = true;
+          };
+          for (let i = 0; i < members.length; i += 1) for (let j = i + 1; j < members.length; j += 1) {
+            const first = members[i]!;
+            const second = members[j]!;
+            const equation = (): Proof => calc(symm(first.path), second.path);
+            const firstInner = unary(first.term);
+            const secondInner = unary(second.term);
+            if (firstInner && secondInner) {
+              if (successorInjective) {
+                cancelled(firstInner, secondInner, () => impElim(at(theorem(successorInjective), firstInner, secondInner), equation()));
+              }
+              continue;
+            }
+            const left = binary(first.term);
+            const right = binary(second.term);
+            if (!left || !right || left[0] !== right[0] || !isAddition(left[0])) continue;
+            if (termEquals(left[2], right[2])) {
+              cancelled(left[1], right[1], () => {
+                let candidate = at(cancellation.right, left[1], right[1], left[2]);
+                for (const term of [left[1], right[1], left[2]]) {
+                  const typed = refinements.prove(term, "Nat");
+                  if (!typed) return undefined;
+                  candidate = impElim(candidate, typed);
+                }
+                return impElim(candidate, equation());
+              });
+            } else if (termEquals(left[1], right[1])) {
+              cancelled(left[2], right[2], () => {
+                const typed = refinements.prove(left[1], "Nat");
+                return typed ? impElim(impElim(at(cancellation.left, left[2], right[2], left[1]), typed), equation()) : undefined;
+              });
+            }
+          }
+        }
+        if (!added) break;
+      }
       const targetKey = termCanonical(current.goal.right);
       const startKey = termCanonical(current.goal.left);
       let arithmeticProof: Proof | undefined = startKey === targetKey ? refl(current.goal.left) : undefined;
@@ -9403,6 +10346,26 @@ function elaborateTacticTheorem(
           visited.add(edgeKey);
           queue.push({ term: edge.term, path });
         }
+      }
+      // Two opposite bounds on the goal sides, each found by the linear
+      // comparison search over the context, with its substitution of local
+      // equations, give the equality by antisymmetry: |T| + 1 = |V| from
+      // |T| + c ≤ |V|, |V| ≤ |T| + c and c = 1.
+      if (!arithmeticProof) {
+        const antisymmetric = dischargeArithmeticTypes(
+          presentation.lessEqualAntisymmetric, [current.goal.left, current.goal.right],
+        );
+        const bound = (left: Term, right: Term): Proof | undefined => {
+          try {
+            const nested = elaborateTacticTheorem(kernel, "", [], [], [], pred(presentation.lessEqual, left, right),
+              [{ number: line.number, text: "arith", indent: line.indent + 2 }], scope,
+              { assumptions: current.assumptions, locals: current.locals, variables: current.variables });
+            return nested?.proof;
+          } catch { return undefined; }
+        };
+        const forward = antisymmetric ? bound(current.goal.left, current.goal.right) : undefined;
+        const backward = forward ? bound(current.goal.right, current.goal.left) : undefined;
+        if (antisymmetric && forward && backward) arithmeticProof = impElim(impElim(antisymmetric, forward), backward);
       }
       if (!arithmeticProof) throw new SurfaceError(line.number, "arith found no supported linear arithmetic step");
       close(line, arithmeticProof);
@@ -9501,86 +10464,579 @@ function formulaMentionsSymbol(formula: Formula, name: string): boolean {
  * arranged as mathematics instead of serialized into one long row.
  */
 /**
- * Unfold every instance of a definition's equivalence `rule` in `goal`: the
- * instances a rewrite reaches through the connectives first, then those
- * under a ∀ or ∃ whose bound variable they mention, by descending into the
- * binder with its variable free and closing the binder again. The result is
- * the unfolded goal with the transport of its proof back to `goal`, or
- * undefined when nothing unfolds.
+ * A formula and its unfolding, with the proofs each way between them:
+ * `forward` turns a proof of the formula into a proof of the unfolding, as
+ * a fact is unfolded; `backward` turns a proof of the unfolding into a
+ * proof of the formula, as a goal is.
+ */
+interface UnfoldTransport {
+  readonly formula: Formula;
+  readonly forward: (proof: Proof) => Proof;
+  readonly backward: (proof: Proof) => Proof;
+}
+
+/**
+ * Unfold every instance of a definition in `formula`: under every
+ * connective and relation and inside arguments, the instances a rewrite
+ * reaches first, then those under a ∀ or ∃ whose bound variable they
+ * mention, by descending into the binder with its variable free and
+ * closing the binder again. `rules` are the definition's equivalence or
+ * its defining equations. Local facts serve only to discharge a rule's
+ * premises and never rewrite, so the unfolding depends on the definition
+ * alone and not on which equalities happen to be in context. Undefined
+ * when nothing unfolds.
  */
 function unfoldThroughout(
-  kernel: Kernel, goal: Formula, rule: Proof, assumptions: readonly Formula[], facts: readonly Proof[],
+  kernel: Kernel, formula: Formula, rules: readonly Proof[],
+  assumptions: readonly Formula[], facts: readonly Proof[],
   visibility: ScopeVisibility | undefined, taken: ReadonlySet<string>,
-): { readonly goal: Formula; readonly lift: (proof: Proof) => Proof } | undefined {
-  type Transport = { readonly goal: Formula; readonly lift: (proof: Proof) => Proof };
-  const compose = (outer: Transport | undefined, inner: Transport | undefined): Transport | undefined =>
-    !inner ? outer : !outer ? inner : { goal: inner.goal, lift: proof => outer.lift(inner.lift(proof)) };
+): UnfoldTransport | undefined {
+  const identity = (item: Formula): UnfoldTransport =>
+    ({ formula: item, forward: proof => proof, backward: proof => proof });
+  const compose = (
+    outer: UnfoldTransport | undefined, inner: UnfoldTransport | undefined,
+  ): UnfoldTransport | undefined =>
+    !inner ? outer : !outer ? inner : {
+      formula: inner.formula,
+      forward: proof => inner.forward(outer.forward(proof)),
+      backward: proof => outer.backward(inner.backward(proof)),
+    };
   const reserved = new Set(taken);
-  assumptions.forEach(item => freeFormulaVariables(item).forEach(name => reserved.add(name)));
-  const repeat = (formula: Formula): Transport | undefined => {
-    let result: Transport | undefined;
-    for (let round = 0; round < 64; round += 1) {
-      const current = result?.goal ?? formula;
-      let rewritten: Transport;
-      try { rewritten = rewriteGoal(kernel, current, rule, assumptions, facts, false, true, undefined, visibility); }
-      catch { break; }
-      if (formulaEquals(rewritten.goal, current)) break;
-      result = compose(result, rewritten);
+  assumptions.forEach(item =>
+    freeFormulaVariables(item).forEach(name => reserved.add(name)));
+  // One instance, read both ways: the goal rewrite carries a proof of the
+  // unfolding back, and the same rewrite of the formula taken as a
+  // hypothesis, discharged by implication introduction, carries a proof
+  // forward. Both select the first instance a rewrite reaches, so they
+  // agree; a disagreement is treated as no unfolding.
+  const once = (current: Formula, rule: Proof): UnfoldTransport | undefined => {
+    let asGoal: GoalRewrite;
+    let asFact: ReturnType<typeof rewriteFact>;
+    try {
+      asGoal = rewriteGoal(kernel, current, rule, assumptions, facts,
+        false, true, undefined, visibility);
+      asFact = rewriteFact(kernel, assume(current), rule,
+        [...assumptions, current], facts, false, true, undefined, visibility);
+    } catch { return undefined; }
+    if (formulaEquals(asGoal.goal, current) ||
+        !formulaEquals(asFact.formula, asGoal.goal)) return undefined;
+    return { formula: asGoal.goal, backward: asGoal.lift,
+      forward: proof => impElim(impIntro(current, asFact.proof), proof) };
+  };
+  // Every instance a rewrite reaches, each rule in turn, to a fixed point;
+  // a round opens one instance at all its occurrences, so the bound is on
+  // distinct instances, well above any formula met in practice.
+  const flat = (start: Formula): UnfoldTransport | undefined => {
+    let result: UnfoldTransport | undefined;
+    for (let round = 0; round < 256; round += 1) {
+      const current = result?.formula ?? start;
+      let step: UnfoldTransport | undefined;
+      for (const rule of rules) {
+        step = once(current, rule);
+        if (step) break;
+      }
+      if (!step) break;
+      result = compose(result, step);
     }
     return result;
   };
-  const descend = (formula: Formula): Transport | undefined => {
-    const flat = repeat(formula);
-    return compose(flat, under(flat?.goal ?? formula));
+  const descend = (item: Formula): UnfoldTransport | undefined => {
+    const level = flat(item);
+    return compose(level, under(level?.formula ?? item));
   };
-  const under = (formula: Formula): Transport | undefined => {
-    switch (formula.tag) {
+  const under = (item: Formula): UnfoldTransport | undefined => {
+    switch (item.tag) {
       case "forall":
       case "exists": {
-        const bound = formula.variable;
-        const variable = reserved.has(bound) ? freshSurfaceVariable(bound, new Set([...reserved, ...freeFormulaVariables(formula)])) : bound;
-        const body = variable === bound ? formula.body : substituteFormula(formula.body, bound, v(variable));
+        // The binder is opened on an internal name, which no later step
+        // can introduce into the context, so the proofs built here check
+        // wherever the fact is used; the result shows the bound name.
+        const bound = item.variable;
+        const variable = freshSurfaceVariable(`__${bound}`, new Set([...reserved, ...freeFormulaVariables(item)]));
+        const body = substituteFormula(item.body, bound, v(variable));
         reserved.add(variable);
         const inner = descend(body);
         if (!inner) return undefined;
-        if (formula.tag === "forall") {
-          return { goal: forall(variable, inner.goal),
-            lift: proof => forallIntro(variable, inner.lift(forallElim(proof, v(variable)))) };
+        const x = v(variable);
+        const shown = freeFormulaVariables(inner.formula).has(bound)
+          ? variable : bound;
+        const presented = shown === variable ? inner.formula : substituteFormula(inner.formula, variable, v(bound));
+        if (item.tag === "forall") {
+          return { formula: forall(shown, presented),
+            forward: proof => forallIntro(variable, inner.forward(forallElim(proof, x))),
+            backward: proof => forallIntro(variable, inner.backward(forallElim(proof, x))) };
         }
-        return { goal: exists(variable, inner.goal),
-          lift: proof => existsElim(proof, variable, existsIntro(variable, body, v(variable), inner.lift(assume(inner.goal)))) };
+        return { formula: exists(shown, presented),
+          forward: proof => existsElim(proof, variable,
+            existsIntro(shown, presented, x, inner.forward(assume(body)))),
+          backward: proof => existsElim(proof, variable,
+            existsIntro(bound, item.body, x, inner.backward(assume(inner.formula)))) };
       }
-      case "and": {
-        const left = descend(formula.left);
-        const right = descend(formula.right);
+      case "and":
+      case "or":
+      case "imp":
+      case "iff": {
+        const left = descend(item.left);
+        const right = descend(item.right);
         if (!left && !right) return undefined;
-        return { goal: and(left?.goal ?? formula.left, right?.goal ?? formula.right),
-          lift: proof => andIntro(left ? left.lift(andElimLeft(proof)) : andElimLeft(proof),
-            right ? right.lift(andElimRight(proof)) : andElimRight(proof)) };
-      }
-      case "or": {
-        const left = descend(formula.left);
-        const right = descend(formula.right);
-        if (!left && !right) return undefined;
-        const leftGoal = left?.goal ?? formula.left;
-        const rightGoal = right?.goal ?? formula.right;
-        return { goal: or(leftGoal, rightGoal),
-          lift: proof => orElim(proof,
-            orIntroLeft(left ? left.lift(assume(leftGoal)) : assume(leftGoal), formula.right),
-            orIntroRight(formula.left, right ? right.lift(assume(rightGoal)) : assume(rightGoal))) };
-      }
-      case "imp": {
-        // The consequent only: an antecedent needs the other direction.
-        const right = descend(formula.right);
-        if (!right) return undefined;
-        return { goal: imp(formula.left, right.goal),
-          lift: proof => impIntro(formula.left, right.lift(impElim(proof, assume(formula.left)))) };
+        const l = left ?? identity(item.left);
+        const r = right ?? identity(item.right);
+        const opened: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }> =
+          { tag: item.tag, left: l.formula, right: r.formula };
+        // Each direction is the same construction with the two formulas
+        // exchanged: `from` is proved, `to` is wanted, and the sides cross
+        // by `fl`/`fr` (the way of travel) and `bl`/`br` (the way back).
+        const direction = (
+          from: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+          to: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+          fl: (proof: Proof) => Proof, fr: (proof: Proof) => Proof,
+          bl: (proof: Proof) => Proof, br: (proof: Proof) => Proof,
+        ) => (proof: Proof): Proof => {
+          switch (item.tag) {
+            case "and": return andIntro(fl(andElimLeft(proof)), fr(andElimRight(proof)));
+            case "or": return orElim(proof,
+              orIntroLeft(fl(assume(from.left)), to.right),
+              orIntroRight(to.left, fr(assume(from.right))));
+            case "imp": return impIntro(to.left, fr(impElim(proof, bl(assume(to.left)))));
+            default: return iffIntro(
+              impIntro(to.left, fr(impElim(iffElimLeft(proof), bl(assume(to.left))))),
+              impIntro(to.right, fl(impElim(iffElimRight(proof), br(assume(to.right))))));
+          }
+        };
+        return { formula: opened,
+          forward: direction(item, opened, l.forward, r.forward, l.backward, r.backward),
+          backward: direction(opened, item, l.backward, r.backward, l.forward, r.forward) };
       }
       default:
         return undefined;
     }
   };
-  return descend(goal);
+  return descend(formula);
+}
+
+/**
+ * The equations a definition unfolds by: a definition by cases has one per
+ * case under `equation.*`; any other rule stands alone.
+ */
+function definitionEquations(kernel: Kernel, rule: Proof): readonly Proof[] {
+  if (rule.rule !== "definition") return [rule];
+  const record = kernel.definitions.get(rule.name);
+  const cases = [...(record?.properties.keys() ?? [])]
+    .filter(key => key.startsWith("equation.")).sort();
+  return cases.length ? cases.map(property => definition(rule.name, property)) : [rule];
+}
+
+/**
+ * A fact with every predicate definition among `rules` opened wherever the
+ * fact mentions it, as `unfold` opens it. `simp` reaches a fact's outer
+ * proposition with an equivalence; a definition named among its rules is
+ * meant to be opened at depth too.
+ */
+function unfoldNamedPredicates(
+  kernel: Kernel, fact: LocalProof, rules: readonly Proof[],
+  assumptions: readonly Formula[], facts: readonly Proof[],
+  visibility: ScopeVisibility | undefined, taken: ReadonlySet<string>,
+): LocalProof {
+  let result = fact;
+  for (const rule of rules) {
+    if (!openingRule(kernel, rule, assumptions)) continue;
+    const opened = unfoldThroughout(kernel, result.formula, [rule],
+      assumptions, facts, visibility, taken);
+    if (opened) result = { formula: opened.formula, proof: opened.forward(result.proof) };
+  }
+  return result;
+}
+
+/**
+ * Whether a rule opens instances as a definition does: a predicate or
+ * set-builder definition, or an equivalence such as a membership
+ * characterization whose right side does not mention the symbol its left
+ * side characterizes, so that opening every instance terminates.
+ */
+function openingRule(kernel: Kernel, rule: Proof, assumptions: readonly Formula[]): boolean {
+  if (rule.rule === "definition") {
+    return ["predicate", "separation"].includes(kernel.definitions.get(rule.name)?.kind ?? "");
+  }
+  let schema: Formula;
+  try { schema = kernel.checkProof(rule, assumptions); } catch { return false; }
+  while (schema.tag === "forall") schema = schema.body;
+  if (schema.tag !== "iff" || schema.left.tag !== "pred") return false;
+  const characterized = schema.left.pred === "in" && schema.left.args[1]?.tag === "app"
+    ? schema.left.args[1].fn : schema.left.pred;
+  return !formulaMentionsSymbol(schema.right, characterized);
+}
+
+/**
+ * The hint appended when `unfold` finds nothing for a set-builder
+ * definition `f`: its definition is its membership characterization, so
+ * only `x ∈ f(…)` instances open, and a formula that mentions `f(…)` only
+ * as a set, on a side of `=` or `⊆`, is reasoned about through `ext`.
+ */
+function setBuilderUnfoldHint(kernel: Kernel, rule: Proof, written: string, formula: Formula): string {
+  if (rule.rule !== "definition" || kernel.definitions.get(rule.name)?.kind !== "separation") return "";
+  if (!formulaMentionsSymbol(formula, rule.name)) return "";
+  return `; ${written} is a set-builder; unfold opens x ∈ ${written}(…) instances, ` +
+    `use ext to reason about ${written}(…) as a set`;
+}
+
+/**
+ * A rule stating a negation, `∀ x, ¬ P(x)` such as the empty-set law
+ * `x ∉ ∅`, read as the equivalence `P(x) ↔ ⊥`, so that simplification
+ * rewrites the atom wherever it occurs rather than only refuting it at the
+ * head. Rules of any other shape give nothing.
+ */
+function negatedRuleAsEquivalence(kernel: Kernel, rule: Proof, assumptions: readonly Formula[]): Proof | undefined {
+  let schema: Formula;
+  try { schema = kernel.checkProof(rule, assumptions); } catch { return undefined; }
+  const variables: string[] = [];
+  while (schema.tag === "forall") { variables.push(schema.variable); schema = schema.body; }
+  if (schema.tag !== "imp" || schema.right.tag !== "bottom" || schema.left.tag === "imp") return undefined;
+  // The equivalence is stated over internal variable names, which no
+  // source can write, so it generalizes in every context the search
+  // extends while the rule is in use.
+  const taken = new Set<string>();
+  assumptions.forEach(item => freeFormulaVariables(item).forEach(name => taken.add(name)));
+  const fresh = variables.map(name => {
+    const chosen = freshSurfaceVariable(`__${name}`, taken);
+    taken.add(chosen);
+    return chosen;
+  });
+  let atom = schema.left;
+  variables.forEach((name, index) => { atom = substituteFormula(atom, name, v(fresh[index]!)); });
+  const instance = fresh.length ? at(rule, ...fresh.map(name => v(name))) : rule;
+  let proof: Proof = iffIntro(
+    impIntro(atom, impElim(instance, assume(atom))),
+    impIntro(bottom, falseElim(atom, assume(bottom))));
+  for (const name of [...fresh].reverse()) proof = forallIntro(name, proof);
+  return proof;
+}
+
+/** `rules` with the equivalence form of every negation rule among them added. */
+function withNegationEquivalences(kernel: Kernel, rules: readonly Proof[], assumptions: readonly Formula[]): Proof[] {
+  return rules.flatMap(rule => {
+    const equivalence = negatedRuleAsEquivalence(kernel, rule, assumptions);
+    return equivalence ? [rule, equivalence] : [rule];
+  });
+}
+
+/**
+ * Absorb `⊥` under the connectives of a formula: `⊥ ∧ P` and `P ∧ ⊥` are
+ * `⊥`, `⊥ ∨ P` and `P ∨ ⊥` are `P`, and `P ↔ ⊥` and `⊥ ↔ P` are `¬P`.
+ * Children are reduced first. Undefined when nothing changes.
+ */
+function absorbBottom(formula: Formula): UnfoldTransport | undefined {
+  const identity = (item: Formula): UnfoldTransport =>
+    ({ formula: item, forward: proof => proof, backward: proof => proof });
+  const compose = (outer: UnfoldTransport | undefined, inner: UnfoldTransport | undefined): UnfoldTransport | undefined =>
+    !inner ? outer : !outer ? inner : {
+      formula: inner.formula,
+      forward: proof => inner.forward(outer.forward(proof)),
+      backward: proof => outer.backward(inner.backward(proof)),
+    };
+  // One law at the root of `item`, whose sides are already reduced.
+  const law = (item: Formula): UnfoldTransport | undefined => {
+    if (item.tag !== "and" && item.tag !== "or" && item.tag !== "iff") return undefined;
+    const { left, right } = item;
+    const leftFalse = left.tag === "bottom";
+    const rightFalse = right.tag === "bottom";
+    if (!leftFalse && !rightFalse) return undefined;
+    const other = leftFalse ? right : left;
+    switch (item.tag) {
+      case "and": return { formula: bottom,
+        forward: proof => leftFalse ? andElimLeft(proof) : andElimRight(proof),
+        backward: proof => falseElim(item, proof) };
+      case "or": return { formula: other,
+        forward: proof => leftFalse
+          ? orElim(proof, falseElim(other, assume(bottom)), assume(other))
+          : orElim(proof, assume(other), falseElim(other, assume(bottom))),
+        backward: proof => leftFalse ? orIntroRight(bottom, proof) : orIntroLeft(proof, bottom) };
+      default: return { formula: not(other),
+        forward: proof => leftFalse ? iffElimRight(proof) : iffElimLeft(proof),
+        backward: proof => leftFalse
+          ? iffIntro(impIntro(bottom, falseElim(other, assume(bottom))), proof)
+          : iffIntro(proof, impIntro(bottom, falseElim(other, assume(bottom)))) };
+    }
+  };
+  const descend = (item: Formula): UnfoldTransport | undefined => {
+    if (item.tag !== "and" && item.tag !== "or" && item.tag !== "iff" && item.tag !== "imp") return undefined;
+    const left = descend(item.left);
+    const right = descend(item.right);
+    let level: UnfoldTransport | undefined;
+    if (left || right) {
+      const l = left ?? identity(item.left);
+      const r = right ?? identity(item.right);
+      const opened: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }> =
+        { tag: item.tag, left: l.formula, right: r.formula };
+      const direction = (
+        from: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+        to: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+        fl: (proof: Proof) => Proof, fr: (proof: Proof) => Proof,
+        bl: (proof: Proof) => Proof, br: (proof: Proof) => Proof,
+      ) => (proof: Proof): Proof => {
+        switch (item.tag) {
+          case "and": return andIntro(fl(andElimLeft(proof)), fr(andElimRight(proof)));
+          case "or": return orElim(proof,
+            orIntroLeft(fl(assume(from.left)), to.right),
+            orIntroRight(to.left, fr(assume(from.right))));
+          case "imp": return impIntro(to.left, fr(impElim(proof, bl(assume(to.left)))));
+          default: return iffIntro(
+            impIntro(to.left, fr(impElim(iffElimLeft(proof), bl(assume(to.left))))),
+            impIntro(to.right, fl(impElim(iffElimRight(proof), br(assume(to.right))))));
+        }
+      };
+      level = { formula: opened,
+        forward: direction(item, opened, l.forward, r.forward, l.backward, r.backward),
+        backward: direction(opened, item, l.backward, r.backward, l.forward, r.forward) };
+    }
+    return compose(level, law(level?.formula ?? item));
+  };
+  return descend(formula);
+}
+
+/** `⊤`, read as `⊥ → ⊥`, with its proof. */
+const truth: Formula = imp(bottom, bottom);
+const truthProof = (): Proof => impIntro(bottom, assume(bottom));
+const isTruth = (formula: Formula): boolean =>
+  formula.tag === "imp" && formula.left.tag === "bottom" && formula.right.tag === "bottom";
+
+/**
+ * The atoms the facts settle: `P` or `∀ x, P(x)` makes `P` true, `¬P` or
+ * `∀ x, ¬P(x)` makes it false; the variables are the schema's own. A fact
+ * of any other shape settles nothing.
+ */
+interface AtomFact {
+  readonly variables: readonly string[];
+  readonly atom: Formula;
+  readonly positive: boolean;
+  readonly proof: Proof;
+}
+function atomFacts(kernel: Kernel, facts: readonly Proof[], assumptions: readonly Formula[]): AtomFact[] {
+  const result: AtomFact[] = [];
+  for (const proof of facts) {
+    let schema: Formula;
+    try { schema = kernel.checkProof(proof, assumptions); } catch { continue; }
+    const variables: string[] = [];
+    while (schema.tag === "forall") { variables.push(schema.variable); schema = schema.body; }
+    if (schema.tag === "pred" || schema.tag === "eq") {
+      result.push({ variables, atom: schema, positive: true, proof });
+    } else if (schema.tag === "imp" && schema.right.tag === "bottom" &&
+        (schema.left.tag === "pred" || schema.left.tag === "eq")) {
+      result.push({ variables, atom: schema.left, positive: false, proof });
+    }
+  }
+  return result;
+}
+
+/**
+ * Decide what the atoms of a formula settle, and absorb the truth values:
+ * an atom a fact among `facts` proves becomes ⊤, one a fact refutes
+ * becomes ⊥, `t = t` is ⊤, and a closed equation between numeral
+ * expressions is evaluated; then `⊤ ∧ P` is `P`, `⊤ → P` is `P`, `P ↔ ⊤`
+ * is `P`, `⊤ ∨ P` is `⊤`, `⊥ → P`, `P → P`, `P ↔ P` and `∀ x, ⊤` are `⊤`,
+ * `∃ x, ⊥` is `⊥`, and the laws of `absorbBottom` apply. Binders are
+ * entered on internal names, as `unfoldThroughout` enters them, so a
+ * quantified fact settles the atoms beneath them too. Undefined when
+ * nothing changes.
+ */
+function decideTruthValues(
+  kernel: Kernel, formula: Formula, facts: readonly Proof[],
+  assumptions: readonly Formula[], taken: ReadonlySet<string>,
+): UnfoldTransport | undefined {
+  const identity = (item: Formula): UnfoldTransport =>
+    ({ formula: item, forward: proof => proof, backward: proof => proof });
+  const compose = (outer: UnfoldTransport | undefined, inner: UnfoldTransport | undefined): UnfoldTransport | undefined =>
+    !inner ? outer : !outer ? inner : {
+      formula: inner.formula,
+      forward: proof => inner.forward(outer.forward(proof)),
+      backward: proof => outer.backward(inner.backward(proof)),
+    };
+  const atoms = atomFacts(kernel, facts, assumptions);
+  const reserved = new Set(taken);
+  assumptions.forEach(item => freeFormulaVariables(item).forEach(name => reserved.add(name)));
+  const madeTrue = (evidence: () => Proof): UnfoldTransport =>
+    ({ formula: truth, forward: () => truthProof(), backward: () => evidence() });
+  const madeFalse = (atom: Formula, refutation: () => Proof): UnfoldTransport =>
+    ({ formula: bottom, forward: proof => impElim(refutation(), proof), backward: proof => falseElim(atom, proof) });
+  // The numeral expressions of a closed equation, evaluated: equal values
+  // make it true by computation, distinct values refute it through the
+  // distinctness of the literals.
+  const evaluated = (atom: Extract<Formula, { tag: "eq" }>): UnfoldTransport | undefined => {
+    if (!closedNumeralEquation(atom)) return undefined;
+    try {
+      const left = kernel.evaluate(atom.left);
+      const right = kernel.evaluate(atom.right);
+      const leftValue = naturalValue(left);
+      const rightValue = naturalValue(right);
+      if (leftValue === undefined || rightValue === undefined) return undefined;
+      if (leftValue === rightValue) {
+        const proof = kernel.proveComputation(atom.left, atom.right);
+        return madeTrue(() => proof);
+      }
+      const distinct = proveLiteralDistinctnessGoal(kernel, imp(eq(left, right), bottom));
+      if (!distinct) return undefined;
+      const refutation = impIntro(atom, impElim(distinct, calc(
+        symm(kernel.proveComputation(atom.left, left)), assume(atom), kernel.proveComputation(atom.right, right))));
+      return madeFalse(atom, () => refutation);
+    } catch { return undefined; }
+  };
+  const valueOf = (atom: Formula): UnfoldTransport | undefined => {
+    if (atom.tag !== "pred" && atom.tag !== "eq") return undefined;
+    if (atom.tag === "eq" && termEquals(atom.left, atom.right)) return madeTrue(() => refl(atom.left));
+    for (const fact of atoms) {
+      let instance: Proof;
+      if (fact.variables.length === 0) {
+        if (!formulaEquals(fact.atom, atom)) continue;
+        instance = fact.proof;
+      } else {
+        const substitution = new Map<string, Term>();
+        if (!matchFormula(fact.atom, atom, new Set(fact.variables), substitution) ||
+            fact.variables.some(variable => !substitution.has(variable))) continue;
+        instance = at(fact.proof, ...fact.variables.map(variable => substitution.get(variable)!));
+        let stated: Formula;
+        try { stated = kernel.checkProof(instance, assumptions); } catch { continue; }
+        if (!formulaEquals(stated, fact.positive ? atom : not(atom))) continue;
+      }
+      return fact.positive ? madeTrue(() => instance) : madeFalse(atom, () => instance);
+    }
+    if (atom.tag !== "eq") return undefined;
+    const closed = evaluated(atom);
+    if (closed) return closed;
+    // Distinct closed literals, `0 = 1`, and ordered pairs with a distinct
+    // literal coordinate, `(0, e) = (1, k)`, are false in any position.
+    const distinct = proveClosedDisequality(kernel, atom.left, atom.right);
+    return distinct ? madeFalse(atom, () => distinct) : undefined;
+  };
+  // One law at the root of `item`, whose parts are already reduced.
+  const law = (item: Formula): UnfoldTransport | undefined => {
+    switch (item.tag) {
+      case "and": case "or": case "iff": case "imp": break;
+      case "forall":
+        return isTruth(item.body)
+          ? { formula: truth, forward: () => truthProof(), backward: () => forallIntro(item.variable, truthProof()) }
+          : undefined;
+      case "exists":
+        return item.body.tag === "bottom"
+          ? { formula: bottom, forward: proof => existsElim(proof, item.variable, assume(bottom)),
+              backward: proof => falseElim(item, proof) }
+          : undefined;
+      default: return undefined;
+    }
+    const { left, right } = item;
+    const leftTrue = isTruth(left);
+    const rightTrue = isTruth(right);
+    switch (item.tag) {
+      case "and":
+        if (leftTrue) return { formula: right, forward: andElimRight, backward: proof => andIntro(truthProof(), proof) };
+        if (rightTrue) return { formula: left, forward: andElimLeft, backward: proof => andIntro(proof, truthProof()) };
+        return absorbBottom(item);
+      case "or":
+        if (leftTrue) return { formula: truth, forward: () => truthProof(), backward: () => orIntroLeft(truthProof(), right) };
+        if (rightTrue) return { formula: truth, forward: () => truthProof(), backward: () => orIntroRight(left, truthProof()) };
+        return absorbBottom(item);
+      case "imp":
+        if (left.tag === "bottom") {
+          if (right.tag === "bottom") return undefined;
+          return { formula: truth, forward: () => truthProof(),
+            backward: () => impIntro(bottom, falseElim(right, assume(bottom))) };
+        }
+        if (leftTrue) return { formula: right, forward: proof => impElim(proof, truthProof()), backward: proof => impIntro(truth, proof) };
+        if (rightTrue) return { formula: truth, forward: () => truthProof(), backward: () => impIntro(left, truthProof()) };
+        if (formulaEquals(left, right)) {
+          return { formula: truth, forward: () => truthProof(), backward: () => impIntro(left, assume(left)) };
+        }
+        return undefined;
+      default:
+        if (leftTrue) return { formula: right, forward: proof => impElim(iffElimLeft(proof), truthProof()),
+          backward: proof => iffIntro(impIntro(truth, proof), impIntro(right, truthProof())) };
+        if (rightTrue) return { formula: left, forward: proof => impElim(iffElimRight(proof), truthProof()),
+          backward: proof => iffIntro(impIntro(left, truthProof()), impIntro(truth, proof)) };
+        if (formulaEquals(left, right)) {
+          return { formula: truth, forward: () => truthProof(),
+            backward: () => iffIntro(impIntro(left, assume(left)), impIntro(left, assume(left))) };
+        }
+        return absorbBottom(item);
+    }
+  };
+  const descend = (item: Formula): UnfoldTransport | undefined => {
+    switch (item.tag) {
+      case "bottom": return undefined;
+      case "pred":
+      case "eq": return valueOf(item);
+      case "forall":
+      case "exists": {
+        const bound = item.variable;
+        const variable = freshSurfaceVariable(`__${bound}`, new Set([...reserved, ...freeFormulaVariables(item)]));
+        const body = substituteFormula(item.body, bound, v(variable));
+        reserved.add(variable);
+        const inner = descend(body);
+        if (!inner) return law(item);
+        const x = v(variable);
+        const shown = freeFormulaVariables(inner.formula).has(bound) ? variable : bound;
+        const presented = shown === variable ? inner.formula : substituteFormula(inner.formula, variable, v(bound));
+        const level: UnfoldTransport = item.tag === "forall"
+          ? { formula: forall(shown, presented),
+              forward: proof => forallIntro(variable, inner.forward(forallElim(proof, x))),
+              backward: proof => forallIntro(variable, inner.backward(forallElim(proof, x))) }
+          : { formula: exists(shown, presented),
+              forward: proof => existsElim(proof, variable,
+                existsIntro(shown, presented, x, inner.forward(assume(body)))),
+              backward: proof => existsElim(proof, variable,
+                existsIntro(bound, item.body, x, inner.backward(assume(inner.formula)))) };
+        return compose(level, law(level.formula));
+      }
+      default: {
+        const left = descend(item.left);
+        const right = descend(item.right);
+        let level: UnfoldTransport | undefined;
+        if (left || right) {
+          const l = left ?? identity(item.left);
+          const r = right ?? identity(item.right);
+          const opened: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }> =
+            { tag: item.tag, left: l.formula, right: r.formula };
+          const direction = (
+            from: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+            to: Extract<Formula, { tag: "and" | "or" | "imp" | "iff" }>,
+            fl: (proof: Proof) => Proof, fr: (proof: Proof) => Proof,
+            bl: (proof: Proof) => Proof, br: (proof: Proof) => Proof,
+          ) => (proof: Proof): Proof => {
+            switch (item.tag) {
+              case "and": return andIntro(fl(andElimLeft(proof)), fr(andElimRight(proof)));
+              case "or": return orElim(proof,
+                orIntroLeft(fl(assume(from.left)), to.right),
+                orIntroRight(to.left, fr(assume(from.right))));
+              case "imp": return impIntro(to.left, fr(impElim(proof, bl(assume(to.left)))));
+              default: return iffIntro(
+                impIntro(to.left, fr(impElim(iffElimLeft(proof), bl(assume(to.left))))),
+                impIntro(to.right, fl(impElim(iffElimRight(proof), br(assume(to.right))))));
+            }
+          };
+          level = { formula: opened,
+            forward: direction(item, opened, l.forward, r.forward, l.backward, r.backward),
+            backward: direction(opened, item, l.backward, r.backward, l.forward, r.forward) };
+        }
+        return compose(level, law(level?.formula ?? item));
+      }
+    }
+  };
+  const result = descend(formula);
+  return result && !formulaEquals(result.formula, formula) ? result : undefined;
+}
+
+/** The predicate symbols a formula mentions. */
+function predicateSymbols(formula: Formula, into = new Set<string>()): Set<string> {
+  switch (formula.tag) {
+    case "bottom":
+    case "eq": return into;
+    case "pred": into.add(formula.pred); return into;
+    case "imp":
+    case "and":
+    case "or":
+    case "iff":
+      predicateSymbols(formula.left, into);
+      return predicateSymbols(formula.right, into);
+    case "forall":
+    case "exists": return predicateSymbols(formula.body, into);
+  }
 }
 
 function joinTheoremClauseContinuations(block: readonly SourceLine[]): readonly SourceLine[] {
@@ -9676,6 +11132,39 @@ function unfoldGoal(
 }
 
 /**
+ * The rule that opens an atom one layer: a defined predicate's definition,
+ * with the count of its generated carrier guards, or the membership law of
+ * a set-builder definition instantiated at the atom `t ∈ f(…)`, so a
+ * comprehension's membership is taken apart, projected, built, and
+ * introduced through its law as a predicate is through its definition.
+ * Undefined when the atom has no such rule.
+ */
+function atomOpeningRule(
+  kernel: Kernel, scope: SurfaceScope, line: number, atom: Formula,
+): { readonly rule: Proof; readonly guards: number } | undefined {
+  if (atom.tag !== "pred" || atom.args.length === 0) return undefined;
+  if (atom.pred === "in" && atom.args.length === 2) {
+    const set = atom.args[1]!;
+    if (set.tag !== "app") return undefined;
+    const law = kernel.definitions.get(set.fn)?.properties.get("membership");
+    if (!law || !visibleDeclaration(set.fn, scope)) return undefined;
+    const variables: string[] = [];
+    let body: Formula = law;
+    while (body.tag === "forall") { variables.push(body.variable); body = body.body; }
+    if (body.tag !== "iff") return undefined;
+    const substitution = new Map<string, Term>();
+    if (!matchFormula(body.left, atom, new Set(variables), substitution) ||
+        variables.some(variable => !substitution.has(variable))) return undefined;
+    return { rule: at(definition(set.fn, "membership"), ...variables.map(variable => substitution.get(variable)!)), guards: 0 };
+  }
+  try {
+    return { rule: resolveProof(kernel, atom.pred, line, scope), guards: predicateSoftGuardCount(atom.pred, kernel, scope) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * A fact through a defined predicate, as its body with the definition's
  * generated carrier guards peeled; undefined when the predicate has no
  * definition or the fact is not an instance of it.
@@ -9703,9 +11192,10 @@ function unfoldPredicateFact(
   }
   if (fact.formula.tag !== "pred" || fact.formula.args.length === 0) return undefined;
   try {
-    const rule = resolveProof(kernel, fact.formula.pred, line, scope);
-    let unfolded = unfoldFormula(kernel, rule, fact, assumptions, line);
-    const guards = predicateSoftGuardCount(fact.formula.pred, kernel, scope);
+    const opening = atomOpeningRule(kernel, scope, line, fact.formula);
+    if (!opening) return undefined;
+    let unfolded = unfoldFormula(kernel, opening.rule, fact, assumptions, line);
+    const guards = opening.guards;
     for (let index = 0; index < guards && unfolded.formula.tag === "and"; index += 1) {
       unfolded = { formula: unfolded.formula.right, proof: andElimRight(unfolded.proof) };
     }
@@ -9713,6 +11203,44 @@ function unfoldPredicateFact(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A formula with every defined-predicate atom opened one layer, beneath
+ * the connectives and binders, with the definitions' generated carrier
+ * guards dropped: a pattern for matching only, never evidence. Undefined
+ * when no atom has a definition.
+ */
+function openedAtoms(
+  kernel: Kernel, scope: SurfaceScope, line: number, formula: Formula, assumptions: readonly Formula[],
+): Formula | undefined {
+  let changed = false;
+  const visit = (current: Formula): Formula => {
+    switch (current.tag) {
+      case "pred": {
+        if (current.args.length === 0) return current;
+        try {
+          const rule = resolveProof(kernel, current.pred, line, scope);
+          let body = unfoldGoal(kernel, rule, current, assumptions, line).formula;
+          const guards = predicateSoftGuardCount(current.pred, kernel, scope);
+          for (let index = 0; index < guards && body.tag === "and"; index += 1) body = body.right;
+          changed = true;
+          return body;
+        } catch {
+          return current;
+        }
+      }
+      case "and": return and(visit(current.left), visit(current.right));
+      case "or": return or(visit(current.left), visit(current.right));
+      case "imp": return imp(visit(current.left), visit(current.right));
+      case "iff": return iff(visit(current.left), visit(current.right));
+      case "forall": return forall(current.variable, visit(current.body));
+      case "exists": return exists(current.variable, visit(current.body));
+      default: return current;
+    }
+  };
+  const opened = visit(formula);
+  return changed ? opened : undefined;
 }
 
 /**
@@ -9746,11 +11274,12 @@ function unfoldPredicateGoal(
   }
   if (goal.tag !== "pred" || goal.args.length === 0) return undefined;
   try {
-    const rule = resolveProof(kernel, goal.pred, line, scope);
-    const unfolded = unfoldGoal(kernel, rule, goal, assumptions, line);
+    const opening = atomOpeningRule(kernel, scope, line, goal);
+    if (!opening) return undefined;
+    const unfolded = unfoldGoal(kernel, opening.rule, goal, assumptions, line);
     let reduced = unfolded.formula;
     let rebuild: (inner: Proof) => Proof = inner => inner;
-    const guards = predicateSoftGuardCount(goal.pred, kernel, scope);
+    const guards = opening.guards;
     for (let index = 0; index < guards; index += 1) {
       if (reduced.tag !== "and") return undefined;
       const guard = reduced.left;
@@ -9791,6 +11320,34 @@ function bridgeDefinition(
   if (forward && formulaEquals(forward.formula, wanted)) return forward.proof;
   const backward = unfoldPredicateGoal(kernel, scope, line, wanted, assumptions, locals);
   if (backward && formulaEquals(backward.formula, actual)) return backward.fold(proof);
+  // A definition nested under the connectives, `EvenSet(X) ↔ EvenSet(Y)`
+  // against `Even(cardinality(X)) ↔ Even(cardinality(Y))`: the predicate
+  // definitions one side mentions and the other does not are opened
+  // throughout that side, as `unfold` opens them.
+  const facts = [...locals.values()].map(item => item.proof);
+  const taken = new Set([...freeFormulaVariables(actual), ...freeFormulaVariables(wanted)]);
+  const opened = (from: Formula, to: Formula): UnfoldTransport | undefined => {
+    const kept = predicateSymbols(to);
+    const names = [...predicateSymbols(from)].filter(name =>
+      !kept.has(name) && kernel.definitions.get(name)?.kind === "predicate");
+    let result: UnfoldTransport | undefined;
+    for (const name of names) {
+      let rule: Proof;
+      try { rule = resolveProof(kernel, name, line, scope); } catch { continue; }
+      const step = unfoldThroughout(kernel, result?.formula ?? from, [rule], assumptions, facts,
+        scopeVisibility(kernel, scope), taken);
+      if (!step) continue;
+      const previous = result;
+      result = !previous ? step : { formula: step.formula,
+        forward: item => step.forward(previous.forward(item)),
+        backward: item => previous.backward(step.backward(item)) };
+    }
+    return result && formulaEquals(result.formula, to) ? result : undefined;
+  };
+  const openedActual = opened(actual, wanted);
+  if (openedActual) return openedActual.forward(proof);
+  const openedWanted = opened(wanted, actual);
+  if (openedWanted) return openedWanted.backward(proof);
   return undefined;
 }
 
@@ -9837,14 +11394,42 @@ function tacticState(goal: Formula, assumptions: readonly Formula[], locals: Rea
   };
 }
 
+/**
+ * `rw thm with facts` whose rule side occurs at several instances of the
+ * goal or fact: the rewrite is repeated at each, with the parameters the
+ * instance fixes supplied.
+ */
+class RewriteInstancesError extends SurfaceError {
+  readonly instances: readonly ReadonlyMap<string, Term>[];
+
+  constructor(line: number, message: string, instances: readonly ReadonlyMap<string, Term>[]) {
+    super(line, message);
+    this.instances = instances;
+  }
+}
+
 interface ProofExpressionContext {
   expectedConclusion?: Formula;
+  /** The parameters one instance of a repeated rewrite fixes; for this application only. */
+  rewriteInstance?: ReadonlyMap<string, Term>;
   /** Infer bare apply parameters while retaining its proof obligations. */
   applicationGoal?: boolean;
   localProofs?: Proof[];
   instanceProver?: InstanceProver;
   /** The conjuncts of transparent guard facts in scope, each with its proof. */
   openedGuards?: GuardFact[];
+  /**
+   * The goal or fact a `rw` with this application rewrites, and the
+   * direction: parameters the premises leave open are fixed by the unique
+   * instance of the rule's rewritten side that occurs in it.
+   */
+  rewriteTarget?: { readonly formula: Formula; readonly reverse: boolean };
+  /**
+   * Variables of the expected conclusion that stand for terms not yet
+   * known: the open parameters of an outer application whose requirement
+   * this nested application fills.
+   */
+  flexibleVariables?: ReadonlySet<string>;
 }
 
 /**
@@ -9926,16 +11511,99 @@ function conjunctionParts(formula: Formula): Formula[] {
   return formula.tag === "and" ? [formula.left, ...conjunctionParts(formula.right)] : [formula];
 }
 
+/** How the components of an anonymous constructor are read for inference. */
+interface ConstructorComponents {
+  /** The statement of a component that is a local fact; null or undefined otherwise. */
+  readonly formula: (text: string) => Formula | null | undefined;
+  /** The term a component denotes, when it reads as one. */
+  readonly term: (text: string) => Term | undefined;
+  /** How a conjunct is matched against a component's statement; structural matching by default. */
+  readonly match?: (target: Formula, statement: Formula, inferred: Map<string, Term>) => boolean;
+}
+
+/**
+ * Match a requirement against an anonymous constructor `⟨a, b⟩` in a with
+ * list, so the components fix the theorem's parameters exactly as named
+ * entries do: each conjunct is matched against the fact its component
+ * names, and a witness term fills an existential. Nested constructors
+ * recurse. A component that is not a local fact or term, or that meets its
+ * conjunct only through a definition, makes the match fail; the
+ * constructor is then checked against the premise once the parameters
+ * are known from elsewhere, as before.
+ */
+function matchConstructorPremise(
+  target: Formula, text: string, parameters: ReadonlySet<string>,
+  inferred: Map<string, Term>, components: ConstructorComponents,
+): boolean {
+  const parts = (constructor: string): string[] =>
+    splitTopLevel(constructor.trim().slice(1, -1), ",")
+      .map(part => part.trim());
+  const matchParts = (formula: Formula, remaining: readonly string[]): boolean => {
+    if (remaining.length === 0) return false;
+    if (remaining.length === 1) return matchComponent(formula, remaining[0]!);
+    if (formula.tag === "and") {
+      return matchComponent(formula.left, remaining[0]!) &&
+        matchParts(formula.right, remaining.slice(1));
+    }
+    if (formula.tag === "exists") {
+      const witness = components.term(remaining[0]!);
+      // A witness naming a parameter would be read as the parameter once
+      // substituted into the body, so such a component is left alone.
+      if (!witness) return false;
+      if ([...freeTermVariables(witness)].some(name => parameters.has(name))) return false;
+      const body = substituteFormula(formula.body, formula.variable, witness);
+      return matchParts(body, remaining.slice(1));
+    }
+    return false;
+  };
+  const matchComponent = (formula: Formula, component: string): boolean => {
+    if (/^⟨.*⟩$/su.test(component)) return matchParts(formula, parts(component));
+    const statement = components.formula(component);
+    return statement !== null && statement !== undefined &&
+      (components.match ?? ((target, actual, bindings) => matchNamedPremise(target, actual, parameters, bindings)))(formula, statement, inferred);
+  };
+  return matchParts(target, parts(text));
+}
+
+/** A numeral, or the constructor form zero/succ(…) an induction case substitutes for it. */
+function numeralShaped(term: Term): boolean {
+  return term.tag === "nat" || (term.tag === "app" && (term.fn === "zero" || term.fn === "succ"));
+}
+
+/**
+ * Structural matching of a requirement against a fact: the parameters are
+ * the pattern's variables that may be instantiated, and every binding is
+ * recorded in `inferred`. A numeral and the constructor term of the same
+ * value, `0` and `zero`, match as the kernel identifies them. A variable
+ * of the fact named in `flexible` stands for a term not yet known, as an
+ * outer application's open parameter does while a nested application is
+ * elaborated: it matches any pattern term without a binding.
+ */
 function matchNamedPremise(pattern: Formula, actual: Formula,
   parameters: ReadonlySet<string>, inferred: Map<string, Term>,
-  bound: ReadonlySet<string> = new Set()): boolean {
+  bound: ReadonlySet<string> = new Set(), flexible?: ReadonlySet<string>): boolean {
   const term = (left: Term, right: Term): boolean => {
+    if (right.tag === "var" && flexible?.has(right.name)) return true;
     if (left.tag === "var" && parameters.has(left.name)) {
       if ([...freeTermVariables(right)].some(name => bound.has(name))) return false;
       const previous = inferred.get(left.name);
       if (previous) return termEquals(previous, right);
       inferred.set(left.name, right);
       return true;
+    }
+    if (numeralShaped(left) || numeralShaped(right)) {
+      const leftValue = naturalValue(left);
+      const rightValue = naturalValue(right);
+      if (leftValue !== undefined && rightValue !== undefined) return leftValue === rightValue;
+      // succ(p) against a positive numeral matches p against the predecessor,
+      // so a pattern succ(n) with n open meets the fact's 1.
+      if (left.tag === "app" && left.fn === "succ" && left.args.length === 1 && rightValue !== undefined && rightValue > 0n) {
+        return term(left.args[0]!, nat(String(rightValue - 1n)));
+      }
+      if (right.tag === "app" && right.fn === "succ" && right.args.length === 1 && leftValue !== undefined && leftValue > 0n) {
+        return term(nat(String(leftValue - 1n)), right.args[0]!);
+      }
+      if (leftValue !== undefined || rightValue !== undefined) return false;
     }
     if (left.tag !== right.tag) return false;
     if (left.tag === "var" && right.tag === "var") return left.name === right.name;
@@ -9951,8 +11619,8 @@ function matchNamedPremise(pattern: Formula, actual: Formula,
       pattern.args.length === actual.args.length && pattern.args.every((arg, i) => term(arg, actual.args[i]!));
     case "and": case "or": case "imp": case "iff":
       return actual.tag === pattern.tag &&
-        matchNamedPremise(pattern.left, actual.left, parameters, inferred, bound) &&
-        matchNamedPremise(pattern.right, actual.right, parameters, inferred, bound);
+        matchNamedPremise(pattern.left, actual.left, parameters, inferred, bound, flexible) &&
+        matchNamedPremise(pattern.right, actual.right, parameters, inferred, bound, flexible);
     case "forall": case "exists": {
       if (actual.tag !== pattern.tag) return false;
       const forbidden = new Set([...parameters, ...bound,
@@ -9960,9 +11628,54 @@ function matchNamedPremise(pattern: Formula, actual: Formula,
       for (const value of inferred.values()) for (const name of freeTermVariables(value)) forbidden.add(name);
       const fresh = freshSurfaceVariable("__premise_bound", forbidden);
       return matchNamedPremise(substituteFormula(pattern.body, pattern.variable, v(fresh)),
-        substituteFormula(actual.body, actual.variable, v(fresh)), parameters, inferred, new Set([...bound, fresh]));
+        substituteFormula(actual.body, actual.variable, v(fresh)), parameters, inferred, new Set([...bound, fresh]), flexible);
     }
   }
+}
+
+/** A rewrite rule's side: a term of an equation, or a formula of an equivalence. */
+type RuleSide = { readonly term: Term } | { readonly formula: Formula };
+
+/**
+ * The distinct instantiations of a rewrite rule's side that occur in a
+ * formula: each subterm (or, for an equivalence rule, each subformula)
+ * the side matches, with the bindings it fixes beyond those already
+ * inferred. A subterm mentioning a variable bound above it is not an
+ * instance. `rw thm with facts` uses this to fix the parameters the named
+ * premises leave open.
+ */
+function ruleSideInstances(
+  side: RuleSide, target: Formula, parameters: ReadonlySet<string>, inferred: ReadonlyMap<string, Term>,
+): Map<string, Term>[] {
+  const found: Map<string, Term>[] = [];
+  const record = (candidate: Map<string, Term>): void => {
+    if (candidate.size === inferred.size) return;
+    if (found.some(item => item.size === candidate.size &&
+      [...candidate].every(([name, value]) => item.has(name) && termEquals(value, item.get(name)!)))) return;
+    found.push(candidate);
+  };
+  const visitTerm = (term: Term, bound: ReadonlySet<string>): void => {
+    if ("term" in side) {
+      const candidate = new Map(inferred);
+      if (matchNamedPremise(eq(side.term, side.term), eq(term, term), parameters, candidate, bound)) record(candidate);
+    }
+    if (term.tag === "app") for (const argument of term.args) visitTerm(argument, bound);
+  };
+  const visit = (formula: Formula, bound: ReadonlySet<string>): void => {
+    if ("formula" in side) {
+      const candidate = new Map(inferred);
+      if (matchNamedPremise(side.formula, formula, parameters, candidate, bound)) record(candidate);
+    }
+    switch (formula.tag) {
+      case "bottom": return;
+      case "eq": visitTerm(formula.left, bound); visitTerm(formula.right, bound); return;
+      case "pred": for (const argument of formula.args) visitTerm(argument, bound); return;
+      case "and": case "or": case "imp": case "iff": visit(formula.left, bound); visit(formula.right, bound); return;
+      case "forall": case "exists": visit(formula.body, new Set([...bound, formula.variable])); return;
+    }
+  };
+  visit(target, new Set());
+  return found;
 }
 
 function parseProofExpression(
@@ -9976,9 +11689,66 @@ function parseProofExpression(
 ): Proof {
   text = expandCountedPremises(text, line);
   const visibility = scopeVisibility(kernel, scope);
+  // The instance a repeated rewrite supplies is for this application only,
+  // never for the nested applications in its with list.
+  const rewriteInstance = expressionContext.rewriteInstance;
+  if (rewriteInstance) {
+    const { rewriteInstance: _own, ...outer } = expressionContext;
+    expressionContext = outer;
+  }
   // A parenthesized proof expression groups an application, as inside the
   // components of refine ⟨…⟩ where commas separate components.
   while (outerParenthesized(text.trim())) text = text.trim().slice(1, -1);
+  // A parenthesised application takes projections: `(thm with h).left`,
+  // `.right`, `.forward`, and `.backward` elaborate the application and
+  // project its statement, through a predicate definition whose body is
+  // a conjunction, wherever a proof expression is accepted.
+  // A parenthesised application without a projection is the head of a
+  // further application: `(thm with h) with u, hu`.
+  // The head is the balanced leading group: a later entry may be
+  // parenthesised too, `(thm with h).forward with (lemma with k)`.
+  const projected = ((): [string, string, string, string | undefined] | undefined => {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("(")) return undefined;
+    let depth = 0;
+    let close = -1;
+    for (let index = 0; index < trimmed.length; index += 1) {
+      const char = trimmed[index];
+      if (char === "(") depth += 1;
+      else if (char === ")") { depth -= 1; if (depth === 0) { close = index; break; } }
+    }
+    if (close < 0) return undefined;
+    const rest = /^((?:\.(?:left|right|forward|backward))*)(\s+(?:with|at)\s+.+)?$/su.exec(trimmed.slice(close + 1));
+    if (!rest) return undefined;
+    return [trimmed, trimmed.slice(0, close + 1), rest[1]!, rest[2]];
+  })();
+  if (projected && (projected[2] || projected[3]) && outerParenthesized(projected[1]!)) {
+    const { expectedConclusion: _expected, flexibleVariables: _flexible, applicationGoal: _apply, ...inner } = expressionContext;
+    let proof = parseProofExpression(kernel, projected[1]!, current, variables, line, scope, inner);
+    let formula = kernel.checkProof(proof, current.assumptions);
+    for (const part of projected[2] ? projected[2].slice(1).split(".") : []) {
+      if (formula.tag === "pred") {
+        const unfolded = unfoldPredicateFact(kernel, scope, line, { formula, proof }, current.assumptions,
+          part === "left" || part === "right" ? ["and"] : ["iff"]);
+        if (unfolded) ({ formula, proof } = unfolded);
+      }
+      if (part === "left" || part === "right") {
+        if (formula.tag !== "and") throw new SurfaceError(line, `${text.trim()}: .${part} requires a conjunction, found ${formatFormula(formula)}`);
+        proof = part === "left" ? andElimLeft(proof) : andElimRight(proof);
+        formula = part === "left" ? formula.left : formula.right;
+      } else {
+        if (formula.tag !== "iff") throw new SurfaceError(line, `${text.trim()}: .${part} requires an equivalence, found ${formatFormula(formula)}`);
+        proof = part === "forward" ? iffElimLeft(proof) : iffElimRight(proof);
+        formula = part === "forward" ? imp(formula.left, formula.right) : imp(formula.right, formula.left);
+      }
+    }
+    if (!projected[3]) return proof;
+    // The projected fact applies to a with or at list as a local fact does.
+    const name = freshSurfaceVariable("__projected", new Set([...variables, ...current.locals.keys()]));
+    const locals = new Map(current.locals);
+    locals.set(name, { formula, proof });
+    return parseProofExpression(kernel, `${name}${projected[3]}`, { ...current, locals }, variables, line, scope, expressionContext);
+  }
   // An anonymous constructor ⟨a, b⟩ is a proof of the expected proposition,
   // assembled as refine would assemble it; it needs that proposition, which
   // exact, show, an annotated have, and a with position all supply.
@@ -10019,11 +11789,31 @@ function parseProofExpression(
       for (let index = 0; index < generatedGuards && unfolded.formula.tag === "and"; index += 1) {
         unfolded = { formula: unfolded.formula.right, proof: andElimRight(unfolded.proof) };
       }
-      return unfolded.formula.tag === "forall" || unfolded.formula.tag === "imp" ? unfolded.proof : undefined;
+      if (unfolded.formula.tag === "forall" || unfolded.formula.tag === "imp") return unfolded.proof;
     } catch {
-      // Not a transparent predicate: the fact is applied as it stands.
-      return undefined;
+      // Not a transparent predicate: the fact is applied through its iff
+      // law when one is stated, and as it stands otherwise.
     }
+    return throughIffLaw(fact);
+  };
+  // A fact whose definition is not universal, Disjoint(X, Y) defined as
+  // X ∩ Y = ∅, applies to arguments through the law <Predicate>.iff the
+  // library states for it, when that law's right side is a ∀ or an
+  // implication: the right side of Disjoint.iff takes v, v ∈ X, v ∈ Y to
+  // ⊥. Used only when the direct application has no argument to take.
+  const throughIffLaw = (fact: LocalProof): Proof | undefined => {
+    if (fact.formula.tag !== "pred") return undefined;
+    let law: Proof;
+    try { law = resolveProof(kernel, `${shortName(fact.formula.pred)}.iff`, line, scope); } catch { return undefined; }
+    let statement: Formula;
+    try { statement = kernel.checkProof(law, current.assumptions); } catch { return undefined; }
+    const bound: string[] = [];
+    while (statement.tag === "forall") { bound.push(statement.variable); statement = statement.body; }
+    if (statement.tag !== "iff" || (statement.right.tag !== "forall" && statement.right.tag !== "imp")) return undefined;
+    const substitution = new Map<string, Term>();
+    if (!matchFormula(statement.left, fact.formula, new Set(bound), substitution) ||
+        bound.some(variable => !substitution.has(variable))) return undefined;
+    return impElim(iffElimLeft(at(law, ...bound.map(variable => substitution.get(variable)!))), fact.proof);
   };
   if (localReference && localReference.formula.tag === "pred" && (atMatch[2] || supplied.length > 0)) {
     proof = throughDefinition(localReference) ?? proof;
@@ -10045,8 +11835,17 @@ function parseProofExpression(
   let generatedGuardCount = 0;
   let inferredApplyGuards = false;
   let inferGuardsWithoutWith = false;
-  if (atMatch[2]) {
-    const terms = splitTopLevel(atMatch[2]!, ",").map(term => parseTerm(term, kernel, variables, line, scope));
+  // `at F, _, _` leaves the parameters the facts fix as holes: the written
+  // terms seed the inference below by position, as named implicit
+  // arguments do, and the holes are found from the premises.
+  const atTerms = atMatch[2] ? splitTopLevel(atMatch[2], ",").map(item => item.trim()) : [];
+  const holes = atTerms.some(item => item === "_");
+  if (holes && (!resolvedName || atTerms.length !== parameters.length)) {
+    throw new SurfaceError(line, `${baseName}: an at list with _ holes names every parameter in order${resolvedName ? `; ${baseName} has ${parameters.length}` : ""}`);
+  }
+  const atList = holes ? undefined : atMatch[2];
+  if (atList) {
+    const terms = splitTopLevel(atList, ",").map(term => parseTerm(term, kernel, variables, line, scope));
     const overrides: ImplicitOverride[] = referenceMatch[2]?.trim()
       ? splitTopLevel(referenceMatch[2]!, ",").map(item => {
           const assignment = findTopLevel(item, ":=");
@@ -10086,7 +11885,7 @@ function parseProofExpression(
   // Named implicit arguments without an at list seed the inference below
   // with those bindings; positional implicit arguments still need at.
   const implicitSeed = new Map<string, Term>();
-  if (!atMatch[2] && referenceMatch[2]?.trim()) {
+  if (!atList && referenceMatch[2]?.trim()) {
     for (const item of splitTopLevel(referenceMatch[2]!, ",")) {
       const assignment = findTopLevel(item, ":=");
       if (assignment < 0) throw new SurfaceError(line, `implicit proof arguments require an explicit \`at\` argument list`);
@@ -10095,6 +11894,10 @@ function parseProofExpression(
       implicitSeed.set(name, parseTerm(item.slice(assignment + 2), kernel, variables, line, scope));
     }
   }
+  for (const [name, value] of rewriteInstance ?? []) implicitSeed.set(name, value);
+  if (holes) atTerms.forEach((item, index) => {
+    if (item !== "_") implicitSeed.set(parameters[index]!.name, parseTerm(item, kernel, variables, line, scope));
+  });
 
   // Goal-directed inference. Without an `at` list, every parameter is found
   // by matching the conclusion against the goal, the named premises against
@@ -10112,10 +11915,10 @@ function parseProofExpression(
   const evidenceFormula = (name: string): Formula | null | undefined => {
     // The wildcard and an anonymous constructor are evidence whose formula
     // is the premise it will be checked against.
-    if (name === "assumption" || /^⟨.*⟩$/su.test(name)) return null;
+    if (name === "assumption" || name === "rfl" || /^⟨.*⟩$/su.test(name)) return null;
     // A parenthesized entry is evidence unless it reads as a term, such as an
     // ordered pair; its statement is found by checking the inner expression.
-    if (/^\(.*\)$/su.test(name)) {
+    if (/^\(.*\)(?:\.(?:left|right|forward|backward))*$/su.test(name)) {
       try { parseTerm(name, kernel, variables, line, scope); return undefined; } catch { /* not a term */ }
       try {
         return kernel.checkProof(parseProofExpression(kernel, name, current, variables, line, scope, expressionContext.localProofs !== undefined ? { localProofs: expressionContext.localProofs } : {}), current.assumptions);
@@ -10128,8 +11931,9 @@ function parseProofExpression(
     // A name that also denotes a term, such as a constant, stays a term.
     try { parseTerm(name, kernel, variables, line, scope); return undefined; } catch { /* not a term */ }
     try {
-      const closed = kernel.checkProof(resolveProof(kernel, name, line, scope), current.assumptions);
-      return closed.tag === "forall" ? undefined : closed;
+      // A theorem stated by a ∀ is evidence too: its binders are
+      // instantiated against the requirement it fills.
+      return kernel.checkProof(resolveProof(kernel, name, line, scope), current.assumptions);
     } catch { return undefined; }
   };
   const namedEvidence = namedPrefix.map(evidenceFormula);
@@ -10144,7 +11948,7 @@ function parseProofExpression(
     (parameters.length === 0 && signature.requirementCount === 0);
   // A bare `with *` on a source theorem also infers: its requirements are
   // matched against local facts, and unique matches fix the parameters.
-  if (!atMatch[2] && allLocal &&
+  if (!atList && allLocal &&
       (metadataFree ? kernel.checkProof(proof, current.assumptions).tag === "forall" : remainingBinders > 0) &&
       (expressionContext.expectedConclusion || namedPrefix.length > 0 || implicitSeed.size > 0 ||
         (starIndex >= 0 && !metadataFree))) {
@@ -10193,9 +11997,27 @@ function parseProofExpression(
       if (goal) {
         let conclusion = pattern;
         let matched = false;
+        // The goal meets the conclusion structurally, or through one layer
+        // of a predicate definition on either side: `relates(w, x, y)` for
+        // `(x, y) ∈ w`, `t ∈ ℕ` for `Nat(t)`, and `Even(cardinality(X))`
+        // for `EvenSet(X)` beneath the connectives. The evidence check
+        // bridges the two once the parameters are known.
+        const openedGoal = openedAtoms(kernel, scope, line, goal, current.assumptions);
+        const matchGoal = (candidateConclusion: Formula): Map<string, Term> | undefined => {
+          const openedConclusion = openedAtoms(kernel, scope, line, candidateConclusion, current.assumptions);
+          const pairs: readonly (readonly [Formula | undefined, Formula | undefined])[] = [
+            [candidateConclusion, goal], [candidateConclusion, openedGoal],
+            [openedConclusion, goal], [openedConclusion, openedGoal]];
+          for (const [matchPattern, actual] of pairs) {
+            if (!matchPattern || !actual) continue;
+            const candidate = new Map(inferred);
+            if (matchNamedPremise(matchPattern, actual, names, candidate, undefined, expressionContext.flexibleVariables)) return candidate;
+          }
+          return undefined;
+        };
         for (let stripped = 0; ; stripped++) {
-          const candidate = new Map(inferred);
-          if (matchNamedPremise(conclusion, goal, names, candidate)) {
+          const candidate = matchGoal(conclusion);
+          if (candidate) {
             for (const [name, value] of candidate) inferred.set(name, value);
             matched = true;
             break;
@@ -10227,18 +12049,138 @@ function parseProofExpression(
       }
       const targets = [...requirements, ...extra];
       const claimed = new Map<number, string>();
+      // A requirement meets a fact structurally, or through one layer of a
+      // predicate definition on either side: `relates(w, x, y)` fills the
+      // requirement `(x, y) ∈ w`, and conversely, as the evidence check
+      // bridges them once the parameters are known.
+      const openedOnce = (formula: Formula): Formula | undefined => formula.tag === "pred"
+        ? unfoldPredicateGoal(kernel, scope, line, formula, current.assumptions, current.locals)?.formula
+        : undefined;
+      // A fact matches a requirement structurally, or, when `bridge` is set,
+      // with one of the two opened by a definition layer (`relates(w, x, y)`
+      // for `(x, y) ∈ w`). Bridging is a fallback: a fact that fits some
+      // requirement as written is never opened, so a membership `x ∈ ℕ`
+      // meets `x ∈ A` rather than a typing guard `Nat(n)`.
+      const matchPremise = (target: Formula, statement: Formula, bindings: Map<string, Term>, bridge = true): boolean => {
+        const attempt = (pattern: Formula, actual: Formula): boolean => {
+          const candidate = new Map(bindings);
+          if (!matchNamedPremise(pattern, actual, names, candidate)) return false;
+          for (const [parameter, value] of candidate) bindings.set(parameter, value);
+          return true;
+        };
+        if (attempt(target, statement)) return true;
+        // A statement by a ∀, a theorem named as an entry, is instantiated
+        // against the requirement, as a nested application would be: its
+        // leading binders are fixed by matching the body against the
+        // requirement with the parameters inferred so far substituted and
+        // the open ones left free; a binder the requirement leaves open
+        // does not fix it.
+        if (statement.tag === "forall") {
+          const instantiated = instantiateAgainst(statement, target, bindings);
+          if (instantiated) return matchPremise(target, instantiated, bindings, bridge);
+        }
+        if (!bridge) return false;
+        const openedStatement = openedOnce(statement);
+        if (openedStatement && attempt(target, openedStatement)) return true;
+        const openedTarget = openedOnce(target);
+        return openedTarget !== undefined && attempt(openedTarget, statement);
+      };
+      function instantiateAgainst(statement: Formula, target: Formula, bindings: ReadonlyMap<string, Term>): Formula | undefined {
+        const open = new Set([...names].filter(parameter => !bindings.has(parameter)));
+        const expected = substituteManySurface(target, bindings);
+        // The theorem's own binders are renamed apart from every name in
+        // scope before its body is matched and instantiated, so a theorem
+        // stated over A and B meets a requirement about the user's A, B,
+        // and C without its A standing for their B.
+        const forbidden = new Set([...variables, ...names, ...freeFormulaVariables(expected), ...freeFormulaVariables(statement)]);
+        const binders = new Set<string>();
+        let body: Formula = statement;
+        while (body.tag === "forall") {
+          const fresh = freshSurfaceVariable(body.variable, forbidden);
+          forbidden.add(fresh);
+          binders.add(fresh);
+          body = substituteFormula(body.body, body.variable, v(fresh));
+          const candidate = new Map<string, Term>();
+          if (!matchNamedPremise(body, expected, binders, candidate, undefined, open)) continue;
+          if (candidate.size !== binders.size) continue;
+          if ([...candidate.values()].some(value => [...freeTermVariables(value)].some(name => open.has(name)))) continue;
+          return substituteManySurface(body, candidate);
+        }
+        return undefined;
+      }
+      // A bare `rfl` entry is the equation requirement whose sides it makes
+      // equal: the side still open is fixed by the other, so `thm with
+      // finite, rfl` reads the requirement `cardinality(F) = n` as `n :=
+      // cardinality(F)`. A side mentioning an open parameter fixes nothing.
+      const matchReflexive = (target: Formula, bindings: ReadonlyMap<string, Term>): Map<string, Term> | undefined => {
+        if (target.tag !== "eq") return undefined;
+        const left = substituteNamedTerm(target.left, bindings);
+        const right = substituteNamedTerm(target.right, bindings);
+        const closed = (term: Term): boolean => [...freeTermVariables(term)].every(name => !names.has(name) || bindings.has(name));
+        for (const [side, other] of [[right, left], [left, right]] as const) {
+          if (!closed(other)) continue;
+          const candidate = new Map(bindings);
+          if (matchNamedPremise(eq(side, side), eq(other, other), names, candidate)) return candidate;
+        }
+        return undefined;
+      };
+      const components: ConstructorComponents = {
+        formula: evidenceFormula,
+        term: text => {
+          try { return parseTerm(text, kernel, variables, line, scope); }
+          catch { return undefined; }
+        },
+        match: matchPremise,
+      };
+      // A nested application whose own parameters need its expected
+      // proposition, `(difference.subset_of_subset with bound)`, is
+      // elaborated after the named entries have fixed what they can, against
+      // the requirement it fills; its statement then fixes the rest.
+      const deferred: number[] = [];
       for (let position = 0; position < namedPrefix.length; position += 1) {
         const name = namedPrefix[position]!;
         const formula = namedEvidence[position];
+        if (formula === null && /^\(.*\)(?:\.(?:left|right|forward|backward))*$/su.test(name)) { deferred.push(position); continue; }
+        // The components of an anonymous constructor are local facts whose
+        // statements fix the parameters as named entries do, so an
+        // unannotated `have h := thm.backward with ⟨a, b⟩` infers from a
+        // and b rather than from a stray context fact of the right shape.
+        // A constructor that fits no open requirement stays positional.
+        if (formula === null && /^⟨.*⟩$/su.test(name)) {
+          for (let i = 0; i < targets.length; i++) {
+            if (claimed.has(i)) continue;
+            const candidate = new Map(inferred);
+            const matched = matchConstructorPremise(
+              targets[i]!, name, names, candidate, components);
+            if (!matched) continue;
+            for (const [parameter, value] of candidate) inferred.set(parameter, value);
+            claimed.set(i, name);
+            break;
+          }
+          continue;
+        }
+        if (formula === null && name === "rfl") {
+          for (let i = 0; i < targets.length; i++) {
+            if (claimed.has(i)) continue;
+            const candidate = matchReflexive(targets[i]!, inferred);
+            if (!candidate) continue;
+            for (const [parameter, value] of candidate) inferred.set(parameter, value);
+            claimed.set(i, name);
+            break;
+          }
+          continue;
+        }
         if (formula === null || formula === undefined) continue;
         let found = false;
-        for (let i = 0; i < targets.length && !found; i++) {
-          if (claimed.has(i)) continue;
-          const candidate = new Map(inferred);
-          if (!matchNamedPremise(targets[i]!, formula, names, candidate)) continue;
-          for (const [parameter, value] of candidate) inferred.set(parameter, value);
-          claimed.set(i, name);
-          found = true;
+        for (const bridge of [false, true]) {
+          for (let i = 0; i < targets.length && !found; i++) {
+            if (claimed.has(i)) continue;
+            const candidate = new Map(inferred);
+            if (!matchPremise(targets[i]!, formula, candidate, bridge)) continue;
+            for (const [parameter, value] of candidate) inferred.set(parameter, value);
+            claimed.set(i, name);
+            found = true;
+          }
         }
         // Entries listed in order may be the conjuncts of one requirement,
         // `with inSpace, notInjective` for `x ∈ A ∧ x ∉ B`: they are
@@ -10250,7 +12192,7 @@ function parseProofExpression(
           const candidate = new Map(inferred);
           const matched = parts.every((part, offset) => {
             const evidence = namedEvidence[position + offset];
-            return evidence !== null && evidence !== undefined && matchNamedPremise(part, evidence, names, candidate);
+            return evidence !== null && evidence !== undefined && matchPremise(part, evidence, candidate);
           });
           if (!matched) continue;
           for (const [parameter, value] of candidate) inferred.set(parameter, value);
@@ -10258,14 +12200,54 @@ function parseProofExpression(
           position += parts.length - 1;
           found = true;
         }
-        if (!found) {
-          const expected = targets.findIndex((_, index) => !claimed.has(index));
-          const wanted = expected < 0
-            ? "every requirement is already matched by an earlier premise"
-            : `requirement ${expected + 1} is ${formatFormula(targets[expected]!)}`;
-          throw new SurfaceError(line,
-            `${baseName}: named premise ${name} (${formatFormula(formula)}) matches no requirement; ${wanted}; supply an explicit at list if needed`);
+        // A statement by a ∀ that fits no requirement yet waits, as a
+        // nested application does, for the entries that fix the parameters
+        // its requirement mentions: `thm with union2.subset_left, joined`
+        // reads `joined` first whatever the order of the list.
+        if (!found && formula.tag === "forall") { deferred.push(position); continue; }
+        if (!found) throw noRequirement(name, formula);
+      }
+      function noRequirement(name: string, formula: Formula): SurfaceError {
+        const expected = targets.findIndex((_, index) => !claimed.has(index));
+        const wanted = expected < 0
+          ? "every requirement is already matched by an earlier premise"
+          : `requirement ${expected + 1} is ${formatFormula(targets[expected]!)}`;
+        return new SurfaceError(line,
+          `${baseName}: named premise ${name} (${formatFormula(formula)}) matches no requirement; ${wanted}; supply an explicit at list if needed`);
+      }
+      // The deferred entries are read against the open requirements with
+      // the parameters inferred so far substituted, each success fixing
+      // parameters for the others, until no entry can be placed. A bare
+      // theorem name is read as an application with no explicit premises:
+      // its requirements are discharged from the context, and its
+      // conclusion, instantiated against the requirement, fixes the rest.
+      for (let changed = true; changed && deferred.length;) {
+        changed = false;
+        for (const position of [...deferred]) {
+          const name = namedPrefix[position]!;
+          const open = new Set([...names].filter(parameter => !inferred.has(parameter)));
+          for (let i = 0; i < targets.length; i++) {
+            if (claimed.has(i)) continue;
+            let statement: Formula;
+            try {
+              const expected = substituteManySurface(targets[i]!, inferred);
+              const nested = parseProofExpression(kernel, name, current, variables, line, scope,
+                { ...expressionContext, expectedConclusion: expected, flexibleVariables: open, applicationGoal: false });
+              statement = kernel.checkProof(nested, current.assumptions);
+            } catch { continue; }
+            const candidate = new Map(inferred);
+            if (!matchPremise(targets[i]!, statement, candidate)) continue;
+            for (const [parameter, value] of candidate) inferred.set(parameter, value);
+            claimed.set(i, name);
+            deferred.splice(deferred.indexOf(position), 1);
+            changed = true;
+            break;
+          }
         }
+      }
+      for (const position of deferred) {
+        const formula = namedEvidence[position];
+        if (formula) throw noRequirement(namedPrefix[position]!, formula);
       }
       // Named premises are consumed where they matched, whatever their order
       // in the list; unnamed positions before the last named one come from
@@ -10276,6 +12258,25 @@ function parseProofExpression(
         for (let i = 0; i <= last; i++) reorderedPremises.push(claimed.get(i) ?? "assumption");
         if (starIndex >= 0) reorderedPremises.push("*", ...supplied.slice(starIndex + 1));
       }
+      // `rw thm with facts`: the parameters the premises leave open are
+      // fixed by the instance of the rule's rewritten side that occurs in
+      // the goal or the fact being rewritten, when there is exactly one.
+      let ruleInstances: Map<string, Term>[] | undefined;
+      const fixFromRewriteTarget = (): void => {
+        const target = expressionContext.rewriteTarget;
+        if (!target || inferred.size >= names.size) return;
+        let rule = pattern;
+        for (let stripped = 0; stripped < extra.length && rule.tag === "imp"; stripped++) rule = rule.right;
+        const side: RuleSide | undefined = rule.tag === "eq" ? { term: target.reverse ? rule.right : rule.left }
+          : rule.tag === "iff" ? { formula: target.reverse ? rule.right : rule.left } : undefined;
+        if (!side) return;
+        const instances = ruleSideInstances(side, target.formula, names, inferred);
+        if (instances.length === 1) {
+          for (const [name, value] of instances[0]!) inferred.set(name, value);
+          ruleInstances = undefined;
+        } else ruleInstances = instances;
+      };
+      fixFromRewriteTarget();
       if (inferred.size < names.size) {
         const key = (formula: Formula): string => formula.tag === "pred" ? `pred:${formula.pred}` : formula.tag;
         const indexed = new Map<string, Formula[]>();
@@ -10331,7 +12332,22 @@ function parseProofExpression(
           }
         }
       }
+      fixFromRewriteTarget();
       const missing = [...names].filter(name => !inferred.has(name));
+      if (missing.length && ruleInstances && ruleInstances.length > 1) {
+        const where = expressionContext.rewriteTarget!.reverse ? "right" : "left";
+        const shown = ruleInstances.map(instance => [...instance]
+          .filter(([name]) => !inferred.has(name)).map(([name, value]) => `${name} := ${formatTerm(value)}`).join(", "));
+        throw new RewriteInstancesError(line, `${baseName}: cannot uniquely infer parameters ${missing.join(", ")}: the rule's ${where} side matches ${ruleInstances.length} different instances, ${shown.join("; ")}; supply an explicit at list`, ruleInstances);
+      }
+      // Parameters that occur only in the conclusion are fixed by nothing
+      // in an unannotated have: the message names them and the two forms
+      // that fix them, the stated fact and an at list with holes.
+      if (missing.length && !goal && missing.every(name => !targets.some(target => freeFormulaVariables(target).has(name)))) {
+        const holes = [...names].map(name => inferred.has(name) ? "_" : name).join(", ");
+        const several = missing.length > 1;
+        throw new SurfaceError(line, `${baseName}: cannot infer parameter${several ? "s" : ""} ${missing.join(", ")}: ${several ? "they occur" : "it occurs"} only in the conclusion ${formatFormula(pattern)}, which nothing here fixes; state the fact, \`have h : … := ${text.trim()}\`, or write \`${baseName} at ${holes}${supplied.length ? ` with ${supplied.join(", ")}` : ""}\` with the parameters the premises fix left as _`);
+      }
       if (missing.length)
         throw new SurfaceError(line, `${baseName}: cannot uniquely infer parameters ${missing.join(", ")} from the goal and local premises; supply an explicit at list`);
       for (const value of inferred.values()) if ([...freeTermVariables(value)].some(name => !variables.has(name)))
@@ -10532,6 +12548,17 @@ function parseProofExpression(
         consumedPremise();
         return true;
       };
+      // A bare `rfl` entry proves the reflexive equation the premise has
+      // become; a routine guard standing before that premise is discharged
+      // on the way.
+      if (argument === "rfl") {
+        const reflexive = formula.left.tag === "eq" && termEquals(formula.left.left, formula.left.right);
+        if (!reflexive && dischargeGuard()) { consume(argument); return; }
+        if (!reflexive || formula.left.tag !== "eq") throw new SurfaceError(line, `rfl cannot establish ${formatFormula(formula.left)}`);
+        proof = impElim(proof, refl(formula.left.left));
+        consumedPremise();
+        return;
+      }
       let evidence: Proof | undefined;
       try {
         evidence = argument === "assumption"
@@ -10594,7 +12621,7 @@ function parseProofExpression(
   // succeeds, so `choose.factorial at n with n` is the equation and
   // `add.commutative at a, b` needs no `with *` for its guards. A guard
   // that cannot be discharged stays, and apply leaves it as a goal.
-  if ((atMatch[2] || supplied.length > 0) && starIndex < 0) {
+  if ((atList || supplied.length > 0) && starIndex < 0) {
     for (;;) {
       const formula = kernel.checkProof(proof, current.assumptions);
       if (formula.tag !== "imp" || formula.left.tag !== "pred" || formula.left.args.length === 0) break;
@@ -10693,6 +12720,11 @@ function describeUnknownProof(kernel: Kernel, rawName: string, scope: SurfaceSco
     const shown = items.slice(0, 3).map(item => `${item.name} in module ${item.module}`).join(", ");
     return items.length > 3 ? `${shown}, and ${items.length - 3} more` : shown;
   };
+  // A theorem of this module beneath the citing proof is a forward
+  // reference, not a missing import: name its line.
+  const later = scope.line === undefined ? undefined : [...(scope.laterDeclarations ?? [])]
+    .find(([name, line]) => line > scope.line! && (name === symbol || name.endsWith(`.${symbol}`) || symbol.endsWith(`.${name}`)));
+  if (later) return `${base}; it is declared later in this module (line ${later[1]}), and a proof uses only the declarations above it`;
   const outside = loaded.filter(item => !visible(item.module));
   if (outside.length) return `${base}; it is declared as ${listed(outside)}, which this module does not import`;
   if (loaded.length) return `${base}; did you mean ${loaded.slice(0, 3).map(item => item.name).join(" or ")}?`;
@@ -11188,6 +13220,226 @@ function elaborateCase(
     if (error instanceof SurfaceError) throw error;
     throw new SurfaceError(line.number, error instanceof Error ? error.message : String(error));
   }
+}
+
+/**
+ * The local facts the arithmetic tactics hand the refinement prover so an
+ * opaque atom such as cardinality(X) can be typed from context: predicate
+ * facts, Nat(t), t ∈ ℕ or Finite(X), and conjunctions of them. The prover
+ * indexes these directly and feeds them to library typing rules such as
+ * cardinality.nat. The proofs are the stored local proof objects, so the
+ * prepared prover is found in its cache on every later call in the goal.
+ */
+/**
+ * The goal and the facts of `tauto` with every set-builder membership atom
+ * they mention opened one layer by its membership law, and membership in
+ * compound sets by the default laws; undefined when nothing opens. The
+ * lift turns a proof of the opened goal into one of the goal.
+ */
+function tautologyOpening(
+  kernel: Kernel, current: TacticGoal, line: SourceLine, scope: SurfaceScope, visibility: ScopeVisibility | undefined,
+): { readonly goal: Formula; readonly facts: Proof[]; readonly rules: Proof[]; readonly lift: (proof: Proof) => Proof } | undefined {
+  const names = new Set<string>();
+  const scanTerm = (term: Term): void => {
+    if (term.tag !== "app") return;
+    const record = kernel.definitions.get(term.fn);
+    if (record?.kind === "separation" && record.properties.has("membership")) names.add(term.fn);
+    term.args.forEach(scanTerm);
+  };
+  const scanFormula = (formula: Formula): void => {
+    switch (formula.tag) {
+      case "pred": formula.args.forEach(scanTerm); break;
+      case "eq": scanTerm(formula.left); scanTerm(formula.right); break;
+      case "and": case "or": case "imp": case "iff": scanFormula(formula.left); scanFormula(formula.right); break;
+      case "forall": case "exists": scanFormula(formula.body); break;
+      default: break;
+    }
+  };
+  scanFormula(current.goal);
+  for (const local of current.locals.values()) scanFormula(local.formula);
+  const rules = [...[...names].map(name => definition(name, "membership")), ...defaultSimpRules(kernel, line.number, scope)];
+  if (rules.length === 0) return undefined;
+  const facts = [...current.locals.values()].map(item => item.proof);
+  const taken = new Set([...current.variables, ...freeFormulaVariables(current.goal)]);
+  const goal = unfoldThroughout(kernel, current.goal, rules, current.assumptions, facts, visibility, taken);
+  let changed = Boolean(goal);
+  const openedFacts: Proof[] = [];
+  for (const local of current.locals.values()) {
+    const step = unfoldThroughout(kernel, local.formula, rules, current.assumptions, facts, visibility, taken);
+    if (step) { changed = true; openedFacts.push(step.forward(local.proof)); } else openedFacts.push(local.proof);
+  }
+  if (!changed) return undefined;
+  return {
+    goal: goal?.formula ?? current.goal, facts: openedFacts, rules,
+    lift: proof => goal ? goal.backward(proof) : proof,
+  };
+}
+
+/**
+ * One disequality split for `arith` on ⊥: the first local `a ≠ b` whose
+ * sides are literals or atoms of the local bounds, not yet split, is opened
+ * by `Less.trichotomy` into `a < b ∨ a = b ∨ b < a`, the equal case closed
+ * by the disequality and the strict cases refuted with `budget` further
+ * splits. Undefined when no such disequality is typed as natural, or the
+ * lemma is not in scope.
+ */
+function arithDisequalitySplit(
+  kernel: Kernel, current: TacticGoal, line: SourceLine, scope: SurfaceScope,
+  visibility: ScopeVisibility | undefined, budget: number,
+): Proof | undefined {
+  const trichotomy = resolveOptional("Less.trichotomy", scope, candidate => kernel.theorems.has(candidate));
+  if (!trichotomy) return undefined;
+  const presentation = naturalLinearArithmeticPresentation(kernel, line.number, scope);
+  const atoms = new Set<string>();
+  const strict = new Set<string>();
+  for (const local of current.locals.values()) {
+    let formula = local.formula;
+    if (formula.tag === "imp" && formula.right.tag === "bottom") formula = formula.left;
+    if (formula.tag === "pred" && formula.args.length === 2 &&
+        (formula.pred === presentation.less || formula.pred === presentation.lessEqual)) {
+      formula.args.forEach(argument => atoms.add(termCanonical(argument)));
+      if (formula === local.formula && formula.pred === presentation.less) strict.add(formulaCanonical(formula));
+    } else if (formula.tag === "eq" && formula === local.formula) {
+      atoms.add(termCanonical(formula.left));
+      atoms.add(termCanonical(formula.right));
+    }
+  }
+  const eligible = (term: Term): boolean => naturalValue(term) !== undefined || atoms.has(termCanonical(term));
+  let refinements: RefinementProver | undefined;
+  for (const [name, local] of current.locals) {
+    const formula = local.formula;
+    if (formula.tag !== "imp" || formula.right.tag !== "bottom" || formula.left.tag !== "eq") continue;
+    const { left, right } = formula.left;
+    if (!eligible(left) || !eligible(right)) continue;
+    if (naturalValue(left) !== undefined && naturalValue(right) !== undefined) continue;
+    if (strict.has(formulaCanonical(pred(presentation.less, left, right))) ||
+        strict.has(formulaCanonical(pred(presentation.less, right, left)))) continue;
+    refinements ??= prepareRefinementProver(kernel, current.assumptions, [
+      ...arithmeticTypingFacts(current.locals),
+      ...orderTypingFacts(kernel, current.locals, current.assumptions, visibility, scope),
+    ], visibility);
+    let instance: Proof = at(theorem(trichotomy), left, right);
+    let typed = true;
+    for (let premise = 0; premise < 2; premise += 1) {
+      const stated = kernel.checkProof(instance, current.assumptions);
+      if (stated.tag !== "imp" || stated.left.tag !== "pred" || stated.left.args.length !== 1) break;
+      const evidence = refinements.prove(stated.left.args[0]!, stated.left.pred);
+      if (!evidence) { typed = false; break; }
+      instance = impElim(instance, evidence);
+    }
+    if (!typed) continue;
+    const cases = kernel.checkProof(instance, current.assumptions);
+    if (cases.tag !== "or") continue;
+    const tag = `${budget}_${name}`;
+    const locals = new Map(current.locals);
+    locals.set(`__arithSplit${tag}`, { formula: cases, proof: instance });
+    const script = [
+      `rcases __arithSplit${tag} with __arithLess${tag} | __arithEqual${tag} | __arithGreater${tag}`,
+      `. __arith_refute${budget}`,
+      `. exact ${name} with __arithEqual${tag}`,
+      `. __arith_refute${budget}`,
+    ];
+    const scriptLines = script.map(text => ({ number: line.number, text, indent: line.indent + 2 })).flatMap(splitTacticLine);
+    try {
+      return elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
+        { assumptions: current.assumptions, locals, variables: current.variables })!.proof;
+    } catch (error) {
+      if (!(error instanceof SurfaceError)) throw error;
+    }
+  }
+  return undefined;
+}
+
+function arithmeticTypingFacts(locals: ReadonlyMap<string, LocalProof>): Proof[] {
+  const facts: Proof[] = [];
+  for (const item of locals.values()) {
+    if (item.formula.tag === "pred" || item.formula.tag === "and") facts.push(item.proof);
+  }
+  return facts;
+}
+
+/**
+ * The right side of a natural bound is a natural number once its left side
+ * is one: from `a ≤ b` or `a < b` with Nat(a) provable, Nat(b) by
+ * LessEqual.natural_right or Less.natural_right, so a bounded opaque atom
+ * such as cardinality(X) is typed without a Finite fact. Bounds are chased
+ * in rounds, so `k ≤ a` and `a ≤ b` type both a and b. The derived proofs
+ * are kept per local proof object: the prepared prover is then found in its
+ * cache on every later call in the goal.
+ */
+function orderTypingFacts(
+  kernel: Kernel, locals: ReadonlyMap<string, LocalProof>, assumptions: readonly Formula[],
+  visibility: ScopeVisibility | undefined, scope: SurfaceScope,
+): Proof[] {
+  const lessEqualName = resolveOptional("LessEqual", scope, candidate => kernel.predicates.has(candidate));
+  const lessName = resolveOptional("Less", scope, candidate => kernel.predicates.has(candidate));
+  const rules = {
+    lessEqual: lessEqualName && kernel.theorems.has("Grace.Core.Nat.Order.LessEqual.natural_right")
+      ? theorem("Grace.Core.Nat.Order.LessEqual.natural_right") : undefined,
+    less: lessName && kernel.theorems.has("Grace.Core.Nat.Order.Less.natural_right")
+      ? theorem("Grace.Core.Nat.Order.Less.natural_right") : undefined,
+  };
+  if (!rules.lessEqual && !rules.less) return [];
+  const bounds = [...locals.values()].filter(item => item.formula.tag === "pred" && item.formula.args.length === 2 &&
+    ((rules.lessEqual && item.formula.pred === lessEqualName) || (rules.less && item.formula.pred === lessName)));
+  if (bounds.length === 0) return [];
+  const base = arithmeticTypingFacts(locals);
+  const derived: Proof[] = [];
+  const typedKeys = new Set<string>();
+  let pending = bounds;
+  for (let round = 0; pending.length > 0 && round < bounds.length; round += 1) {
+    const prover = prepareRefinementProver(kernel, assumptions, [...base, ...derived], visibility);
+    const remaining: LocalProof[] = [];
+    for (const bound of pending) {
+      const [left, right] = (bound.formula as Extract<Formula, { readonly tag: "pred" }>).args as [Term, Term];
+      const rightKey = termCanonical(right);
+      if (typedKeys.has(rightKey) || right.tag === "nat" || prover.prove(right, "Nat")) { typedKeys.add(rightKey); continue; }
+      const typedLeft = prover.prove(left, "Nat");
+      if (!typedLeft) { remaining.push(bound); continue; }
+      let proof = orderTypingProofs.get(bound.proof);
+      if (!proof) {
+        const rule = bound.formula.tag === "pred" && bound.formula.pred === lessName ? rules.less! : rules.lessEqual!;
+        proof = impElim(impElim(at(rule, left, right), typedLeft), bound.proof);
+        orderTypingProofs.set(bound.proof, proof);
+      }
+      derived.push(proof);
+      typedKeys.add(rightKey);
+    }
+    if (remaining.length === pending.length) break;
+    pending = remaining;
+  }
+  return derived;
+}
+const orderTypingProofs = new WeakMap<Proof, Proof>();
+/** The facts the steps before an `induction` clause proved, handed over by the internal `__keep_facts` step. */
+let keptFactsCapture: Map<string, LocalProof> | undefined;
+
+/**
+ * `formula` with every occurrence of `source` replaced by `target`, outside
+ * any binder whose variable `source` mentions.
+ */
+function replaceFormulaSubterm(formula: Formula, source: Term, target: Term): Formula {
+  switch (formula.tag) {
+    case "bottom": return formula;
+    case "eq": return eq(replaceSubterm(formula.left, source, target), replaceSubterm(formula.right, source, target));
+    case "pred": return pred(formula.pred, ...formula.args.map(argument => replaceSubterm(argument, source, target)));
+    case "imp": return imp(replaceFormulaSubterm(formula.left, source, target), replaceFormulaSubterm(formula.right, source, target));
+    case "and": return and(replaceFormulaSubterm(formula.left, source, target), replaceFormulaSubterm(formula.right, source, target));
+    case "or": return or(replaceFormulaSubterm(formula.left, source, target), replaceFormulaSubterm(formula.right, source, target));
+    case "iff": return iff(replaceFormulaSubterm(formula.left, source, target), replaceFormulaSubterm(formula.right, source, target));
+    case "forall":
+      return freeTermVariables(source).has(formula.variable) ? formula : forall(formula.variable, replaceFormulaSubterm(formula.body, source, target));
+    case "exists":
+      return freeTermVariables(source).has(formula.variable) ? formula : exists(formula.variable, replaceFormulaSubterm(formula.body, source, target));
+  }
+}
+
+/** `term` with every occurrence of `source` replaced by `target`. */
+function replaceSubterm(term: Term, source: Term, target: Term): Term {
+  if (termEquals(term, source)) return target;
+  if (term.tag !== "app") return term;
+  const args = term.args.map(argument => replaceSubterm(argument, source, target));
+  return args.every((argument, index) => argument === term.args[index]) ? term : app(term.fn, ...args);
 }
 
 function preparedRingRules(kernel: Kernel, line: number, scope: SurfaceScope): PreparedRewrites {
@@ -12776,7 +15028,12 @@ function defaultSimpRules(kernel: Kernel, line: number, scope: SurfaceScope): Pr
   return [
     "Grace.Cumulus.Set.Finite.FiniteSet.union2.membership",
     "Grace.Cumulus.Set.Finite.FiniteSet.singleton.membership",
+    "Grace.Cumulus.Set.Basic.intersection.membership",
+    "Grace.Cumulus.Set.Basic.difference.membership",
+    "Grace.Cumulus.Set.Powerset.difference.singleton_membership",
+    "Grace.Cumulus.Set.Algebra.symmetricDifference.membership",
     "pair.membership",
+    "set.empty",
   ].flatMap(name => {
     try { return resolveRules(kernel, [name], line, scope); }
     catch (error) {
@@ -13803,6 +16060,16 @@ function classExpressionFreeVariables(expression: SurfaceClassExpression, into =
   return into;
 }
 
+/** How many parentheses a header line opens without closing, so a wrapped binder list is read to its close. */
+function openParentheses(text: string): number {
+  let depth = 0;
+  for (const character of text) {
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+  }
+  return depth;
+}
+
 function freshSurfaceVariable(base: string, forbidden: ReadonlySet<string>): string {
   if (!forbidden.has(base)) return base;
   for (let index = 1; ; index += 1) {
@@ -14025,6 +16292,32 @@ function parseFormula(
     return names.reduceRight<Formula>((result, name, index) => universal
       ? forall(name, imp(sorts[index]!, imp(bounds[index]!, result)))
       : exists(name, and(sorts[index]!, and(bounds[index]!, result))), body);
+  }
+  // `∀ X Y ⊆ V, φ` binds each variable as a subset of V, in scope for φ:
+  // `∀ X, X ⊆ V → φ`, and `∃ X ⊆ V, φ` is `∃ X, X ⊆ V ∧ φ`.
+  const subsetPrefix = /^(forall|exists|∀|∃)\s*((?:[\p{L}_][\p{L}\p{M}\p{N}_']*\s+)*[\p{L}_][\p{L}\p{M}\p{N}_']*)\s*⊆\s*(.+)$/u.exec(source);
+  if (subsetPrefix) {
+    const names = subsetPrefix[2]!.trim().split(/\s+/);
+    const comma = findTopLevel(subsetPrefix[3]!, ",");
+    if (comma < 0) throw new SurfaceError(line, "a subset-bounded quantifier needs a comma after its bound");
+    const boundSource = subsetPrefix[3]!.slice(0, comma).trim();
+    const bodySource = subsetPrefix[3]!.slice(comma + 1).trim();
+    if (!boundSource || !bodySource) throw new SurfaceError(line, "malformed subset-bounded quantifier");
+    const nestedVariables = new Set(variables);
+    const nestedTypes = new Map(scope.binderTypes ?? []);
+    for (const name of names) {
+      if (variables.has(name)) throw new SurfaceError(line, `${name} is already bound; a bounded quantifier binds a fresh variable`);
+      nestedVariables.add(name);
+      nestedTypes.set(name, { name, type: "Set" });
+    }
+    const nestedScope: SurfaceScope = { ...scope, binderTypes: nestedTypes };
+    const bounds = names.map(name => parseFormula(`${name} ⊆ ${boundSource}`, kernel, nestedVariables, line, nestedScope, classParameters));
+    const body = parseFormula(bodySource, kernel, nestedVariables, line,
+      { ...nestedScope, localFormulas: () => [...(scope.localFormulas?.() ?? []), ...bounds] }, classParameters);
+    const universal = subsetPrefix[1] === "forall" || subsetPrefix[1] === "∀";
+    return names.reduceRight<Formula>((result, name, index) => universal
+      ? forall(name, imp(bounds[index]!, result))
+      : exists(name, and(bounds[index]!, result)), body);
   }
   // `∀ a b ∈ A, φ` binds each variable by membership in A, in scope for φ.
   const boundedPrefix = /^(forall|exists|∀|∃)\s*([^,]+?)\s+(?:in\s+|∈\s*)(.+)$/u.exec(source);
@@ -14389,6 +16682,25 @@ function stripOuterParentheses(text: string): string {
 }
 
 /** Whether the text is one parenthesized group: its first "(" closes at its last character. */
+/**
+ * A rule list entry that is a parenthesised application, `(thm with
+ * facts)` or `(thm at terms)`, read as the local fact it proves, so that
+ * `simp [(thm with h)]` and `rw (thm with h)` need no named `have` first.
+ * A name with named arguments, `thm{x := t}`, is an application too.
+ * Undefined for a plain name.
+ */
+function applicationRule(
+  kernel: Kernel, text: string, current: TacticGoal, variables: ReadonlySet<string>, line: number, scope: SurfaceScope,
+  target?: Formula,
+): LocalProof | undefined {
+  if (!outerParenthesized(text.trim()) && !/^[^\s(){}[\]]+\{.*\}$/su.test(text.trim())) return undefined;
+  // The goal or fact the rule rewrites fixes the parameters the facts
+  // leave open, as it does for `rw thm with facts`.
+  const proof = parseProofExpression(kernel, text, current, variables, line, scope,
+    target ? { rewriteTarget: { formula: target, reverse: false } } : {});
+  return { formula: kernel.checkProof(proof, current.assumptions), proof };
+}
+
 function outerParenthesized(text: string): boolean {
   if (!text.startsWith("(") || !text.endsWith(")")) return false;
   let depth = 0;
@@ -14425,6 +16737,19 @@ function findTopLevelWord(text: string, word: string): number {
       (index === 0 || /\s/.test(text[index - 1]!)) && /^\s*$/.test(text[index + word.length] ?? "")) return index;
   }
   return -1;
+}
+
+/** The last top-level occurrence of a word, outside every bracket. */
+function lastTopLevelWord(text: string, word: string): number {
+  let depth = 0, found = -1;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]!;
+    if ("([{⟨".includes(character)) depth += 1;
+    else if (")]}⟩".includes(character)) depth -= 1;
+    else if (depth === 0 && text.startsWith(word, index) &&
+      (index === 0 || /\s/.test(text[index - 1]!)) && /^\s*$/.test(text[index + word.length] ?? "")) found = index;
+  }
+  return found;
 }
 
 function findTopLevel(text: string, operator: string): number {

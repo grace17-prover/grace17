@@ -1,0 +1,222 @@
+-- Linear systems over the two-element field in the language of finite sets:
+-- a matrix is a relation between rows and columns, a vector a set of its
+-- coordinates, and a row equation asks for the parity of a finite set. A
+-- left-kernel vector seeing an odd right-hand side obstructs every solution,
+-- by counting a block of the matrix both ways.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Combinatorics.ParitySystems
+import Cardinal.Parity
+import Cardinal.Handshake
+
+-- Section: Systems and solutions.
+
+-- t solves A t = b: for every row r, the row of A meets t in an odd number of
+-- columns exactly when r ∈ b.
+predicate Solves (A R C b t : Set) :=
+  t ⊆ C ∧ (∀ r ∈ R, (EvenSet(fiber(A, C, r) ∩ t) ↔ ¬r ∈ b))
+
+-- y obstructs: y A = 0, every column meets y evenly, while y b is odd.
+predicate Obstructs (A R C b y : Set) :=
+  y ⊆ R ∧ (∀ c ∈ C, EvenSet(cofiber(A, R, c) ∩ y)) ∧ ¬EvenSet(y ∩ b)
+
+-- Parity of the small sets: a subset of {a} is even exactly when it misses a.
+theorem EvenSet.subset_singleton (S a : Set)
+  requires inside : S ⊆ {a}
+  shows EvenSet(S) ↔ ¬a ∈ S
+proof
+  have shape := subset_singleton.cases with inside
+  rcases shape with rfl | rfl
+  . simp [EvenSet.empty]
+  . unfold EvenSet
+    rw cardinality.singleton
+    simp [Even.not_one, singleton.self]
+
+theorem EvenSet.singleton_intersection (a S : Set)
+  shows EvenSet({a} ∩ S) ↔ ¬a ∈ S
+proof
+  have inside : {a} ∩ S ⊆ {a} := intersection.subset_left
+  rw EvenSet.subset_singleton with inside
+  simp
+
+-- Adding to t a part X of {a}, with a outside t, changes the parity of S ∩ t
+-- exactly when a lies in both S and X.
+theorem EvenSet.intersection_union_part (S t X a : Set)
+  requires finiteT : Finite(t)
+  requires part : X ⊆ {a}
+  requires fresh : ¬a ∈ t
+  shows EvenSet(S ∩ (t ∪ X)) ↔ (EvenSet(S ∩ t) ↔ ¬(a ∈ S ∧ a ∈ X))
+proof
+  have finiteLeft : Finite(S ∩ t) :=
+    Finite.subset with finiteT, intersection.subset_right
+  have partInside : S ∩ X ⊆ {a}
+    intros x hx
+    exact part with x, hx.right
+  have finiteRight : Finite(S ∩ X) :=
+    Finite.subset with Finite.singleton, partInside
+  have apart : Disjoint(S ∩ t, S ∩ X)
+    apply Disjoint.iff.backward
+    intros x hx hx2
+    have same := singleton.membership.forward with (partInside with x, hx2)
+    rw same at hx
+    exact fresh with hx.right
+  rw [intersection.union2_distrib,
+    (EvenSet.union_disjoint with finiteLeft, finiteRight, apart),
+    (EvenSet.subset_singleton with partInside)]
+  simp
+
+-- Section: The double count.
+
+-- The block of A over the rows y and the columns t, A ∩ (y × t), grows by
+-- the row a's part {a} × fiber(A, t, a) when a joins y, and by the column
+-- a's part cofiber(A, y, a) × {a} when a joins t.
+theorem EvenSet.block_add_row (A G t a : Set)
+  requires finiteG : Finite(G)
+  requires finiteT : Finite(t)
+  requires fresh : ¬a ∈ G
+  shows EvenSet(A ∩ ((G ∪ {a}) × t)) ↔
+    (EvenSet(A ∩ (G × t)) ↔ EvenSet(fiber(A, t, a)))
+proof
+  have split : A ∩ ((G ∪ {a}) × t) = (A ∩ (G × t)) ∪ ({a} × fiber(A, t, a))
+    rw [product.union2_left, intersection.union2_distrib, fiber.row]
+  have apartG : Disjoint(G, {a}) by simp [Disjoint.iff, fresh]
+  have apart : Disjoint(A ∩ (G × t), {a} × fiber(A, t, a)) :=
+    Disjoint.of_subset_left with (product.disjoint_of_left with apartG),
+      intersection.subset_right
+  have finiteBlock : Finite(A ∩ (G × t)) :=
+    Finite.subset with (Finite.product with finiteG, finiteT),
+      intersection.subset_right
+  have finiteFiber : Finite(fiber(A, t, a)) := fiber.finite with finiteT
+  have finiteRow : Finite({a} × fiber(A, t, a)) :=
+    Finite.product with Finite.singleton, finiteFiber
+  have rowParity : EvenSet({a} × fiber(A, t, a)) ↔ EvenSet(fiber(A, t, a))
+    unfold EvenSet
+    rw cardinality.singleton_product with finiteFiber
+  rw [split, (EvenSet.union_disjoint with finiteBlock, finiteRow, apart),
+    rowParity]
+
+theorem cardinality.product_singleton (A b : Set)
+  requires finite : Finite(A)
+  shows cardinality(A × {b}) = cardinality(A)
+proof
+  have finiteProduct := Finite.product with finite, (Finite.singleton at b)
+  exact cardinality.bijective with finiteProduct,
+    (firstProjection.bijective_singleton at A, b)
+
+theorem EvenSet.block_add_column (A y G a : Set)
+  requires finiteY : Finite(y)
+  requires finiteG : Finite(G)
+  requires fresh : ¬a ∈ G
+  shows EvenSet(A ∩ (y × (G ∪ {a}))) ↔
+    (EvenSet(A ∩ (y × G)) ↔ EvenSet(cofiber(A, y, a)))
+proof
+  have column : A ∩ (y × {a}) = cofiber(A, y, a) × {a}
+    ext q
+    constructor
+    . intro hq
+      obtain ⟨_, r, hr, x, hx, rfl⟩ := product.membership.forward with hq.right
+      rw singleton.membership.forward with hx at hq
+      rw singleton.membership.forward with hx
+      exact product.pair with ⟨hr, hq.left⟩, singleton.self
+    . intro hq
+      obtain ⟨_, r, hr, x, hx, rfl⟩ := product.membership.forward with hq
+      rw singleton.membership.forward with hx
+      exact ⟨hr.right, (product.pair with hr.left, singleton.self)⟩
+  have split : A ∩ (y × (G ∪ {a})) =
+      (A ∩ (y × G)) ∪ (cofiber(A, y, a) × {a})
+    rw [product.union2_right, intersection.union2_distrib, column]
+  have apartG : Disjoint(G, {a}) by simp [Disjoint.iff, fresh]
+  have apart : Disjoint(A ∩ (y × G), cofiber(A, y, a) × {a}) :=
+    Disjoint.of_subset_left with (product.disjoint_of_right with apartG),
+      intersection.subset_right
+  have finiteBlock : Finite(A ∩ (y × G)) :=
+    Finite.subset with (Finite.product with finiteY, finiteG),
+      intersection.subset_right
+  have cofiberInside : cofiber(A, y, a) ⊆ y
+    intros r hr
+    exact hr.left
+  have finiteCofiber : Finite(cofiber(A, y, a)) :=
+    Finite.subset with finiteY, cofiberInside
+  have finiteColumn : Finite(cofiber(A, y, a) × {a}) :=
+    Finite.product with finiteCofiber, Finite.singleton
+  have columnParity : EvenSet(cofiber(A, y, a) × {a}) ↔
+      EvenSet(cofiber(A, y, a))
+    unfold EvenSet
+    rw cardinality.product_singleton with finiteCofiber
+  rw [split, (EvenSet.union_disjoint with finiteBlock, finiteColumn, apart),
+    columnParity]
+
+-- Counted row by row: when t solves the system, row r contributes an odd
+-- number exactly when r ∈ b, so the block has the parity of y ∩ b.
+theorem Solves.block_parity (A R C b t y : Set)
+  requires finiteColumns : Finite(C)
+  requires solution : Solves(A, R, C, b, t)
+  requires rows : y ⊆ R
+  requires finiteY : Finite(y)
+  shows EvenSet(A ∩ (y × t)) ↔ EvenSet(y ∩ b)
+proof
+  have inside := solution.left
+  have finiteT : Finite(t) := Finite.subset with finiteColumns, inside
+  induction finiteY with G a
+  | empty =>
+    have blockEmpty : A ∩ (∅ × t) = ∅ by ext q; simp [product.left_empty]
+    have rowsEmpty : ∅ ∩ b = ∅ by ext r; simp
+    rw [blockEmpty, rowsEmpty]
+  | insert using ih =>
+    have rowFiber : fiber(A, t, a) = fiber(A, C, a) ∩ t by ext x; simp
+    have rowParity : EvenSet(fiber(A, t, a)) ↔ ¬a ∈ b
+      rw rowFiber
+      exact solution.right with a, aMember
+    have rowsParity : EvenSet((G ∪ {a}) ∩ b) ↔ (EvenSet(G ∩ b) ↔ ¬a ∈ b)
+      rw [intersection.commutative,
+        (EvenSet.intersection_union_part with GFinite, Subset.reflexive,
+          aFresh),
+        intersection.commutative]
+      simp
+    rw [(EvenSet.block_add_row with GFinite, finiteT, aFresh), rowParity,
+      rowsParity, ih]
+
+-- Counted column by column: when y obstructs, every column contributes an
+-- even number.
+theorem Obstructs.block_even (A R C b t y : Set)
+  requires finiteRows : Finite(R)
+  requires obstruction : Obstructs(A, R, C, b, y)
+  requires columns : t ⊆ C
+  requires finiteT : Finite(t)
+  shows EvenSet(A ∩ (y × t))
+proof
+  have rows := obstruction.left
+  have finiteY : Finite(y) := Finite.subset with finiteRows, rows
+  induction finiteT with G a
+  | empty =>
+    have none : A ∩ (y × ∅) = ∅ by ext q; simp [product.right_empty]
+    rw none
+    exact EvenSet.empty
+  | insert using ih =>
+    have columnFiber : cofiber(A, y, a) = cofiber(A, R, a) ∩ y by ext r; simp
+    have columnParity : EvenSet(cofiber(A, y, a))
+      rw columnFiber
+      exact obstruction.right.left with a, aMember
+    rw EvenSet.block_add_column with finiteY, GFinite, aFresh
+    tauto
+
+-- Counting the block A ∩ (y × t) both ways: by rows its parity is that of
+-- y ∩ b, which is odd; by columns it is even.
+theorem Solves.not_obstructed (A R C b t y : Set)
+  requires finiteRows : Finite(R)
+  requires finiteColumns : Finite(C)
+  requires matrix : A ⊆ R × C
+  requires solution : Solves(A, R, C, b, t)
+  requires obstruction : Obstructs(A, R, C, b, y)
+  shows ⊥
+proof
+  have finiteT : Finite(t) := Finite.subset with finiteColumns, solution.left
+  have finiteY : Finite(y) := Finite.subset with finiteRows, obstruction.left
+  have byRows := Solves.block_parity
+    with finiteColumns, solution, obstruction.left, finiteY
+  have byColumns := Obstructs.block_even
+    with finiteRows, obstruction, solution.left, finiteT
+  exact obstruction.right.right with (byRows.forward with byColumns)

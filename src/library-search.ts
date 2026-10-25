@@ -94,7 +94,12 @@ export function scanSearchDeclarations(file: string, source: string): SearchDecl
     while (j < lines.length && (/^\s+\S/.test(lines[j]!) || !lines[j]!.trim())) {
       const next = lines[j]!.trim();
       if (/^(proof|uniqueness|termination|typeproof)\b/.test(next)) break;
-      if (next && !next.startsWith("--")) header.push(next.replace(/--.*$/, "").trim());
+      if (next && !next.startsWith("--")) {
+        const piece = next.replace(/--.*$/, "").trim();
+        // A binder list wrapped onto the lines beneath the header is one line of the signature.
+        if (header.length === 1 && openParentheses(header[0]!) > 0) header[0] = `${header[0]} ${piece}`;
+        else header.push(piece);
+      }
       j++;
     }
     const signature = header.join("\n"), statement = /\bshows\s+([\s\S]*)/.exec(signature)?.[1] || signature;
@@ -466,4 +471,14 @@ export function indexModuleDocuments(entries: Iterable<readonly [string, string]
     }
   }
   return index;
+}
+
+/** How many parentheses a header line opens without closing: a positive count means the binder list wraps onto the next line. */
+export function openParentheses(text: string): number {
+  let depth = 0;
+  for (const character of text) {
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+  }
+  return depth;
 }

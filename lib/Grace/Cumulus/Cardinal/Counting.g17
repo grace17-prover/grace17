@@ -1,4 +1,6 @@
--- Cardinality under bijections and insertion of a fresh element (ZF).
+-- Cardinality under bijections, insertion and removal of a point, the
+-- empty set as the set of size zero, differences of finite sets, and
+-- induction over finite subsets of a set (ZF).
 -- Part of Cumulus, the Grace17 mathematics library.
 -- Copyright (c) 2026 Grant Passmore.
 -- Released under the Apache License 2.0. See LICENSE in the repository root.
@@ -41,14 +43,163 @@ proof
     refine ⟨adjoinMap(f, a, cardinality(A)), extended⟩
   exact cardinality.eq_of_has with cardinal
 
+theorem Finite.difference (A B : Set)
+  requires finite : Finite(A)
+  shows Finite(A ∖ B)
+proof
+  exact Finite.subset with finite, (difference.subset_left at A, B)
+
 theorem cardinality.remove (A a : Set)
   requires finite : Finite(A)
   requires member : a ∈ A
   shows cardinality(A) = succ(cardinality(A ∖ {a}))
 proof
-  have subset := difference.subset_left at A, {a}
-  have smaller := Finite.subset with finite, subset
+  have smaller := Finite.difference at A, {a} with finite
   have fresh : ¬(a ∈ A ∖ {a}) by simp [difference.membership, singleton.membership]
   have restored := insert.restore with member
   have count := cardinality.insert with *
   rwa restored at count
+
+-- The same counts in the form n + 1, and with the point adjoined as a union.
+theorem cardinality.insert_add_one (A a : Set)
+  requires finite : Finite(A)
+  requires fresh : ¬a ∈ A
+  shows cardinality(insert(a, A)) = cardinality(A) + 1
+proof
+  have inserted := cardinality.insert with finite, fresh
+  have natA := HasCardinality.natural with (cardinality.correct with finite)
+  have one := add.right_one at cardinality(A)
+  rw [inserted, one]
+  rfl
+
+theorem cardinality.union_singleton (A a : Set)
+  requires finite : Finite(A)
+  requires fresh : ¬a ∈ A
+  shows cardinality(A ∪ {a}) = cardinality(A) + 1
+proof
+  have asInsert : A ∪ {a} = insert(a, A)
+    unfold insert
+    exact union2.commutative at A, {a}
+  rw asInsert
+  exact cardinality.insert_add_one with finite, fresh
+
+theorem cardinality.remove_add_one (A a : Set)
+  requires finite : Finite(A)
+  requires member : a ∈ A
+  shows cardinality(A) = cardinality(A ∖ {a}) + 1
+proof
+  have removed := cardinality.remove with finite, member
+  have restFinite := Finite.difference at A, {a} with finite
+  have restNat := HasCardinality.natural
+    with (cardinality.correct with restFinite)
+  have one := add.right_one at cardinality(A ∖ {a})
+  rw [removed, one]
+  rfl
+
+-- A finite set of size zero is empty.
+theorem HasCardinality.empty_of_zero (A : Set)
+  requires counted : HasCardinality(A, 0)
+  shows A = ∅
+proof
+  rcases counted with ⟨natural, f, bijective⟩
+  have function := Bijective.injective with bijective
+  have graph := Injective.function with function
+  have subset : A ⊆ ∅
+    intros a member
+    obtain ⟨y, inZero, related⟩ :=
+      FunctionBetween.exists_value at f, A, 0, a with *
+    exfalso
+    rw nat.zero at inZero
+    exact set.empty with inZero
+  have reverse := empty.subset at A
+  exact Subset.antisymmetric with *
+
+theorem cardinality.eq_empty_of_zero (A : Set)
+  requires finite : Finite(A)
+  requires zero : cardinality(A) = 0
+  shows A = ∅
+proof
+  have counted := cardinality.correct with finite
+  rw zero at counted
+  exact HasCardinality.empty_of_zero with counted
+
+-- A set of size k + 1 is a set of size k with one element put back.
+theorem cardinality.exists_remove (F : Set) (k : Nat)
+  requires finite : Finite(F)
+  requires size : cardinality(F) = succ(k)
+  shows ∃ e ∈ F, cardinality(F ∖ {e}) = k ∧ (F ∖ {e}) ∪ {e} = F
+proof
+  have inhabited : ∃ e, e ∈ F
+    by_contra none
+    have empty : F = ∅
+      ext y
+      constructor
+      . intro hy
+        exfalso
+        exact none with ⟨y, hy⟩
+      . intro hy
+        exfalso
+        exact set.empty with hy
+    rw [empty, cardinality.empty] at size
+    exact Naturals.disjoint.zero.succ at k with size
+  obtain ⟨e, he⟩ := inhabited
+  have removed := cardinality.remove with finite, he
+  rw size at removed
+  have restored : (F ∖ {e}) ∪ {e} = F
+    ext y
+    simp
+  refine ⟨e, he, _, restored⟩
+  symm
+  exact Naturals.injective.succ with removed
+
+-- Induction over the finite subsets of E, by the size of the subset: a
+-- family S of sets containing ∅ and closed under adjoining a fresh point of
+-- E to a finite member contains every finite subset of E.
+theorem Finite.induction_of_size (E S : Set, n : Nat)
+  requires base : ∅ ∈ S
+  requires step : ∀ F ⊆ E, Finite(F) → ∀ a ∈ E, a ∉ F → F ∈ S →
+    F ∪ {a} ∈ S
+  shows ∀ F ⊆ E, Finite(F) → cardinality(F) = n → F ∈ S
+proof
+  induction n
+  | zero =>
+    intros F bound finite size
+    have empty : F = ∅
+      ext y
+      constructor
+      . intro hy
+        exfalso
+        have removed := cardinality.remove with finite, hy
+        rw size at removed
+        exact Naturals.disjoint.zero.succ at cardinality(F ∖ {y}) with removed
+      . intro hy
+        exfalso
+        exact set.empty with hy
+    rw empty
+    exact base
+  | succ(k) using ih =>
+    intros F bound finite size
+    obtain ⟨e, he, restSize, restored⟩ :=
+      cardinality.exists_remove with finite, size
+    have restSubset := difference.subset_left at F, {e}
+    have restBound := Subset.transitive with restSubset, bound
+    have restFinite := Finite.subset with finite, restSubset
+    have rest := ih with F ∖ {e}, restBound, restFinite, restSize
+    have fresh : e ∉ F ∖ {e} by simp
+    have next := step with F ∖ {e}, restBound, restFinite, e,
+      (bound with e, he), fresh, rest
+    rw restored at next
+    exact next
+
+theorem Finite.induction (E S : Set)
+  requires base : ∅ ∈ S
+  requires step : ∀ F ⊆ E, Finite(F) → ∀ a ∈ E, a ∉ F → F ∈ S →
+    F ∪ {a} ∈ S
+  shows ∀ F ⊆ E, Finite(F) → F ∈ S
+proof
+  intros F bound finite
+  have correct := cardinality.correct with finite
+  have natural := correct.left
+  have size : cardinality(F) = cardinality(F) by rfl
+  exact Finite.induction_of_size at E, S, cardinality(F)
+    with natural, base, step, F, bound, finite, size

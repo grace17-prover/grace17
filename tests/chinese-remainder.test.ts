@@ -27,7 +27,6 @@ proof
   have coprime : IntegerCoprime(${M}, ${N})
   . unfold IntegerCoprime
     simp [integerGCD, integerNatAbs.ofNat, integerNatAbs.ofNegativeNat]
-    compute
   exact ChineseRemainder.exists at ${M}, ${N}, a, b with *
 `;
   }
