@@ -88,7 +88,20 @@ let decode path =
   require (!pos = String.length payload) "trailing certificate bytes" ;
   {environment; symbols; terms; formulas; contexts; code; root; boundaries}
 
-let lookup pairs key =
+(* The environment's tables are consulted for every symbol of every node; a
+   linear association list made that quadratic. The first binding of a name
+   wins, as it did in the list. *)
+let index pairs =
+  let h = Hashtbl.create 4096 in
+  List.iter (fun (k, v) -> if not (Hashtbl.mem h k) then Hashtbl.add h k v) pairs ;
+  h
+
+let lookup table key =
+  match Hashtbl.find_opt table key with
+  | Some x -> x
+  | None -> fail ("unknown environment name " ^ key)
+
+let lookup_pairs pairs key =
   match List.assoc_opt key pairs with
   | Some x -> x
   | None -> fail ("unknown environment name " ^ key)
@@ -112,8 +125,8 @@ let verify_current ?statements p env =
     [p.terms; p.formulas; p.contexts; p.code] ;
   valid_word p.root ;
   List.iter (fun (a, b) -> valid_word a ; valid_word b) p.boundaries ;
-  let functions = pairs (get env "functions")
-  and predicates = pairs (get env "predicates") in
+  let functions = index (pairs (get env "functions"))
+  and predicates = index (pairs (get env "predicates")) in
   let arity table name n =
     require (num (lookup table name) = n) ("signature mismatch " ^ name)
   in
@@ -210,11 +223,12 @@ let verify_current ?statements p env =
       closed r )
     p.boundaries ;
   let boundaries = List.map (fun (n, r) -> (symbol n, r)) p.boundaries in
+  let boundary_index = index boundaries in
   let results = Array.make (Array.length instructions) False in
-  let ax = pairs (get env "axioms")
-  and th = pairs (get env "theorems")
-  and defs = pairs (get env "definitions")
-  and datatypes = pairs (get env "datatypes") in
+  let ax = index (pairs (get env "axioms"))
+  and th = index (pairs (get env "theorems"))
+  and defs = index (pairs (get env "definitions"))
+  and datatypes = index (pairs (get env "datatypes")) in
   let imported j = formula_json [] j in
   Array.iteri
     (fun pc (op, claim, ctx, pre, data) ->
@@ -256,9 +270,9 @@ let verify_current ?statements p env =
             let name = ds 0 in
             if op = 1 then imported (lookup ax name)
             else if op = 3 then
-              imported (lookup (pairs (get (lookup defs name) "properties")) (ds 1))
+              imported (lookup_pairs (pairs (get (lookup defs name) "properties")) (ds 1))
             else
-              match List.assoc_opt name boundaries with
+              match Hashtbl.find_opt boundary_index name with
               | Some root ->
                   require (root < pc) "unproved linked theorem" ;
                   results.(root)
@@ -495,14 +509,14 @@ let verify_current ?statements p env =
         | 29 -> count 0 ; words 0 ; Compute.rational env goal ; goal
         | _ -> fail "unknown opcode"
       in
-      require (derived = goal) (Printf.sprintf "wrong conclusion at instruction %d" pc) ;
+      require (formula_equal derived goal) (Printf.sprintf "wrong conclusion at instruction %d" pc) ;
       results.(pc) <- derived )
     instructions ;
-  let expected = match statements with Some xs -> xs | None -> th in
+  let expected = match statements with Some xs -> index xs | None -> th in
   List.iter
     (fun (n, root) ->
       require
-        (results.(root) = imported (lookup expected n))
+        (formula_equal results.(root) (imported (lookup expected n)))
         ("theorem boundary mismatch " ^ n) )
     boundaries ;
   (Array.length instructions, List.length boundaries)
