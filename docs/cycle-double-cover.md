@@ -507,28 +507,14 @@ reports. The numbers below are from one laptop.
 | compiling the certificate | 47 s |
 | replay with the Rust checker | 2.9 s |
 | replay with the Python checker | 9.9 s |
-| replay with the OCaml checker | 9 s |
+| replay with the OCaml checker | 8 s |
 
 The same proofs as a [machine tape](kernel-format.md), the lower-level format
 in which every proof is a sequence of natural-deduction instructions against an
 authenticated environment, are 2,221 theorems in 1,139,382 instructions: a 39
 MB tape with a 12 MB environment, compiled in 53 s. The Rust checker replays
-the tape in 0.6 s, Python in 9.1 s, and OCaml in 3.1 s, and the kernel verifies
+the tape in 0.6 s, Python in 9.1 s, and OCaml in 2.5 s, and the kernel verifies
 it against the elaborated modules in 18 s.
-
-Measuring this found a bug worth recording. The OCaml checker first took over
-two minutes on both the certificate and the tape, slower than the Python
-checker, which made no sense for native code. The cause was a duplicate check
-over the arena's vectors through a generic hashtable whose hash looks at only
-the first few elements of a list; contexts that open with the same hypotheses
-all landed in one bucket and the check went quadratic. Hashing every word,
-equality that short-circuits on identity, and a digest on native integers
-instead of boxed ones brought it to the times above.
-
-I find this part quietly thrilling. Everything above the kernel, the
-elaborator, the tactics, the agents, the session that ran them, is untrusted.
-What remains at the end is a file, and three programs written in three
-languages agree that the file is a proof from the axioms of set theory.
 
 ## Check it yourself
 
