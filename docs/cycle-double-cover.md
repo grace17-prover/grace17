@@ -2,8 +2,6 @@
 
 <p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-30">30 October 2026</time></span></p>
 
-![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
-
 <div class="preface">
 
 If you have arrived here directly, welcome. Grace17 is a proof assistant for
@@ -20,6 +18,8 @@ theorem!
 </div>
 
 <div class="section-mark" aria-hidden="true"><span>§</span></div>
+
+![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
 Every finite bridgeless multigraph has a list of cycles in which every edge
 lies exactly twice. George Szekeres asked whether this is so in 1973, and Paul
