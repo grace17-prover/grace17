@@ -730,10 +730,19 @@ Counting lines of Lean or Grace17 source and the theorems declared in them:
 
 | proof | system | files | lines | theorems |
 |---|---|---:|---:|---:|
-| the cycle double cover theorem | Grace17 | 41 | 13,881 | 521 |
+| the cycle double cover theorem, with its library | Grace17 | 41 | 13,881 | 521 |
+| the cycle double cover theorem, the proof alone | Grace17 | 12 | 4,220 | 167 |
 | the cycle double cover theorem | Lean | 16 | 7,156 | 234 |
 | Erdős 90, the unit distance counterexample | Lean | 2,638 | 1,198,531 | 30,426 |
 | Fermat's Last Theorem | Lean | 60,478 | 13,499,380 | 29,511 |
+
+The two Grace17 rows are the split made above for the cost: the whole
+development, and then the twelve modules specific to the theorem with the
+background graph theory, tree packing, parity systems, and flows left out,
+since those were built for this proof but belong to the library. The second row
+is the nearer comparison with the Lean proof, which likewise builds some of
+what Mathlib lacked, tree packing among it. The Lean rows count each project's
+own files and not the Mathlib under them, which is several million lines more.
 
 Fermat's Last Theorem is a thousand times the size of this proof, and its check
 alone takes five and a half hours on ninety-six cores. Nothing here shows that
