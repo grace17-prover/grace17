@@ -1,6 +1,6 @@
 # An adventure in multifoundational Mathematics 2.0: the cycle double cover theorem in Grace17
 
-<p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-26">26 October 2026</time></span></p>
+<p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-30">30 October 2026</time></span></p>
 
 ![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
@@ -719,6 +719,30 @@ help of AI, were formalized in many foundations, as a matter of course, by
 people and machines who delight in the mathematics and want it to stand on more
 than one ground.
 
+A word on scale, so that this positive result is not read as being more
+significant than it really is. This proof is encouraging, and I think it shows
+that multifoundational Mathematics 2.0 is possible with a ZFC-based kernel. It
+is also small next to two formalizations completed in Lean this year: the proof
+of OpenAI's counterexample to the Erdős unit distance conjecture, [Erdős
+problem 90](https://github.com/plby/Erdos90), and Anthropic's proof of
+[Fermat's Last Theorem](https://github.com/anthropics/fermats-last-theorem).
+Counting lines of Lean or Grace17 source and the theorems declared in them:
+
+| proof | system | files | lines | theorems |
+|---|---|---:|---:|---:|
+| the cycle double cover theorem | Grace17 | 41 | 13,881 | 521 |
+| the cycle double cover theorem | Lean | 16 | 7,156 | 234 |
+| Erdős 90, the unit distance counterexample | Lean | 2,638 | 1,198,531 | 30,426 |
+| Fermat's Last Theorem | Lean | 60,478 | 13,499,380 | 29,511 |
+
+Fermat's Last Theorem is a thousand times the size of this proof, and its check
+alone takes five and a half hours on ninety-six cores. Nothing here shows that
+Grace17 scales to proofs of that size, and I expect that today it does not.
+Getting there is a serious research challenge, in the elaborator, the library,
+and the way agents and people work together on a development of that size, and
+it is the work I am now actively engaged in. Encouraging, then, but a first
+step, with much to do before the next.
+
 Everything on this page is in the repository: the library, the blueprint, the
 agent interface, and the checkers. Every theorem shown above opens in the
 Workbench. If you try it, I would love to hear how it goes for you.
@@ -728,4 +752,6 @@ Workbench. If you try it, I would love to hear how it goes for you.
 - Sang-il Oum, [A proof of the cycle double cover conjecture by OpenAI: an exposition](https://arxiv.org/abs/2607.16356), arXiv 2607.16356, July 2026.
 - Tomáš Kaiser, [A short proof of the tree-packing theorem](https://arxiv.org/abs/0911.2809), arXiv 0911.2809.
 - OpenAI, [cdc-lean](https://github.com/openai/cdc-lean), the published Lean 4 formalization.
+- [plby/Erdos90](https://github.com/plby/Erdos90), the Lean proof of OpenAI's counterexample to the Erdős unit distance conjecture.
+- Anthropic, [fermats-last-theorem](https://github.com/anthropics/fermats-last-theorem), the Lean proof of Fermat's Last Theorem.
 - The blueprint's [README](../blueprints/CycleDoubleCover/README.md), with the plan, the conventions, and the record of promotion.
