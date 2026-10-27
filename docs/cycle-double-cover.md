@@ -23,17 +23,18 @@ theorem!
 
 Every finite bridgeless multigraph has a list of cycles in which every edge
 lies exactly twice. George Szekeres asked whether this is so in 1973, and Paul
-Seymour asked it again in 1979, and for half a century it stayed a question.
-The work in between was real. Jaeger showed that it is enough to settle the
-snarks. Alspach, Goddyn, and Zhang settled every graph with no Petersen minor.
-Huck showed that a smallest counterexample would have girth at least twelve.
-Then, in July 2026, a model at OpenAI found a proof, and the proof was written
-down, checked in Lean 4, and set out for human readers by Sang-il Oum. Grace17
-now proves it too, from the axioms of set theory. The theorem is
+Seymour asked it again in 1979, and for half a century it was an open problem.
+Major progress was made by Jaeger, Alspach, Goddyn, Zhang, and Huck: Jaeger
+showed that it is enough to settle the snarks, Alspach, Goddyn, and Zhang
+settled every graph with no Petersen minor, and Huck showed that a smallest
+counterexample would have girth at least twelve. Then, in July 2026, a model at
+OpenAI found a proof, and the proof was written down, checked in Lean 4, and
+further polished for human understanding by Sang-il Oum. Grace17 now proves it
+too, from the axioms of set theory. The theorem is
 [`Grace.Cumulus.GraphTheory.DoubleCover.Theorem.cycleDoubleCover`](../lib/Grace/Cumulus/GraphTheory/DoubleCover/Theorem.g17),
-and the forty modules under it are the library's graph theory of edge sets,
-cuts, components, tree packings, flows over the two-element field, and double
-covers.
+and the forty modules under it are our library [Cumulus](cumulus.md)'s
+developments of graph theory, including edge sets, cuts, components, tree
+packings, flows over the two-element field, and double covers.
 
 This page is my account of how the proof was planned and carried out, and of
 what I learned about doing a proof of this size in Grace17. The short version:
@@ -44,14 +45,6 @@ half, 521 theorems in forty-one modules, a certificate that an independent
 Grace17 proof checker replays from axioms of set theory in under three seconds,
 and a theorem whose statement is a formula of ZF. Needless to say, I believe
 this is an encouraging result :-).
-
-Mathematics is better for having many foundations, tools, and habits of
-thought. This theorem now has formal proofs in both dependent type theory and
-set theory, and the two were written independently from the same mathematics. I
-think this is very exciting, and I would love for it to become ordinary: new
-results, and especially the "Mathematics 2.0" results found with the help of
-AI, formalized in more than one foundation, each asking its own questions of
-the statements, the concepts and the proofs.
 
 ## How the problem was chosen
 
@@ -64,7 +57,7 @@ choice. It is a substantial recent result in graph theory which is deep but not
 too large in terms of its dependencies, it was obtained in a "Mathematics 2.0"
 fashion, it has both a Lean formalization and an exposition written to improve
 human understanding of the proof, and almost none of its dependencies were in
-Cumulus (the Grace17 mathematics library).
+[Cumulus](cumulus.md).
 
 On 10 July 2026 OpenAI announced a proof found by its model GPT-5.6 Sol Ultra
 and published the proof, the prompt, and a Lean 4 formalization,
@@ -75,7 +68,7 @@ exposition of the proof](https://arxiv.org/abs/2607.16356), with modifications
 to make it easier to read, and Jim Geelen wrote notes clarifying it. Neither
 found a gap. The proof has not been refereed yet, and this conjecture has seen
 claimed proofs withdrawn before. A formalization, especially using a different
-foundation of mathematics, is another kind of check. Every step below is
+foundation of mathematics, is another kind of verification. Every step below is
 verified by a ZFC-based kernel of about two thousand lines and replayed by
 independent checkers written in Python, OCaml and Rust.
 
