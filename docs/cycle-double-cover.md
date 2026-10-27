@@ -6,15 +6,14 @@
 
 If you have arrived here directly, welcome. Grace17 is a proof assistant for
 mathematics based on set theory: a small trusted kernel for classical ZFC, a
-modern elaborator and proof language above it, a library called
-[Cumulus](cumulus.md) that runs from the axioms through analysis, algebra,
-topology, and combinatorics, and a browser Workbench in which every proof opens
-and can be stepped through interactively (including natural deduction proofs
-from the axioms of set theory). I am building it because I want a mainstream
-proof assistant that is ergonomic and efficient and whose foundation is ZFC in
-first-order logic with equality. Please see the [Introduction](introduction.md)
-for more background on the system and what I'm hoping to achieve. Now, onto the
-cycle double cover theorem!
+modern elaborator and proof language above it, a growing mathematical library
+called [Cumulus](cumulus.md), and a browser Workbench in which every proof
+opens and can be stepped through interactively (including natural deduction
+proofs from the axioms of set theory). I am building it because I want a
+mainstream proof assistant that is ergonomic and efficient and whose foundation
+is ZFC in first-order logic with equality. Please see the
+[Introduction](introduction.md) for more background on the system and what I'm
+hoping to achieve. Now, onto the cycle double cover theorem!
 
 </div>
 
