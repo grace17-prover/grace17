@@ -60,19 +60,6 @@ fashion, it has both a Lean formalization and an exposition written to improve
 human understanding of the proof, and almost none of its dependencies were in
 [Cumulus](cumulus.md).
 
-On 10 July 2026 OpenAI announced a proof found by its model GPT-5.6 Sol Ultra
-and published the proof, the prompt, and a Lean 4 formalization,
-[`openai/cdc-lean`](https://github.com/openai/cdc-lean), whose main theorem
-`CDCLean.cycleDoubleCover_of_bridgeless` is checked from first principles for
-finite loopless bridgeless multigraphs. A week later Sang-il Oum posted [an
-exposition of the proof](https://arxiv.org/abs/2607.16356), with modifications
-to make it easier to read, and Jim Geelen wrote notes clarifying it. Neither
-found a gap. The proof has not been refereed yet, and this conjecture has seen
-claimed proofs withdrawn before. A formalization, especially using a different
-foundation of mathematics, is another kind of verification. Every step below is
-verified by a ZFC-based kernel of about two thousand lines and replayed by
-independent checkers written in Python, OCaml and Rust.
-
 ## What is proved
 
 A multigraph is a vertex set `V`, an edge set `E`, and two functions `leftEnd`
