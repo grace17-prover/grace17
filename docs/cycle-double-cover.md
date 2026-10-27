@@ -28,10 +28,12 @@ Seymour asked it again in 1979, and for half a century it was an open problem.
 Major progress was made by Jaeger, Alspach, Goddyn, Zhang, and Huck: Jaeger
 showed that it is enough to settle the snarks, Alspach, Goddyn, and Zhang
 settled every graph with no Petersen minor, and Huck showed that a smallest
-counterexample would have girth at least twelve. Then, in July 2026, a model at
-OpenAI found a proof, and the proof was written down, checked in Lean 4, and
-further polished for human understanding by Sang-il Oum. Grace17 now proves it
-too, from the axioms of set theory. The theorem is
+counterexample would have girth at least twelve. Then, on 10 July 2026, a model
+at OpenAI found a proof, and the proof was written down, [checked in Lean
+4](https://github.com/openai/cdc-lean), and further polished for human
+understanding by Sang-il Oum in [an
+exposition](https://arxiv.org/abs/2607.16356). Grace17 now proves it too, from
+the axioms of set theory. The theorem is
 [`Grace.Cumulus.GraphTheory.DoubleCover.Theorem.cycleDoubleCover`](../lib/Grace/Cumulus/GraphTheory/DoubleCover/Theorem.g17),
 and the forty modules under it are our library [Cumulus](cumulus.md)'s
 developments of graph theory, including edge sets, cuts, components, tree
