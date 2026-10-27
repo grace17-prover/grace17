@@ -4,17 +4,22 @@
 
 ![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
+<div class="preface">
+
 If you have arrived here directly, welcome. Grace17 is a proof assistant for
 mathematics based on set theory: a small trusted kernel for classical ZFC, a
 modern elaborator and proof language above it, a library called Cumulus that
 runs from the axioms through analysis, algebra, topology, and combinatorics,
 and a browser Workbench in which every proof opens and can be stepped through.
 I am building it because I want a mainstream proof assistant that is ergonomic
-and efficient and whose foundation is the one most mathematicians already think
-in, and because I believe formalized mathematics, and the "Mathematics 2.0" now
-being done with AI, is better for having more than one foundation to stand on.
-The [Introduction](introduction.md) says what Grace17 is and how it works, with
-proofs you can try as you read. This page is about one project done with it.
+and efficient and whose foundation is ZFC in first-order logic with equality.
+Please see the [Introduction](introduction.md) for more background on the
+system and what I'm hoping to achieve. Now, onto the cycle double cover
+theorem!
+
+</div>
+
+<div class="section-mark" aria-hidden="true"><span>§</span></div>
 
 Every finite bridgeless multigraph has a list of cycles in which every edge
 lies exactly twice. Grace17 now proves this from the axioms of set theory. The
