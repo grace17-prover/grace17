@@ -1,4 +1,4 @@
-# An adventure in multifoundational Mathematics 2.0: the cycle double cover theorem in Grace17
+# An adventure in multifoundational Mathematics 2.0: the cycle double cover theorem in ZFC with Grace17
 
 <p class="byline"><img src="images/profiles/grant-passmore.jpg" alt="Grant Passmore"><span><a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a><br><time datetime="2026-10-30">30 October 2026</time></span></p>
 
