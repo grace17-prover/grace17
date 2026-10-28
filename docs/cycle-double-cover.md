@@ -64,8 +64,11 @@ human understanding of the proof, and almost none of its dependencies were in
 ## What is proved
 
 A multigraph is a vertex set `V`, an edge set `E`, and two functions `leftEnd`
-and `rightEnd` from `E` to `V`. Loops and parallel edges are allowed. A cut of
-`X ⊆ V` is the set of edges with one end in `X` and one outside, and a graph is
+and `rightEnd` from `E` to `V`. That is all the hypothesis `Graph(V, E,
+leftEnd, rightEnd)` below says: the two end functions map edges to vertices,
+and nothing more. Loops and parallel edges are allowed, since nothing forbids
+an edge whose ends coincide or two edges with the same ends. A cut of `X ⊆ V`
+is the set of edges with one end in `X` and one outside, and a graph is
 bridgeless when no cut has exactly one edge. A cycle is a nonempty connected
 edge set in which every vertex has degree zero or two, a loop contributing both
 of its ends.
