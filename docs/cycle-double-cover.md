@@ -7,13 +7,13 @@
 If you have arrived here directly, welcome. Grace17 is a proof assistant for
 mathematics based on set theory: a small trusted kernel for classical ZFC, a
 modern elaborator and proof language above it, a growing mathematical library
-called [Cumulus](cumulus.md), and a browser Workbench in which every proof
-opens and can be stepped through interactively (including natural deduction
-proofs from the axioms of set theory). I am building it because I want a
-mainstream proof assistant that is ergonomic and efficient and whose foundation
-is ZFC in first-order logic with equality. Please see the
-[Introduction](introduction.md) for more background on the system and what I'm
-hoping to achieve. Now, onto the cycle double cover theorem!
+called [Cumulus](cumulus.md), and a browser [Workbench](workbench.md) in which
+every proof opens and can be stepped through interactively, all the way down to
+the axioms of set theory. I am building it because I want a mainstream proof
+assistant that is ergonomic and efficient and whose foundation is ZFC in
+first-order logic with equality. Please see the [Introduction](introduction.md)
+for more background on the system and what I'm hoping to achieve. Now, onto the
+cycle double cover theorem!
 
 </div>
 
@@ -21,9 +21,9 @@ hoping to achieve. Now, onto the cycle double cover theorem!
 
 ![A cycle double cover of the Petersen graph by six cycles, with the Grace17 statement of the theorem](images/cycle-double-cover-petersen.svg "Six cycles of the Petersen graph, every edge in exactly two of them, and the theorem stated in Grace17.")
 
-Every finite bridgeless multigraph has a list of cycles in which every edge
-lies exactly twice. George Szekeres asked whether this is so in 1973, and Paul
-Seymour asked it again in 1979, and for half a century it was an open problem.
+Does every finite bridgeless multigraph have a list of cycles in which every
+edge lies exactly twice? George Szekeres posed this question in 1973, and Paul
+Seymour posed it again in 1979, and for half a century it was an open problem.
 Major progress was made by Jaeger, Alspach, Goddyn, Zhang, and Huck: Jaeger
 showed that it is enough to settle the snarks, Alspach, Goddyn, and Zhang
 settled every graph with no Petersen minor, and Huck showed that a smallest
