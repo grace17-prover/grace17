@@ -5,6 +5,10 @@ execution, kernel checking, evaluation, and standard-library loading run
 inside a module Web Worker in your browser. Checking a proof sends nothing to
 a server.
 
+**The Workbench is live at [grace17.org/workbench](../workbench/).** Every
+module of Cumulus opens there, and every theorem on the documentation pages
+has a button that opens it there at its line.
+
 ## Build and run
 
 ```text
