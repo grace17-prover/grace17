@@ -163,6 +163,8 @@ export function rewriteHref(href: string, ctx: RenderContext): string {
   const example = /^\.\.\/examples\/([^/]+)\.g17$/.exec(path);
   if (example) return `${ctx.prefix}examples/${example[1]}.html${suffix}`;
   if (path.startsWith("images/")) return path + suffix;
+  // The Workbench is part of the site, served beside the pages.
+  if (path === "../workbench/" || path.startsWith("../workbench/")) return ctx.prefix + path.slice(3) + suffix;
   if (path.startsWith("../")) return repo + path.slice(3) + suffix;
   return `${repo}docs/${path}${suffix}`;
 }
