@@ -763,6 +763,11 @@ Everything on this page is in the repository: the library, the blueprint, the
 agent interface, and the checkers. Every theorem shown above opens in the
 Workbench. If you try it, I would love to hear how it goes for you.
 
+## Acknowledgements
+
+Many thanks to András Salamon for his helpful comments on drafts of this
+post.
+
 ## Sources
 
 - Sang-il Oum, [A proof of the cycle double cover conjecture by OpenAI: an exposition](https://arxiv.org/abs/2607.16356), arXiv 2607.16356, July 2026.
