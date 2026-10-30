@@ -765,8 +765,8 @@ Workbench. If you try it, I would love to hear how it goes for you.
 
 ## Acknowledgements
 
-Many thanks to András Salamon for his helpful comments on drafts of this
-post.
+Many thanks to Tim Chow for his guidance in selecting the problem, and to
+András Salamon for his helpful comments on drafts of this post.
 
 ## Sources
 
