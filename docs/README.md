@@ -20,6 +20,7 @@ developments in Cumulus.
 - [Cumulus guide](cumulus.md): what is proved, organized by subject
 - [Top 100 theorems](top-100.md): formal statements and proof links
 - [Erdős problem 397](erdos-397.md): an infinite family of binomial coincidences, found with an AI, checked from the axioms
+- [The cycle double cover theorem](cycle-double-cover.md): a recent theorem formalized in ZFC with Grace17, planned as a blueprint and proved with agents
 - [Algebraic hierarchy](algebra.md): how structures are represented
 - [Axiom audits](axiom-audit.md): inspecting Choice and other assumptions a proof uses
 
