@@ -227,3 +227,43 @@ proof
 end RingContext
 ` }], ["lib"]), /could not establish.*∈ B/);
 });
+
+// The normalizer's expansion budget is a per-call option. An identity past
+// the default budget fails naming the option; the same identity closes with
+// the budget raised, and its certificate replays.
+
+// The normalizer's expansion budget is a per-call option. An identity past
+// the default budget fails naming the option; the same identity is checked
+// by the kernel once the budget is raised. The certificate is not exported
+// here: a ring certificate of this size takes minutes to flatten for the
+// machine format, which is a cost of the export path, not of the tactic.
+test("ring (monomials := N) sets the expansion budget for one call", () => {
+  const cube = (sum: string) => `(${sum} * ${sum} * ${sum})`;
+  const theorem = (tactic: string) => `module RingWide
+import Grace.Cumulus.Algebra.Ring
+
+section Wide
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem wide (a b c d e : Set)
+  requires ha : a ∈ A
+  requires hb : b ∈ A
+  requires hc : c ∈ A
+  requires hd : d ∈ A
+  requires he : e ∈ A
+  shows ${cube("(a + b + c + d + e)")} * ${cube("(a + b + c + d + e)")} =
+    ${cube("(e + d + c + b + a)")} * ${cube("(e + d + c + b + a)")}
+proof
+  ${tactic}
+end Wide
+`;
+  const kernel = createZfgKernel();
+  assert.throws(() => loadModuleSourceGraph(kernel, [{ file: "RingWide.g17", source: theorem("ring") }], ["lib"]),
+    /exceeds 256 monomials; raise the budget with ring \(monomials := 1024\)/);
+  const generous = createZfgKernel();
+  loadModuleSourceGraph(generous, [{ file: "RingWide.g17", source: theorem("ring (monomials := 2048)") }], ["lib"]);
+  assert.ok(generous.theorems.has("RingWide.wide"));
+});
+

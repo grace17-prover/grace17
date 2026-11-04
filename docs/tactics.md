@@ -42,7 +42,7 @@ ends with the natural-deduction rule schema its proof term reduces to, with
 | [Logic and witnesses](#logic-and-witnesses) | [`constructor  /  split`](#constructor-split), [`refine ⟨a, ha, b, hb, _⟩`](#refine-a-ha-b-hb), [`left  /  right`](#left-right), [`witness t  /  use t`](#witness-t-use-t), [`rcases h with ⟨h₁, h₂, h₃⟩`](#rcases-h-with-h1-h2-h3), [`obtain ⟨x, hx, rfl⟩ := fact`](#obtain-x-hx-rfl-fact), [`cases h with hp \| hq`](#cases-h-with-hp-hq), [`rcases h with hp \| hq \| hr`](#rcases-h-with-hp-hq-hr), [`obtain ⟨x, hx, y, hy⟩ := fact`](#obtain-x-hx-y-hy-fact), [`exfalso`](#exfalso), [`by_contra h`](#bycontra-h), [`by_cases h : P`](#bycases-h-p), [`contradiction`](#contradiction), [`tauto`](#tauto) |
 | [Changing the view](#changing-the-view) | [`symm  /  symm at h`](#symm-symm-at-h), [`rw h  /  rewrite h  /  rw ← h`](#rw-h-rewrite-h-rw-h), [`rw [h₁, h₂] / rwa h`](#rw-h1-h2-rwa-h), [`rw under h at fact`](#rw-under-h-at-fact), [`simp [rules]`](#simp-rules), [`simpa [rules] using fact`](#simpa-rules-using-fact), [`unfold name`](#unfold-name), [`ext x`](#ext-x), [`clear h`](#clear-h), [`rename h => betterName`](#rename-h-bettername), [`revert h`](#revert-h), [`set x := t with h`](#set-x-t-with-h) |
 | [Search and automation](#search-and-automation) | [`exact?`](#exact), [`apply?`](#apply), [`rw?`](#rw), [`settle with rules`](#settle-with-rules), [`typecheck`](#typecheck), [`synthesize`](#synthesize), [`cc  /  congruence`](#cc-congruence), [`decide`](#decide), [`compute`](#compute) |
-| [Arithmetic](#arithmetic) | [`ring`](#ring), [`ring [h₁, h₂]`](#ring-h1-h2), [`ring_nf`](#ringnf), [`linear_combination 2 * h1 - h2`](#linearcombination-2-h1---h2), [`arith`](#arith), [`linarith`](#linarith) |
+| [Arithmetic](#arithmetic) | [`ring`](#ring), [`ring [h₁, h₂]`](#ring-h1-h2), [`ring (monomials := N)`](#ring-monomials-n), [`ring_nf`](#ringnf), [`linear_combination 2 * h1 - h2`](#linearcombination-2-h1---h2), [`arith`](#arith), [`linarith`](#linarith) |
 | [Shaping a development](#shaping-a-development) | [`sorry`](#sorry), [`. tactic`](#tactic), [`tactic1; . tactic2`](#tactic1-tactic2), [`tactic solve(rule) := simp [$rule]`](#tactic-solverule-simp-rule) |
 | [Induction](#induction) | [`induction n [generalizing s ...] [with]`](#induction-n-generalizing-s-with), [`induction finite with G a`](#induction-finite-with-g-a), [`induction x using membership`](#induction-x-using-membership), [`induction x over A ordered by r certified by founded`](#induction-x-over-a-ordered-by-r-certified-by-founded) |
 
@@ -1211,6 +1211,24 @@ h₁ : p₁ = q₁ ∈ Γ    h₂ : p₂ = q₂ ∈ Γ    normalization certific
 ─────────────────────────────────────────────────────────────────────────  ring
 Γ ⊢ lhs = rhs
 each rule rewrites an exposed multiple of its normal form by equality elimination
+```
+
+### `ring (monomials := N)`
+
+**Raise the normalizer's expansion budget for one call.** ring expands products into sums of monomials with checked certificates and refuses an expansion past 256 monomials, so routine identities stay cheap and a mistaken goal fails fast. An identity that needs more states its budget, ring (monomials := 4096); the option applies to that call only, and the failure message names the budget a call ran out of.
+
+```g17
+-- a composite polynomial identity in four variables, fully unfolded
+ring (monomials := 65536)
+```
+
+Rule schema:
+
+```text
+normalization certificate from Γ, at most N monomials per product
+─────────────────────────────────────────────────────────────────  ring
+Γ ⊢ lhs = rhs
+the same semiring steps; only the expansion budget changes
 ```
 
 ### `ring_nf`

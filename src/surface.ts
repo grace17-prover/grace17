@@ -8122,11 +8122,16 @@ function elaborateTacticTheorem(
       replaceWith(line, [{ goal }], ([proof]) => lift(proof!));
       continue;
     }
+    // `ring (monomials := N)` raises the normalizer's expansion budget for
+    // one call; the default keeps routine identities cheap.
+    const ringConfig = /^ring\s+\(monomials\s*:=\s*(\d+)\)(.*)$/u.exec(command);
+    const ringOptions: RingOptions = ringConfig ? { monomials: Number(ringConfig[1]) } : defaultRingOptions;
+    if (ringConfig) command = "ring" + ringConfig[2]!;
     const ring = /^ring(?:\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_]*))?$/u.exec(command);
     if (ring) {
       if (!ring[1] && current.goal.tag === "eq") {
         const generic = normalizeCommutativeRing(kernel, [current.goal.left, current.goal.right],
-          current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number);
+          current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number, ringOptions);
         if (generic) {
           if (termEquals(generic[0]!.term, generic[1]!.term)) {
             close(line, calc(generic[0]!.proof, symm(generic[1]!.proof)));
@@ -8141,7 +8146,7 @@ function elaborateTacticTheorem(
             if (local.formula.tag !== "eq" ||
                 ![...freeFormulaVariables(local.formula)].some(variable => goalVariables.has(variable))) continue;
             const normalized = normalizeCommutativeRing(kernel, [local.formula.left, local.formula.right],
-              current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number);
+              current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number, ringOptions);
             if (!normalized) continue;
             const equality = calc(symm(normalized[0]!.proof), local.proof, normalized[1]!.proof);
             if (termEquals(generic[0]!.term, normalized[0]!.term) &&
@@ -13527,16 +13532,22 @@ function proveRingConstantMembership(kernel: Kernel, goal: Formula,
 }
 
 /** An untrusted polynomial computation accompanied by ordinary ring-law proofs. */
+/** Computational budget of the ring normalizer, settable per call as `ring (monomials := 4096)`. */
+interface RingOptions { readonly monomials: number }
+const defaultRingOptions: RingOptions = { monomials: 256 };
+
 function normalizeCommutativeRing(kernel: Kernel, terms: readonly Term[],
-  assumptions: readonly Formula[], facts: readonly Proof[], scope: SurfaceScope, line: number
+  assumptions: readonly Formula[], facts: readonly Proof[], scope: SurfaceScope, line: number,
+  options: RingOptions = defaultRingOptions,
 ): readonly { term: Term; proof: Proof }[] | undefined {
-  return prepareCommutativeRing(kernel, terms, assumptions, facts, scope, line)?.normalize(terms);
+  return prepareCommutativeRing(kernel, terms, assumptions, facts, scope, line, options)?.normalize(terms);
 }
 
 // All caches belong to this one fixed kernel/context/carrier. No evidence is
 // retained across tactic invocations or changes to assumptions.
 function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
-  assumptions: readonly Formula[], facts: readonly Proof[], scope: SurfaceScope, line: number) {
+  assumptions: readonly Formula[], facts: readonly Proof[], scope: SurfaceScope, line: number,
+  options: RingOptions = defaultRingOptions) {
   // The six-place IsCommRing over separate pieces; the bundled CommRing(R)
   // of a ring structure reaches this path through the instance
   // CommRing.parts, which reads the pieces off the projections.
@@ -14204,7 +14215,8 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       lift(call2, identity(add), first.proof, rest.proof), append([first.item], rest.items)) };
   };
   const multiplyPoly = (as: Poly, bs: Poly): { items: Mono[]; proof: Proof } => {
-    if (as.length * bs.length > 256) throw new Error("polynomial expansion exceeds 256 monomials");
+    if (as.length * bs.length > options.monomials) throw new Error(
+      `polynomial expansion exceeds ${options.monomials} monomials; raise the budget with ring (monomials := ${options.monomials * 4})`);
     if (as.length === 0) return { items: [], proof: equation("IsRing.zero_mul", [polyTerm(bs)],
       times(zero, polyTerm(bs)), zero) };
     if (bs.length === 0) return { items: [], proof: equation("IsRing.mul_zero", [polyTerm(as)],
