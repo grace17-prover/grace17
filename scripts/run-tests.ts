@@ -72,11 +72,21 @@ function runOne(name: string): Promise<void> {
   });
 }
 
+// Files that load or compile the whole library hold most of their heap at
+// once; two of them side by side exceed a sixteen-gigabyte machine, so they
+// run one at a time, first, and the rest share the workers. The CI workflow
+// isolates the same file in its own job.
+const heavy = new Set(["cumulus.test.ts", "zf-library.test.ts", "workbench.test.ts", "rust-checker.test.ts",
+  "python-g17c.test.ts", "compiled-module.test.ts"]);
+const heavyFiles = files.filter(name => heavy.has(name));
+const lightFiles = files.filter(name => !heavy.has(name));
+for (const name of heavyFiles) await runOne(name);
+next = 0;
 async function worker(): Promise<void> {
-  while (next < files.length) await runOne(files[next++]!);
+  while (next < lightFiles.length) await runOne(lightFiles[next++]!);
 }
 
-await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
+await Promise.all(Array.from({ length: Math.min(concurrency, lightFiles.length) }, worker));
 const seconds = ((performance.now() - started) / 1000).toFixed(1);
 console.log(`${passed} of ${files.length} test files passed in ${seconds}s${failures.length ? `; failed: ${failures.join(", ")}` : ""}`);
 process.exitCode = failures.length ? 1 : 0;
