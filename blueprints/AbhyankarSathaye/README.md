@@ -160,14 +160,14 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| AbhyankarSathaye.Algebras | 20 | 9 | 11 |
+| AbhyankarSathaye.Algebras | 21 | 21 | 0 |
 | AbhyankarSathaye.Identities | 7 | 7 | 0 |
-| AbhyankarSathaye.PolynomialAlgebras | 11 | 1 | 10 |
+| AbhyankarSathaye.PolynomialAlgebras | 52 | 52 | 0 |
 | AbhyankarSathaye.Ambient | 10 | 10 | 0 |
-| AbhyankarSathaye.Derivatives | 10 | 0 | 10 |
-| AbhyankarSathaye.FiniteMaps | 11 | 1 | 10 |
+| AbhyankarSathaye.Derivatives | 61 | 61 | 0 |
+| AbhyankarSathaye.FiniteMaps | 11 | 11 | 0 |
 | AbhyankarSathaye.CriticalPoint | 10 | 0 | 10 |
-| AbhyankarSathaye.QuotientAlgebras | 12 | 0 | 12 |
+| AbhyankarSathaye.QuotientAlgebras | 22 | 22 | 0 |
 | AbhyankarSathaye.Plane | 27 | 0 | 27 |
 | AbhyankarSathaye.LiftingIdentities | 21 | 18 | 3 |
 | AbhyankarSathaye.Lifting | 16 | 0 | 16 |
@@ -176,5 +176,5 @@ graph TD
 | AbhyankarSathaye.NoCoordinate | 1 | 0 | 1 |
 | AbhyankarSathaye.Stabilization | 7 | 0 | 7 |
 | AbhyankarSathaye.Theorem | 3 | 0 | 3 |
-| **total** | **188** | **46** | **142** |
+| **total** | **291** | **202** | **89** |
 <!-- /blueprint-status -->
