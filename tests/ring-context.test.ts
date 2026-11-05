@@ -267,3 +267,57 @@ end Wide
   assert.ok(generous.theorems.has("RingWide.wide"));
 });
 
+
+// Operand membership inside a ring certificate falls back to the certified
+// typing rules, so a product of a subtraction and a power nested in a sum
+// is placed in the ring as typecheck places it.
+test('ring certificates place nested subtractions and powers by the typing rules', () => {
+ const k=createZfgKernel();
+ loadModuleSourceGraph(k,[{file:'N.g17',source:`module N
+import Grace.Cumulus.Algebra.Ring
+section Probe
+variable (R : Set)
+hypothesis ring : CommRing(R)
+
+theorem compat (h x y s U G : R)
+  requires cusp : x^2 + y^3 = h*s
+  requires lin : h*G - y*U = x
+  shows y^2*(y + U^2) = h*(s - h*G^2 + R[2]*U*y*G)
+proof
+  linear_combination (h*G - y*U + x) * lin + cusp
+end Probe
+`}],['lib']);
+ assert.ok(k.theorems.has('N.compat'));
+});
+
+// A constant is placed in a ring by its membership instance, as an
+// application is, so a sum of constants under two ring hypotheses resolves.
+test('constants are placed in a ring by their membership instances', () => {
+ const k=createZfgKernel();
+ loadModuleSourceGraph(k,[{file:'C.g17',source:`module C
+import Grace.Cumulus.Algebra.Polynomial.BundledEvaluation
+import Grace.Cumulus.Algebra.Ring.Pow
+import Grace.Cumulus.Complex.Field
+section Constants
+hypothesis complexes : CommRing(complexRing)
+hypothesis ambient : CommRing(polynomialRing(complexRing, 4))
+
+def first : Set := X(complexRing, 4, 1)^3 + X(complexRing, 4, 0)*X(complexRing, 4, 2)
+
+instance first.mem
+  shows first ∈ Ring.carrier(polynomialRing(complexRing, 4))
+proof
+  unfold first
+  typecheck
+
+def second : Set := first + first^2
+
+instance second.mem
+  shows second ∈ Ring.carrier(polynomialRing(complexRing, 4))
+proof
+  unfold second
+  typecheck
+end Constants
+`}],['lib']);
+ assert.ok(k.definitions.has('C.second'));
+});

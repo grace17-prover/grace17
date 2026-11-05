@@ -3163,7 +3163,7 @@ function elaborateMixfixHypothesisNotation(
   const trimmed = pattern.trim();
   const literals = mixfixLiterals(trimmed);
   if (!trimmed.startsWith("_") || !trimmed.endsWith("_") || literals.length < 1 ||
-      literals.some(literal => !/^[^\p{L}\p{M}\p{N}\s_(),."]+$/u.test(literal))) {
+      literals.some(literal => !mixfixLiteralToken.test(literal))) {
     throw new SurfaceError(line.number, 'a mixfix pattern alternates placeholders and punctuation tokens, as in "_ : _ ⟶ _"');
   }
   const targetPieces = splitTopLevel(rawTargetArguments, ",").map(piece => piece.trim());
@@ -3348,7 +3348,7 @@ function elaborateMixfixNotation(
   const trimmed = pattern.trim();
   const literals = mixfixLiterals(trimmed);
   if (!trimmed.startsWith("_") || !trimmed.endsWith("_") || literals.length < 1 ||
-      literals.some(literal => !/^[^\p{L}\p{M}\p{N}\s_(),."]+$/u.test(literal))) {
+      literals.some(literal => !mixfixLiteralToken.test(literal))) {
     throw new SurfaceError(line.number, 'a mixfix pattern alternates placeholders and punctuation tokens, as in "_ : _ → _"');
   }
   const arity = literals.length + 1;
@@ -13837,6 +13837,12 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       }
     }
     if (!result) {
+      // The certified typing rules, as `typecheck` reads them: closure
+      // instances such as Ring.pow_mem and the membership instances of
+      // defined operands place a compound the structural cases above miss.
+      result = proveRefinement(kernel, carrier, "in", [term], assumptions, facts, visibility);
+    }
+    if (!result) {
       try {
         result = settle(kernel, goal, { using: resolveRules(kernel, ["Real"], line, scope),
           assumptions, facts, fuel: 100, visibility });
@@ -16206,6 +16212,13 @@ function findMixfixToken(source: string, token: string): { readonly index: numbe
   return undefined;
 }
 
+/**
+ * A literal of a mixfix pattern: punctuation without whitespace, which may
+ * continue with modifier letters, so that `→ₐ` and `≃ₐ` are tokens as `·ₐ`
+ * and a postfix `ᵀ` are.
+ */
+const mixfixLiteralToken = /^[^\p{L}\p{M}\p{N}\s_(),."](?:[^\p{L}\p{M}\p{Nd}\s_(),."]|\p{Lm})*$/u;
+
 /** A formula written with a visible mixfix predicate notation, or undefined when the text has no such shape. */
 function parseMixfixFormula(
   source: string, kernel: Kernel, variables: ReadonlySet<string>, line: number, scope: SurfaceScope,
@@ -17464,7 +17477,9 @@ function selectHypothesisOperation(
   // typing rules in the carrier of a structure value an instance supplies,
   // X(R, I, j) in Ring.carrier(polynomialRing(R, I)) by X.mem: that
   // structure's operations join the candidates.
-  const unplaced = operands.filter(term => term.tag === "app" && term.args.length > 0 &&
+  // A constant counts as an application here: ambientF in the ambient
+  // polynomial ring by its membership instance, as X(R, I, j) by X.mem.
+  const unplaced = operands.filter(term => term.tag === "app" &&
     !found.some(item => inCarrier(term, item.carrier)));
   const derived = unplaced.flatMap(term => {
     const carrier = completedCarrier(kernel, scope, facts, term);

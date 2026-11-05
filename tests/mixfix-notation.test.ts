@@ -114,3 +114,26 @@ proof
 `;
   assert.equal(checkWorkbenchFiles([{ name: "MixfixRegression.g17", source }]).ok, true);
 });
+
+// A mixfix literal may continue with modifier letters after its punctuation,
+// so that →ₐ and ≃ₐ are tokens as ·ₐ is.
+test("mixfix literals continue with modifier letters", () => {
+  const source = `module MixfixLetters
+import Grace.Cumulus.Algebra.Ring
+
+predicate AlgebraHom (f A B : Set) := RingHom(f, fst(A), fst(B)) ∧ f(snd(A)) = snd(B)
+predicate AlgebraIso (f A B : Set) :=
+  AlgebraHom(f, A, B) ∧ BijectiveBetween(f, Ring.carrier(fst(A)), Ring.carrier(fst(B)))
+notation guard "_ : _ →ₐ _" => AlgebraHom
+notation guard "_ : _ ≃ₐ _" => AlgebraIso
+
+theorem iso_hom (f A B : Set)
+  requires iso : f : A ≃ₐ B
+  shows f : A →ₐ B
+proof
+  exact iso.left
+`;
+  const result = checkWorkbenchFiles([{ name: "MixfixLetters.g17", source }]);
+  assert.equal(result.ok, true, JSON.stringify(result).slice(0, 400));
+  assert.match(JSON.stringify(result), /f : A →ₐ B/);
+});

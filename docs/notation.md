@@ -390,7 +390,8 @@ read back as a natural operation.
 arguments in the placeholders around literal tokens: `f : A → B` is
 `FunctionBetween(f, A, B)`, and `->` is accepted for `→`. The pattern begins
 and ends with a placeholder, placeholders alternate with punctuation tokens,
-and the target takes as many arguments as there are placeholders. The form
+which may continue with modifier letters, as `→ₐ` and `≃ₐ` do, and the
+target takes as many arguments as there are placeholders. The form
 is read only when every placeholder holds a term, so `n : ℕ → n ∈ S` is still
 an implication. On its own line a statement or goal prints in this form;
 inside a larger formula the predicate keeps its spelling, as a sort
