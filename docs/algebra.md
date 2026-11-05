@@ -177,13 +177,17 @@ go both ways: the instances `Ring.parts`, `CommRing.parts`, and
 `OrderedField.of_parts` bundle a parameterized instance;
 `CommRing.of_projections` and `Ring.of_projections` close the loop for a
 value whose shape is known. The closure facts `Ring.add_mem`, `Ring.mul_mem`,
-`Ring.neg_mem`, `Ring.zero_mem`, `Ring.one_mem`, and `Ring.numeral_mem` are
-instances, so the carrier membership of a compound term is synthesized.
+`Ring.neg_mem`, `Ring.zero_mem`, `Ring.one_mem`, `Ring.numeral_mem`, and
+`Ring.pow_mem` are instances, so the carrier membership of a compound term
+is synthesized. The power laws `Ring.pow_zero`, `Ring.pow_succ`,
+`Ring.pow_add`, and `Ring.pow_mul` are in `Grace.Cumulus.Algebra.Ring.Pow`.
 
 Under a hypothesis `Ring(R)`, `CommRing(R)`, `Field(R)`, or
 `OrderedField(R, lt)` the operations are `x + y`, `x * y`, and `-x`, a
-binder `(x : R)` is membership in the carrier, and `R[0]`, `R[1]`, `R[2]`
-are the ring's own constants and numerals, so a section reads
+binder `(x : R)` is membership in the carrier, `R[0]`, `R[1]`, `R[2]`
+are the ring's own constants and numerals, and `x ^ n` is the natural power
+`Ring.pow(R, x, n)`, which `ring` reads as the product a literal exponent
+abbreviates, so a section reads
 
 ```grace17 import=Grace.Cumulus.Algebra.Ring
 section Rings
@@ -191,7 +195,7 @@ variable (R : Set)
 hypothesis ring : CommRing(R)
 
 theorem square_sum (x y : R)
-  shows (x + y) * (x + y) = x * x + R[2] * (x * y) + y * y
+  shows (x + y) ^ 2 = x ^ 2 + R[2] * (x * y) + y ^ 2
 proof
   ring
 end Rings

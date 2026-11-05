@@ -963,7 +963,7 @@ by any of this; only its text is.
 Two notations that share a token and fixity never share a spelling in one
 printed formula: of the group power `x ^ n` and the matrix power under a
 typed `^`, the declaration met first keeps the token and the other prints
-by name, `groupPow(G, x, n)` or `matrixPow3(x, n)`. Two instances of one
+by name, `groupPow(G, x, n)` or `realPow(x, n)`. Two instances of one
 declaration keep the token, since their operands tell them apart, as in
 `f(a * b) = f(a) * f(b)` under `f : G →* H`. A graph applied to a pair
 prints as the two-argument application, `f(a, b)`, the spelling of
