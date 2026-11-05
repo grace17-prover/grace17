@@ -4,12 +4,12 @@ In ℂ[h, u, v, w] there is a polynomial F whose zero fibre is affine
 three-space, ℂ[h, u, v, w] ⧸ (F) ≅ ℂ[3], and which is not a coordinate: no
 automorphism of ℂ[h, u, v, w] sends a variable to F. The same F, read in
 ℂ[4 + k], has the same two properties in every dimension at least four.
-This blueprint plans its formalization in Cumulus as checked Grace17
-modules: every definition here is final, every theorem is stated in full
-and admitted with `sorry` unless already proved, and the import graph is
-the dependency graph of the proof. The blueprint checks as it stands;
-filling it in replaces admissions with proofs, one theorem at a time, and
-`npm run blueprint:status` reports what remains.
+This blueprint planned its formalization in Cumulus as checked Grace17
+modules: every definition final, every theorem stated in full and admitted
+with `sorry` until proved, the import graph the dependency graph of the
+proof. It is now proved in full: no module has an admission left, and the
+two final theorems audit to the ZF axioms alone, without choice.
+`npm run blueprint:status` reports the count per module.
 
 ```sh
 npm run blueprint:check     # the whole blueprint elaborates
@@ -166,15 +166,15 @@ graph TD
 | AbhyankarSathaye.Ambient | 10 | 10 | 0 |
 | AbhyankarSathaye.Derivatives | 61 | 61 | 0 |
 | AbhyankarSathaye.FiniteMaps | 11 | 11 | 0 |
-| AbhyankarSathaye.CriticalPoint | 10 | 0 | 10 |
+| AbhyankarSathaye.CriticalPoint | 35 | 35 | 0 |
 | AbhyankarSathaye.QuotientAlgebras | 22 | 22 | 0 |
-| AbhyankarSathaye.Plane | 27 | 0 | 27 |
-| AbhyankarSathaye.LiftingIdentities | 21 | 18 | 3 |
-| AbhyankarSathaye.Lifting | 16 | 0 | 16 |
-| AbhyankarSathaye.Elimination | 17 | 0 | 17 |
-| AbhyankarSathaye.Fibre | 5 | 0 | 5 |
-| AbhyankarSathaye.NoCoordinate | 1 | 0 | 1 |
-| AbhyankarSathaye.Stabilization | 7 | 0 | 7 |
-| AbhyankarSathaye.Theorem | 3 | 0 | 3 |
-| **total** | **291** | **202** | **89** |
+| AbhyankarSathaye.Plane | 64 | 64 | 0 |
+| AbhyankarSathaye.LiftingIdentities | 21 | 21 | 0 |
+| AbhyankarSathaye.Lifting | 57 | 57 | 0 |
+| AbhyankarSathaye.Elimination | 120 | 120 | 0 |
+| AbhyankarSathaye.Fibre | 16 | 16 | 0 |
+| AbhyankarSathaye.NoCoordinate | 5 | 5 | 0 |
+| AbhyankarSathaye.Stabilization | 56 | 56 | 0 |
+| AbhyankarSathaye.Theorem | 3 | 3 | 0 |
+| **total** | **561** | **561** | **0** |
 <!-- /blueprint-status -->
