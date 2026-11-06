@@ -190,7 +190,8 @@ inhabited subset of ℕ, from which the principle of mathematical induction
 for subsets of ℕ is proved. Arithmetic evaluates with native large integers,
 so `compute` settles ground equations at any size. The everyday lemma
 library covers order, minimum and maximum, powers, parity, truncated
-subtraction, and the distance between naturals.
+subtraction, the distance between naturals, and the positions below a sum
+m + n with the offset j ↦ m + j.
 
 `Grace.Cumulus.List` develops finite sequences as the `List` datatype:
 append and reverse, take and drop, filtering by a set, counts and
