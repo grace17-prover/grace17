@@ -34,6 +34,18 @@ export interface SimpOptions {
   readonly ground?: readonly Proof[];
   /** The declarations and guards the current scope sees; absent, the whole kernel. */
   readonly visibility?: ScopeVisibility;
+  /**
+   * The budget of a ground evaluation attempted on a closed equation: the
+   * size its unfolding may reach and the steps it may take. Absent, the
+   * default budget.
+   */
+  readonly compute?: number;
+  /**
+   * The instance search of the scope, prepared on demand: a guard of a
+   * rule that neither the context nor soft typing settles is asked of it,
+   * so a membership an instance supplies lets the rule fire.
+   */
+  readonly instances?: () => RefinementProver | undefined;
 }
 
 
@@ -70,6 +82,13 @@ interface ReliefState {
   remaining: number;
   readonly active: Set<string>;
   readonly visibility?: ScopeVisibility;
+  readonly instances?: () => RefinementProver | undefined;
+}
+
+/** The instance search of the scope, asked for a guard; undefined when it has none or fails. */
+function instanceEvidence(instances: (() => RefinementProver | undefined) | undefined, guard: Formula): Proof | undefined {
+  if (!instances || guard.tag !== "pred" || guard.args.length === 0) return undefined;
+  try { return instances()?.prove(guard.args.at(-1)!, guard.pred, guard.args.slice(0, -1)); } catch { return undefined; }
 }
 
 function reliefState(options: SimpOptions): ReliefState {
@@ -81,7 +100,7 @@ function reliefState(options: SimpOptions): ReliefState {
   }
   if (policy && [...(policy.hypothesisDepths?.values() ?? [])].some(limits =>
     limits.some(n => !Number.isSafeInteger(n) || n < 0))) throw new Error("invalid hypothesis depth limit");
-  return { policy, remaining: policy ? policy.work : 0, active: new Set(), visibility: options.visibility };
+  return { policy, remaining: policy ? policy.work : 0, active: new Set(), visibility: options.visibility, instances: options.instances };
 }
 
 /** No case splits, existential guesses, or calls into the general settle search. */
@@ -107,6 +126,8 @@ function relieveHypothesis(
     const typed = proveRefinement(kernel, wanted.args.at(-1)!, wanted.pred, wanted.args.slice(0, -1), context, facts, state.visibility);
     if (typed) { report("context"); return typed; }
   }
+  const instance = instanceEvidence(state.instances, wanted);
+  if (instance) { report("context"); return instance; }
   if (wanted.tag === "and") {
     const left = relieveHypothesis(kernel, wanted.left, rules, context, facts, state, depth, ceiling);
     if (!left) return undefined;
@@ -249,6 +270,109 @@ interface AvailableFact {
 }
 
 class SettleSearchLimit extends Error {}
+
+/**
+ * The size of a closed term once every explicit definition is unfolded by
+ * value, as the ground evaluator unfolds it: the size that evaluating the
+ * term can reach before anything reduces. Each explicit definition
+ * contributes its body's size as a linear form in the sizes of its
+ * arguments, memoized per kernel; recursive functions and primitives
+ * contribute their node alone, since the evaluation fuel bounds their
+ * work. The form is saturated at the cap, so a definition whose unfolding
+ * nests a pair of structures many levels deep is recognized without
+ * computing its exact exponential size.
+ */
+interface UnfoldedSizeForm {
+  readonly constant: bigint;
+  readonly multiplicities: readonly bigint[];
+}
+
+const unfoldedSizeForms = new WeakMap<Kernel, Map<string, UnfoldedSizeForm | undefined>>();
+const UNFOLDED_SIZE_CAP = 1n << 62n;
+
+function saturate(value: bigint): bigint {
+  return value > UNFOLDED_SIZE_CAP ? UNFOLDED_SIZE_CAP : value;
+}
+
+function unfoldedSizeForm(kernel: Kernel, name: string): UnfoldedSizeForm | undefined {
+  let forms = unfoldedSizeForms.get(kernel);
+  if (!forms) { forms = new Map(); unfoldedSizeForms.set(kernel, forms); }
+  if (forms.has(name)) return forms.get(name);
+  const definition = kernel.functionBodies.get(name);
+  if (!definition) { forms.set(name, undefined); return undefined; }
+  // A definition met again while its own form is being computed is opaque.
+  forms.set(name, undefined);
+  const parameters = definition.parameters;
+  const index = new Map(parameters.map((parameter, position) => [parameter, position]));
+  const form = (term: Term): UnfoldedSizeForm => {
+    const multiplicities = parameters.map(() => 0n);
+    if (term.tag === "var") {
+      const position = index.get(term.name);
+      if (position === undefined) return { constant: 1n, multiplicities };
+      multiplicities[position] = 1n;
+      return { constant: 0n, multiplicities };
+    }
+    if (term.tag === "nat") return { constant: 1n, multiplicities };
+    const inner = unfoldedSizeForm(kernel, term.fn);
+    const parts = term.args.map(form);
+    let constant = inner ? inner.constant : 1n;
+    for (let position = 0; position < parts.length; position += 1) {
+      const weight = inner ? inner.multiplicities[position] ?? 1n : 1n;
+      const part = parts[position]!;
+      constant = saturate(constant + weight * part.constant);
+      for (let i = 0; i < multiplicities.length; i += 1) {
+        multiplicities[i] = saturate(multiplicities[i]! + weight * part.multiplicities[i]!);
+      }
+    }
+    return { constant, multiplicities };
+  };
+  const result = form(definition.body);
+  forms.set(name, result);
+  return result;
+}
+
+/** The size the ground evaluation of a closed term can reach; see the forms above. */
+export function unfoldedSize(kernel: Kernel, term: Term): bigint {
+  if (term.tag !== "app") return 1n;
+  const inner = unfoldedSizeForm(kernel, term.fn);
+  const sizes = term.args.map(argument => unfoldedSize(kernel, argument));
+  let total = inner ? inner.constant : 1n;
+  for (let position = 0; position < sizes.length; position += 1) {
+    const weight = inner ? inner.multiplicities[position] ?? 1n : 1n;
+    total = saturate(total + weight * sizes[position]!);
+  }
+  return total;
+}
+
+/**
+ * The default budget of a ground evaluation a tactic attempts on its own,
+ * without being asked to compute: the size the unfolding of the closed
+ * equation may reach, and the steps the evaluation may take. A closed goal
+ * over structures nested a few levels deep stays well within it; a
+ * polynomial over the complex numbers, whose unfolding is exponential in
+ * its nesting, is left to rewriting instead of exhausting the heap.
+ */
+export const DEFAULT_COMPUTE_BUDGET = 65_536;
+
+/**
+ * Whether the ground evaluation of a closed equation is within the budget,
+ * by the unfolded size of its sides.
+ */
+export function withinComputeBudget(kernel: Kernel, left: Term, right: Term, budget = DEFAULT_COMPUTE_BUDGET): boolean {
+  const limit = BigInt(budget);
+  return unfoldedSize(kernel, left) <= limit && unfoldedSize(kernel, right) <= limit;
+}
+
+/**
+ * A computation certificate for a closed equation when its evaluation is
+ * within the budget and succeeds; undefined otherwise. Tactics that
+ * evaluate a closed goal on their own initiative go through here, so that
+ * a goal whose unfolding is too large is left to rewriting.
+ */
+export function boundedComputation(kernel: Kernel, left: Term, right: Term, budget = DEFAULT_COMPUTE_BUDGET): Proof | undefined {
+  if (!withinComputeBudget(kernel, left, right, budget)) return undefined;
+  try { return kernel.proveComputation(left, right, budget); } catch { return undefined; }
+}
 
 /** An equation without variables that mentions a numeral under a function. */
 export function closedNumeralEquation(formula: Extract<Formula, { tag: "eq" }>): boolean {
@@ -580,7 +704,7 @@ export function settle(kernel: Kernel, goal: Formula, options: SimpOptions): Pro
   const assumptions = options.assumptions ?? [];
   if (goal.tag !== "eq") {
     if (!Array.isArray(options.using)) throw new Error("logical settle needs its explicit rule proofs");
-    const result = settleLogical(kernel, goal, options.using, assumptions, options.facts ?? [], options.fuel ?? 1_000, options.backchain === undefined ? undefined : reliefState(options), options.ground, options.visibility);
+    const result = settleLogical(kernel, goal, options.using, assumptions, options.facts ?? [], options.fuel ?? 1_000, options.backchain === undefined ? undefined : reliefState(options), options.ground, options.visibility, options.compute);
     const checked = kernel.checkProof(result, assumptions);
     if (!formulaEquals(checked, goal)) throw new Error("settle produced a proof of the wrong logical goal");
     return result;
@@ -619,15 +743,15 @@ export function settle(kernel: Kernel, goal: Formula, options: SimpOptions): Pro
     stats.candidatesConsidered = 0;
     stats.rewrites = 0;
   }
-  const budget = { remaining: options.fuel ?? 10_000 };
+  const budget = { remaining: options.fuel ?? 10_000, fuel: options.fuel ?? 10_000 };
   const refinements = prepareRefinementProver(kernel, assumptions, options.facts ?? [], options.visibility);
   const factIndex = indexFacts(facts);
   const relief = reliefState(options);
   const relieve = (goal: Formula): Proof | undefined => {
     const doubleNegative = factIndex.get(formulaCanonical(not(not(goal))));
     if (doubleNegative) return dne(goal, doubleNegative);
-    return relief.policy ? relieveHypothesis(
-      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined;
+    return instanceEvidence(options.instances, goal) ?? (relief.policy ? relieveHypothesis(
+      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined);
   };
   const left = normalize(kernel, goal.left, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, stats);
   const right = normalize(kernel, goal.right, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, stats);
@@ -657,15 +781,15 @@ export function simplifyEqualityGoal(kernel: Kernel, goal: Formula, options: Sim
     : options.using;
   const locals = facts.flatMap(fact => fact.formula.tag === "eq" ? [compileContextRule(kernel, fact.proof, assumptions)] : []);
   const rewrites = locals.length === 0 ? explicit : indexRules([...explicit.rules, ...locals]);
-  const budget = { remaining: options.fuel ?? 10_000 };
+  const budget = { remaining: options.fuel ?? 10_000, fuel: options.fuel ?? 10_000 };
   const refinements = prepareRefinementProver(kernel, assumptions, options.facts ?? [], options.visibility);
   const factIndex = indexFacts(facts);
   const relief = reliefState(options);
   const relieve = (goal: Formula): Proof | undefined => {
     const doubleNegative = factIndex.get(formulaCanonical(not(not(goal))));
     if (doubleNegative) return dne(goal, doubleNegative);
-    return relief.policy ? relieveHypothesis(
-      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined;
+    return instanceEvidence(options.instances, goal) ?? (relief.policy ? relieveHypothesis(
+      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined);
   };
   const left = normalize(kernel, goal.left, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, options.stats);
   const right = normalize(kernel, goal.right, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, options.stats);
@@ -804,17 +928,17 @@ export function simplifyEqualityFact(kernel: Kernel, proof: Proof, options: Simp
         return rule ? [rule] : [];
       }))
     : options.using;
-  const locals = facts.flatMap(fact => fact.formula.tag === "eq" ? [compileContextRule(kernel, fact.proof, assumptions)] : []);
+  const locals = options.useContextEqualities === false ? [] : facts.flatMap(fact => fact.formula.tag === "eq" ? [compileContextRule(kernel, fact.proof, assumptions)] : []);
   const rewrites = locals.length === 0 ? explicit : indexRules([...explicit.rules, ...locals]);
-  const budget = { remaining: options.fuel ?? 10_000 };
+  const budget = { remaining: options.fuel ?? 10_000, fuel: options.fuel ?? 10_000 };
   const refinements = prepareRefinementProver(kernel, assumptions, options.facts ?? [], options.visibility);
   const factIndex = indexFacts(facts);
   const relief = reliefState(options);
   const relieve = (goal: Formula): Proof | undefined => {
     const doubleNegative = factIndex.get(formulaCanonical(not(not(goal))));
     if (doubleNegative) return dne(goal, doubleNegative);
-    return relief.policy ? relieveHypothesis(
-      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined;
+    return instanceEvidence(options.instances, goal) ?? (relief.policy ? relieveHypothesis(
+      kernel, goal, logicalRules, assumptions, facts.map(fact => fact.proof), relief) : undefined);
   };
   const left = normalize(kernel, original.left, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, options.stats);
   const right = normalize(kernel, original.right, rewrites, assumptions, facts, factIndex, refinements, relieve, budget, options.stats);
@@ -909,6 +1033,7 @@ function settleLogical(
   relief?: ReliefState,
   ground?: readonly Proof[],
   visibility: ScopeVisibility | undefined = relief?.visibility,
+  compute?: number,
 ): Proof {
   // Ground classical reasoning with equality and instantiated lemmas is
   // tried at a bounded number of quantifier-free goals before the structural
@@ -981,7 +1106,8 @@ function settleLogical(
     // A closed equation between numeral expressions is evaluated, so
     // `1 + 1 = 2` closes by computation inside a logical goal.
     if (wanted.tag === "eq" && closedNumeralEquation(wanted)) {
-      try { return kernel.proveComputation(wanted.left, wanted.right); } catch {}
+      const computed = boundedComputation(kernel, wanted.left, wanted.right, compute);
+      if (computed) return computed;
     }
     const grounded = tryGround(wanted, context, available.map(fact => fact.proof));
     if (grounded) return grounded;
@@ -1500,13 +1626,13 @@ function normalize(
   factIndex: ReadonlyMap<string, Proof>,
   refinements: RefinementProver,
   relieve: (goal: Formula) => Proof | undefined,
-  budget: { remaining: number },
+  budget: { remaining: number; readonly fuel: number },
   stats?: SettleStats,
   rewritePath: ReadonlySet<string> = new Set(),
   depth = 0,
 ): { readonly value: Term; readonly proof: Proof } {
   if (depth > 512) throw new Error("settle exceeded its normalization depth");
-  if (budget.remaining-- <= 0) throw new Error("settle exhausted its rewrite fuel");
+  if (budget.remaining-- <= 0) throw new Error(`simp stopped after ${budget.fuel} rewrite steps; raise the budget with simp (steps := ${budget.fuel * 4}) [rules], or give fewer rules`);
   if (stats) stats.termsVisited += 1;
 
   let value = term;

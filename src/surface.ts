@@ -21,7 +21,7 @@ import { InstanceResolutionError, InstanceResolutionLimitError, prepareInstanceP
   type GuardFact, type ScopeVisibility,
 } from "./type-system.ts";
 import { closedNumeralEquation, matchFormula } from "./tactics.ts";
-import { createSimpSession, prepareRewrites, rewriteFact, rewriteGoal, RewriteMismatch, settle, simplifyEqualityFact, simplifyEqualityGoal, simplifyFormulaFact, simplifyFormulaGoal, type GoalRewrite, type PreparedRewrites, type SettleStats } from "./tactics.ts";
+import { createSimpSession, prepareRewrites, rewriteFact, rewriteGoal, RewriteMismatch, settle, simplifyEqualityFact, simplifyEqualityGoal, simplifyFormulaFact, simplifyFormulaGoal, boundedComputation, unfoldedSize, withinComputeBudget, DEFAULT_COMPUTE_BUDGET, type BackchainOptions, type GoalRewrite, type PreparedRewrites, type SettleStats } from "./tactics.ts";
 import { excludedMiddle, proveCongruence, proveTautology } from "./decision-procedures.ts";
 import { proveRealLinearArithmetic } from "./real-linarith.ts";
 import { proveRationalLinearArithmetic } from "./rational-linarith.ts";
@@ -5146,7 +5146,7 @@ function splitTacticLine(line: SourceLine): readonly SourceLine[] {
     };
     // `simp [rules] at a, b` and `unfold name at a, b` are the sequence of
     // single steps, one per fact.
-    const factList = /^((?:simp(?:\s+\(backchain[^)]*\))?(?:\s+with\s+.+?|\s*\[.*?\])?|unfold\s+\S+)\s+at\s+)([\p{L}_][\p{L}\p{M}\p{N}_']*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_']*)+)$/u.exec(piece.text);
+    const factList = /^((?:simp(?:\s+\([^)]*\))?(?:\s+with\s+.+?|\s*\[.*?\])?|unfold\s+\S+)\s+at\s+)([\p{L}_][\p{L}\p{M}\p{N}_']*(?:\s*,\s*[\p{L}_][\p{L}\p{M}\p{N}_']*)+)$/u.exec(piece.text);
     if (factList) {
       return splitTopLevel(factList[2]!, ",").map((name, index) => ({
         ...base, ...(index > 0 ? { bullet: undefined } : {}), text: `${factList[1]}${name.trim()}`,
@@ -5905,11 +5905,25 @@ function elaborateTacticTheorem(
     try {
     let command = expandUserTactic(kernel, line.text, scope, line.number);
     // Explicit bounds are required; omission never enables recursive relief.
-    const backchainConfig = /^(simp|simpa)\s+\(backchain\s*:=\s*(\d+),\s*work\s*:=\s*(\d+)\)(.*)$/u.exec(command);
-    const backchain = backchainConfig
-      ? { depth: Number(backchainConfig[2]), work: Number(backchainConfig[3]) } : false;
-    if (backchainConfig) command = backchainConfig[1]! + backchainConfig[4]!;
+    const simpConfig = /^(simp|simpa)\s+\(([^)]*)\)(.*)$/u.exec(command);
+    const simpSettings = simpConfig ? parseSimpSettings(simpConfig[2]!, line.number) : {};
+    const backchain = simpSettings.backchain ?? false;
+    const compute = simpSettings.compute;
+    const steps = simpSettings.steps;
+    if (simpConfig) command = simpConfig[1]! + simpConfig[3]!;
     const current = focused(line);
+    // The instance search of the scope, prepared the first time a guard
+    // of a rewrite rule needs it in this step.
+    let scopeInstances: RefinementProver | undefined | null = null;
+    const instanceSearch = (): RefinementProver | undefined => {
+      if (scopeInstances === null) {
+        try {
+          scopeInstances = prepareInstanceProver(kernel, visibleInstanceNames(kernel, scope),
+            current.assumptions, [...current.locals.values()].map(item => item.proof), {}, visibility);
+        } catch { scopeInstances = undefined; }
+      }
+      return scopeInstances;
+    };
     // Local lemmas and split goals restore their own term namespace.
     variables = current.variables;
     if (calculation) {
@@ -6139,7 +6153,7 @@ function elaborateTacticTheorem(
       const rules = [...defaultSimpRules(kernel, line.number, scope),
         ...resolveRules(kernel, external, line.number, scope), ...localRules];
       const options = createSimpSession({
-        backchain, visibility,
+        backchain, visibility, compute, instances: instanceSearch,
         underBinders: true,
         using: rules,
         assumptions: current.assumptions,
@@ -6204,20 +6218,31 @@ function elaborateTacticTheorem(
         const distinct = proveClosedDisequality(kernel, opened.formula.left, opened.formula.right);
         if (distinct) { close(line, falseElim(current.goal, impElim(distinct, opened.proof))); continue; }
       }
+      // The rules rewrite: the ones named and the default membership laws.
+      // An equation in the context is a rule only when it is named, so
+      // the fact is never rewritten into a triviality by a hypothesis it
+      // was meant to be compared with; the context still discharges the
+      // guards of the rules. Binders are crossed as in the goal.
       const simplifyOptions = createSimpSession({
-        backchain, visibility,
+        backchain, visibility, compute, fuel: steps, instances: instanceSearch,
         using: [...defaults, ...externalRules, ...localRules],
         assumptions: current.assumptions,
-        facts: otherFacts,
+        facts: otherFacts, useContextEqualities: false, underBinders: true,
       });
       // An equality the opening produced is normalized further when the
       // context allows; the opened fact stands otherwise.
-      const simplified = opened.formula.tag === "eq"
+      const outer = opened.formula.tag === "eq"
         ? ((): LocalProof => {
             try { return simplifyEqualityFact(kernel, opened.proof, simplifyOptions); }
             catch (error) { if (opened === local) throw error; return opened; }
           })()
         : simplifyFormulaFact(kernel, opened.proof, simplifyOptions);
+      // An instance under a binder that mentions the bound variable is
+      // reached as unfold reaches it, with the binder opened.
+      const deeper = outer.formula.tag !== "eq" && formulaHasBinder(outer.formula) && (externalRules.length || localRules.length)
+        ? unfoldThroughout(kernel, outer.formula, [...externalRules, ...localRules], current.assumptions, otherFacts, visibility, variables)
+        : undefined;
+      const simplified: LocalProof = deeper ? { formula: deeper.formula, proof: deeper.forward(outer.proof) } : outer;
       const absorbed = absorbBottom(simplified.formula);
       let result: LocalProof = absorbed
         ? { formula: absorbed.formula, proof: absorbed.forward(simplified.proof) }
@@ -6225,7 +6250,7 @@ function elaborateTacticTheorem(
       // The atoms the rules settle are decided in the fact as in a goal; a
       // fact that comes to ⊥ closes the goal.
       const decided = decideTruthValues(kernel, result.formula,
-        [...defaults, ...externalRules, ...localRules], current.assumptions, variables);
+        [...defaults, ...externalRules, ...localRules], current.assumptions, variables, compute);
       if (decided) result = { formula: decided.formula, proof: decided.forward(result.proof) };
       if (result.formula.tag === "bottom") { close(line, falseElim(current.goal, result.proof)); continue; }
       // A residue the other facts of the context refute, x ∉ A beside
@@ -6233,7 +6258,7 @@ function elaborateTacticTheorem(
       // the rules alone left it.
       if (otherFacts.length) {
         const refuted = decideTruthValues(kernel, result.formula,
-          [...defaults, ...externalRules, ...localRules, ...otherFacts], current.assumptions, variables);
+          [...defaults, ...externalRules, ...localRules, ...otherFacts], current.assumptions, variables, compute);
         if (refuted?.formula.tag === "bottom") { close(line, falseElim(current.goal, refuted.forward(result.proof))); continue; }
       }
       current.locals.set(localName, result);
@@ -6251,15 +6276,16 @@ function elaborateTacticTheorem(
         current.assumptions);
       if (current.goal.tag !== "eq") {
         const options = createSimpSession({
-          backchain, visibility,
+          backchain, visibility, compute, instances: instanceSearch,
           // A subset goal is unfolded by itself, as settle does, with or
           // without named rules.
           using: [...rules, ...defaultSettleRules(kernel, line.number, scope)],
           assumptions: current.assumptions, facts: [...current.locals.values()].map(item => item.proof),
           ground: defaultGroundRules(kernel, line.number, scope),
           // `simp` closes a logical goal with the full search when it can,
-          // and otherwise falls back to a deterministic checked rewrite.
-          fuel: 1_000,
+          // and otherwise falls back to a deterministic checked rewrite,
+          // which crosses binders as it does in a fact.
+          fuel: 1_000, underBinders: true,
         });
         try {
           close(line, settle(kernel, current.goal, options));
@@ -6308,7 +6334,7 @@ function elaborateTacticTheorem(
           // The atoms the rules settle become ⊤ or ⊥ wherever they occur,
           // closed numerals are evaluated, and the truth values are absorbed.
           const decide = (): void => {
-            const decided = decideTruthValues(kernel, target, rules, current.assumptions, variables);
+            const decided = decideTruthValues(kernel, target, rules, current.assumptions, variables, compute);
             if (decided) { target = decided.formula; lifts.push(decided.backward); }
           };
           decide();
@@ -6317,7 +6343,17 @@ function elaborateTacticTheorem(
             if (seen.has(key)) break;
             seen.add(key);
             let rewritten: GoalRewrite;
-            try { rewritten = simplifyFormulaGoal(kernel, target, options); } catch { break; }
+            try { rewritten = simplifyFormulaGoal(kernel, target, options); }
+            catch {
+              // An instance under a binder that mentions the bound
+              // variable is reached as unfold reaches it.
+              const deeper = formulaHasBinder(target)
+                ? unfoldThroughout(kernel, target, rules, current.assumptions,
+                  [...current.locals.values()].map(item => item.proof), visibility, variables)
+                : undefined;
+              if (!deeper) break;
+              rewritten = { goal: deeper.formula, lift: deeper.backward };
+            }
             if (formulaEquals(rewritten.goal, target)) break;
             target = rewritten.goal;
             lifts.push(rewritten.lift);
@@ -6344,11 +6380,15 @@ function elaborateTacticTheorem(
         }
         continue;
       }
+      // A closed goal is evaluated when its unfolding is within the
+      // budget; a polynomial over a structure whose unfolding is
+      // exponential in its nesting is left to the rewriting instead.
       if (freeFormulaVariables(current.goal).size === 0) {
-        try { close(line, kernel.proveComputation(current.goal.left, current.goal.right)); continue; } catch {}
+        const computed = boundedComputation(kernel, current.goal.left, current.goal.right, compute);
+        if (computed) { close(line, computed); continue; }
       }
       const simplified = simplifyEqualityGoal(kernel, current.goal, {
-        backchain, visibility,
+        backchain, visibility, compute, fuel: steps, instances: instanceSearch,
         using: rules, assumptions: current.assumptions, facts: [...current.locals.values()].map(item => item.proof),
       });
       if (simplified.goal.tag === "eq" && formulaEquals(simplified.goal, eq(simplified.goal.left, simplified.goal.left))) {
@@ -6357,7 +6397,19 @@ function elaborateTacticTheorem(
       }
       // A residue the rules closed, 2 = 1 + 1 after h : x = 2, is evaluated.
       if (simplified.goal.tag === "eq" && freeFormulaVariables(simplified.goal).size === 0) {
-        try { close(line, simplified.lift(kernel.proveComputation(simplified.goal.left, simplified.goal.right))); continue; } catch {}
+        const computed = boundedComputation(kernel, simplified.goal.left, simplified.goal.right, compute);
+        if (computed) { close(line, simplified.lift(computed)); continue; }
+        // Nothing rewrote and the evaluation was refused: say why, so the
+        // budget can be raised when the computation is meant.
+        if (formulaEquals(simplified.goal, current.goal) &&
+            !withinComputeBudget(kernel, simplified.goal.left, simplified.goal.right, compute)) {
+          const estimate = unfoldedSize(kernel, simplified.goal.left) > unfoldedSize(kernel, simplified.goal.right)
+            ? unfoldedSize(kernel, simplified.goal.left) : unfoldedSize(kernel, simplified.goal.right);
+          throw new SurfaceError(line.number,
+            `simp did not change the goal, and did not evaluate it: its unfolding is estimated at ${estimate} nodes, ` +
+            `above the budget of ${compute ?? DEFAULT_COMPUTE_BUDGET}; raise it with simp (compute := ${estimate}) ` +
+            `[rules] if the computation is meant, or rewrite with the definitions involved`);
+        }
       }
       replaceWith(line, [{ goal: simplified.goal }], ([proof]) => simplified.lift(proof!));
       continue;
@@ -10847,9 +10899,49 @@ function atomFacts(kernel: Kernel, facts: readonly Proof[], assumptions: readonl
  * quantified fact settles the atoms beneath them too. Undefined when
  * nothing changes.
  */
+/** Whether a formula quantifies anywhere. */
+function formulaHasBinder(formula: Formula): boolean {
+  switch (formula.tag) {
+    case "forall": case "exists": return true;
+    case "imp": case "and": case "or": case "iff": return formulaHasBinder(formula.left) || formulaHasBinder(formula.right);
+    default: return false;
+  }
+}
+
+/**
+ * The settings of one simp call, `simp (backchain := 2, work := 128,
+ * compute := 100000, steps := 40000) [rules]`: recursive relief needs both
+ * of its bounds; the evaluation budget and the rewrite budget stand alone.
+ */
+function parseSimpSettings(text: string, line: number): {
+  readonly backchain?: BackchainOptions; readonly compute?: number; readonly steps?: number;
+} {
+  const values = new Map<string, number>();
+  for (const piece of text.split(",")) {
+    const item = /^\s*([a-z]+)\s*:=\s*(\d+)\s*$/u.exec(piece);
+    if (!item || !["backchain", "work", "compute", "steps"].includes(item[1]!)) {
+      throw new SurfaceError(line, `simp settings are backchain := N, work := N, compute := N, and steps := N, separated by commas; found ${piece.trim()}`);
+    }
+    if (values.has(item[1]!)) throw new SurfaceError(line, `simp setting ${item[1]} is given twice`);
+    values.set(item[1]!, Number(item[2]));
+  }
+  if (values.has("backchain") !== values.has("work")) {
+    throw new SurfaceError(line, "simp (backchain := N, work := N) needs both bounds");
+  }
+  for (const name of ["compute", "steps"]) {
+    const value = values.get(name);
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) throw new SurfaceError(line, `simp (${name} := N) needs a positive integer`);
+  }
+  return {
+    ...(values.has("backchain") ? { backchain: { depth: values.get("backchain")!, work: values.get("work")! } } : {}),
+    ...(values.has("compute") ? { compute: values.get("compute")! } : {}),
+    ...(values.has("steps") ? { steps: values.get("steps")! } : {}),
+  };
+}
+
 function decideTruthValues(
   kernel: Kernel, formula: Formula, facts: readonly Proof[],
-  assumptions: readonly Formula[], taken: ReadonlySet<string>,
+  assumptions: readonly Formula[], taken: ReadonlySet<string>, compute?: number,
 ): UnfoldTransport | undefined {
   const identity = (item: Formula): UnfoldTransport =>
     ({ formula: item, forward: proof => proof, backward: proof => proof });
@@ -10870,21 +10962,22 @@ function decideTruthValues(
   // make it true by computation, distinct values refute it through the
   // distinctness of the literals.
   const evaluated = (atom: Extract<Formula, { tag: "eq" }>): UnfoldTransport | undefined => {
-    if (!closedNumeralEquation(atom)) return undefined;
+    if (!closedNumeralEquation(atom) || !withinComputeBudget(kernel, atom.left, atom.right, compute)) return undefined;
+    const budget = compute ?? DEFAULT_COMPUTE_BUDGET;
     try {
-      const left = kernel.evaluate(atom.left);
-      const right = kernel.evaluate(atom.right);
+      const left = kernel.evaluate(atom.left, budget);
+      const right = kernel.evaluate(atom.right, budget);
       const leftValue = naturalValue(left);
       const rightValue = naturalValue(right);
       if (leftValue === undefined || rightValue === undefined) return undefined;
       if (leftValue === rightValue) {
-        const proof = kernel.proveComputation(atom.left, atom.right);
+        const proof = kernel.proveComputation(atom.left, atom.right, budget);
         return madeTrue(() => proof);
       }
       const distinct = proveLiteralDistinctnessGoal(kernel, imp(eq(left, right), bottom));
       if (!distinct) return undefined;
       const refutation = impIntro(atom, impElim(distinct, calc(
-        symm(kernel.proveComputation(atom.left, left)), assume(atom), kernel.proveComputation(atom.right, right))));
+        symm(kernel.proveComputation(atom.left, left, budget)), assume(atom), kernel.proveComputation(atom.right, right, budget))));
       return madeFalse(atom, () => refutation);
     } catch { return undefined; }
   };
