@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import {
   app, nat, forall, imp, checkSoftType, classReport, createZfgKernel, elaborateModule, formulaEquals,
-  inferSoftTypes, instanceReport, InstanceResolutionError, loadModuleGraph, pred, prepareInstanceProver,
+  inferSoftTypes, instanceReport, loadModuleGraph, pred, prepareInstanceProver,
   softTypeReport, SoftTypeError, termEquals, v, prepareRefinementProver,
 } from "../src/index.ts";
 
@@ -423,7 +423,7 @@ end InstanceLimit
   assert.throws(() => limited.prove(app("empty"), "InstanceLimit.P"), /maximumDepth/);
 });
 
-test("exact local evidence wins before deterministic global ambiguity", () => {
+test("exact local evidence wins, and among global proofs of one fact the first by name stands", () => {
   const kernel = createZfgKernel();
   elaborateModule(kernel, `
 module InstanceAmbiguity
@@ -443,14 +443,14 @@ proof
 end InstanceAmbiguity
 `);
   const names = new Set(instanceReport(kernel).map(item => item.name).reverse());
-  const ambiguous = prepareInstanceProver(kernel, names);
-  assert.throws(() => ambiguous.prove(app("empty"), "InstanceAmbiguity.P"), (error: unknown) => {
-    assert.ok(error instanceof InstanceResolutionError);
-    assert.deepEqual(error.diagnostic.candidates, [
-      "InstanceAmbiguity.alpha", "InstanceAmbiguity.zulu",
-    ]);
-    return true;
-  });
+  // Both instances prove the one proposition P(empty): the request is not
+  // ambiguous, and the candidate first in name order is taken whatever the
+  // order the registry was given in.
+  const global = prepareInstanceProver(kernel, names);
+  const chosen = global.prove(app("empty"), "InstanceAmbiguity.P");
+  assert.ok(chosen);
+  assert.ok(JSON.stringify(chosen).includes("InstanceAmbiguity.alpha"));
+  assert.ok(!JSON.stringify(chosen).includes("InstanceAmbiguity.zulu"));
 
   const wanted = pred("InstanceAmbiguity.P", app("empty"));
   const local = prepareInstanceProver(kernel, names, [wanted]);

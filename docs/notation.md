@@ -782,7 +782,11 @@ under the facts in scope, tried only for terms built by a structure's
 constructor, and statements and goals print the binders and memberships
 back as written. A composite already read in such a ring, `p ^ 2` with `p`
 a polynomial, lies in that ring by its own shape, so `p ^ 2 + q ^ 3` is
-the ring's sum with no fact naming the ring.
+the ring's sum with no fact naming the ring. An element so placed keeps
+that structure's tokens against a typed declaration of the same token:
+`X(R, I, j) ^ 2` is the power of the polynomial ring, not the natural
+power, just as `X(R, I, j) * p` is its product, while `2 ^ n` on naturals
+stays natural.
 
 The same reading extends to any term a ring fact in scope is about: where
 a set of elements is meant, in `∀ a ∈ R, …`, `x ∈ R`, `S ⊆ R`, the arrow

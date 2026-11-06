@@ -214,8 +214,10 @@ it selects an implementation from unary soft-type evidence.
 An `instance` declaration is a theorem with predicate premises and a predicate
 conclusion. After the theorem passes the kernel, its name is entered in a
 separate registry. `synthesize` searches the visible registry, exact local
-evidence takes precedence, and multiple successful global declarations are an
-ambiguity error. The registry and search are untrusted metadata; the result is
+evidence takes precedence, several global declarations proving one and the
+same proposition yield the first in specificity order, and global
+declarations that complete an open argument differently are an ambiguity
+error. The registry and search are untrusted metadata; the result is
 a theorem-application proof. Registry visibility follows transitive module
 imports, as the visibility of typing rules and guard predicates does, and
 survives compiled surface-index sidecars.

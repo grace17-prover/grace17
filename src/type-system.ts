@@ -927,12 +927,16 @@ function prepareRuleProver(
             break;
           }
         }
-        if (found && !rejectAmbiguity) break;
+        // The goal is fully specified, so every candidate that succeeds
+        // proves the same proposition: `CommRing(complexRing)` by its own
+        // instance and by the field-to-ring bridge is one fact, not two
+        // choices. The first candidate in specificity order is taken; the
+        // rules are the same in every scope that sees them, so the choice is
+        // deterministic. A request with open arguments, which different
+        // instances may complete differently, keeps its ambiguity check in
+        // `complete` below.
+        if (found) break;
       }
-      if (solutions.length > 1) throw new InstanceResolutionError({
-        predicate: wantedPredicate, arguments: wantedArguments,
-        candidates: solutions.map(item => item.name),
-      });
       if (solutions[0]) {
         memo.set(key, solutions[0].proof);
         return solutions[0].proof;
@@ -1035,13 +1039,18 @@ function prepareRuleProver(
       }
       if (!rejectAmbiguity && solutions.length >= limit) break;
     }
-    if (solutions.length > 1 && rejectAmbiguity) throw new InstanceResolutionError({
+    // Two instances that complete the open arguments the same way prove one
+    // proposition, and the first in specificity order stands for it; the
+    // request is ambiguous only when they complete it differently.
+    const distinct = solutions.filter((item, index) =>
+      solutions.findIndex(other => sameTerms(other.arguments, item.arguments)) === index);
+    if (distinct.length > 1 && rejectAmbiguity) throw new InstanceResolutionError({
       predicate: wantedPredicate,
       arguments: solutions[0]!.arguments,
-      candidates: solutions.map(item => item.instance),
+      candidates: distinct.map(item => item.instance),
     });
     outputMemo.set(outputKey, solutions[0] ?? false);
-    return solutions;
+    return rejectAmbiguity ? distinct : solutions;
   };
   const prover = {
     visibility,

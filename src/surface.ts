@@ -7867,7 +7867,18 @@ function elaborateTacticTheorem(
               parsed = parseTerm(match[1].trim(), kernel, variables, line.number,
                 { ...scope, rings: [ringSession.ring], ringAliases: scope.ringAliases ?? scope.rings ?? [] });
             }
-            const coefficient = ringNumeral(kernel, scope, parsed, ringSession.ring, line.number);
+            // A numeral under the ring's own operations is the ring's too:
+            // (-1) is the opposite of the ring's one, and R[2] stays as
+            // written.
+            const ringCoefficient = (term: Term): Term => {
+              if (term.tag === "app" && naturalValue(term) === undefined && (
+                  (term.fn === ops.call2 && term.args.length === 3 &&
+                    [ops.add, ops.mul].some(operation => termEquals(operation, term.args[0]!))) ||
+                  (term.fn === ops.call1 && term.args.length === 2 && termEquals(ops.neg, term.args[0]!))))
+                return app(term.fn, term.args[0]!, ...term.args.slice(1).map(ringCoefficient));
+              return ringNumeral(kernel, scope, term, ringSession.ring, line.number);
+            };
+            const coefficient = ringCoefficient(parsed);
             proof = congr(ops.call2, refl(ops.mul), refl(coefficient), proof);
           }
           return proof;
@@ -10318,8 +10329,87 @@ function elaborateTacticTheorem(
           if (!termEquals(normal.term, term)) addEquality(eq(term, normal.term), normal.proof);
         } catch {}
       };
+      // A truncated subtraction whose subtrahend the minuend contains is its
+      // difference: 4 + k - 1 is 3 + k, and a + b - b is a. For a subterm
+      // m - n whose normal forms satisfy N(m) = N(y) + N(n), y the
+      // monomials of m that n leaves over, the lemma sub.of_add_eq turns
+      // the normalization certificate of y + n = m into m - n = y, and the
+      // term with y in place of m - n joins the graph. The lemma is read
+      // from Grace.Cumulus.Nat.SubtractionLemmas when it is imported, and
+      // the subtraction symbol off its conclusion.
+      const subtractionLemma = resolveOptional("sub.of_add_eq", scope, candidate => kernel.theorems.has(candidate));
+      const subtractionSymbol = ((): string | undefined => {
+        let statement = subtractionLemma ? kernel.theorems.get(subtractionLemma) : undefined;
+        while (statement?.tag === "forall") statement = statement.body;
+        while (statement?.tag === "imp") statement = statement.right;
+        return statement?.tag === "eq" && statement.left.tag === "app" && statement.left.args.length === 2
+          ? statement.left.fn : undefined;
+      })();
+      const monomialParts = (item: SemiringMonomial): { coefficient: bigint; body: readonly Term[] } => {
+        const leading = item.factors.length ? naturalValue(item.factors[0]!) : undefined;
+        return leading === undefined ? { coefficient: 1n, body: item.factors }
+          : { coefficient: leading, body: item.factors.slice(1) };
+      };
+      const monomialTerm = (coefficient: bigint, body: readonly Term[]): Term => {
+        const factors = coefficient === 1n && body.length ? body : [nat(coefficient), ...body];
+        return factors.slice(0, -1).reduceRight<Term>((tail, head) => app(presentation.mul, head, tail), factors.at(-1)!);
+      };
+      const exactDifference = (minuend: Term, subtrahend: Term): { term: Term; proof: Proof } | undefined => {
+        if (!subtractionLemma) return undefined;
+        let left: SemiringNormalForm;
+        let right: SemiringNormalForm;
+        try {
+          left = normalizeNaturalSemiring(kernel, minuend, line.number, scope, current.assumptions, refinements);
+          right = normalizeNaturalSemiring(kernel, subtrahend, line.number, scope, current.assumptions, refinements);
+        } catch { return undefined; }
+        const remainder = new Map(left.monomials.map(item => {
+          const parts = monomialParts(item);
+          return [parts.body.map(termCanonical).join("\u0000"), parts] as const;
+        }));
+        for (const item of right.monomials) {
+          const parts = monomialParts(item);
+          const key = parts.body.map(termCanonical).join("\u0000");
+          const held = remainder.get(key);
+          if (!held || held.coefficient < parts.coefficient) return undefined;
+          remainder.set(key, { coefficient: held.coefficient - parts.coefficient, body: held.body });
+        }
+        const terms = [...remainder.values()].filter(parts => parts.coefficient > 0n)
+          .map(parts => monomialTerm(parts.coefficient, parts.body));
+        const difference = terms.length === 0 ? nat(0)
+          : terms.slice(0, -1).reduceRight<Term>((tail, head) => app(presentation.add, head, tail), terms.at(-1)!);
+        let sum: SemiringNormalForm;
+        try {
+          sum = normalizeNaturalSemiring(kernel, app(presentation.add, difference, subtrahend), line.number, scope,
+            current.assumptions, refinements);
+        } catch { return undefined; }
+        if (!termEquals(sum.term, left.term)) return undefined;
+        const lemma = dischargeArithmeticTypes(theorem(subtractionLemma), [difference, subtrahend, minuend]);
+        if (!lemma) return undefined;
+        const proof = impElim(lemma, calc(sum.proof, symm(left.proof)));
+        const statement = kernel.checkProof(proof, current.assumptions);
+        if (statement.tag !== "eq" || !termEquals(statement.left, app(subtractionSymbol!, minuend, subtrahend)) ||
+            !termEquals(statement.right, difference)) return undefined;
+        return { term: difference, proof };
+      };
+      const reduceSubtractions = (term: Term): { term: Term; proof: Proof } | undefined => {
+        if (!subtractionSymbol || term.tag !== "app") return undefined;
+        const inner = term.args.map(reduceSubtractions);
+        const rebuilt = inner.some(Boolean)
+          ? app(term.fn, ...term.args.map((argument, index) => inner[index]?.term ?? argument)) : term;
+        const lifted = inner.some(Boolean)
+          ? congr(term.fn, ...term.args.map((argument, index) => inner[index]?.proof ?? refl(argument))) : undefined;
+        if (rebuilt.tag === "app" && rebuilt.fn === subtractionSymbol && rebuilt.args.length === 2) {
+          const reduced = exactDifference(rebuilt.args[0]!, rebuilt.args[1]!);
+          if (reduced) return { term: reduced.term, proof: lifted ? calc(lifted, reduced.proof) : reduced.proof };
+        }
+        return lifted ? { term: rebuilt, proof: lifted } : undefined;
+      };
       const nodes = [current.goal.left, current.goal.right, ...[...graph.values()].flat().map(edge => edge.term)];
-      for (const node of nodes) joinNormalForm(node);
+      for (const node of nodes) {
+        const reduced = reduceSubtractions(node);
+        if (reduced) { addEquality(eq(node, reduced.term), reduced.proof); joinNormalForm(reduced.term); }
+        joinNormalForm(node);
+      }
       // Two successors, or two sums with a common summand, in one class of
       // the graph cancel to an equation between their remaining parts, so
       // cardinality(F) = succ(cardinality(F ∖ {e})) and cardinality(F) =
@@ -10416,11 +10506,25 @@ function elaborateTacticTheorem(
         const antisymmetric = dischargeArithmeticTypes(
           presentation.lessEqualAntisymmetric, [current.goal.left, current.goal.right],
         );
+        // A local equation with an exact subtraction, k + 3 - 1 = 5, is
+        // read by the bound search in its reduced form, k + 2 = 5, as well.
+        const boundLocals = new Map(current.locals);
+        for (const [name, fact] of current.locals) {
+          if (fact.formula.tag !== "eq") continue;
+          const left = reduceSubtractions(fact.formula.left);
+          const right = reduceSubtractions(fact.formula.right);
+          if (!left && !right) continue;
+          const steps = [...(left ? [symm(left.proof)] : []), fact.proof, ...(right ? [right.proof] : [])];
+          boundLocals.set(`${name}__reduced`, {
+            formula: eq(left?.term ?? fact.formula.left, right?.term ?? fact.formula.right),
+            proof: calc(steps[0]!, ...steps.slice(1)),
+          });
+        }
         const bound = (left: Term, right: Term): Proof | undefined => {
           try {
             const nested = elaborateTacticTheorem(kernel, "", [], [], [], pred(presentation.lessEqual, left, right),
               [{ number: line.number, text: "arith", indent: line.indent + 2 }], scope,
-              { assumptions: current.assumptions, locals: current.locals, variables: current.variables });
+              { assumptions: current.assumptions, locals: boundLocals, variables: current.variables });
             return nested?.proof;
           } catch { return undefined; }
         };
@@ -13633,6 +13737,50 @@ function proveRingConstantMembership(kernel: Kernel, goal: Formula,
 interface RingOptions { readonly monomials: number }
 const defaultRingOptions: RingOptions = { monomials: 256 };
 
+/**
+ * How far the ring certificate opens defining bodies to find the operations
+ * of a goal: the body of a symbol applied in the goal, at the goal's
+ * arguments, and the bodies of the symbols in it. Two levels reach a
+ * power's recursion through the definition that names it,
+ * Ring.pow(R, x, n) := monoidPow(Ring.mul(R), Ring.one(R), x, n), which is
+ * as far as the normalizer itself opens a term before it is an atom.
+ */
+const DEFINING_BODY_LEVELS = 2;
+
+/**
+ * The defining bodies of the function symbol of a term, at the term's
+ * arguments: the body of an explicit definition, or the right side of each
+ * equation of a recursive function, with the arguments substituted for the
+ * parameters the patterns bind outright. A variable bound inside a
+ * constructor pattern, the n of succ(n), is renamed so that it captures
+ * nothing of the goal. Untrusted: the bodies only propose operations, and
+ * every operation is confirmed by the instance search.
+ */
+function definingBodies(kernel: Kernel, term: Term): Term[] {
+  if (term.tag !== "app") return [];
+  const explicit = kernel.functionBodies.get(term.fn);
+  if (explicit) {
+    if (explicit.parameters.length !== term.args.length) return [];
+    return [substituteManyTerm(explicit.body,
+      new Map(explicit.parameters.map((name, index) => [name, term.args[index]!])))];
+  }
+  const recursive = kernel.recursiveFunctions.get(term.fn);
+  if (!recursive) return [];
+  return recursive.equations.flatMap(equation => {
+    if (equation.patterns.length !== term.args.length) return [];
+    const substitution = new Map<string, Term>();
+    const rename = (pattern: Pattern): void => {
+      if (pattern.tag === "bind") substitution.set(pattern.name, v(`__defining_${pattern.name}`));
+      else pattern.args.forEach(rename);
+    };
+    equation.patterns.forEach((pattern, index) => {
+      if (pattern.tag === "bind") substitution.set(pattern.name, term.args[index]!);
+      else rename(pattern);
+    });
+    return [substituteManyTerm(equation.body, substitution)];
+  });
+}
+
 function normalizeCommutativeRing(kernel: Kernel, terms: readonly Term[],
   assumptions: readonly Formula[], facts: readonly Proof[], scope: SurfaceScope, line: number,
   options: RingOptions = defaultRingOptions,
@@ -13692,16 +13840,27 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
   // hidden inside f's argument before the target ring governing the equality.
   // Keep deeper operations as fallbacks; this is a linear traversal and does
   // not add proof search or retain evidence across contexts.
-  const operationQueue = [...terms];
+  // A defined operation names its ring only through its body: Ring.sub(R, a, b)
+  // is call2(Ring.add(R), a, apply(Ring.neg(R), b)), a numeral R[k] is a sum
+  // of ones under Ring.add(R), and Ring.pow(R, x, k) is a monoid power under
+  // Ring.mul(R). The body of a function symbol applied in the goal is read at
+  // the goal's arguments, and the symbols of that body once more, so that a
+  // power's defining equations are reached through the definition that
+  // names them; the terms so opened come after the goal's own, as deeper
+  // operations do. This is the opening the normalizer performs when it
+  // expands the term, so the ring the operations select is the ring the
+  // certificate is built in.
+  const operationQueue: { readonly term: Term; readonly opened: number }[] = terms.map(term => ({ term, opened: 0 }));
   for (let index = 0; index < operationQueue.length; index++) {
-    const term = operationQueue[index]!;
+    const { term, opened } = operationQueue[index]!;
     if (term.tag !== "app") continue;
     // An operation graph applied to arguments: call2(op, a, b), or a unary
-    // operation applied as a function, op(a), with a variable or constant
-    // graph. A sequence applied to an index also matches; when no candidate
-    // resolves, the alias ranking below still finds the ring.
+    // operation applied as a function, op(a), with a variable, constant, or
+    // projection graph such as Ring.neg(R). A sequence applied to an index
+    // also matches; when no candidate resolves, the alias ranking below
+    // still finds the ring.
     if ((term.fn.endsWith(".Algebra.call2") || (term.fn === "apply" && term.args.length === 2 &&
-        (term.args[0]!.tag === "var" || (term.args[0]!.tag === "app" && term.args[0]!.args.length === 0)))) && term.args[0]) {
+        (term.args[0]!.tag === "var" || term.args[0]!.tag === "app"))) && term.args[0]) {
       const key = termCanonical(term.args[0]);
       if (!seenOperations.has(key)) { seenOperations.add(key); operations.push(term.args[0]); }
     }
@@ -13710,7 +13869,10 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       const key = termCanonical(bridge.operation);
       if (!seenOperations.has(key)) { seenOperations.add(key); operations.push(bridge.operation); }
     }
-    operationQueue.push(...term.args);
+    operationQueue.push(...term.args.map(argument => ({ term: argument, opened })));
+    if (opened < DEFINING_BODY_LEVELS) {
+      for (const body of definingBodies(kernel, term)) operationQueue.push({ term: body, opened: opened + 1 });
+    }
   }
   // A goal written only with a carrier's own numerals and value functions,
   // as realNumeral(2) = realAddValue(1, 1), names no operation graph; the
@@ -17601,6 +17763,10 @@ function typedOperandsOutsideHypothesis(
   // An operand without a sort that the certified typing rules place in a
   // carrier keeps the hypothesis: G.one ^ 1 is the group power, since
   // Group.one_mem places the unit in G.carrier.
+  // So does an operand the typing rules place in the carrier of a structure
+  // an instance supplies: X(R, I, j) ^ 2 is the power of the polynomial
+  // ring, placed by X.mem under polynomialRing.comm_ring, as X(R, I, j) * p
+  // is its product.
   const assumptions = scope.localFormulas?.() ?? [];
   const placed = (term: Term): boolean => found.some(item => memberThroughDefinition(kernel, facts, term, item.carrier) ||
     Boolean(proveRefinement(kernel, item.carrier, "in", [term], assumptions, [], scopeVisibility(kernel, scope))));

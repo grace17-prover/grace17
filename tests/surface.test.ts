@@ -2075,11 +2075,12 @@ end Instances
   ]);
 });
 
-test("instance synthesis rejects ambiguity, unsafe heads, and malformed declarations", () => {
-  const ambiguous = createZfgKernel();
-  assert.throws(() => elaborateModule(ambiguous, `
-module AmbiguousInstances
-namespace AmbiguousInstances
+test("instance synthesis takes the first of several proofs of one fact, and rejects unsafe heads and malformed declarations", () => {
+  // Two instances proving one fully specified proposition are one fact.
+  const duplicated = createZfgKernel();
+  elaborateModule(duplicated, `
+module DuplicatedInstances
+namespace DuplicatedInstances
 predicate Marked (x : Set) := x = x
 def witness : Set := empty
 instance first
@@ -2097,8 +2098,9 @@ lemma selected
 proof
   synthesize
 
-end AmbiguousInstances
-`), /ambiguous instance.*first.*second/);
+end DuplicatedInstances
+`);
+  assert.ok(duplicated.theorems.has("DuplicatedInstances.selected"));
 
   assert.throws(() => elaborateModule(createZfgKernel(), `
 module MalformedInstance

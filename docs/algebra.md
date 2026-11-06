@@ -534,9 +534,15 @@ predicate. It is checked like any theorem and then entered in an untrusted,
 import-scoped registry. `synthesize`, `with *`, and notation queries search
 that registry. The search is first-order: the key is the predicate and the
 known argument structure, search has depth and work bounds, success and
-failure are memoized, and two global candidates that both succeed are an
-error. A successful result is a proof of the requested predicate, so
-resolution is predictable and a missing law produces a useful diagnostic.
+failure are memoized, and two global candidates that complete a request
+differently are an error. Candidates that prove one and the same
+proposition are not: `CommRing(complexRing)` by `complexRing.comm_ring` and
+by `Field.to_comm_ring` is one fact, and the first candidate in specificity
+order stands for it, a local fact before any instance, a rule naming the
+term's shape before one about a bare variable, and otherwise the first by
+name, so a proof found alone is found in any larger environment too. A
+successful result is a proof of the requested predicate, so resolution is
+predictable and a missing law produces a useful diagnostic.
 See [types.md](types.md) for the registry's rules and limits.
 
 ## Numerals, operators, and zero
