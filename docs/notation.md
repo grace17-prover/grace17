@@ -780,7 +780,43 @@ the facts place it nowhere, as the instance `X.mem` places `X(R, I, j)` in
 the polynomial ring; the search is the bounded instance search of `with *`
 under the facts in scope, tried only for terms built by a structure's
 constructor, and statements and goals print the binders and memberships
-back as written.
+back as written. A composite already read in such a ring, `p ^ 2` with `p`
+a polynomial, lies in that ring by its own shape, so `p ^ 2 + q ^ 3` is
+the ring's sum with no fact naming the ring.
+
+The same reading extends to any term a ring fact in scope is about: where
+a set of elements is meant, in `∀ a ∈ R, …`, `x ∈ R`, `S ⊆ R`, the arrow
+guard `f : R → R`, and the numeral `R[2]`, the term `R` may be a variable
+under a hypothesis, a constant such as `complexRing` under a closed
+instance, a structure value such as `polynomialRing(R, I)`, or a projection
+such as `Algebra.ring(A)`, and it is read as `Ring.carrier(R)` whenever a
+hypothesis, a local fact of the proof, or an instance supplies `Ring(R)`,
+`CommRing(R)`, or `Field(R)` there. This holds in theorem statements, in
+`have` statements, and in quantifiers inside proofs alike; a statement is
+read with the facts in scope at the statement, so a ring fact established
+later in the proof does not reach it. The arrow guard reads its last two
+placeholders this way because the definition of `FunctionBetween` uses them
+as sets of elements, and a mixfix predicate whose definition uses a
+placeholder as the container of a membership is read the same way, while
+`f : R →+* S` keeps the structures themselves. Writing
+`Ring.carrier(R)` says the carrier outright, and a plain set with no ring
+fact in scope is unaffected. When two rings spelled apart but equal by a
+definition are both in scope, `CommRing(polynomialRing(K, 2))` beside
+`CommRing(Algebra.ring(polynomialAlgebra(K, 2)))`, an operand's membership
+fact selects the ring it names, also through a definition of the container
+it unfolds to, `p ∈ algebraCarrier(polynomialAlgebra(K, 2))` selecting the
+algebra's ring; an operand with no such fact is an error that lists the
+candidates.
+
+An application that no structure in scope places, and that the typing
+rules do not make a natural number, is never read as natural arithmetic
+by default: `X(K, 4, 1) ^ 2` in a section with `CommRing(polynomialRing(K, 4))`
+but no `CommRing(K)` is an error that names the operand, the carriers the
+hypotheses in scope supply the token on, and what the instance that would
+place it lacks, `X(K, 4, 1) ∈ Ring.carrier(polynomialRing(K, 4)) by X.mem needs
+CommRing(K)`. A numeral, an operand whose sort is `Nat` by a binder, a
+fact, a typing rule, or an annotation such as `(cardinality(S):N)`, and a
+variable with no evidence either way keep the natural reading.
 
 The ideal theory uses the same notation. `Ideal(R, I)`, `ProperIdeal(R, I)`,
 `MaximalIdeal(R, M)`, `PrimeIdeal(R, I)`, and `Subring(R, S)` take the ring

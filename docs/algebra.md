@@ -433,7 +433,9 @@ again and `ring` treats as a coefficient; `x ^ n` is `monoidPow` for the
 ring's multiplication (import `Grace.Cumulus.Algebra.Group.Power`), with a
 natural exponent. Multiplication binds more tightly than addition, unary
 minus more tightly than multiplication, and a numeral annotation such as
-`(2:Nat)` keeps a natural index natural inside the scope. A complete
+`(2:Nat)` keeps a natural index natural inside the scope. A literal filling
+a parameter declared `Nat` is natural without an annotation, so
+`realNumeral(2)` takes the natural `2` inside a real scope. A complete
 checked file is [ScopedRingNotation.g17](../examples/ScopedRingNotation.g17).
 
 **Scoped forms.** A scope name stands for its pieces in `IsCommRing(R)`,

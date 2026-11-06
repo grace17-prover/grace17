@@ -2592,16 +2592,20 @@ function bundledRingScope(kernel: Kernel, scope: SurfaceScope, name: string, var
 
 /**
  * The ring scope of a term built by the ring constructor, or by a
- * definition whose body is one, `polynomialRing(R, I)[2]`, when an instance
- * supplies its ring structure under the facts in scope.
+ * definition whose body is one, `polynomialRing(R, I)[2]`, or of a
+ * projection, `Algebra.ring(A)[2]`, when a hypothesis, a local fact, or an
+ * instance supplies its ring structure under the facts in scope.
  */
 function bundledRingScopeOfTerm(kernel: Kernel, scope: SurfaceScope, term: Term): RingNotation | undefined {
-  const record = structureValueOf(kernel, scope, term);
-  if (!record || record.structure!.fields.length !== RING_STRUCTURE_FIELDS.length ||
-      !RING_STRUCTURE_FIELDS.every((field, index) => record.structure!.fields[index] === field)) return undefined;
+  const isRing = (item: SurfaceDatatypeRecord): boolean => item.structure!.fields.length === RING_STRUCTURE_FIELDS.length &&
+    RING_STRUCTURE_FIELDS.every((field, index) => item.structure!.fields[index] === field);
+  const value = structureValueOf(kernel, scope, term);
+  const record = value ? (isRing(value) ? value : undefined)
+    : structureProjectionTerm(kernel, scope, term) ? visibleStructures(kernel, scope).find(isRing) : undefined;
+  if (!record) return undefined;
   const structure = record.structure!;
   const local = expandedLocalFormulas(kernel, scope);
-  const facts = [...local, ...instanceStructureFacts(kernel, scope, term, local)];
+  const facts = [...local, ...structureFactsOfTerm(kernel, scope, term, local)];
   const supplied = facts.some(fact => fact.tag === "pred" && fact.args.some((argument, index) =>
     termEquals(argument, term) &&
     (fact.pred === structure.predicate || fact.pred === record.predicate ? index === 0
@@ -15595,7 +15599,7 @@ function hypothesisCarriersOfTerm(kernel: Kernel, scope: SurfaceScope, structure
   const notations = visibleHypothesisCarrierNotations(kernel, scope, line);
   if (!notations.length) return [];
   const local = expandedLocalFormulas(kernel, scope);
-  const facts = structure.tag === "var" ? local : [...local, ...instanceStructureFacts(kernel, scope, structure, local)];
+  const facts = structure.tag === "var" ? local : [...local, ...structureFactsOfTerm(kernel, scope, structure, local)];
   const carriers: Term[] = [];
   for (const notation of notations) {
     const pattern = notation.hypothesis!;
@@ -15624,26 +15628,54 @@ function structureValueOf(kernel: Kernel, scope: SurfaceScope, term: Term): Surf
 const instanceStructureCache = new WeakMap<Kernel, Map<string, boolean>>();
 
 /**
+ * Whether a term is a projection of a structure, `Algebra.ring(A)`, that is
+ * not itself the carrier a hypothesis notation names, `Ring.carrier(R)`: a
+ * term the instances may place a structure on without its constructor in
+ * sight.
+ */
+function structureProjectionTerm(kernel: Kernel, scope: SurfaceScope, term: Term): boolean {
+  if (term.tag !== "app" || term.args.length !== 1 || !projectionOf(kernel, term.fn)) return false;
+  return !visibleHypothesisCarrierNotations(kernel, scope, scope.line ?? 0).some(notation =>
+    notation.hypothesis!.carriers.some(template => template.tag === "app" && template.fn === term.fn));
+}
+
+/**
+ * The structure facts in scope about a term that is not a variable: the
+ * local facts naming it first, the closed facts the instances assert for a
+ * declared constant, `CommRing(complexRing)`, and the facts the instances
+ * derive for a structure value or a projection, `CommRing(Algebra.ring(A))`
+ * by `Algebra.comm_ring` under `Algebra(A)`.
+ */
+function structureFactsOfTerm(kernel: Kernel, scope: SurfaceScope, term: Term, local: readonly Formula[]): Formula[] {
+  if (term.tag !== "app") return [];
+  const about = (fact: Formula): boolean => fact.tag === "pred" && fact.args.length > 0 && termEquals(fact.args[0]!, term);
+  if (term.args.length === 0) return closedInstanceFacts(kernel, scope).filter(about);
+  return instanceStructureFacts(kernel, scope, term, local);
+}
+
+/**
  * The structure facts the instances derive for a term built by a
  * structure's constructor, or by a definition whose body is one:
  * `CommRing(polynomialRing(R, I))` by `polynomialRing.comm_ring` under
- * `CommRing(R)`. The predicates tried are those of the hypothesis notations
- * in scope that take the structure first, the search is the bounded
- * instance search of `with *` under the facts given, and its outcomes are
- * remembered per kernel.
+ * `CommRing(R)`; and for a projection of a structure, `CommRing(Algebra.ring(A))`
+ * by `Algebra.comm_ring` under `Algebra(A)`. The predicates tried are those
+ * of the hypothesis notations in scope that take the structure first (any
+ * visible structure, for a projection), the search is the bounded instance
+ * search of `with *` under the facts given, and its outcomes are remembered
+ * per kernel.
  */
 function instanceStructureFacts(kernel: Kernel, scope: SurfaceScope, term: Term, assumptions: readonly Formula[]): Formula[] {
   const record = structureValueOf(kernel, scope, term);
-  if (!record) return [];
-  const structure = record.structure!;
+  if (!record && !structureProjectionTerm(kernel, scope, term)) return [];
+  const structures = record ? [record] : visibleStructures(kernel, scope);
   const line = scope.line ?? 0;
   const predicates = new Set<string>();
   for (const notation of [...visibleHypothesisCarrierNotations(kernel, scope, line),
       ...[...visibleInfixNotationGroups(kernel, scope, line, "function", "function").values()].flat()]) {
     const predicate = notation.hypothesis!.predicate;
     if (notation.hypothesis!.arity !== 1 || predicates.has(predicate)) continue;
-    if (predicate === structure.predicate || predicate === record.predicate ||
-        receiverParameters(kernel, predicate).get(0) === structure.predicate) predicates.add(predicate);
+    if (structures.some(item => predicate === item.structure!.predicate || predicate === item.predicate ||
+        receiverParameters(kernel, predicate).get(0) === item.structure!.predicate)) predicates.add(predicate);
   }
   if (!predicates.size) return [];
   const context = assumptions.map(formulaCanonical).sort().join("\u0000");
@@ -15750,9 +15782,29 @@ function statementConclusion(statement: Formula): Formula {
  * no carrier, or two, is left as it is.
  */
 function structureCarrier(kernel: Kernel, scope: SurfaceScope, term: Term): Term {
-  if (term.tag !== "var" && !structureValueOf(kernel, scope, term)) return term;
+  if (!structureCandidate(kernel, scope, term)) return term;
   const carriers = hypothesisCarriersOfTerm(kernel, scope, term, scope.line ?? 0);
   return carriers.length === 1 ? carriers[0]! : term;
+}
+
+/**
+ * Whether a term may stand for a structure where a set of elements is
+ * meant: a variable, a declared constant such as `complexRing`, a term built
+ * by a structure's constructor, or a projection such as `Algebra.ring(A)`.
+ * Which of these are structures is for the facts in scope to say.
+ */
+function structureCandidate(kernel: Kernel, scope: SurfaceScope, term: Term): boolean {
+  if (term.tag === "var") return true;
+  if (term.tag !== "app") return false;
+  // A constant counts only when some fact in scope is about it, so that
+  // `x ∈ ℝ` costs no search.
+  if (term.args.length === 0) {
+    const about = (fact: Formula): boolean => fact.tag === "pred" && fact.args.length > 0 &&
+      fact.args[0]!.tag === "app" && fact.args[0]!.fn === term.fn;
+    return (scope.localFormulas?.() ?? []).some(fact => formulaMentionsSymbol(fact, term.fn)) ||
+      closedInstanceFacts(kernel, scope).some(about);
+  }
+  return structureValueOf(kernel, scope, term) !== undefined || structureProjectionTerm(kernel, scope, term);
 }
 
 /** The functions and predicates whose argument is a set of elements, so that a structure variable there is its carrier. */
@@ -15770,8 +15822,60 @@ function mixfixApplication(
   const supplied = candidates.filter(item => item.hypothesis?.fixed);
   const plain = candidates.find(item => !item.hypothesis);
   const shape = supplied.length ? selectHypothesisShape(kernel, scope, supplied, operands, line, plain !== undefined) : undefined;
-  if (!shape) return pred(plain!.target, ...operands);
+  if (!shape) {
+    // A placeholder whose parameter the predicate's definition uses as a
+    // set of elements, A and B in `f : A → B`, reads a structure there as
+    // its carrier, as `x ∈ A` does.
+    const elementSets = elementSetParameters(kernel, plain!.target);
+    return pred(plain!.target, ...operands.map((operand, index) =>
+      elementSets.has(index) ? structureCarrier(kernel, scope, operand) : operand));
+  }
   return shapeApplication(shape, operands);
+}
+
+const elementSetParameterCache = new WeakMap<Kernel, Map<string, ReadonlySet<number>>>();
+
+/**
+ * The positions of a defined predicate's parameters that its definition
+ * uses as sets of elements: those standing as the container of a
+ * membership, directly or in a defined predicate the body applies, so
+ * `FunctionBetween(r, A, B)` has A and B, which its body quantifies over.
+ */
+function elementSetParameters(kernel: Kernel, predicate: string): ReadonlySet<number> {
+  let cache = elementSetParameterCache.get(kernel);
+  if (!cache) { cache = new Map(); elementSetParameterCache.set(kernel, cache); }
+  const cached = cache.get(predicate);
+  if (cached) return cached;
+  const containers = (symbol: string, depth: number): ReadonlySet<number> => {
+    const record = kernel.definitions.get(symbol);
+    let equation = record?.kind === "predicate" ? record.properties.get("equation") : undefined;
+    while (equation?.tag === "forall") equation = equation.body;
+    if (equation?.tag !== "iff" || !record) return new Set();
+    const result = new Set<number>();
+    const visit = (formula: Formula): void => {
+      switch (formula.tag) {
+        case "bottom": case "eq": return;
+        case "pred":
+          if (formula.pred === "in" && formula.args.length === 2 && formula.args[1]!.tag === "var") {
+            const index = record.parameters.indexOf(formula.args[1]!.name);
+            if (index >= 0) result.add(index);
+          } else if (depth > 0 && formula.pred !== symbol) {
+            for (const index of containers(formula.pred, depth - 1)) {
+              const argument = formula.args[index];
+              if (argument?.tag === "var" && record.parameters.includes(argument.name)) result.add(record.parameters.indexOf(argument.name));
+            }
+          }
+          return;
+        case "imp": case "and": case "or": case "iff": visit(formula.left); visit(formula.right); return;
+        case "forall": case "exists": visit(formula.body); return;
+      }
+    };
+    visit(equation.right);
+    return result;
+  };
+  const result = containers(predicate, 1);
+  cache.set(predicate, result);
+  return result;
 }
 
 /** The target of a hypothesis shape at its fixed arguments and the written operands, in order. */
@@ -17405,12 +17509,83 @@ function typedOperandsOutsideHypothesis(
   // carrier keeps the hypothesis: G.one ^ 1 is the group power, since
   // Group.one_mem places the unit in G.carrier.
   const assumptions = scope.localFormulas?.() ?? [];
-  const placed = (term: Term): boolean => found.some(item =>
+  const placed = (term: Term): boolean => found.some(item => memberThroughDefinition(kernel, facts, term, item.carrier) ||
     Boolean(proveRefinement(kernel, item.carrier, "in", [term], assumptions, [], scopeVisibility(kernel, scope))));
   const unsorted = operands.filter(term => !sorted(term));
-  if (unsorted.length < operands.length) return !unsorted.some(placed);
+  if (unsorted.length < operands.length) {
+    if (unsorted.some(placed)) return false;
+    const natural = (term: Term): boolean => sorts.some(type => termHasType(kernel, term, type, scope));
+    if (unsorted.some(natural)) return true;
+    // An operand the typing rules place in the carrier of a structure an
+    // instance supplies, polynomialConstant(B, 1)(x) in the polynomial ring
+    // by polynomialConstant.mem, keeps the hypothesis as well.
+    if (unsorted.some(term => instanceCarrierOf(kernel, scope, facts, term, line) !== undefined)) return false;
+    // An application that no structure in scope places and that the typing
+    // rules do not make a natural number is an error, never a silent
+    // reading as natural arithmetic: X(K, 4, 1) ^ 2 with no CommRing(K).
+    const stray = unsorted.find(term => term.tag === "app");
+    if (stray) throw unplacedOperandError(kernel, scope, facts, found, stray, supplied[0]!.token, sorts, line);
+    return true;
+  }
   if (unsorted.some(placed)) return false;
   return operands.some(term => sorts.some(type => termHasType(kernel, term, type, scope)));
+}
+
+/**
+ * The error for an operand of a token that hypotheses in scope supply which
+ * no supplier's carrier is known to hold and the typed declarations cannot
+ * take: it names the operand, the structures in scope, and, when a
+ * membership instance would place the operand but for its premises, the
+ * premises it lacks, `CommRing(K)` for `X(K, 4, 1)` by `X.mem`.
+ */
+function unplacedOperandError(
+  kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], found: readonly HypothesisOperation[], term: Term,
+  token: string, sorts: readonly string[], line: number,
+): SurfaceError {
+  const carriers = [...new Set(found.map(item => formatTerm(item.carrier)))];
+  const kinds = [...new Set(sorts.map(sort => shortName(sort)))];
+  const hints = membershipInstanceHints(kernel, scope, facts, term);
+  return new SurfaceError(line,
+    `cannot place ${formatTerm(term)} for ${token}: the hypotheses in scope supply ${token} on ${carriers.join(" and ")}, ` +
+    `no fact or instance puts it there, and it is not a ${kinds.join(" or ") || "typed operand"}` +
+    `; ${hints ?? "add the membership fact, or the hypothesis the instance placing it needs"}` +
+    (kinds.length === 1 ? `, or annotate it as (${formatTerm(term)}:${annotationLabel(sorts[0]!)}) for the ${kinds[0]} reading` : ""));
+}
+
+/**
+ * How the visible instances would place a term, and what they lack: for
+ * each instance whose conclusion is a membership of the term's shape, the
+ * premises that hold neither among the facts nor by the typing rules,
+ * `X(K, 4, 1) ∈ polynomialRing(K, 4) by X.mem needs CommRing(K)`.
+ */
+function membershipInstanceHints(kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], term: Term): string | undefined {
+  const hints: string[] = [];
+  const assumptions = scope.localFormulas?.() ?? [];
+  const visibility = scopeVisibility(kernel, scope);
+  for (const name of visibleInstanceNames(kernel, scope)) {
+    const statement = kernel.theorems.get(name);
+    if (!statement) continue;
+    const variables = new Set<string>();
+    for (let body = statement; body.tag === "forall"; body = body.body) variables.add(body.variable);
+    const conclusion = statementConclusion(statement);
+    if (conclusion.tag !== "pred" || conclusion.pred !== "in" || conclusion.args.length !== 2) continue;
+    const substitution = new Map<string, Term>();
+    if (!matchImplicitTerm(conclusion.args[0]!, term, variables, substitution)) continue;
+    const instantiate = (formula: Formula): Formula => {
+      let result = formula;
+      for (const [variable, value] of substitution) result = substituteFormula(result, variable, value);
+      return result;
+    };
+    const missing = statementHypotheses(statement).map(instantiate).filter(premise =>
+      ![...freeFormulaVariables(premise)].some(variable => variables.has(variable)) &&
+      !facts.some(fact => formulaEquals(fact, premise)) &&
+      !(premise.tag === "pred" && premise.args.length === 1 &&
+        proveRefinement(kernel, premise.args[0]!, premise.pred, [], assumptions, [], visibility)));
+    if (missing.length) {
+      hints.push(`${formatFormula(instantiate(conclusion))} by ${name.split(".").slice(-2).join(".")} needs ${missing.map(premise => formatFormula(premise)).join(" and ")}`);
+    }
+  }
+  return hints.length ? hints.join("; ") : undefined;
 }
 
 /**
@@ -17436,6 +17611,69 @@ function selectStructureOperation(
     throw new SurfaceError(line, `ambiguous notation ${notations[0]!.token}; hypotheses in scope make ${formatTerm(left)} a structure of ${targets.map(target => shortName(target)).join(" and ")}; write the function by name`);
   }
   return found[0];
+}
+
+/**
+ * The carrier a composite already read under a hypothesis token lies in,
+ * read off the composite itself: `Ring.pow(polynomialRing(B, 1), c, 2)` is
+ * the power of the ring `polynomialRing(B, 1)`, so it lies in that ring's
+ * carrier whether or not a fact in scope names the ring. The operation
+ * template of the notation is matched against the composite's operation,
+ * and its carrier template instantiated with what the match binds.
+ */
+function compositeCarrier(kernel: Kernel, scope: SurfaceScope, term: Term, line: number): Term | undefined {
+  if (term.tag !== "app" || (term.args.length !== 3 && term.args.length !== 2)) return undefined;
+  for (const notation of visibleHypothesisFunctionNotations(kernel, scope, line)) {
+    const pattern = notation.hypothesis!;
+    if (notation.target !== term.fn || notation.fixity === "constant" || !pattern.output || !pattern.carriers.length) continue;
+    if ((term.args.length === 3) !== !notation.fixity) continue;
+    const substitution = new Map<string, Term>();
+    if (!matchImplicitTerm(pattern.output, term.args[0]!, new Set(pattern.names), substitution)) continue;
+    if (pattern.names.some(name => !substitution.has(name))) continue;
+    return substituteTerms(pattern.carriers[0]!, substitution);
+  }
+  return undefined;
+}
+
+/**
+ * The body of a plain definition at these arguments, one level deep:
+ * `Ring.carrier(Algebra.ring(A))` for `algebraCarrier(A)`. Undefined for a
+ * variable, a constant with no definition, or a definition of another kind.
+ */
+function unfoldDefinitionOnce(kernel: Kernel, term: Term): Term | undefined {
+  if (term.tag !== "app") return undefined;
+  const record = kernel.definitions.get(term.fn);
+  if (record?.kind !== "function" || record.parameters.length !== term.args.length) return undefined;
+  let equation = record.properties.get("equation");
+  while (equation?.tag === "forall") equation = equation.body;
+  if (equation?.tag !== "eq" || equation.left.tag !== "app" || equation.left.fn !== term.fn) return undefined;
+  let result = equation.right;
+  record.parameters.forEach((name, index) => { result = substituteTerm(result, name, v(`$unfold${index}`)); });
+  record.parameters.forEach((_, index) => { result = substituteTerm(result, `$unfold${index}`, term.args[index]!); });
+  return result;
+}
+
+/**
+ * Whether a membership fact places a term in a carrier through a definition
+ * of its container: `p ∈ algebraCarrier(A)` places `p` in
+ * `Ring.carrier(Algebra.ring(A))`, the body of `algebraCarrier`.
+ */
+function memberThroughDefinition(kernel: Kernel, facts: readonly Formula[], term: Term, carrier: Term): boolean {
+  return facts.some(fact => {
+    if (fact.tag !== "pred" || fact.pred !== "in" || fact.args.length !== 2 || !termEquals(fact.args[0]!, term)) return false;
+    const body = unfoldDefinitionOnce(kernel, fact.args[1]!);
+    return body !== undefined && termEquals(body, carrier);
+  });
+}
+
+/**
+ * The carrier an operand lies in by its own shape or by the certified
+ * typing rules, when the facts in scope do not place it: a composite's own
+ * structure first, then the completion `X(R, I, j) ∈ Ring.carrier(polynomialRing(R, I))`
+ * by the instance `X.mem`.
+ */
+function instanceCarrierOf(kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], term: Term, line: number): Term | undefined {
+  return compositeCarrier(kernel, scope, term, line) ?? completedCarrier(kernel, scope, facts, term);
 }
 
 /**
@@ -17482,10 +17720,11 @@ function selectHypothesisOperation(
   const unplaced = operands.filter(term => term.tag === "app" &&
     !found.some(item => inCarrier(term, item.carrier)));
   const derived = unplaced.flatMap(term => {
-    const carrier = completedCarrier(kernel, scope, facts, term);
-    return carrier?.tag === "app" && carrier.args.length === 1 && projectionOf(kernel, carrier.fn) &&
-      !found.some(item => termEquals(item.carrier, carrier)) && structureValueOf(kernel, scope, carrier.args[0]!)
-      ? instanceStructureFacts(kernel, scope, carrier.args[0]!, facts).map(fact => ({ fact, term, carrier })) : [];
+    const carrier = instanceCarrierOf(kernel, scope, facts, term, line);
+    const structure = carrier?.tag === "app" && carrier.args.length === 1 && projectionOf(kernel, carrier.fn)
+      ? carrier.args[0]! : undefined;
+    return carrier && structure && !found.some(item => termEquals(item.carrier, carrier)) && structureCandidate(kernel, scope, structure)
+      ? structureFactsOfTerm(kernel, scope, structure, facts).map(fact => ({ fact, term, carrier })) : [];
   });
   if (derived.length) {
     facts = [...facts, ...derived.map(item => item.fact), ...derived.map(item => pred("in", item.term, item.carrier))];
@@ -17504,6 +17743,11 @@ function selectHypothesisOperation(
   };
   const matching = select(inCarrier);
   if (matching.length === 1) return matching[0];
+  // A membership fact whose container is a definition unfolding to a
+  // candidate's carrier names that candidate: p ∈ algebraCarrier(A) places
+  // p in Ring.carrier(Algebra.ring(A)) among equal rings spelled apart.
+  const unfolded = select((term, carrier) => memberThroughDefinition(kernel, facts, term, carrier));
+  if (unfolded.length === 1) return unfolded[0];
   // With no syntactic evidence, the certified typing rules decide: unit(G)
   // lies in carrier(G) by the closure instance of the group.
   const typed = select((term, carrier) => inCarrier(term, carrier) ||
@@ -17654,13 +17898,24 @@ function displayFunctions(kernel: Kernel, scope: SurfaceScope, facts: readonly F
  * members of `integerRing.carrier` is the addition of that ring.
  */
 function closedInstanceFacts(kernel: Kernel, scope: SurfaceScope): Formula[] {
+  // The closed facts change only as instances are admitted, so they are
+  // remembered per scope until the kernel grows.
+  let cache = closedInstanceFactsCache.get(kernel);
+  if (!cache) { cache = new Map(); closedInstanceFactsCache.set(kernel, cache); }
+  const key = `${kernel.theorems.size}\u0000${scopeVisibilityKey(scope)}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
   const result: Formula[] = [];
   for (const name of visibleInstanceNames(kernel, scope)) {
     const statement = kernel.theorems.get(name);
     if (statement?.tag === "pred" && freeFormulaVariables(statement).size === 0) result.push(statement);
   }
+  if (cache.size > 64) cache.clear();
+  cache.set(key, result);
   return result;
 }
+
+const closedInstanceFactsCache = new WeakMap<Kernel, Map<string, Formula[]>>();
 
 /** The infix, postfix, and prefix function notations in scope that a hypothesis supplies. */
 function visibleHypothesisFunctionNotations(kernel: Kernel, scope: SurfaceScope, line: number): SurfaceNotationRecord[] {
@@ -18128,7 +18383,10 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       return app(symbol);
     }
     if (/^\d+$/.test(token.text)) {
-      return !exponentDepth && scope.rings?.length === 1 && !scope.rings[0]!.plainLiterals
+      // A literal filling a parameter declared Nat stays a natural number
+      // inside a ring scope: realNumeral(2) takes the natural 2.
+      const natural = expected !== undefined && shortName(expected) === "Nat";
+      return !exponentDepth && !natural && scope.rings?.length === 1 && !scope.rings[0]!.plainLiterals
         ? ringNumeral(kernel, scope, nat(token.text), scope.rings[0]!, line) : nat(token.text);
     }
     const qualifier = (scope.ringAliases ?? scope.rings)?.find(ring => ring.name === token.text) ??
