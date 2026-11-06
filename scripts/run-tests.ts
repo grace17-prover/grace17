@@ -77,7 +77,7 @@ function runOne(name: string): Promise<void> {
 // run one at a time, first, and the rest share the workers. The CI workflow
 // isolates the same file in its own job.
 const heavy = new Set(["cumulus.test.ts", "zf-library.test.ts", "workbench.test.ts", "rust-checker.test.ts",
-  "python-g17c.test.ts", "compiled-module.test.ts", "blueprint-abhyankar-sathaye.test.ts"]);
+  "python-g17c.test.ts", "compiled-module.test.ts"]);
 const heavyFiles = files.filter(name => heavy.has(name));
 const lightFiles = files.filter(name => !heavy.has(name));
 for (const name of heavyFiles) await runOne(name);

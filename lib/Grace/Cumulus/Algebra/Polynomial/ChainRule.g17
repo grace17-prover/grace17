@@ -1,0 +1,397 @@
+-- The chain rule for an algebra homomorphism φ : R[n] → R[J] between
+-- polynomial algebras with a numeral index set: the derivative of φ(f) in
+-- Xⱼ is the sum over i < n of φ(∂f/∂Xᵢ) times the derivative of φ(Xᵢ)
+-- in Xⱼ, by generation.
+-- Part of Cumulus, the Grace17 mathematics library.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module Grace.Cumulus.Algebra.Polynomial.ChainRule
+import Grace.Cumulus.Algebra.Polynomial.Derivative
+import Grace.Cumulus.Algebra.Ring.IdentitySum
+import Grace.Cumulus.Algebra.Polynomial.Algebra
+
+-- The chain rule for an algebra homomorphism φ : R[n] → R[J]: the
+-- derivative of φ(f) in Xⱼ is the sum over i < n of φ(∂f/∂Xᵢ) times
+-- the derivative of φ(Xᵢ) in Xⱼ. The terms of the sum, the rule for f,
+-- and the polynomials satisfying it.
+def chainTerms (R J φ f j : Set, n : Nat) : Set :=
+  { t ∈ n × Ring.carrier(polynomialRing(R, J)) |
+    snd(t) = call2(Ring.mul(polynomialRing(R, J)),
+      φ(partialDerivative(R, n, fst(t))(f)),
+      partialDerivative(R, J, j)(φ(X(R, n, fst(t))))) }
+
+predicate ChainRule (R J φ f j : Set, n : Nat) :=
+  partialDerivative(R, J, j)(φ(f)) =
+    indexedRingSum(identity(Ring.carrier(polynomialRing(R, J))),
+      chainTerms(R, J, φ, f, j, n), Ring.add(polynomialRing(R, J)),
+      Ring.zero(polynomialRing(R, J)), n)
+
+def chainPolynomials (R J φ j : Set, n : Nat) : Set :=
+  { f ∈ polynomials(n, Ring.carrier(R), Ring.zero(R)) |
+    ChainRule(R, J, φ, f, j, n) }
+
+-- An algebra homomorphism between polynomial algebras is a ring
+-- homomorphism between the polynomial rings fixing the constants.
+theorem AlgebraHom.polynomial_ring_hom (R I J φ : Set)
+  requires hom : φ : polynomialAlgebra(R, I) →ₐ polynomialAlgebra(R, J)
+  shows φ : polynomialRing(R, I) →+* polynomialRing(R, J)
+proof
+  have ringHom := AlgebraHom.ring_hom with hom
+  rw [polynomialAlgebra.ring, polynomialAlgebra.ring] at ringHom
+  exact ringHom
+
+theorem AlgebraHom.polynomial_constant (R I J φ a : Set)
+  requires hom : φ : polynomialAlgebra(R, I) →ₐ polynomialAlgebra(R, J)
+  requires scalar : a ∈ Ring.carrier(R)
+  shows φ(polynomialConstant(R, I)(a)) = polynomialConstant(R, J)(a)
+proof
+  have baseIn : a ∈ Ring.carrier(Algebra.base(polynomialAlgebra(R, I)))
+    rw polynomialAlgebra.base
+    exact scalar
+  have mapped := AlgebraHom.map_base with hom, baseIn
+  rw [polynomialAlgebra.map, polynomialAlgebra.map] at mapped
+  exact mapped
+
+-- The chain terms as a function on n, and their values.
+section ChainTerms
+variable (R J φ f j : Set, n : Nat)
+hypothesis ring : CommRing(R)
+hypothesis hom : φ : polynomialAlgebra(R, n) →ₐ polynomialAlgebra(R, J)
+hypothesis member : f ∈ Ring.carrier(polynomialRing(R, n))
+hypothesis index : j ∈ J
+
+theorem chainTerms.value_mem (k : Set)
+  requires position : k ∈ n
+  shows call2(Ring.mul(polynomialRing(R, J)), φ(partialDerivative(R, n, k)(f)),
+    partialDerivative(R, J, j)(φ(X(R, n, k)))) ∈
+    Ring.carrier(polynomialRing(R, J))
+proof
+  have ringN := polynomialRing.comm_ring at R, n with ring
+  have ringJ := polynomialRing.comm_ring at R, J with ring
+  have ringHom := AlgebraHom.polynomial_ring_hom at R, n, J, φ with hom
+  have derivative := partialDerivative.map_mem at R, n, k, f with *
+  have mapped : φ(partialDerivative(R, n, k)(f)) ∈ polynomialRing(R, J) :=
+    RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+      partialDerivative(R, n, k)(f) with *
+  have variable : X(R, n, k) ∈ polynomialRing(R, n) := X.mem at R, n, k with *
+  have mappedVariable : φ(X(R, n, k)) ∈ polynomialRing(R, J) :=
+    RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+      X(R, n, k) with *
+  have derivativeJ :=
+    partialDerivative.map_mem at R, J, j, φ(X(R, n, k)) with *
+  exact Ring.mul_mem with *
+
+theorem chainTerms.function
+  shows chainTerms(R, J, φ, f, j, n) : n → Ring.carrier(polynomialRing(R, J))
+proof
+  constructor
+  . intros e he
+    exact he.left
+  constructor
+  . intros x y relatedY z relatedZ
+    obtain ⟨_, shapeY⟩ := relatedY
+    obtain ⟨_, shapeZ⟩ := relatedZ
+    simp [fst.pair, snd.pair] at shapeY, shapeZ
+    cc
+  . intros k hk
+    have valueIn := chainTerms.value_mem at R, J, φ, f, j, n, k with *
+    refine ⟨call2(Ring.mul(polynomialRing(R, J)),
+      φ(partialDerivative(R, n, k)(f)),
+      partialDerivative(R, J, j)(φ(X(R, n, k)))), valueIn, _⟩
+    apply chainTerms.membership.backward
+    refine ⟨(product.pair with hk, valueIn), _⟩
+    simp [fst.pair, snd.pair]
+
+theorem chainTerms.value (k : Set)
+  requires position : k ∈ n
+  shows chainTerms(R, J, φ, f, j, n)(k) =
+    call2(Ring.mul(polynomialRing(R, J)), φ(partialDerivative(R, n, k)(f)),
+      partialDerivative(R, J, j)(φ(X(R, n, k))))
+proof
+  have function := chainTerms.function at R, J, φ, f, j, n with *
+  have valueIn := chainTerms.value_mem at R, J, φ, f, j, n, k with *
+  have related : relates(chainTerms(R, J, φ, f, j, n), k,
+      call2(Ring.mul(polynomialRing(R, J)), φ(partialDerivative(R, n, k)(f)),
+        partialDerivative(R, J, j)(φ(X(R, n, k)))))
+    apply chainTerms.membership.backward
+    refine ⟨(product.pair with position, valueIn), _⟩
+    simp [fst.pair, snd.pair]
+  exact FunctionBetween.apply_value with function, position, related
+
+theorem chainTerms.values
+  shows ∀ k ∈ n,
+    chainTerms(R, J, φ, f, j, n)(k) ∈ Ring.carrier(polynomialRing(R, J))
+proof
+  intros k hk
+  have function := chainTerms.function at R, J, φ, f, j, n with *
+  exact FunctionBetween.apply_closed with function, hk
+
+end ChainTerms
+
+-- The chain rule, by generation: the polynomials satisfying it contain
+-- the constants (both sides vanish) and the variables (a single term
+-- survives), and are closed under sums and products (the sums add and
+-- combine bilinearly termwise).
+section ChainRule
+variable (R J : Set, n : Nat)
+hypothesis ring : CommRing(R)
+
+theorem polynomial_chain_rule (φ f j : Set)
+  requires hom : φ : polynomialAlgebra(R, n) →ₐ polynomialAlgebra(R, J)
+  requires member : f ∈ Ring.carrier(polynomialRing(R, n))
+  requires index : j ∈ J
+  shows partialDerivative(R, J, j)(φ(f)) =
+    indexedRingSum(identity(Ring.carrier(polynomialRing(R, J))),
+      chainTerms(R, J, φ, f, j, n), Ring.add(polynomialRing(R, J)),
+      Ring.zero(polynomialRing(R, J)), n)
+proof
+  have parts := CommRing.parts with ring
+  have ringN := polynomialRing.comm_ring at R, n with ring
+  have ringJ := polynomialRing.comm_ring at R, J with ring
+  have ringHom := AlgebraHom.polynomial_ring_hom at R, n, J, φ with hom
+  have mappedZero := RingHom.map_zero at φ, polynomialRing(R, n),
+    polynomialRing(R, J) with ringHom
+  have mappedOne := RingHom.map_one at φ, polynomialRing(R, n),
+    polynomialRing(R, J) with ringHom
+  have fParts := polynomialRing.member_parts at R, n, f with *
+  have variableTerms : ∀ k ∈ n, φ(X(R, n, k)) ∈ polynomialRing(R, J) ∧
+      partialDerivative(R, J, j)(φ(X(R, n, k))) ∈ polynomialRing(R, J)
+    intros k hk
+    have variable : X(R, n, k) ∈ polynomialRing(R, n) :=
+      X.mem at R, n, k with *
+    have mappedVariable : φ(X(R, n, k)) ∈ polynomialRing(R, J) :=
+      RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+        X(R, n, k) with *
+    have derivativeJ :=
+      partialDerivative.map_mem at R, J, j, φ(X(R, n, k)) with *
+    exact ⟨mappedVariable, derivativeJ⟩
+  have constants : ∀ a ∈ R.carrier,
+      polynomialConstant(n, R.carrier, R.zero, a) ∈
+        chainPolynomials(R, J, φ, j, n)
+    intros a ha
+    have value := polynomialConstant.apply at R, n, a with *
+    have constantN : polynomialConstant(R, n)(a) ∈ polynomialRing(R, n) :=
+      polynomialConstant.mem at R, n, a with *
+    have constantParts := polynomialRing.member_parts at R, n,
+      polynomialConstant(R, n)(a) with *
+    rw ← value
+    apply chainPolynomials.membership.backward
+    refine ⟨constantParts, _⟩
+    unfold ChainRule
+    have mapped := AlgebraHom.polynomial_constant at R, n, J, φ, a with *
+    have constantJ : polynomialConstant(R, J)(a) ∈ polynomialRing(R, J) :=
+      polynomialConstant.mem at R, J, a with *
+    have vanishes := partialDerivative.constant at R, J, j, a with *
+    rw [mapped, vanishes]
+    have terms : ∀ k ∈ n,
+        chainTerms(R, J, φ, polynomialConstant(R, n)(a), j, n)(k) =
+        Ring.zero(polynomialRing(R, J))
+      intros k hk
+      have termValue := chainTerms.value at R, J, φ,
+        polynomialConstant(R, n)(a), j, n, k with *
+      have derivativeZero := partialDerivative.constant at R, n, k, a with *
+      have pieces := variableTerms with k, hk
+      have derivativeJ := pieces.right
+      rw [termValue, derivativeZero, mappedZero]
+      ring
+    have vanishing := indexedRingSum.identity_zero at polynomialRing(R, J),
+      chainTerms(R, J, φ, polynomialConstant(R, n)(a), j, n), n with *, terms
+    rw vanishing
+    rfl
+  have variables : ∀ m ∈ n,
+      polynomialVariable(n, R.carrier, R.zero, R.one, m) ∈
+        chainPolynomials(R, J, φ, j, n)
+    intros m hm
+    have variableN : X(R, n, m) ∈ polynomialRing(R, n) :=
+      X.mem at R, n, m with *
+    have variableParts := polynomialRing.member_parts at R, n, X(R, n, m) with *
+    rw ← X.value
+    apply chainPolynomials.membership.backward
+    refine ⟨variableParts, _⟩
+    unfold ChainRule
+    have piecesM := variableTerms with m, hm
+    have derivativeJ := piecesM.right
+    have others : ∀ k ∈ n, k ≠ m →
+        chainTerms(R, J, φ, X(R, n, m), j, n)(k) =
+        Ring.zero(polynomialRing(R, J))
+      intros k hk different
+      have reverse : m ≠ k by cc
+      have termValue := chainTerms.value at R, J, φ, X(R, n, m), j, n, k with *
+      have derivativeZero := partialDerivative.X_other at R, n, k, m with *
+      have pieces := variableTerms with k, hk
+      have derivativeJK := pieces.right
+      rw [termValue, derivativeZero, mappedZero]
+      ring
+    have same : chainTerms(R, J, φ, X(R, n, m), j, n)(m) =
+        partialDerivative(R, J, j)(φ(X(R, n, m)))
+      have termValue := chainTerms.value at R, J, φ, X(R, n, m), j, n, m with *
+      have derivativeOne := partialDerivative.X_self at R, n, m with *
+      rw [termValue, derivativeOne, mappedOne]
+      ring
+    have single := indexedRingSum.identity_single at polynomialRing(R, J),
+      chainTerms(R, J, φ, X(R, n, m), j, n), m,
+      partialDerivative(R, J, j)(φ(X(R, n, m))), n
+      with ringJ, derivativeJ, hm, others, same
+    rw single
+    rfl
+  have sums : ∀ u ∈ chainPolynomials(R, J, φ, j, n),
+      ∀ v ∈ chainPolynomials(R, J, φ, j, n),
+      coefficientAdd(monomials(n), R.carrier, R.add, R.zero, R.neg, R.mul,
+        R.one, u, v) ∈ chainPolynomials(R, J, φ, j, n)
+    intros u hu v hv
+    have dataU := chainPolynomials.membership.forward with hu
+    have dataV := chainPolynomials.membership.forward with hv
+    have uParts := dataU.left
+    have uIn := polynomialRing.member_of_parts at R, n, u with *
+    have vParts := dataV.left
+    have vIn := polynomialRing.member_of_parts at R, n, v with *
+    have ruleU := dataU.right
+    have ruleV := dataV.right
+    unfold ChainRule at ruleU
+    unfold ChainRule at ruleV
+    have sumForm := polynomialRing.add_apply at R, n, u, v with *
+    have sumIn : u + v ∈ polynomialRing(R, n) := Ring.add_mem with *
+    have sumParts := polynomialRing.member_parts at R, n, u + v with *
+    rw ← sumForm
+    apply chainPolynomials.membership.backward
+    refine ⟨sumParts, _⟩
+    unfold ChainRule
+    have mappedU : φ(u) ∈ polynomialRing(R, J) :=
+      RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J), u
+        with *
+    have mappedV : φ(v) ∈ polynomialRing(R, J) :=
+      RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J), v
+        with *
+    have mappedSum := RingHom.map_add at φ, polynomialRing(R, n),
+      polynomialRing(R, J), u, v with *
+    have additive := partialDerivative.add at R, J, j, φ(u), φ(v) with *
+    rw [mappedSum, additive, ruleU, ruleV]
+    have valuesU := chainTerms.values at R, J, φ, u, j, n with *
+    have valuesV := chainTerms.values at R, J, φ, v, j, n with *
+    have equations : ∀ k ∈ n, chainTerms(R, J, φ, u + v, j, n)(k) =
+        call2(Ring.add(polynomialRing(R, J)), chainTerms(R, J, φ, u, j, n)(k),
+          chainTerms(R, J, φ, v, j, n)(k))
+      intros k hk
+      have termSum := chainTerms.value at R, J, φ, u + v, j, n, k with *
+      have termU := chainTerms.value at R, J, φ, u, j, n, k with *
+      have termV := chainTerms.value at R, J, φ, v, j, n, k with *
+      have derivativeSum := partialDerivative.add at R, n, k, u, v with *
+      have derivativeU :
+          partialDerivative(R, n, k)(u) ∈ polynomialRing(R, n) :=
+        partialDerivative.map_mem at R, n, k, u with *
+      have derivativeV :
+          partialDerivative(R, n, k)(v) ∈ polynomialRing(R, n) :=
+        partialDerivative.map_mem at R, n, k, v with *
+      have mappedDerivativeU :
+          φ(partialDerivative(R, n, k)(u)) ∈ polynomialRing(R, J) :=
+        RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+          partialDerivative(R, n, k)(u) with *
+      have mappedDerivativeV :
+          φ(partialDerivative(R, n, k)(v)) ∈ polynomialRing(R, J) :=
+        RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+          partialDerivative(R, n, k)(v) with *
+      have mappedDerivativeSum := RingHom.map_add at φ, polynomialRing(R, n),
+        polynomialRing(R, J), partialDerivative(R, n, k)(u),
+        partialDerivative(R, n, k)(v) with *
+      have pieces := variableTerms with k, hk
+      have derivativeJK := pieces.right
+      rw [termSum, termU, termV, derivativeSum, mappedDerivativeSum]
+      ring
+    have combined := indexedRingSum.identity_add at polynomialRing(R, J),
+      chainTerms(R, J, φ, u, j, n), chainTerms(R, J, φ, v, j, n),
+      chainTerms(R, J, φ, u + v, j, n), n
+      with ringJ, valuesU, valuesV, equations
+    rw combined
+    rfl
+  have products : ∀ u ∈ chainPolynomials(R, J, φ, j, n),
+      ∀ v ∈ chainPolynomials(R, J, φ, j, n),
+      polynomialProduct(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, u, v)
+        ∈ chainPolynomials(R, J, φ, j, n)
+    intros u hu v hv
+    have dataU := chainPolynomials.membership.forward with hu
+    have dataV := chainPolynomials.membership.forward with hv
+    have uParts := dataU.left
+    have uIn := polynomialRing.member_of_parts at R, n, u with *
+    have vParts := dataV.left
+    have vIn := polynomialRing.member_of_parts at R, n, v with *
+    have ruleU := dataU.right
+    have ruleV := dataV.right
+    unfold ChainRule at ruleU
+    unfold ChainRule at ruleV
+    have productForm := polynomialRing.mul_apply at R, n, u, v with *
+    have productIn : u * v ∈ polynomialRing(R, n) := Ring.mul_mem with *
+    have productParts := polynomialRing.member_parts at R, n, u * v with *
+    rw ← productForm
+    apply chainPolynomials.membership.backward
+    refine ⟨productParts, _⟩
+    unfold ChainRule
+    have mappedU : φ(u) ∈ polynomialRing(R, J) :=
+      RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J), u
+        with *
+    have mappedV : φ(v) ∈ polynomialRing(R, J) :=
+      RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J), v
+        with *
+    have mappedProduct := RingHom.map_mul at φ, polynomialRing(R, n),
+      polynomialRing(R, J), u, v with *
+    have leibniz := partialDerivative.mul at R, J, j, φ(u), φ(v) with *
+    rw [mappedProduct, leibniz, ruleU, ruleV]
+    have valuesU := chainTerms.values at R, J, φ, u, j, n with *
+    have valuesV := chainTerms.values at R, J, φ, v, j, n with *
+    have equations : ∀ k ∈ n, chainTerms(R, J, φ, u * v, j, n)(k) =
+        call2(Ring.add(polynomialRing(R, J)),
+          call2(Ring.mul(polynomialRing(R, J)),
+            chainTerms(R, J, φ, u, j, n)(k), φ(v)),
+          call2(Ring.mul(polynomialRing(R, J)),
+            φ(u), chainTerms(R, J, φ, v, j, n)(k)))
+      intros k hk
+      have termProduct := chainTerms.value at R, J, φ, u * v, j, n, k with *
+      have termU := chainTerms.value at R, J, φ, u, j, n, k with *
+      have termV := chainTerms.value at R, J, φ, v, j, n, k with *
+      have derivativeU :
+          partialDerivative(R, n, k)(u) ∈ polynomialRing(R, n) :=
+        partialDerivative.map_mem at R, n, k, u with *
+      have derivativeV :
+          partialDerivative(R, n, k)(v) ∈ polynomialRing(R, n) :=
+        partialDerivative.map_mem at R, n, k, v with *
+      have leftIn :
+          partialDerivative(R, n, k)(u) * v ∈ polynomialRing(R, n) :=
+        Ring.mul_mem with *
+      have rightIn :
+          u * partialDerivative(R, n, k)(v) ∈ polynomialRing(R, n) :=
+        Ring.mul_mem with *
+      have derivativeProduct := partialDerivative.mul at R, n, k, u, v with *
+      have mappedDerivativeU :
+          φ(partialDerivative(R, n, k)(u)) ∈ polynomialRing(R, J) :=
+        RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+          partialDerivative(R, n, k)(u) with *
+      have mappedDerivativeV :
+          φ(partialDerivative(R, n, k)(v)) ∈ polynomialRing(R, J) :=
+        RingHom.map_mem at φ, polynomialRing(R, n), polynomialRing(R, J),
+          partialDerivative(R, n, k)(v) with *
+      have mappedSum := RingHom.map_add at φ, polynomialRing(R, n),
+        polynomialRing(R, J), partialDerivative(R, n, k)(u) * v,
+        u * partialDerivative(R, n, k)(v) with *
+      have mappedLeft := RingHom.map_mul at φ, polynomialRing(R, n),
+        polynomialRing(R, J), partialDerivative(R, n, k)(u), v with *
+      have mappedRight := RingHom.map_mul at φ, polynomialRing(R, n),
+        polynomialRing(R, J), u, partialDerivative(R, n, k)(v) with *
+      have pieces := variableTerms with k, hk
+      have derivativeJK := pieces.right
+      rw [termProduct, termU, termV, derivativeProduct, mappedSum,
+        mappedLeft, mappedRight]
+      ring
+    have combined := indexedRingSum.identity_bilinear at polynomialRing(R, J),
+      chainTerms(R, J, φ, u, j, n), chainTerms(R, J, φ, v, j, n),
+      chainTerms(R, J, φ, u * v, j, n), φ(u), φ(v), n
+      with ringJ, mappedU, mappedV, valuesU, valuesV, equations
+    rw combined
+    rfl
+  have generated := polynomials.generated at n, R.carrier, R.add, R.zero,
+    R.neg, R.mul, R.one, chainPolynomials(R, J, φ, j, n), f
+    with parts, fParts, constants, variables, sums, products
+  have data := chainPolynomials.membership.forward with generated
+  exact data.right
+
+end ChainRule

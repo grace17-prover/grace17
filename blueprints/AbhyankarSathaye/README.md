@@ -16,11 +16,11 @@ npm run blueprint:check     # the whole blueprint elaborates
 npm run blueprint:status    # theorems per module, proved and admitted
 ```
 
-The module root is `blueprints/`; the modules are `AbhyankarSathaye.*`.
-A module whose last admission goes is promoted into Cumulus under the home
-named in its header, with its module line renamed and its imports made
-relative, and is then held to the Cumulus rules: at most three imports for a
-proof module, headers, and no admissions.
+Every module is promoted into Cumulus under the home named in its row
+below, held to the Cumulus rules: at most three imports for a proof
+module, headers, and no admissions. The library content lives under
+`Grace.Cumulus.Algebra.Algebras` and `Grace.Cumulus.Algebra.Polynomial`,
+and the proof under `Grace.Cumulus.AlgebraicGeometry.Coordinates`.
 
 ## The result
 
@@ -85,22 +85,27 @@ And the whole stabilizes: in ℂ[4 + k] the same polynomial has fibre
 
 | module | layer | home in Cumulus (relative to `Grace.Cumulus`) |
 |---|---|---|
-| Identities | 1 | AlgebraicGeometry/Coordinates/Identities |
-| LiftingIdentities | 1 | AlgebraicGeometry/Coordinates/LiftingIdentities |
-| Ambient | 1 | AlgebraicGeometry/Coordinates/Ambient |
-| Algebras | 2 | Algebra/Algebra/Basic |
-| QuotientAlgebras | 2 | Algebra/Algebra/Quotient |
-| PolynomialAlgebras | 2 | Algebra/Polynomial/Algebra |
-| Derivatives | 2 | Algebra/Polynomial/Derivative |
-| FiniteMaps | 2 | Set/Function/Quadruples, Nat/Foundation |
-| Lifting | 3 | AlgebraicGeometry/Coordinates/Lifting |
-| Plane | 4 | AlgebraicGeometry/Coordinates/Plane |
-| Elimination | 5 | AlgebraicGeometry/Coordinates/Elimination |
-| Fibre | 5 | AlgebraicGeometry/Coordinates/Fibre |
-| CriticalPoint | 6 | AlgebraicGeometry/Coordinates/CriticalPoint |
-| NoCoordinate | 6 | AlgebraicGeometry/Coordinates/NoCoordinate |
-| Stabilization | 7 | AlgebraicGeometry/Coordinates/Stabilization |
-| Theorem | 7 | AlgebraicGeometry/Coordinates/Theorem |
+| Identities | 1 | promoted: AlgebraicGeometry/Coordinates/Identities |
+| LiftingIdentities | 1 | promoted: AlgebraicGeometry/Coordinates/LiftingIdentities |
+| Ambient | 1 | promoted: AlgebraicGeometry/Coordinates/Ambient |
+| Algebras | 2 | promoted: Algebra/Algebras/Basic |
+| QuotientAlgebras | 2 | promoted: Algebra/Algebras/Quotient |
+| PolynomialAlgebras | 2 | promoted: Algebra/Polynomial/Algebra |
+| ShiftMonomial | 2 | promoted: Algebra/Polynomial/ShiftMonomial |
+| DerivativeCoefficients | 2 | promoted: Algebra/Polynomial/DerivativeCoefficients |
+| Derivative | 2 | promoted: Algebra/Polynomial/Derivative |
+| IdentitySum | 2 | promoted: Algebra/Ring/IdentitySum |
+| ChainRule | 2 | promoted: Algebra/Polynomial/ChainRule |
+| FiniteMaps | 2 | promoted: Set/Function/Quadruples |
+| Lifting | 3 | promoted: AlgebraicGeometry/Coordinates/Lifting |
+| Plane | 4 | promoted: AlgebraicGeometry/Coordinates/Plane |
+| Elimination | 5 | promoted: AlgebraicGeometry/Coordinates/Elimination |
+| Fibre | 5 | promoted: AlgebraicGeometry/Coordinates/Fibre |
+| CriticalValues | 6 | promoted: AlgebraicGeometry/Coordinates/CriticalValues |
+| CriticalPoint | 6 | promoted: AlgebraicGeometry/Coordinates/CriticalPoint |
+| NoCoordinate | 6 | promoted: AlgebraicGeometry/Coordinates/NoCoordinate |
+| Stabilization | 7 | promoted: AlgebraicGeometry/Coordinates/Stabilization |
+| Theorem | 7 | promoted: AlgebraicGeometry/Coordinates/Theorem |
 
 ```mermaid
 graph TD
@@ -108,7 +113,11 @@ graph TD
   Identities --> Ambient
   Algebras --> QuotientAlgebras
   Algebras --> PolynomialAlgebras
-  PolynomialAlgebras --> Derivatives
+  ShiftMonomial --> DerivativeCoefficients
+  DerivativeCoefficients --> Derivative
+  Derivative --> ChainRule
+  IdentitySum --> ChainRule
+  PolynomialAlgebras --> ChainRule
   PolynomialAlgebras --> Ambient
   LiftingIdentities --> Lifting
   QuotientAlgebras --> Lifting
@@ -123,9 +132,10 @@ graph TD
   Lifting --> Elimination
   Elimination --> Fibre
   Ambient --> CriticalPoint
-  Derivatives --> CriticalPoint
-  FiniteMaps --> CriticalPoint
-  Derivatives --> NoCoordinate
+  Derivative --> CriticalPoint
+  FiniteMaps --> CriticalValues
+  CriticalValues --> CriticalPoint
+  ChainRule --> NoCoordinate
   Fibre --> Stabilization
   CriticalPoint --> Stabilization
   NoCoordinate --> Stabilization
@@ -160,21 +170,5 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| AbhyankarSathaye.Algebras | 32 | 32 | 0 |
-| AbhyankarSathaye.Identities | 15 | 15 | 0 |
-| AbhyankarSathaye.PolynomialAlgebras | 60 | 60 | 0 |
-| AbhyankarSathaye.Ambient | 16 | 16 | 0 |
-| AbhyankarSathaye.Derivatives | 63 | 63 | 0 |
-| AbhyankarSathaye.FiniteMaps | 11 | 11 | 0 |
-| AbhyankarSathaye.CriticalPoint | 26 | 26 | 0 |
-| AbhyankarSathaye.QuotientAlgebras | 22 | 22 | 0 |
-| AbhyankarSathaye.Plane | 65 | 65 | 0 |
-| AbhyankarSathaye.LiftingIdentities | 26 | 26 | 0 |
-| AbhyankarSathaye.Lifting | 47 | 47 | 0 |
-| AbhyankarSathaye.Elimination | 120 | 120 | 0 |
-| AbhyankarSathaye.Fibre | 9 | 9 | 0 |
-| AbhyankarSathaye.NoCoordinate | 6 | 6 | 0 |
-| AbhyankarSathaye.Stabilization | 55 | 55 | 0 |
-| AbhyankarSathaye.Theorem | 3 | 3 | 0 |
-| **total** | **576** | **576** | **0** |
+| **total** | **0** | **0** | **0** |
 <!-- /blueprint-status -->

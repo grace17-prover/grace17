@@ -368,6 +368,21 @@ arbitrary set of variables with evaluation, base change, and Dickson's
 finite-basis theorem, and field theory through integral extensions,
 Zariski's lemma, and the Nullstellensatz. Almost all of this is in ZF.
 
+Algebras over a commutative ring are the structures `Algebra.mk(K, A, ι)`,
+a base ring, a ring, and the structure map `ι : K →+* A`, with
+homomorphisms `f : A →ₐ B` commuting with the structure maps,
+isomorphisms `f : A ≃ₐ B`, restriction of scalars along a homomorphism of
+base rings, and quotient algebras `quotientAlgebra(A, J)` with the lift of
+a homomorphism that kills a finitely generated ideal. The polynomial
+algebra `polynomialAlgebra(K, I)` has evaluation as the universal
+homomorphism, renaming of variables along a map of index sets, transport
+along an isomorphism of base algebras, and the flattening
+`K[m][n] ≅ K[m + n]` for numeral index sets. Partial derivatives
+`partialDerivative(R, I, i)` are defined coefficientwise, with the rules
+for constants, variables, sums, products, and powers, and the chain rule
+for an algebra homomorphism out of a polynomial ring in finitely many
+variables.
+
 ## Complex numbers
 
 `Grace.Cumulus.Complex` constructs the complex numbers as ordered pairs of
@@ -378,6 +393,23 @@ that ℂ is algebraically closed and specializes the abstract Nullstellensatz
 to concrete polynomial systems. Solutions of the cubic and quartic are
 checked identities in this field. The axiom audit records where this
 development inherits Choice from the analytic minimum-attainment results.
+
+## Algebraic geometry
+
+`Grace.Cumulus.AlgebraicGeometry` holds the explicit noncoordinate
+polynomial with affine three-space zero fibre, a counterexample to the
+Abhyankar–Sathaye conjecture in four variables. With x = u³ + hv,
+y = −u² + hw, s = S(h, u, v, w) a quartic, and p = P(x, y, s), the
+polynomial F = h − p − 1 in ℂ[h, u, v, w] satisfies three things, each a
+checked theorem: ℂ[h, u, v, w] ⧸ (F) ≅ ℂ[3] as ℂ-algebras, by a lifting
+lemma over a plane presentation and the flattening of polynomial
+algebras; F has a critical point, where every partial derivative
+vanishes and F = −1; and no automorphism of ℂ[h, u, v, w] sends a
+variable to F, because a coordinate has no critical point, by the chain
+rule evaluated at the point. The same F read in ℂ[4 + k] has fibre
+ℂ[3 + k] and is not a coordinate, so every dimension at least four has
+such a polynomial. The axiom audit of both final theorems reports the ZF
+axioms alone.
 
 ## Linear algebra
 
