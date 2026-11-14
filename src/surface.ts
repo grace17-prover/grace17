@@ -1044,13 +1044,14 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     let clauseSpan = 1;
     let line = lines[cursor]!;
     // A theorem header whose binder list is still open, `theorem t (A B : Set,`,
-    // continues on the more indented lines beneath it until it closes.
+    // continues on the more indented lines beneath it until it closes, and
+    // onto a more indented line that begins a further binder group.
     const wrappedHeader = /^(?:theorem|lemma|instance)\s/u.test(line.text);
-    if (/^(?:hypothesis|variable)\s/u.test(line.text) || (wrappedHeader && openParentheses(line.text) > 0)) {
+    if (/^(?:hypothesis|variable)\s/u.test(line.text) || wrappedHeader) {
       while (cursor + clauseSpan < lines.length) {
         const next = lines[cursor + clauseSpan]!;
         if (next.narrative || next.indent <= line.indent) break;
-        if (wrappedHeader && openParentheses(line.text) <= 0) break;
+        if (wrappedHeader && openParentheses(line.text) <= 0 && !/^[({]/u.test(next.text)) break;
         line = { ...line, text: `${line.text} ${next.text}`, columnEnd: next.columnEnd };
         clauseSpan += 1;
       }
@@ -5225,7 +5226,12 @@ function joinTacticContinuations(lines: readonly SourceLine[]): readonly SourceL
 /** The binary operators a proposition or term may break before or after. */
 const CONTINUATION_OPERATORS =
   "→|->|↔|<->|∧|∨|=|≠|\\+|-|\\*|/|∘|∈|∉|⊆|⊂|⊇|⊃|∪|∩|∖|×|≤|≥|<|>|∣|⊑|⊓|⊔|↦|⟶|⇒|⧸|≃|≅|⊕|⊗|·ₐ|\\^";
-const CONTINUATION_OPERATOR_START = new RegExp(`^(?:${CONTINUATION_OPERATORS})\\s`, "u");
+/**
+ * A line may begin with an operator, or with a symbolic literal that extends
+ * one, such as the `→+*` and `≃ₐ` of mixfix notations: the operator followed
+ * by symbols, punctuation, or modifier letters, then a space.
+ */
+const CONTINUATION_OPERATOR_START = new RegExp(`^(?:${CONTINUATION_OPERATORS})[\\p{S}\\p{P}\\p{Lm}\\p{M}]*\\s`, "u");
 /** Steps whose argument may run on, since nothing indented beneath them is a block of theirs. */
 const BLOCKLESS_STEP = /^(?:exact|apply|witness|use|refine|specialize|obtain|rewrite|rw|rwa|unfold|intro|intros|symm|settle)\b/u;
 /** A line that begins a step of its own, never a continuation. */
@@ -5253,6 +5259,9 @@ function tacticLineNeedsContinuation(text: string): boolean {
   // same way, so a long case split need not be wrapped in parentheses.
   if (/^have\s+[\p{L}_][\p{L}\p{M}\p{N}_]*\s*:$/u.test(text)) return true;
   if (/^by_cases\s+[\p{L}_][\p{L}\p{M}\p{N}_']*\s*:$/u.test(text)) return true;
+  // A guard's typing colon at the end of the line, `have h : f :`, takes
+  // the guard's type from the next line.
+  if (/^(?:have|by_cases|show)\s.*:$/u.test(text)) return true;
   return /[,]\s*$/.test(text) ||
     new RegExp(`(?:\\bat|\\bwith|\\busing|:=|=>|${CONTINUATION_OPERATORS}|\\band|\\bor)\\s*$`, "u").test(text) ||
     /^(?:exact|apply|rewrite|rw|unfold|have|specialize|obtain|cases|rcases|clear|rename|revert|witness|use)\s*$/.test(text);
@@ -6466,7 +6475,11 @@ function elaborateTacticTheorem(
         const local = location
           ? resolveLocalProof(current.locals, location, line.number, { kernel, scope, assumptions: current.assumptions })
           : undefined;
-        if (location && !local) throw new SurfaceError(line.number, `unknown local proof ${location}`);
+        if (location && !local) {
+          throw new SurfaceError(line.number, `unknown local proof ${location}` + (variables.has(location)
+            ? `; ${location} is a variable, not a local fact; in a rw list, an entry applied with its own at or with list is parenthesized, rw [(thm at a with h), thm2]`
+            : ""));
+        }
         if (location && local && !current.locals.has(location)) current.locals.set(location, local);
         let candidates: readonly Proof[];
         // A rule named by a definition is the first of its equations that
@@ -6479,7 +6492,7 @@ function elaborateTacticTheorem(
           const ruleName = /^(.*?)(?:\s+at\s.*|\{.*)?$/u.exec(head)?.[1]?.trim() ?? head;
           // The goal, or the fact being rewritten, fixes the parameters the
           // facts leave open: the rule's rewritten side must occur in it.
-          const rewriteTarget = { formula: local ? local.formula : current.goal, reverse };
+          const rewriteTarget = { formula: local ? local.formula : current.goal, reverse, ...(location ? { name: location } : {}) };
           try {
             try {
               candidates = [parseProofExpression(kernel, reference, current, variables, line.number, scope, { rewriteTarget })];
@@ -6491,13 +6504,29 @@ function elaborateTacticTheorem(
             }
           } catch (error) {
             if (!(error instanceof SurfaceError)) throw error;
+            if (error.message.includes("nothing left to rewrite")) throw error;
             throw new SurfaceError(line.number,
               `rw takes a fact or rule, optionally applied with \`at terms\` and \`with facts\`, ` +
               `and \`at hypothesis\` after it names the hypothesis to rewrite; ` +
               `\`rw ${reference}${rewrite[3] ? ` at ${rewrite[3]}` : ""}\` rewrites with ${ruleName} applied to ` +
               `${reference.slice(ruleName.length).trim().replace(/^with\s+/u, "")}, which failed: ${error.message}`);
           }
-        } else candidates = localRule ? [localRule.proof] : resolveRules(kernel, [reference], line.number, scope);
+        } else if (localRule) candidates = [localRule.proof];
+        else {
+          try {
+            candidates = resolveRules(kernel, [reference], line.number, scope);
+          } catch (error) {
+            // A variable or fact where a rule is expected is often an entry
+            // of a list whose own at or with list the commas split.
+            if (error instanceof SurfaceError && error.message.startsWith("unknown settle rule") &&
+                (variables.has(reference) || current.locals.has(reference))) {
+              throw new SurfaceError(line.number, `${error.message.replace(/; did you mean .*$/u, "")}; ` +
+                `${reference} is a ${variables.has(reference) ? "variable" : "local fact"}, not a rule; ` +
+                `in a rw list, an entry applied with its own at or with list is parenthesized, rw [(thm at a with h), thm2]`);
+            }
+            throw error;
+          }
+        }
         rewritten = undefined;
         let lastError: unknown;
         // A rule that matches nothing outside the binders is tried under
@@ -6529,6 +6558,43 @@ function elaborateTacticTheorem(
             lastError = error;
             if (everyCandidate) { rewritten = undefined; break; }
           }
+        }
+        // A rule and a target that differ only in closed arithmetic on
+        // literals, `headOne(1, …)` against `headOne(0 + 1, …)`, meet once
+        // the literal terms of each are folded to their numerals.
+        if (!rewritten && lastError instanceof RewriteMismatch && !everyCandidate && candidates.length === 1) {
+          const foldedRule = foldLiteralArithmetic(kernel, candidates[0]!, current.assumptions);
+          if (location) {
+            const before = current.locals.get(location)!;
+            const foldedFact = foldLiteralArithmetic(kernel, before.proof, current.assumptions);
+            for (const [rule, fact] of [[foldedRule.proof, before], [candidates[0]!, foldedFact], [foldedRule.proof, foldedFact]] as const) {
+              if (rule === candidates[0] && fact === before) continue;
+              try {
+                const transformed = attempt(underBinders => rewriteFact(kernel, fact.proof, rule, current.assumptions,
+                  [...current.locals.values()].filter(item => item !== before).map(item => item.proof), reverse, underBinders, undefined, visibility));
+                current.locals.set(location, transformed);
+                rewritten = { goal: current.goal, lift: proof => proof };
+                break;
+              } catch { /* the next form */ }
+            }
+          } else {
+            const foldedGoal = foldGoalLiterals(kernel, current.goal, current.assumptions);
+            for (const [rule, target] of [[foldedRule.proof, undefined], [candidates[0]!, foldedGoal], [foldedRule.proof, foldedGoal]] as const) {
+              if (rule === candidates[0] && !target) continue;
+              try {
+                const step = attempt(underBinders => rewriteGoal(kernel, target?.goal ?? current.goal, rule, current.assumptions,
+                  [...current.locals.values()].map(item => item.proof), reverse, underBinders, undefined, visibility));
+                rewritten = target ? { goal: step.goal, lift: proof => target.lift(step.lift(proof)) } : step;
+                break;
+              } catch { /* the next form */ }
+            }
+          }
+        }
+        // A closed numeral equation, `1 + 1 = 2`, that has nothing to
+        // rewrite leaves its target as it is: an instantiated statement
+        // already holds the numeral the equation computes.
+        if (!rewritten && lastError instanceof RewriteMismatch && closedLiteralEquation(lastError.rule)) {
+          rewritten = { goal: current.goal, lift: proof => proof };
         }
         if (!rewritten) {
           // The rule and its target are shown as the goal panel shows them,
@@ -7290,10 +7356,19 @@ function elaborateTacticTheorem(
           }
           return nested;
         }
-        // A final existential component may already have a complete proof.
-        // Try it before treating the entry as a witness; earlier entries keep
-        // their established witness/constructor interpretation.
-        if (entryPosition && formula.tag === "exists" && cursor === entries.length - 1 && next !== "_") {
+        // An existential component may already have a complete proof: a
+        // fact whose statement is the existential, in any position, or a
+        // proof expression written as the last entry. A term is a witness
+        // only when the entry is not such a fact.
+        const existentialFact = (entry: string | undefined): boolean => {
+          if (!entry || variables.has(entry)) return false;
+          if (/^[\p{L}_][\p{L}\p{M}\p{N}_.]*$/u.test(entry)) {
+            return resolveLocalProof(current.locals, entry, line.number, { kernel, scope, assumptions: current.assumptions }) !== undefined;
+          }
+          return findTopLevelWord(entry, "with") >= 0 || findTopLevelWord(entry, "at") >= 0;
+        };
+        if (entryPosition && formula.tag === "exists" && next !== "_" &&
+            (cursor === entries.length - 1 || existentialFact(next))) {
           try {
             const proof = parseProofExpression(kernel, next!, current, variables, line.number, scope,
               { expectedConclusion: formula });
@@ -11629,13 +11704,19 @@ interface ProofExpressionContext {
    * direction: parameters the premises leave open are fixed by the unique
    * instance of the rule's rewritten side that occurs in it.
    */
-  rewriteTarget?: { readonly formula: Formula; readonly reverse: boolean };
+  rewriteTarget?: { readonly formula: Formula; readonly reverse: boolean; readonly name?: string };
   /**
    * Variables of the expected conclusion that stand for terms not yet
    * known: the open parameters of an outer application whose requirement
    * this nested application fills.
    */
   flexibleVariables?: ReadonlySet<string>;
+  /**
+   * How a partial at list followed by facts is read: its terms seed the
+   * inference of the rest ("inferred"), or fill the leading binders by
+   * position as a full list does ("positional"), the fallback.
+   */
+  partialAt?: "inferred" | "positional";
 }
 
 /**
@@ -11769,6 +11850,91 @@ function matchConstructorPremise(
       (components.match ?? ((target, actual, bindings) => matchNamedPremise(target, actual, parameters, bindings)))(formula, statement, inferred);
   };
   return matchParts(target, parts(text));
+}
+
+/** A term built from numerals alone: a numeral, or an application of such terms. */
+function literalLeaved(term: Term): boolean {
+  if (term.tag === "nat" || naturalValue(term) !== undefined) return true;
+  return term.tag === "app" && term.args.length > 0 && term.args.every(literalLeaved);
+}
+
+/** An equation between terms built from numerals alone, `1 + 1 = 2`. */
+function closedLiteralEquation(formula: Formula): boolean {
+  return formula.tag === "eq" && literalLeaved(formula.left) && literalLeaved(formula.right);
+}
+
+/** Whether a term mentions a numeral literal anywhere. */
+function mentionsLiteral(term: Term): boolean {
+  return term.tag === "nat" || (term.tag === "app" && term.args.some(mentionsLiteral));
+}
+
+/**
+ * The maximal subterms of a formula that are arithmetic on literals alone:
+ * applications whose every leaf is a numeral, such as `1 + 1` and
+ * `succ(1)`, and not themselves numerals, standing inside a term that is
+ * not one. A whole side `1 * 1` of an equation is a computation the fact
+ * is about and stays; a constant, a variable, or a term under a binder's
+ * variable is never folded.
+ */
+function literalArithmeticTerms(formula: Formula): Term[] {
+  const found: Term[] = [];
+  const visitTerm = (term: Term, whole = true): void => {
+    if (term.tag !== "app" || naturalValue(term) !== undefined) return;
+    if (literalLeaved(term)) {
+      if (!whole && !found.some(item => termEquals(item, term))) found.push(term);
+      return;
+    }
+    for (const argument of term.args) visitTerm(argument, false);
+  };
+  const visit = (current: Formula): void => {
+    switch (current.tag) {
+      case "bottom": return;
+      case "eq": visitTerm(current.left); visitTerm(current.right); return;
+      case "pred": for (const argument of current.args) visitTerm(argument); return;
+      case "and": case "or": case "imp": case "iff": visit(current.left); visit(current.right); return;
+      case "forall": case "exists": visit(current.body); return;
+    }
+  };
+  visit(formula);
+  return found;
+}
+
+/**
+ * Closed natural arithmetic on literals in an instantiated statement,
+ * `p ^ (1 + 1)` after `thm at …, 1`, folded to the numeral it evaluates
+ * to, `p ^ 2`, as the printer and simp decide closed numerals; each fold
+ * is the kernel's computation of the literal term, applied as a rewrite.
+ * A term the kernel does not evaluate to a numeral is left as written.
+ */
+function foldLiteralArithmetic(kernel: Kernel, proof: Proof, assumptions: readonly Formula[]): LocalProof {
+  let formula = kernel.checkProof(proof, assumptions);
+  for (const term of literalArithmeticTerms(formula)) {
+    let value: Term;
+    try { value = kernel.evaluate(term); } catch { continue; }
+    if (naturalValue(value) === undefined || termEquals(value, term)) continue;
+    try {
+      const rewritten = rewriteFact(kernel, proof, kernel.proveComputation(term, value), assumptions);
+      proof = rewritten.proof;
+      formula = rewritten.formula;
+    } catch { continue; }
+  }
+  return { proof, formula };
+}
+
+/** A goal with its closed arithmetic on literals folded, and the lift back to the goal as written; undefined when nothing folds. */
+function foldGoalLiterals(kernel: Kernel, goal: Formula, assumptions: readonly Formula[]): GoalRewrite | undefined {
+  let result: GoalRewrite | undefined;
+  for (const term of literalArithmeticTerms(goal)) {
+    let value: Term;
+    try { value = kernel.evaluate(term); } catch { continue; }
+    if (naturalValue(value) === undefined || termEquals(value, term)) continue;
+    try {
+      const previous = result;
+      const step = rewriteGoal(kernel, previous?.goal ?? goal, kernel.proveComputation(term, value), assumptions);
+      result = previous ? { goal: step.goal, lift: proof => previous.lift(step.lift(proof)) } : step;
+    } catch { continue; }
+  }
+  return result;
 }
 
 /** A numeral, or the constructor form zero/succ(…) an induction case substitutes for it. */
@@ -12041,6 +12207,12 @@ function parseProofExpression(
   let generatedGuardCount = 0;
   let inferredApplyGuards = false;
   let inferGuardsWithoutWith = false;
+  // Whether a binder was instantiated at a term mentioning a numeral, so
+  // the statement may hold closed arithmetic on literals to fold.
+  let literalArguments = false;
+  // The premises discharged from the context on the way: a named entry
+  // that proves one of them is redundant evidence, accepted and skipped.
+  const discharged: Formula[] = [];
   // `at F, _, _` leaves the parameters the facts fix as holes: the written
   // terms seed the inference below by position, as named implicit
   // arguments do, and the holes are found from the premises.
@@ -12049,69 +12221,6 @@ function parseProofExpression(
   if (holes && (!resolvedName || atTerms.length !== parameters.length)) {
     throw new SurfaceError(line, `${baseName}: an at list with _ holes names every parameter in order${resolvedName ? `; ${baseName} has ${parameters.length}` : ""}`);
   }
-  const atList = holes ? undefined : atMatch[2];
-  if (atList) {
-    const terms = splitTopLevel(atList, ",").map(term => parseTerm(term, kernel, variables, line, scope));
-    const overrides: ImplicitOverride[] = referenceMatch[2]?.trim()
-      ? splitTopLevel(referenceMatch[2]!, ",").map(item => {
-          const assignment = findTopLevel(item, ":=");
-          if (assignment < 0) return { value: parseTerm(item, kernel, variables, line, scope) };
-          const name = item.slice(0, assignment).trim();
-          if (!SIMPLE_IDENTIFIER.test(name)) throw new SurfaceError(line, `malformed implicit argument name ${name}`);
-          return { name, value: parseTerm(item.slice(assignment + 2), kernel, variables, line, scope) };
-        }) : [];
-    const arguments_ = resolvedName
-      ? elaborateApplicationArguments(kernel, resolvedName, terms, overrides, variables, scope, line)
-      : terms;
-    // Terms fill the binders in order; a carrier guard standing between two
-    // binders is discharged on the way, as one after the last is. The
-    // statement is walked alongside, so no proof is checked per term.
-    const guardEvidence = (wanted: Formula): Proof | undefined => {
-      const local = [...current.locals.values()].find(item => formulaEquals(item.formula, wanted));
-      if (local) return local.proof;
-      if (current.assumptions.some(item => formulaEquals(item, wanted))) return assume(wanted);
-      if (wanted.tag !== "pred" || wanted.args.length === 0) return undefined;
-      return proveRefinement(kernel, wanted.args.at(-1)!, wanted.pred, wanted.args.slice(0, -1),
-        current.assumptions, [...current.locals.values()].map(item => item.proof), visibility);
-    };
-    let shape: Formula | undefined = kernel.checkProof(proof, current.assumptions);
-    for (const term of arguments_) {
-      if (shape?.tag === "imp" && shape.left.tag === "pred" && shape.left.args.length > 0 &&
-          routineGuardPredicate(kernel, shape.left.pred)) {
-        const guard = guardEvidence(shape.left);
-        if (guard) { proof = impElim(proof, guard); consumedPremise(); shape = shape.right; }
-      }
-      proof = at(proof, term);
-      shape = shape?.tag === "forall" ? substituteFormula(shape.body, shape.variable, term) : undefined;
-    }
-    remainingBinders = Math.max(0, parameters.length - arguments_.length);
-    generatedGuardCount = remainingBinders === 0 ? guardCount : 0;
-    inferGuardsWithoutWith = parameters.some(item => item.implicit);
-  }
-  // Named implicit arguments without an at list seed the inference below
-  // with those bindings; positional implicit arguments still need at.
-  const implicitSeed = new Map<string, Term>();
-  if (!atList && referenceMatch[2]?.trim()) {
-    for (const item of splitTopLevel(referenceMatch[2]!, ",")) {
-      const assignment = findTopLevel(item, ":=");
-      if (assignment < 0) throw new SurfaceError(line, `implicit proof arguments require an explicit \`at\` argument list`);
-      const name = item.slice(0, assignment).trim();
-      if (!SIMPLE_IDENTIFIER.test(name)) throw new SurfaceError(line, `malformed implicit argument name ${name}`);
-      implicitSeed.set(name, parseTerm(item.slice(assignment + 2), kernel, variables, line, scope));
-    }
-  }
-  for (const [name, value] of rewriteInstance ?? []) implicitSeed.set(name, value);
-  if (holes) atTerms.forEach((item, index) => {
-    if (item !== "_") implicitSeed.set(parameters[index]!.name, parseTerm(item, kernel, variables, line, scope));
-  });
-
-  // Goal-directed inference. Without an `at` list, every parameter is found
-  // by matching the conclusion against the goal, the named premises against
-  // the requirements, and finally the remaining requirements against local
-  // facts with a bounded, syntactic, unique-match search. Bare `exact thm`
-  // then discharges the requirements from local facts as `with *` does.
-  let autoDischarge = false;
-  let reorderedPremises: string[] | undefined;
   const starIndex = supplied.indexOf("*");
   const namedPrefix = starIndex >= 0 ? supplied.slice(0, starIndex) : supplied;
   // Premise evidence is a local fact, a closed theorem, or the assumption
@@ -12152,6 +12261,88 @@ function parseProofExpression(
   // bootstrap `pair.membership`, is inferred over like a metadata-free proof.
   const metadataFree = signature?.kind !== "theorem" || signature.requirementCount === undefined ||
     (parameters.length === 0 && signature.requirementCount === 0);
+  // A partial at list followed by facts, `thm at K, J with first, second`,
+  // fixes the leading parameters by position and leaves the rest to the
+  // facts and the goal, as holes would: the section variables of a section
+  // theorem are written and its binders are inferred.
+  // The written terms are read by position when the inference fails.
+  const partialAt = !holes && atTerms.length > 0 && resolvedName !== undefined && !metadataFree &&
+    atTerms.length < parameters.length && allLocal && !referenceMatch[2]?.trim() &&
+    (namedPrefix.length > 0 || starIndex >= 0) && expressionContext.partialAt !== "positional";
+  if (partialAt && expressionContext.partialAt !== "inferred") {
+    try {
+      return parseProofExpression(kernel, text, current, variables, line, scope, { ...expressionContext, rewriteInstance, partialAt: "inferred" });
+    } catch (error) {
+      if (!(error instanceof SurfaceError)) throw error;
+      try {
+        return parseProofExpression(kernel, text, current, variables, line, scope, { ...expressionContext, rewriteInstance, partialAt: "positional" });
+      } catch { throw error; }
+    }
+  }
+  const atList = holes || partialAt ? undefined : atMatch[2];
+  if (atList) {
+    const terms = splitTopLevel(atList, ",").map(term => parseTerm(term, kernel, variables, line, scope));
+    const overrides: ImplicitOverride[] = referenceMatch[2]?.trim()
+      ? splitTopLevel(referenceMatch[2]!, ",").map(item => {
+          const assignment = findTopLevel(item, ":=");
+          if (assignment < 0) return { value: parseTerm(item, kernel, variables, line, scope) };
+          const name = item.slice(0, assignment).trim();
+          if (!SIMPLE_IDENTIFIER.test(name)) throw new SurfaceError(line, `malformed implicit argument name ${name}`);
+          return { name, value: parseTerm(item.slice(assignment + 2), kernel, variables, line, scope) };
+        }) : [];
+    const arguments_ = resolvedName
+      ? elaborateApplicationArguments(kernel, resolvedName, terms, overrides, variables, scope, line)
+      : terms;
+    // Terms fill the binders in order; a carrier guard standing between two
+    // binders is discharged on the way, as one after the last is. The
+    // statement is walked alongside, so no proof is checked per term.
+    const guardEvidence = (wanted: Formula): Proof | undefined => {
+      const local = [...current.locals.values()].find(item => formulaEquals(item.formula, wanted));
+      if (local) return local.proof;
+      if (current.assumptions.some(item => formulaEquals(item, wanted))) return assume(wanted);
+      if (wanted.tag !== "pred" || wanted.args.length === 0) return undefined;
+      return proveRefinement(kernel, wanted.args.at(-1)!, wanted.pred, wanted.args.slice(0, -1),
+        current.assumptions, [...current.locals.values()].map(item => item.proof), visibility);
+    };
+    let shape: Formula | undefined = kernel.checkProof(proof, current.assumptions);
+    for (const term of arguments_) {
+      if (mentionsLiteral(term)) literalArguments = true;
+      if (shape?.tag === "imp" && shape.left.tag === "pred" && shape.left.args.length > 0 &&
+          routineGuardPredicate(kernel, shape.left.pred)) {
+        const guard = guardEvidence(shape.left);
+        if (guard) { proof = impElim(proof, guard); consumedPremise(); discharged.push(shape.left); shape = shape.right; }
+      }
+      proof = at(proof, term);
+      shape = shape?.tag === "forall" ? substituteFormula(shape.body, shape.variable, term) : undefined;
+    }
+    remainingBinders = Math.max(0, parameters.length - arguments_.length);
+    generatedGuardCount = remainingBinders === 0 ? guardCount : 0;
+    inferGuardsWithoutWith = parameters.some(item => item.implicit);
+  }
+  // Named implicit arguments without an at list seed the inference below
+  // with those bindings; positional implicit arguments still need at.
+  const implicitSeed = new Map<string, Term>();
+  if (!atList && referenceMatch[2]?.trim()) {
+    for (const item of splitTopLevel(referenceMatch[2]!, ",")) {
+      const assignment = findTopLevel(item, ":=");
+      if (assignment < 0) throw new SurfaceError(line, `implicit proof arguments require an explicit \`at\` argument list`);
+      const name = item.slice(0, assignment).trim();
+      if (!SIMPLE_IDENTIFIER.test(name)) throw new SurfaceError(line, `malformed implicit argument name ${name}`);
+      implicitSeed.set(name, parseTerm(item.slice(assignment + 2), kernel, variables, line, scope));
+    }
+  }
+  for (const [name, value] of rewriteInstance ?? []) implicitSeed.set(name, value);
+  if (holes || partialAt) atTerms.forEach((item, index) => {
+    if (item !== "_") implicitSeed.set(parameters[index]!.name, parseTerm(item, kernel, variables, line, scope));
+  });
+
+  // Goal-directed inference. Without an `at` list, every parameter is found
+  // by matching the conclusion against the goal, the named premises against
+  // the requirements, and finally the remaining requirements against local
+  // facts with a bounded, syntactic, unique-match search. Bare `exact thm`
+  // then discharges the requirements from local facts as `with *` does.
+  let autoDischarge = false;
+  let reorderedPremises: string[] | undefined;
   // A bare `with *` on a source theorem also infers: its requirements are
   // matched against local facts, and unique matches fix the parameters.
   if (!atList && allLocal &&
@@ -12190,7 +12381,7 @@ function parseProofExpression(
         requirements.push(direction === "forward" ? pattern.left : pattern.right);
         pattern = direction === "forward" ? pattern.right : pattern.left;
       }
-      const inferred = new Map<string, Term>();
+      let inferred = new Map<string, Term>();
       for (const [name, value] of implicitSeed) {
         if (!names.has(name)) throw new SurfaceError(line, `${baseName} has no parameter ${name}`);
         inferred.set(name, value);
@@ -12254,7 +12445,10 @@ function parseProofExpression(
         }
       }
       const targets = [...requirements, ...extra];
-      const claimed = new Map<number, string>();
+      // The bindings the goal and the seeds fix, from which each attempt
+      // at placing the named entries starts.
+      const seeded = new Map(inferred);
+      let claimed = new Map<number, string>();
       // A requirement meets a fact structurally, or through one layer of a
       // predicate definition on either side: `relates(w, x, y)` fills the
       // requirement `(x, y) ∈ w`, and conversely, as the evidence check
@@ -12342,203 +12536,269 @@ function parseProofExpression(
       // proposition, `(difference.subset_of_subset with bound)`, is
       // elaborated after the named entries have fixed what they can, against
       // the requirement it fills; its statement then fixes the rest.
-      const deferred: number[] = [];
-      for (let position = 0; position < namedPrefix.length; position += 1) {
-        const name = namedPrefix[position]!;
-        const formula = namedEvidence[position];
-        if (formula === null && /^\(.*\)(?:\.(?:left|right|forward|backward))*$/su.test(name)) { deferred.push(position); continue; }
-        // The components of an anonymous constructor are local facts whose
-        // statements fix the parameters as named entries do, so an
-        // unannotated `have h := thm.backward with ⟨a, b⟩` infers from a
-        // and b rather than from a stray context fact of the right shape.
-        // A constructor that fits no open requirement stays positional.
-        if (formula === null && /^⟨.*⟩$/su.test(name)) {
-          for (let i = 0; i < targets.length; i++) {
-            if (claimed.has(i)) continue;
-            const candidate = new Map(inferred);
-            const matched = matchConstructorPremise(
-              targets[i]!, name, names, candidate, components);
-            if (!matched) continue;
-            for (const [parameter, value] of candidate) inferred.set(parameter, value);
-            claimed.set(i, name);
-            break;
-          }
-          continue;
-        }
-        if (formula === null && name === "rfl") {
-          for (let i = 0; i < targets.length; i++) {
-            if (claimed.has(i)) continue;
-            const candidate = matchReflexive(targets[i]!, inferred);
-            if (!candidate) continue;
-            for (const [parameter, value] of candidate) inferred.set(parameter, value);
-            claimed.set(i, name);
-            break;
-          }
-          continue;
-        }
-        if (formula === null || formula === undefined) continue;
-        let found = false;
+      // The named entries are placed on the requirements, and the open
+      // parameters are then searched for in the context. An entry that
+      // fits several requirements takes the first; when the inference then
+      // fails, the other choices are tried in turn, latest decision first,
+      // so `thm with member` reads `member : m ∈ monomials(I)` as the
+      // requirement about m once reading it as the guard `i ∈ I` leaves m
+      // unfixed. Every attempt draws on the one match limit.
+      let attempts = 0;
+      let optionCounts: number[] = [];
+      let ruleInstances: Map<string, Term>[] | undefined;
+      let absentSide: RuleSide | undefined;
+      const matchLimit = (): void => {
+        if (++attempts > 2048)
+          throw new SurfaceError(line, `${baseName}: ${inferenceMode} parameter inference reached its 2048-match limit; supply an explicit at list`);
+      };
+      /** The open requirements a fact fits, structurally first and through a definition layer otherwise. */
+      const requirementOptions = (formula: Formula): [number, Map<string, Term>][] => {
         for (const bridge of [false, true]) {
-          for (let i = 0; i < targets.length && !found; i++) {
+          const options: [number, Map<string, Term>][] = [];
+          for (let i = 0; i < targets.length; i++) {
             if (claimed.has(i)) continue;
+            matchLimit();
             const candidate = new Map(inferred);
-            if (!matchPremise(targets[i]!, formula, candidate, bridge)) continue;
+            if (matchPremise(targets[i]!, formula, candidate, bridge)) options.push([i, candidate]);
+          }
+          if (options.length) return options;
+        }
+        return [];
+      };
+      /** One reading of the entries, by the given decisions: the parameters it leaves open. */
+      const infer = (decisions: readonly number[]): string[] => {
+        inferred = new Map(seeded);
+        claimed = new Map();
+        optionCounts = [];
+        ruleInstances = undefined;
+        absentSide = undefined;
+        const deferred: number[] = [];
+        for (let position = 0; position < namedPrefix.length; position += 1) {
+          const name = namedPrefix[position]!;
+          const formula = namedEvidence[position];
+          if (formula === null && /^\(.*\)(?:\.(?:left|right|forward|backward))*$/su.test(name)) { deferred.push(position); continue; }
+          // The components of an anonymous constructor are local facts whose
+          // statements fix the parameters as named entries do, so an
+          // unannotated `have h := thm.backward with ⟨a, b⟩` infers from a
+          // and b rather than from a stray context fact of the right shape.
+          // A constructor that fits no open requirement stays positional.
+          if (formula === null && /^⟨.*⟩$/su.test(name)) {
+            for (let i = 0; i < targets.length; i++) {
+              if (claimed.has(i)) continue;
+              const candidate = new Map(inferred);
+              const matched = matchConstructorPremise(
+                targets[i]!, name, names, candidate, components);
+              if (!matched) continue;
+              for (const [parameter, value] of candidate) inferred.set(parameter, value);
+              claimed.set(i, name);
+              break;
+            }
+            continue;
+          }
+          if (formula === null && name === "rfl") {
+            for (let i = 0; i < targets.length; i++) {
+              if (claimed.has(i)) continue;
+              const candidate = matchReflexive(targets[i]!, inferred);
+              if (!candidate) continue;
+              for (const [parameter, value] of candidate) inferred.set(parameter, value);
+              claimed.set(i, name);
+              break;
+            }
+            continue;
+          }
+          if (formula === null || formula === undefined) continue;
+          let found = false;
+          // The entry claims the one open requirement it fits; when it fits
+          // several, the one whose bindings are the identity is preferred,
+          // and otherwise the choice waits for the entries that fix more.
+          const options = requirementOptions(formula);
+          if (options.length > 0) {
+            const choice = options.length > 1 ? decisions[optionCounts.length] ?? 0 : 0;
+            if (options.length > 1) optionCounts.push(options.length);
+            const [index, candidate] = options[choice]!;
             for (const [parameter, value] of candidate) inferred.set(parameter, value);
-            claimed.set(i, name);
+            claimed.set(index, name);
             found = true;
           }
-        }
-        // Entries listed in order may be the conjuncts of one requirement,
-        // `with inSpace, notInjective` for `x ∈ A ∧ x ∉ B`: they are
-        // combined into the constructor ⟨inSpace, notInjective⟩.
-        for (let i = 0; i < targets.length && !found; i++) {
-          if (claimed.has(i) || targets[i]!.tag !== "and") continue;
-          const parts = conjunctionParts(targets[i]!);
-          if (position + parts.length > namedPrefix.length) continue;
-          const candidate = new Map(inferred);
-          const matched = parts.every((part, offset) => {
-            const evidence = namedEvidence[position + offset];
-            return evidence !== null && evidence !== undefined && matchPremise(part, evidence, candidate);
-          });
-          if (!matched) continue;
-          for (const [parameter, value] of candidate) inferred.set(parameter, value);
-          claimed.set(i, `⟨${namedPrefix.slice(position, position + parts.length).join(", ")}⟩`);
-          position += parts.length - 1;
-          found = true;
-        }
-        // A statement by a ∀ that fits no requirement yet waits, as a
-        // nested application does, for the entries that fix the parameters
-        // its requirement mentions: `thm with union2.subset_left, joined`
-        // reads `joined` first whatever the order of the list.
-        if (!found && formula.tag === "forall") { deferred.push(position); continue; }
-        if (!found) throw noRequirement(name, formula);
-      }
-      function noRequirement(name: string, formula: Formula): SurfaceError {
-        const expected = targets.findIndex((_, index) => !claimed.has(index));
-        const wanted = expected < 0
-          ? "every requirement is already matched by an earlier premise"
-          : `requirement ${expected + 1} is ${formatFormula(targets[expected]!)}`;
-        return new SurfaceError(line,
-          `${baseName}: named premise ${name} (${formatFormula(formula)}) matches no requirement; ${wanted}; supply an explicit at list if needed`);
-      }
-      // The deferred entries are read against the open requirements with
-      // the parameters inferred so far substituted, each success fixing
-      // parameters for the others, until no entry can be placed. A bare
-      // theorem name is read as an application with no explicit premises:
-      // its requirements are discharged from the context, and its
-      // conclusion, instantiated against the requirement, fixes the rest.
-      for (let changed = true; changed && deferred.length;) {
-        changed = false;
-        for (const position of [...deferred]) {
-          const name = namedPrefix[position]!;
-          const open = new Set([...names].filter(parameter => !inferred.has(parameter)));
-          for (let i = 0; i < targets.length; i++) {
-            if (claimed.has(i)) continue;
-            let statement: Formula;
-            try {
-              const expected = substituteManySurface(targets[i]!, inferred);
-              const nested = parseProofExpression(kernel, name, current, variables, line, scope,
-                { ...expressionContext, expectedConclusion: expected, flexibleVariables: open, applicationGoal: false });
-              statement = kernel.checkProof(nested, current.assumptions);
-            } catch { continue; }
+          // Entries listed in order may be the conjuncts of one requirement,
+          // `with inSpace, notInjective` for `x ∈ A ∧ x ∉ B`: they are
+          // combined into the constructor ⟨inSpace, notInjective⟩.
+          for (let i = 0; i < targets.length && !found; i++) {
+            if (claimed.has(i) || targets[i]!.tag !== "and") continue;
+            const parts = conjunctionParts(targets[i]!);
+            if (position + parts.length > namedPrefix.length) continue;
             const candidate = new Map(inferred);
-            if (!matchPremise(targets[i]!, statement, candidate)) continue;
+            const matched = parts.every((part, offset) => {
+              const evidence = namedEvidence[position + offset];
+              return evidence !== null && evidence !== undefined && matchPremise(part, evidence, candidate);
+            });
+            if (!matched) continue;
             for (const [parameter, value] of candidate) inferred.set(parameter, value);
-            claimed.set(i, name);
-            deferred.splice(deferred.indexOf(position), 1);
-            changed = true;
-            break;
+            claimed.set(i, `⟨${namedPrefix.slice(position, position + parts.length).join(", ")}⟩`);
+            position += parts.length - 1;
+            found = true;
           }
+          // A statement by a ∀ that fits no requirement yet waits, as a
+          // nested application does, for the entries that fix the parameters
+          // its requirement mentions: `thm with union2.subset_left, joined`
+          // reads `joined` first whatever the order of the list. So does a
+          // parenthesized application whose statement, read without an
+          // expected proposition, fits none: it is read again against the
+          // requirement it fills.
+          if (!found && (formula.tag === "forall" || /^\(.*\)(?:\.(?:left|right|forward|backward))*$/su.test(name))) {
+            deferred.push(position);
+            continue;
+          }
+          if (!found) throw noRequirement(name, formula);
         }
-      }
-      for (const position of deferred) {
-        const formula = namedEvidence[position];
-        if (formula) throw noRequirement(namedPrefix[position]!, formula);
-      }
-      // Named premises are consumed where they matched, whatever their order
-      // in the list; unnamed positions before the last named one come from
-      // local evidence. A wildcard entry keeps the list positional.
-      if (claimed.size > 0 && !namedEvidence.includes(null)) {
-        const last = Math.max(...claimed.keys());
-        reorderedPremises = [];
-        for (let i = 0; i <= last; i++) reorderedPremises.push(claimed.get(i) ?? "assumption");
-        if (starIndex >= 0) reorderedPremises.push("*", ...supplied.slice(starIndex + 1));
-      }
-      // `rw thm with facts`: the parameters the premises leave open are
-      // fixed by the instance of the rule's rewritten side that occurs in
-      // the goal or the fact being rewritten, when there is exactly one.
-      let ruleInstances: Map<string, Term>[] | undefined;
-      const fixFromRewriteTarget = (): void => {
-        const target = expressionContext.rewriteTarget;
-        if (!target || inferred.size >= names.size) return;
-        let rule = pattern;
-        for (let stripped = 0; stripped < extra.length && rule.tag === "imp"; stripped++) rule = rule.right;
-        const side: RuleSide | undefined = rule.tag === "eq" ? { term: target.reverse ? rule.right : rule.left }
-          : rule.tag === "iff" ? { formula: target.reverse ? rule.right : rule.left } : undefined;
-        if (!side) return;
-        const instances = ruleSideInstances(side, target.formula, names, inferred);
-        if (instances.length === 1) {
-          for (const [name, value] of instances[0]!) inferred.set(name, value);
-          ruleInstances = undefined;
-        } else ruleInstances = instances;
-      };
-      fixFromRewriteTarget();
-      if (inferred.size < names.size) {
-        const key = (formula: Formula): string => formula.tag === "pred" ? `pred:${formula.pred}` : formula.tag;
-        const indexed = new Map<string, Formula[]>();
-        const openedFacts = openedGuardFacts(kernel, current.assumptions, current.locals.values(), visibility).map(item => item.formula);
-        for (const fact of [...current.assumptions, ...[...current.locals.values()].map(item => item.formula), ...openedFacts]) {
-          const bucket = indexed.get(key(fact));
-          if (bucket) bucket.push(fact); else indexed.set(key(fact), [fact]);
+        function noRequirement(name: string, formula: Formula): SurfaceError {
+          const expected = targets.findIndex((_, index) => !claimed.has(index));
+          const wanted = expected < 0
+            ? "every requirement is already matched by an earlier premise"
+            : `requirement ${expected + 1} is ${formatFormula(targets[expected]!)}`;
+          return new SurfaceError(line,
+            `${baseName}: named premise ${name} (${formatFormula(formula)}) matches no requirement; ${wanted}; supply an explicit at list if needed`);
         }
-        let attempts = 0;
-        let changed = true;
-        while (changed && inferred.size < names.size) {
+        // The deferred entries are read against the open requirements with
+        // the parameters inferred so far substituted, each success fixing
+        // parameters for the others, until no entry can be placed. A bare
+        // theorem name is read as an application with no explicit premises:
+        // its requirements are discharged from the context, and its
+        // conclusion, instantiated against the requirement, fixes the rest.
+        for (let changed = true; changed && deferred.length;) {
           changed = false;
-          for (const requirement of targets) {
-            if (![...freeFormulaVariables(requirement)].some(name => names.has(name) && !inferred.has(name))) continue;
-            let unique: Map<string, Term> | undefined;
-            let ambiguous = false;
-            for (const fact of indexed.get(key(requirement)) ?? []) {
-              if (++attempts > 2048)
-                throw new SurfaceError(line, `${baseName}: ${inferenceMode} parameter inference reached its 2048-match limit; supply an explicit at list`);
+          for (const position of [...deferred]) {
+            const name = namedPrefix[position]!;
+            const open = new Set([...names].filter(parameter => !inferred.has(parameter)));
+            for (let i = 0; i < targets.length; i++) {
+              if (claimed.has(i)) continue;
+              let statement: Formula;
+              try {
+                const expected = substituteManySurface(targets[i]!, inferred);
+                const nested = parseProofExpression(kernel, name, current, variables, line, scope,
+                  { ...expressionContext, expectedConclusion: expected, flexibleVariables: open, applicationGoal: false });
+                statement = kernel.checkProof(nested, current.assumptions);
+              } catch { continue; }
               const candidate = new Map(inferred);
-              if (!matchNamedPremise(requirement, fact, names, candidate)) continue;
-              if (!unique) unique = candidate;
-              else if (candidate.size !== unique.size || [...candidate].some(([name, value]) =>
-                !unique!.has(name) || !termEquals(value, unique!.get(name)!))) {
-                ambiguous = true;
-                break;
-              }
-            }
-            if (!ambiguous && unique && unique.size > inferred.size) {
-              for (const [name, value] of unique) inferred.set(name, value);
-              changed = true;
-            }
-          }
-          // A guard such as (g ∘ f : a ⟶ b) with an open endpoint and no
-          // local fact of its shape is completed by the certified rules: the
-          // guards of the factors determine the endpoints of the composite.
-          if (!changed && inferred.size < names.size) {
-            for (const requirement of targets) {
-              if (requirement.tag !== "pred" || !isBindingPredicate(kernel, requirement.pred, visibility)) continue;
-              const open = (term: Term): boolean => [...freeTermVariables(term)].some(name => names.has(name) && !inferred.has(name));
-              if (!requirement.args.some(open)) continue;
-              const request = requirement.args.map(argument => open(argument) ? undefined : substituteNamedTerm(argument, inferred));
-              if (request.every(argument => argument === undefined)) continue;
-              const completed = prepareRefinementProver(kernel, current.assumptions,
-                [...current.locals.values()].map(item => item.proof), visibility).complete(requirement.pred, request);
-              if (!completed) continue;
-              const candidate = new Map(inferred);
-              if (!matchNamedPremise(requirement, pred(requirement.pred, ...completed.arguments), names, candidate)) continue;
-              for (const [name, value] of candidate) inferred.set(name, value);
+              if (!matchPremise(targets[i]!, statement, candidate)) continue;
+              for (const [parameter, value] of candidate) inferred.set(parameter, value);
+              claimed.set(i, name);
+              deferred.splice(deferred.indexOf(position), 1);
               changed = true;
               break;
             }
           }
         }
+        for (const position of deferred) {
+          const formula = namedEvidence[position];
+          if (formula) throw noRequirement(namedPrefix[position]!, formula);
+        }
+        // Named premises are consumed where they matched, whatever their order
+        // in the list; unnamed positions before the last named one come from
+        // local evidence. A wildcard entry keeps the list positional.
+        if (claimed.size > 0 && !namedEvidence.includes(null)) {
+          const last = Math.max(...claimed.keys());
+          reorderedPremises = [];
+          for (let i = 0; i <= last; i++) reorderedPremises.push(claimed.get(i) ?? "assumption");
+          if (starIndex >= 0) reorderedPremises.push("*", ...supplied.slice(starIndex + 1));
+        }
+        // `rw thm with facts`: the parameters the premises leave open are
+        // fixed by the instance of the rule's rewritten side that occurs in
+        // the goal or the fact being rewritten, when there is exactly one.
+        const fixFromRewriteTarget = (): void => {
+          const target = expressionContext.rewriteTarget;
+          if (!target || inferred.size >= names.size) return;
+          let rule = pattern;
+          for (let stripped = 0; stripped < extra.length && rule.tag === "imp"; stripped++) rule = rule.right;
+          const side: RuleSide | undefined = rule.tag === "eq" ? { term: target.reverse ? rule.right : rule.left }
+            : rule.tag === "iff" ? { formula: target.reverse ? rule.right : rule.left } : undefined;
+          if (!side) return;
+          const instances = ruleSideInstances(side, target.formula, names, inferred);
+          absentSide = instances.length === 0 ? side : undefined;
+          if (instances.length === 1) {
+            for (const [name, value] of instances[0]!) inferred.set(name, value);
+            ruleInstances = undefined;
+          } else ruleInstances = instances;
+        };
+        fixFromRewriteTarget();
+        if (inferred.size < names.size) {
+          const key = (formula: Formula): string => formula.tag === "pred" ? `pred:${formula.pred}` : formula.tag;
+          const indexed = new Map<string, Formula[]>();
+          const openedFacts = openedGuardFacts(kernel, current.assumptions, current.locals.values(), visibility).map(item => item.formula);
+          for (const fact of [...current.assumptions, ...[...current.locals.values()].map(item => item.formula), ...openedFacts]) {
+            const bucket = indexed.get(key(fact));
+            if (bucket) bucket.push(fact); else indexed.set(key(fact), [fact]);
+          }
+          let changed = true;
+          while (changed && inferred.size < names.size) {
+            changed = false;
+            /** The distinct bindings the facts of a requirement's shape give it. */
+            const factMatches = (requirement: Formula): Map<string, Term>[] => {
+              const distinct: Map<string, Term>[] = [];
+              for (const fact of indexed.get(key(requirement)) ?? []) {
+                matchLimit();
+                const candidate = new Map(inferred);
+                if (!matchNamedPremise(requirement, fact, names, candidate)) continue;
+                if (!distinct.some(item => item.size === candidate.size && [...candidate].every(([name, value]) =>
+                  item.has(name) && termEquals(value, item.get(name)!)))) distinct.push(candidate);
+              }
+              return distinct;
+            };
+            const openRequirements = targets.filter(requirement =>
+              [...freeFormulaVariables(requirement)].some(name => names.has(name) && !inferred.has(name)));
+            for (const requirement of openRequirements) {
+              const distinct = factMatches(requirement);
+              if (distinct.length === 1 && distinct[0]!.size > inferred.size) {
+                for (const [name, value] of distinct[0]!) inferred.set(name, value);
+                changed = true;
+              }
+            }
+            // A guard such as (g ∘ f : a ⟶ b) with an open endpoint and no
+            // local fact of its shape is completed by the certified rules: the
+            // guards of the factors determine the endpoints of the composite.
+            if (!changed && inferred.size < names.size) {
+              for (const requirement of targets) {
+                if (requirement.tag !== "pred" || !isBindingPredicate(kernel, requirement.pred, visibility)) continue;
+                const open = (term: Term): boolean => [...freeTermVariables(term)].some(name => names.has(name) && !inferred.has(name));
+                if (!requirement.args.some(open)) continue;
+                const request = requirement.args.map(argument => open(argument) ? undefined : substituteNamedTerm(argument, inferred));
+                if (request.every(argument => argument === undefined)) continue;
+                const completed = prepareRefinementProver(kernel, current.assumptions,
+                  [...current.locals.values()].map(item => item.proof), visibility).complete(requirement.pred, request);
+                if (!completed) continue;
+                const candidate = new Map(inferred);
+                if (!matchNamedPremise(requirement, pred(requirement.pred, ...completed.arguments), names, candidate)) continue;
+                for (const [name, value] of candidate) inferred.set(name, value);
+                changed = true;
+                break;
+              }
+            }
+          }
+        }
+        fixFromRewriteTarget();
+        return [...names].filter(name => !inferred.has(name));
+      };
+      let decisions: number[] = [];
+      let failure: SurfaceError | undefined;
+      for (let attempt = 0; ; attempt += 1) {
+        let open: string[] | undefined;
+        try { open = infer(decisions); }
+        catch (error) {
+          if (!(error instanceof SurfaceError) || error.message.includes("2048-match limit")) throw error;
+          if (attempt === 0) failure = error;
+        }
+        if (open && open.length === 0) { failure = undefined; break; }
+        // The latest decision with a choice left advances; none left, and
+        // the first reading's outcome is reported.
+        let latest = optionCounts.length - 1;
+        while (latest >= 0 && (decisions[latest] ?? 0) + 1 >= optionCounts[latest]!) latest -= 1;
+        if (latest < 0) {
+          if (attempt > 0) { try { infer([]); } catch (error) { if (!failure && error instanceof SurfaceError) failure = error; } }
+          break;
+        }
+        decisions = [...decisions.slice(0, latest), (decisions[latest] ?? 0) + 1];
       }
-      fixFromRewriteTarget();
+      if (failure) throw failure;
       const missing = [...names].filter(name => !inferred.has(name));
       if (missing.length && ruleInstances && ruleInstances.length > 1) {
         const where = expressionContext.rewriteTarget!.reverse ? "right" : "left";
@@ -12554,11 +12814,19 @@ function parseProofExpression(
         const several = missing.length > 1;
         throw new SurfaceError(line, `${baseName}: cannot infer parameter${several ? "s" : ""} ${missing.join(", ")}: ${several ? "they occur" : "it occurs"} only in the conclusion ${formatFormula(pattern)}, which nothing here fixes; state the fact, \`have h : … := ${text.trim()}\`, or write \`${baseName} at ${holes}${supplied.length ? ` with ${supplied.join(", ")}` : ""}\` with the parameters the premises fix left as _`);
       }
+      // A rewrite whose rule side occurs nowhere in its target, as after an
+      // earlier call rewrote every instance, has nothing left to rewrite.
+      if (missing.length && absentSide) {
+        const shown = "term" in absentSide ? formatTerm(substituteNamedTerm(absentSide.term, inferred))
+          : formatFormula(substituteManySurface(absentSide.formula, inferred));
+        throw new SurfaceError(line, `${baseName}: nothing left to rewrite: no instance of the rule's ${expressionContext.rewriteTarget!.reverse ? "right" : "left"} side ${shown} occurs in ${expressionContext.rewriteTarget!.name ?? "the goal"}`);
+      }
       if (missing.length)
         throw new SurfaceError(line, `${baseName}: cannot uniquely infer parameters ${missing.join(", ")} from the goal and local premises; supply an explicit at list`);
       for (const value of inferred.values()) if ([...freeTermVariables(value)].some(name => !variables.has(name)))
         throw new SurfaceError(line, `${baseName}: inferred parameter escapes the local scope`);
       proof = at(proof, ...[...names].map(name => inferred.get(name)!));
+      if ([...inferred.values()].some(mentionsLiteral)) literalArguments = true;
       remainingBinders = 0;
       generatedGuardCount = metadataFree ? 0 : guardCount;
       inferredApplyGuards = Boolean(expressionContext.applicationGoal && supplied.length === 0);
@@ -12624,7 +12892,7 @@ function parseProofExpression(
     const evidence = explicit ?? inferredEvidence(formula.left);
     if (!evidence) break;
     if (explicit) remaining.shift();
-    else inferredGuards += 1;
+    else { inferredGuards += 1; discharged.push(formula.left); }
     proof = impElim(proof, evidence);
     generatedGuardCount -= 1;
     consumedPremise();
@@ -12641,6 +12909,7 @@ function parseProofExpression(
       if (!evidence) break;
       proof = impElim(proof, evidence);
       consumedPremise();
+      discharged.push(formula.left);
     }
   }
 
@@ -12659,6 +12928,7 @@ function parseProofExpression(
           !current.assumptions.some(item => formulaEquals(item, wanted))) break;
       proof = impElim(proof, assume(wanted));
       consumedPremise();
+      discharged.push(wanted);
     }
   }
 
@@ -12672,6 +12942,14 @@ function parseProofExpression(
     // Selecting an equivalence direction adds precisely its antecedent,
     // even when the selected consequent is itself an implication or negation.
     if (remainingPremises !== undefined) remainingPremises += 1;
+  };
+  // A named fact proving a premise already discharged from the context,
+  // `with ideal, member` where the guard member proves was discharged on
+  // the way, is accepted as the redundant evidence it is.
+  const redundant = (argument: string): boolean => {
+    if (argument === "*" || argument === "assumption" || argument === "rfl") return false;
+    const statement = evidenceFormula(argument);
+    return Boolean(statement) && discharged.some(item => formulaEquals(item, statement!));
   };
   const consume = (argument: string): void => {
     projectDirection();
@@ -12726,6 +13004,7 @@ function parseProofExpression(
       try {
         proof = forallElim(proof, parseTerm(argument, kernel, variables, line, scope));
       } catch (error) {
+        if (error instanceof SurfaceError && redundant(argument)) return;
         // A fact named where a binder wants a term: say which entries of the
         // list are facts and which are terms, and where the terms belong.
         if (!(error instanceof SurfaceError) || evidenceFormula(argument) === undefined) throw error;
@@ -12752,6 +13031,7 @@ function parseProofExpression(
         if (!guard) return false;
         proof = impElim(proof, guard);
         consumedPremise();
+        discharged.push(formula.left);
         return true;
       };
       // A bare `rfl` entry proves the reflexive equation the premise has
@@ -12802,6 +13082,7 @@ function parseProofExpression(
             return;
           }
         }
+        if (redundant(argument)) return;
         throw new SurfaceError(line,
           `${argument} proves ${formatFormula(actual)}, but application needs ${formatFormula(formula.left)}`);
       }
@@ -12818,6 +13099,7 @@ function parseProofExpression(
       consume(argument);
       return;
     }
+    if (redundant(argument)) return;
     throw new SurfaceError(line, `${baseName} has no remaining argument at ${argument}`);
   };
 
@@ -12856,7 +13138,42 @@ function parseProofExpression(
     }
   }
   if (pendingDirection) throw new SurfaceError(line, `${baseName} is not an equivalence`);
+  // Closed arithmetic on literals that an instantiation produced is folded,
+  // unless the statement as written is the expected one, or is the one
+  // whose rewritten side a rewrite target holds.
+  if (literalArguments && !expressionContext.applicationGoal) {
+    const statement = kernel.checkProof(proof, current.assumptions);
+    const folded = foldLiteralArithmetic(kernel, proof, current.assumptions);
+    if (!formulaEquals(folded.formula, statement)) {
+      const expected = expressionContext.expectedConclusion;
+      const target = expressionContext.rewriteTarget;
+      const keepWritten = (expected && formulaEquals(statement, expected) && !formulaEquals(folded.formula, expected)) ||
+        (target && ruleSideOccurs(statement, target) && !ruleSideOccurs(folded.formula, target));
+      if (!keepWritten) proof = folded.proof;
+    }
+  }
   return proof;
+}
+
+/** Whether the rewritten side of a closed rule occurs in a rewrite target. */
+function ruleSideOccurs(rule: Formula, target: { readonly formula: Formula; readonly reverse: boolean }): boolean {
+  while (rule.tag === "forall" || rule.tag === "imp") rule = rule.tag === "forall" ? rule.body : rule.right;
+  const side: RuleSide | undefined = rule.tag === "eq" ? { term: target.reverse ? rule.right : rule.left }
+    : rule.tag === "iff" ? { formula: target.reverse ? rule.right : rule.left } : undefined;
+  if (!side) return false;
+  const occursIn = (formula: Formula): boolean => {
+    if ("formula" in side && formulaEquals(formula, side.formula)) return true;
+    const inTerm = (term: Term): boolean => ("term" in side && termEquals(term, side.term)) ||
+      (term.tag === "app" && term.args.some(inTerm));
+    switch (formula.tag) {
+      case "bottom": return false;
+      case "eq": return inTerm(formula.left) || inTerm(formula.right);
+      case "pred": return formula.args.some(inTerm);
+      case "and": case "or": case "imp": case "iff": return occursIn(formula.left) || occursIn(formula.right);
+      case "forall": case "exists": return occursIn(formula.body);
+    }
+  };
+  return occursIn(target.formula);
 }
 
 function resolveProof(kernel: Kernel, rawName: string, line: number, scope: SurfaceScope, affinity = false): Proof {
@@ -13307,9 +13624,23 @@ function hasNamedProof(kernel: Kernel, name: string): boolean {
   return Boolean(definitionProperty(kernel, name));
 }
 
+/**
+ * Simultaneous substitution: a value that mentions another substituted
+ * name, `a := b ⊓ a` beside `b := a`, is never substituted into again.
+ */
 function substituteManySurface(formula: Formula, substitution: ReadonlyMap<string, Term>): Formula {
+  if (substitution.size === 0) return formula;
+  const forbidden = new Set([...freeFormulaVariables(formula), ...substitution.keys()]);
+  for (const value of substitution.values()) for (const name of freeTermVariables(value)) forbidden.add(name);
+  const placeholders = new Map<string, string>();
   let result = formula;
-  for (const [name, value] of substitution) result = substituteFormula(result, name, value);
+  for (const name of substitution.keys()) {
+    const fresh = freshSurfaceVariable(`__substituted_${name}`, forbidden);
+    forbidden.add(fresh);
+    placeholders.set(name, fresh);
+    result = substituteFormula(result, name, v(fresh));
+  }
+  for (const [name, value] of substitution) result = substituteFormula(result, placeholders.get(name)!, value);
   return result;
 }
 

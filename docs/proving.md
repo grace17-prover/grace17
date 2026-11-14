@@ -38,7 +38,8 @@ default library, and everything after that is mathematics. A theorem's
 parameters introduce the objects under discussion, `requires` lists the
 assumptions, and `shows` gives the claim. A parameter list that grows long
 may continue on the lines beneath the header, more indented, with the break
-after a comma or before the closing parenthesis:
+after a comma or before the closing parenthesis, or between binder groups,
+a further group beginning a more indented line:
 
 ```g17
 theorem equality.copy_again (x y : Set,
@@ -90,7 +91,10 @@ left a parenthesis open; when it begins with a binary operator, `∧`, `∨`,
 spanning several indented lines, with a return to the clause indentation
 beginning the next clause or the `proof` block; a `have` proposition wraps
 before or after an operator, with its proof block beneath the last line,
-and may begin on the line after `have h :`; a proof expression after
+and may begin on the line after `have h :`; a guard's typing colon may end
+the line, `have h : f :` followed by a more indented `R →+* S`, and a
+continuation may begin with a mixfix literal such as `→+*` or `≃ₐ` as it
+may with an operator; a proof expression after
 `exact`, `witness`, `refine`, `apply`, or `have h :=` continues the same
 way, so `have cancel := Thm` followed by a more-indented `at a, b, c with
 h` is one application, as is an `at` list broken after a comma; and a
@@ -332,9 +336,31 @@ apply difference.membership.backward
 
 Named premises may come in any order; each one is used where it matched.
 Matching is structural, indexed by formula head, and capped at 2,048
-attempts. It does not unfold definitions, backchain, or choose between
-ambiguous substitutions, and quantified variables inside a premise stay local
-to that premise. Carrier guards such as `Nat(n)`, and guards by a declared
+attempts. It does not unfold definitions or backchain, and quantified
+variables inside a premise stay local to that premise. A named premise that
+fits several requirements takes the first; when the inference then leaves a
+parameter unfixed, the other readings are tried in turn, latest choice
+first, within the same cap, so `shiftMonomial.function with member` reads
+`member : m ∈ monomials(I)` as the requirement about `m` once reading it as
+the guard `i ∈ I` leaves `m` open. A requirement that several local facts
+fit is still ambiguous; name the fact.
+
+An `at` list may stop short: `thm at K, J with first, second` fills the
+leading parameters by position and infers the rest from the facts and the
+goal, so a section theorem is applied with its section variables written
+and its own binders inferred. When that inference fails, the written terms
+are read by position, as a full list is. A named fact that proves a premise
+already discharged from the context, `Ideal.mem_carrier at R, J, x with
+ideal, member` where the guard `x ∈ J` was discharged on the way, is
+accepted as the redundant evidence it is; only a fact that proves no premise
+at all is an error. Instantiating a binder at a numeral folds the closed
+arithmetic on literals it produces inside the statement, so
+`partialDerivative.pow at R, I, i, A, 1 with *` states `A ^ 2` rather than
+`A ^ (1 + 1)`, as the printer and `simp` decide closed numerals; a whole side
+of an equation such as `1 * 1 = 1` stays as written, and so does the form an
+`exact` goal or a `rw` target holds. A `rw` whose rule and target differ only
+in such arithmetic folds both and rewrites, so a folded fact still rewrites a
+goal written with `0 + 1`. Carrier guards such as `Nat(n)`, and guards by a declared
 class such as `Ordinal(α)`, are requirements too and are
 discharged from local facts or by soft typing; a guard standing between the
 supplied entries, after the last of a `with` list, or after an `at` list with

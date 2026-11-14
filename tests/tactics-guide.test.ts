@@ -292,7 +292,8 @@ test("exact Help documents bounded goal-directed parameter inference", () => {
   assert.ok(entry);
   assert.match(entry.detail, /from the goal, from the named premises in any order, and from uniquely matching local facts/);
   assert.match(entry.detail, /2048-match limit/);
-  assert.match(entry.detail, /no unfolding or backtracking/);
+  assert.match(entry.detail, /2048-match limit and no unfolding/);
+  assert.match(entry.detail, /read each way in turn until the parameters are fixed/);
 });
 
 test("words on module and import lines are module names, not types", () => {
