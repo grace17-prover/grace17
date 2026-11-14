@@ -137,9 +137,15 @@ function foundationParam(params: Params): WorkbenchFoundation {
   return value as WorkbenchFoundation;
 }
 
+let defaultModuleRoots: readonly string[] | undefined;
+/** The roots a request that names none resolves against, as the command line sets them from its settings. */
+export function setDefaultModuleRoots(roots: readonly string[] | undefined): void {
+  defaultModuleRoots = roots;
+}
+
 function rootsParam(params: Params): readonly string[] | undefined {
   const value = params.moduleRoots;
-  if (value === undefined || value === null) return undefined;
+  if (value === undefined || value === null) return defaultModuleRoots;
   if (!Array.isArray(value) || !value.every(item => typeof item === "string")) throw new MachineError("invalid_params", "moduleRoots must be an array of directories");
   return value as string[];
 }

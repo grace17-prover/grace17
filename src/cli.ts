@@ -25,6 +25,9 @@ import { setSurfaceTraceCapture } from "./surface.ts";
 import { theoremDependencies } from "./export.ts";
 import { buildModuleStore, createStoreKernel, declaredModule, loadModuleStore } from "./module-store.ts";
 import { scanModule } from "./module-source-loader.ts";
+import { describeSettings, loadCliSettings } from "./cli-settings.ts";
+import { getHeapStatistics } from "node:v8";
+import { setDefaultModuleRoots } from "./machine-interface.ts";
 
 type Kernel = ReturnType<typeof createSetTheoryKernel>;
 
@@ -37,6 +40,23 @@ export function runCli(args: readonly string[]): void {
     return;
   }
   const json = args.includes("--json");
+  // The settings every command starts from; a wrong configuration is the
+  // first thing reported.
+  let settings: ReturnType<typeof loadCliSettings>;
+  try { settings = loadCliSettings(args); } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (json) console.log(JSON.stringify({ ok: false, operation: command, message }));
+    else console.error(`error: ${message}`);
+    process.exitCode = 2;
+    return;
+  }
+  setDefaultModuleRoots(settings.moduleRoots);
+  if (command === "settings") {
+    const described = describeSettings(settings, Math.floor(getHeapStatistics().heap_size_limit / 2 ** 20));
+    if (json) console.log(JSON.stringify(described));
+    else for (const [key, value] of Object.entries(described)) console.log(`${key}: ${Array.isArray(value) ? value.join(", ") || "(none)" : String(value)}`);
+    return;
+  }
   const option = (name: string): string | undefined => {
     const index = args.indexOf(name);
     return index >= 0 ? args[index + 1] : undefined;
@@ -49,8 +69,8 @@ export function runCli(args: readonly string[]): void {
     return values;
   };
   const optionNames = new Set(["--theorem", "--out", "--machine", "--environment", "--foundation", "--module-root", "--function", "--args", "--artifacts",
-    "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables"]);
-  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet"]);
+    "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables", "--heap"]);
+  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet", "--store"]);
   const optionNames2 = ["--from"];
   optionNames2.forEach(name => optionNames.add(name));
   const modules: string[] = [];
@@ -60,7 +80,7 @@ export function runCli(args: readonly string[]): void {
   }
 
   if (machineCommands.has(command)) {
-    runMachineCommand(command, modules, option, options, name => args.includes(name), !args.includes("--text"));
+    runMachineCommand(command, modules, option, options, name => args.includes(name), !args.includes("--text"), settings);
     return;
   }
 
@@ -77,17 +97,16 @@ export function runCli(args: readonly string[]): void {
     let continued: ContinuedCheck | undefined;
     const started = performance.now();
     try {
-      const requestedFoundation = option("--foundation") ?? "ZFG";
-      if (!["ZF", "ZFC", "ZFG"].includes(requestedFoundation)) {
-        throw new Error("--foundation must be ZF, ZFC, or ZFG");
-      }
-      const profile = requestedFoundation as "ZF" | "ZFC" | "ZFG";
-      const requestedRoots = options("--module-root");
-      const roots = requestedRoots.length > 0 ? requestedRoots : ["."];
-      const store = option("--artifacts");
-      if (continuing && store) throw new Error("check --continue elaborates from source; it does not take --artifacts");
+      const profile = settings.foundation;
+      // The roots the settings resolved: the named or configured ones, then
+      // the bundled library, so an import of the library needs no flag.
+      const roots = settings.moduleRoots;
+      // The store: named by --artifacts, asked for by --store or the
+      // configuration, and for build the default store in any case.
+      const store = settings.artifacts ?? (command === "build" ? settings.storeDefault : undefined);
+      if (continuing && store) throw new Error("check --continue elaborates from source; it does not take --artifacts or --store");
       // A store replays its foundation image instead of elaborating the prelude.
-      kernel = command === "build" || store ? createStoreKernel(store ?? "build/modules", profile) : createSetTheoryKernel({ profile });
+      kernel = store ? createStoreKernel(store, profile) : createSetTheoryKernel({ profile });
       // The tactic trace of every successful proof serves the Workbench and
       // the machine interface, and `check` reports a failure from them; a
       // compile or an audit needs none, and over the whole library they are
@@ -97,8 +116,8 @@ export function runCli(args: readonly string[]): void {
       // root is compiled to its artifact once and replayed afterwards; only
       // workspace files outside the roots are elaborated from source each time.
       let checked: readonly LoadedModule[] = [];
-      if (command === "build" || store) {
-        const storeDirectory = store ?? "build/modules";
+      if (store) {
+        const storeDirectory = store;
         const named = modules.map(entry => entry.endsWith(".g17") ? declaredModule(entry, roots) : entry);
         const library = named.flatMap((name, index) => name && isLibraryFile(modules[index]!, name, roots) ? [name] : []);
         const workspace = modules.filter((entry, index) => !(named[index] && isLibraryFile(entry, named[index]!, roots)));
@@ -135,7 +154,7 @@ export function runCli(args: readonly string[]): void {
         const name = option("--theorem");
         if (!name) throw new Error("axiom-audit requires --theorem <qualified-name>");
         const audit = auditTheoremAxioms(kernel, name);
-        const result = { ok: true, operation: command, foundation: requestedFoundation, ...audit };
+        const result = { ok: true, operation: command, foundation: settings.foundation, ...audit };
         if (json) console.log(JSON.stringify(result));
         else {
           console.log(`Axiom audit: ${name} (${audit.complete ? "complete" : "INCOMPLETE"})`);
@@ -313,7 +332,7 @@ export function runCli(args: readonly string[]): void {
         const sources = modules.filter(entry => entry.endsWith(".g17")).flatMap(entry => {
           try { return [{ name: resolve(entry), source: readFileSync(resolve(entry), "utf8") }]; } catch { return []; }
         });
-        console.log(JSON.stringify({ ...failure, ...machineCheckFailure(error, sources, options("--module-root")), milliseconds: Number((performance.now() - started).toFixed(3)) }));
+        console.log(JSON.stringify({ ...failure, ...machineCheckFailure(error, sources, settings.moduleRoots), milliseconds: Number((performance.now() - started).toFixed(3)) }));
       } else if (json) console.error(JSON.stringify(trace ? { ...failure, trace } : failure));
       else {
         console.error(`${failure.kind} error${failure.file ? ` in ${failure.file}` : ""}: ${failure.message}`);
@@ -432,6 +451,7 @@ const machineCommands = new Set(["serve", "goal", "suggest", "search", "declarat
 function runMachineCommand(
   command: string, positional: readonly string[],
   option: (name: string) => string | undefined, options: (name: string) => string[], flag: (name: string) => boolean, json: boolean,
+  settings: ReturnType<typeof loadCliSettings>,
 ): void {
   if (command === "serve") {
     if (positional.length) { usage(console.error); process.exitCode = 2; return; }
@@ -450,8 +470,8 @@ function runMachineCommand(
   const workspace = (files: readonly string[]) => ({
     files: files.map(name => ({ name })),
     ...(option("--active") ? { activeFile: option("--active") } : {}),
-    ...(option("--foundation") ? { foundation: option("--foundation") } : {}),
-    ...(options("--module-root").length ? { moduleRoots: options("--module-root") } : {}),
+    foundation: settings.foundation,
+    moduleRoots: settings.moduleRoots,
   });
   const fileWorkspace = () => options("--file").length ? workspace(options("--file")) : {};
   const position = () => ({ line: integer("--line"), ...(integer("--column") !== undefined ? { column: integer("--column") } : {}) });
@@ -469,7 +489,7 @@ function runMachineCommand(
       : command === "notations" ? { ...(option("--module") ? { module: option("--module") } : {}), ...(positional.length ? workspace(positional) : {}) }
       : command === "closure" ? {
         ...(positional[0]?.endsWith(".g17") ? { file: positional[0] } : { module: positional[0] ?? "" }),
-        ...(options("--module-root").length ? { moduleRoots: options("--module-root") } : {}),
+        moduleRoots: settings.moduleRoots,
         ...(option("--from") ? { from: option("--from") } : {}),
       }
       : command === "audit" ? { ...workspace(positional), ...(options("--theorem").length > 1 ? { theorems: options("--theorem") } : { theorem: option("--theorem") ?? "" }) }
@@ -548,5 +568,9 @@ function usage(print: (line: string) => void): void {
   print("  g17 library [--area Area] [--module Module.Name] [--declarations]");
   print("  g17 notations [--module Module.Name] [file.g17 ...]");
   print("  g17 closure [--text] [--module-root dir ...] <Module.Name|file.g17> [--from Module.Name]");
+  print("  g17 settings [--json]                      the module roots, store, foundation, and heap this run resolves");
   print("  g17 --help                                 this text");
+  print("settings: --module-root dir, --artifacts dir or --store, --foundation F, and --heap MB on the command line; G17_MODULE_ROOTS,");
+  print("  G17_ARTIFACTS, G17_FOUNDATION, G17_HEAP in the environment; then g17.json up from the working directory, then");
+  print("  ~/.config/grace17/config.json; the bundled library is always a module root (docs/machine-interface.md, Settings).");
 }

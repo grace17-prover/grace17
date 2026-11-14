@@ -77,8 +77,13 @@ a proof, and watch the goals and hypotheses change. Nothing is sent to a
 server. To check a file from the command line instead:
 
 ```sh
-node bin/g17.ts check --foundation ZF --module-root lib examples/Introduction.g17
+node bin/g17.ts check --foundation ZF examples/Introduction.g17
 ```
+
+The library is found without a flag, from any directory; `g17 settings`
+shows the module roots, artifact store, foundation, and heap a run uses,
+and a `g17.json` in the project or `~/.config/grace17/config.json` sets
+them once (see the [settings](docs/machine-interface.md#settings)).
 
 ## A first proof
 

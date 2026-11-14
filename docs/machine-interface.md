@@ -252,8 +252,8 @@ The shape:
 
 `g17 check --json file...` prints the same object, with `ok: true`,
 `version`, and `operation: "check"` added, over the checker's own loader:
-it honors `--foundation`, `--module-root`, `--artifacts`, `--audit`, and
-`--imports`. Without `--json`, `--imports` prints each note as
+it honors `--foundation`, `--module-root`, `--artifacts`, `--store`, `--audit`,
+and `--imports`, and the settings below. Without `--json`, `--imports` prints each note as
 `note: <file>:<line>: <message>` and a count, and a shadowed-property
 warning prints as `warning: <file>:<line>: <message>`; neither changes the
 exit status.
@@ -814,6 +814,40 @@ to that dependency, both included. A `from` outside the closure is
 `g17 closure Topology.Tube --from Set.Choice` prints it; `--text` prints
 one line per module, `choice-free` or `choice` first, and the chain.
 A module that is choice-free loads under `--foundation ZF`.
+
+## Settings
+
+A run resolves four settings before it starts, and `g17 settings` prints
+what it resolved: the module roots, the artifact store, the foundation,
+and the heap. Each comes from the command line first (`--module-root dir`,
+repeatable; `--artifacts dir`, or `--store` for the default store;
+`--foundation ZF|ZFC|ZFG`; `--heap MB`), then from the environment
+(`G17_MODULE_ROOTS`, a path list in the platform's separator;
+`G17_ARTIFACTS`, a directory, `true` for the default store, or `false`;
+`G17_FOUNDATION`; `G17_HEAP`), then from a project configuration
+`g17.json` found by walking up from the working directory, then from the
+user's `~/.config/grace17/config.json` (under `XDG_CONFIG_HOME` when that
+is set), and last from the defaults. A configuration file is a JSON object
+with any of `moduleRoots` (directories relative to the file),
+`artifacts` (a directory relative to the file, `true`, or `false`),
+`foundation`, and `heap` (megabytes):
+
+```json
+{ "moduleRoots": ["src"], "artifacts": true, "foundation": "ZF" }
+```
+
+The bundled library under `lib/` is always the last module root, so a
+file anywhere imports `Grace.Cumulus.Set` with no flag; with nothing
+named or configured, the working directory is the root before it. The
+default store is `~/.cache/grace17/modules` (under `XDG_CACHE_HOME` when
+that is set, or `G17_CACHE_DIR`), shared by every project, so `g17 build`
+and a `check --store` reuse what an earlier run compiled wherever it ran;
+a `check` with no store named elaborates from source. The foundation
+defaults to ZFG. The heap defaults to eight gigabytes, or three quarters
+of the machine's memory when that is less: when the runtime's limit is
+below the setting, the launcher runs the command again in a child with
+that limit, so no `--max-old-space-size` is needed on the command line or
+in `NODE_OPTIONS`, and a limit already at or above the setting is kept.
 
 ## A session
 

@@ -67,7 +67,7 @@ first failing module; `npm run check:cumulus -- --continue` goes on past a
 failure, skips the modules that import the failed one, and lists every
 failure and skipped module at the end (add `--quiet` to print only those
 and the summary), with exit status 1 when anything
-failed. The command line and the Workbench need only the module root `lib/`. The files in `examples/` are
+failed. The command line and the Workbench find the library under `lib/` without a flag. The files in `examples/` are
 clients of the library: short, runnable developments that show a subject's
 public interface in use. How files, imports, namespaces, and sections fit
 together is described in [modules, namespaces, and sections](modules.md).
