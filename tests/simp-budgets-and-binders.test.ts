@@ -37,6 +37,11 @@ def nest14 : Set := {nest13, nest13}
 def nest15 : Set := {nest14, nest14}
 def nest16 : Set := {nest15, nest15}
 def alt16 : Set := {nest15, {nest14, nest14}}
+def nest17 : Set := {nest16, nest16}
+def nest18 : Set := {nest17, nest17}
+def nest19 : Set := {nest18, nest18}
+def nest20 : Set := {nest19, nest19}
+def alt20 : Set := {nest19, {nest18, nest18}}
 `;
 
 function check(body: string, imports = ""): ReturnType<typeof createZfKernel> {
@@ -58,7 +63,7 @@ function failure(body: string, imports = ""): string {
 test("a closed goal whose unfolding exceeds the evaluation budget is not evaluated, and the message names the budget", () => {
   const message = failure(`
 theorem nested.refused
-  shows nest16 = alt16
+  shows nest20 = alt20
 proof
   simp
 `);

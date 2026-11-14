@@ -352,7 +352,7 @@ export function unfoldedSize(kernel: Kernel, term: Term): bigint {
  * polynomial over the complex numbers, whose unfolding is exponential in
  * its nesting, is left to rewriting instead of exhausting the heap.
  */
-export const DEFAULT_COMPUTE_BUDGET = 65_536;
+export const DEFAULT_COMPUTE_BUDGET = 1_000_000;
 
 /**
  * Whether the ground evaluation of a closed equation is within the budget,
