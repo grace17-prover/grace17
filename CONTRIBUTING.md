@@ -46,7 +46,7 @@ During development, run a single file:
 ```sh
 node scripts/run-tests.ts cumulus
 node --test tests/cumulus.test.ts
-node bin/g17.ts check --module-root lib lib/Grace/Cumulus/Set/Zorn.g17
+node bin/g17.ts check lib/Grace/Cumulus/Set/Zorn.g17
 ```
 
 The [architecture guide](docs/architecture.md) describes how the system fits

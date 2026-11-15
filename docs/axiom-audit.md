@@ -5,7 +5,7 @@ that contains Choice does not mean every theorem in it uses Choice.
 
 ```sh
 node --disable-warning=ExperimentalWarning bin/g17.ts axiom-audit \
-  --module-root lib lib/Grace/Cumulus/Set/Choice.g17 \
+  lib/Grace/Cumulus/Set/Choice.g17 \
   --theorem Grace.Cumulus.Set.Choice.choose.member
 ```
 

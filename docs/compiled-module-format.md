@@ -230,9 +230,9 @@ and checks `resultEnvironment`. The reference functions are
 `replaySeparateKernelModuleExact`. The chain form of section 7 remains the
 format of the distributed whole-library artifact.
 
-`src/module-store.ts` is the build driver. `g17 build --module-root lib
---artifacts build/modules lib/Grace/Cumulus.g17` writes
-`build/modules/<Module.Name>.g17a`, a JSON record holding the compiled module,
+`src/module-store.ts` is the build driver. `g17 build lib/Grace/Cumulus.g17`
+writes `<Module.Name>.g17a` into the artifact store, by default the user's
+cache directory and otherwise the `--artifacts` directory, a JSON record holding the compiled module,
 the surface delta the module adds for the elaborator (notation, signatures,
 instances, tactics, and carrier annotations), the module's report data, and
 the digests of its source and of each closure artifact. An artifact is current

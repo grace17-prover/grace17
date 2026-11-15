@@ -143,12 +143,13 @@ Library modules compile once into per-module artifacts and replay afterwards,
 so checking a file over a large import closure takes well under a second:
 
 ```sh
-node bin/g17.ts build --module-root lib --artifacts build/modules lib/Grace/Cumulus.g17
-node bin/g17.ts check --module-root lib --artifacts build/modules examples/Introduction.g17
+node bin/g17.ts build lib/Grace/Cumulus.g17
+node bin/g17.ts check --store examples/Introduction.g17
 ```
 
 `build` rebuilds only modules whose source or import closure changed; `check
---artifacts` builds what it needs first. See the
+--store` builds what it needs first, and the store is shared by every
+project unless `--artifacts dir` names another. See the
 [compiled module format](compiled-module-format.md) for what an artifact
 contains and how it is checked.
 
@@ -194,8 +195,8 @@ and elaborate modules in topological order. Thus a CLI invocation needs only
 the entry module:
 
 ```sh
-g17 check --module-root lib examples/Compute.g17
-g17 run --module-root lib examples/Compute.g17 \
+g17 check examples/Compute.g17
+g17 run examples/Compute.g17 \
   --function Grace.Examples.Compute.Demo.double --args 100000
 ```
 
@@ -249,8 +250,8 @@ def factorial (n : Nat) -> Nat
 Check the whole dependency graph or call the admitted function directly:
 
 ```sh
-g17 check --module-root lib lib/Grace/Core.g17
-g17 run --module-root lib lib/Grace/Core.g17 \
+g17 check lib/Grace/Core.g17
+g17 run lib/Grace/Core.g17 \
   --function Grace.Core.Nat.Rec.factorial --args 20
 ```
 

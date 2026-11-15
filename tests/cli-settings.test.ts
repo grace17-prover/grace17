@@ -123,3 +123,24 @@ test("the launcher runs the command with the heap the settings ask for", () => {
   assert.equal(printed.heap, 6000);
   assert.ok(printed.heapLimit >= 6000 - 64, `the heap limit is ${printed.heapLimit}`);
 });
+
+test("a compile elaborates from source even when the configuration asks for the store", () => {
+  const { home, nested } = scratch();
+  writeFileSync(join(nested, "g17.json"), JSON.stringify({ artifacts: true, foundation: "ZF" }));
+  writeFileSync(join(nested, "Probe.g17"), `module Probe
+import Grace.Cumulus.Set.Core
+
+theorem chain (A B C : Set)
+  requires first : A ⊆ B
+  requires second : B ⊆ C
+  shows A ⊆ C
+proof
+  exact Subset.transitive with *
+`);
+  const env = { ...cleanEnv, HOME: home, G17_HEAP: "2048", XDG_CACHE_HOME: join(home, "cache") };
+  const check = g17(["check", "Probe.g17"], nested, env);
+  assert.equal(check.status, 0, check.stderr + check.stdout);
+  const compile = g17(["compile", "Probe.g17", "--out", "probe.g17m", "--environment", "probe.g17env"], nested, env);
+  assert.equal(compile.status, 0, compile.stderr + compile.stdout);
+  assert.doesNotMatch(compile.stdout + compile.stderr, /no retained proof/u);
+});

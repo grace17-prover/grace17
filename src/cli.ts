@@ -103,7 +103,12 @@ export function runCli(args: readonly string[]): void {
       const roots = settings.moduleRoots;
       // The store: named by --artifacts, asked for by --store or the
       // configuration, and for build the default store in any case.
-      const store = settings.artifacts ?? (command === "build" ? settings.storeDefault : undefined);
+      // Only a check or a build replays artifacts: a compile, an export, an
+      // audit of retained proofs, or a run needs the proofs themselves,
+      // which an artifact does not carry, so those elaborate from source
+      // whatever the settings ask for.
+      const store = command === "build" ? settings.artifacts ?? settings.storeDefault
+        : command === "check" ? settings.artifacts : undefined;
       if (continuing && store) throw new Error("check --continue elaborates from source; it does not take --artifacts or --store");
       // A store replays its foundation image instead of elaborating the prelude.
       kernel = store ? createStoreKernel(store, profile) : createSetTheoryKernel({ profile });
