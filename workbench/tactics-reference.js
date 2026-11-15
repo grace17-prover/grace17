@@ -39,6 +39,7 @@ export const tacticReference = new Map([
   ["fact at terms with *", [
     "Bare `*` stops at a source theorem's `shows` boundary even when evidence for an antecedent in the conclusion is available, so conditional and negative results are preserved. To eliminate such an implication, name the evidence after the star: `with *, evidence`. A named premise may also precede the star: `with named, *`.",
     "`with *` draws on local facts, instance synthesis, and Tau refinement reconstruction, in that order. It does not find library theorems or prove reflexive equalities: bind `have one := realZero.lt_one` or `have same : t = t` with `rfl` first, or list the premise explicitly.",
+    "A requirement an instance in scope can supply, such as a section hypothesis `CommRing(S)` with an instance for `CommRing` visible, fixes `S` from a lone local fact of its shape only after every other requirement has had its turn, so `rw RingHom.map_pow with *` finds `S` from the homomorphism fact `f : R →+* S` and `CommRing(S)` from the instance.",
     "For local proof values and declarations without a source boundary, `*` consumes the leading implication chain; use a count to preserve a remainder.",
   ]],
   ["fact at terms with *{n}", [
@@ -143,7 +144,8 @@ export const tacticReference = new Map([
   ["typecheck", [
     "Tau indexes checked propositions of the forms `P(x) → Q(x)`, `P(x) → Q(y) → R(f(x, y))`, `(P(x) ∧ Q(x)) → R(x)`, `Q(constant)`, constructor closure facts, and atomic predicate equivalences such as `Nat(n) ↔ n ∈ ω`, including local induction hypotheses. Refinement search is bounded by depth 256, 4,096 visited goals, 100,000 rule attempts, and 4,096 expanded term nodes per goal; exhaustion returns no evidence, and an explicit proof can still discharge the obligation.",
   ]],
-  ["cc  /  congruence", [
+  ["cc  /  congruence  /  cc [facts]", [
+    "`cc [h, k]` chains the listed facts alone, with the opened guard facts, instead of every local fact: a listed entry is a local fact, a theorem, or a theorem instance `thm at a, b with facts` or `(thm with h)` as a `rw` or `simp` list accepts it, and an instantiated theorem's statement joins the equalities. A listed name that is neither a local fact nor a theorem is an error. Bare `cc` keeps its meaning.",
     "`cc` chains local equalities, closes function congruences, transports positive predicate facts across congruent arguments, and derives arbitrary goals from a congruent disequality or a positive/negative predicate conflict. A disequality goal `s ≠ t`, or a denied predicate `¬P(t)`, is assumed and refuted: the equation or predicate joins the facts and ⊥ follows from the conflict it creates, so `rightEnd(e) ≠ v` follows from `leftEnd(e) = rightEnd(e)` and `leftEnd(e) ≠ v`. The explanation is built from the original equalities, equality transitivity and symmetry, function congruence, and equality elimination. `cc` does no quantifier instantiation and no conditional rewriting; use `specialize`, `rw`, and `simp` for those.",
   ]],
   ["by_cases h : P", [

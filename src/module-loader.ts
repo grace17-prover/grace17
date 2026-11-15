@@ -39,6 +39,7 @@ export function loadModuleSourceGraph(
   entryFiles?: readonly string[],
   entryModules: readonly string[] = [],
   deriveName: ModuleNameDeriver = file => moduleNameFromRoots(file, roots),
+  options: ModuleGraphOptions = {},
 ): readonly LoadedModule[] {
   const resolvedRoots = roots.map(root => resolve(root));
   setLibraryDeclarationLocator(libraryDeclarationLocator(resolvedRoots));
@@ -49,7 +50,7 @@ export function loadModuleSourceGraph(
       return existsSync(candidate);
     });
     return file ? { file, source: readFileSync(file, "utf8") } : undefined;
-  }, entryModules, deriveName);
+  }, entryModules, deriveName, options);
 }
 
 // The dependency files a check read from disk, each with the size and

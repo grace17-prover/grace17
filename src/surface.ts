@@ -16,7 +16,7 @@ import { compute,
 } from "./proof.ts";
 import { CARRIER_ARGUMENT_FUNCTIONS, formatFormula, formatTerm, fromSuperscript, registerStructureMember, ringNumeralValue, structureMember, structureProjection as structureFieldSymbol, type CarrierNotation, type FunctionNotation, type OperationNotation, type PredicateNotation, type PrettyOptions, type RingNotation, type RingPiece, type ScopedArgument } from "./pretty.ts";
 import { evaluateNative, nativeValueToTerm } from "./runtime.ts";
-import { InstanceResolutionError, InstanceResolutionLimitError, prepareInstanceProver, prepareRefinementProver, proveRefinement, type InstanceProver, type InstanceSynthesisResult, type RefinementProver, forkTypeIndex, moveTypeIndex,
+import { InstanceResolutionError, InstanceResolutionLimitError, instancePredicates, prepareInstanceProver, prepareRefinementProver, proveRefinement, type InstanceProver, type InstanceSynthesisResult, type RefinementProver, forkTypeIndex, moveTypeIndex,
   functionValueSorts, isBindingPredicate, isTransparentPredicate, openGuardFact, proveClosedDisequality, proveLiteralDistinctnessGoal, refuteLiteralEquation, registerGuardPredicate,
   type GuardFact, type ScopeVisibility,
 } from "./type-system.ts";
@@ -58,6 +58,14 @@ export interface ElaboratedModule {
   readonly theoremLocations: readonly SurfaceTheoremLocation[];
   readonly evaluations: readonly SurfaceEvaluation[];
   readonly sorries: readonly SurfaceSorry[];
+  /** What the module checks but a reader may want to change: a section hypothesis a theorem's proof does not use. */
+  readonly warnings: readonly SurfaceWarning[];
+}
+
+export interface SurfaceWarning {
+  readonly theorem: string;
+  readonly line: number;
+  readonly message: string;
 }
 
 export interface SurfaceTheoremLocation {
@@ -477,6 +485,7 @@ interface CachedTheoremDeclaration {
   readonly instance: boolean;
   /** Expression carrier annotations recorded while elaborating the declaration. */
   readonly annotations: readonly (readonly [string, string])[];
+  readonly warnings?: readonly SurfaceWarning[];
 }
 const theoremDeclarationCaches = new WeakMap<object, Map<string, CachedTheoremDeclaration>>();
 const maximumTheoremDeclarations = 2_048;
@@ -1030,6 +1039,19 @@ function surfaceSymbol(name: string): string {
 export interface ElaborateModuleOptions {
   /** The qualified name the module's file denotes, which qualifies a bare `module Name`. */
   readonly moduleName?: string;
+  /**
+   * Called with each theorem, lemma, or instance whose elaboration failed
+   * when the module is to go on to its next declaration instead of
+   * stopping: the failed declaration is left out, the rest are checked,
+   * and every failure is reported. A failure elsewhere, in a definition,
+   * a notation, or a section clause, still stops the module.
+   */
+  readonly onTheoremFailure?: (failure: TheoremFailure) => void;
+}
+
+export interface TheoremFailure {
+  readonly line: number;
+  readonly error: SurfaceError | KernelError;
 }
 
 export function elaborateModule(kernel: Kernel, source: string, options: ElaborateModuleOptions = {}): ElaboratedModule {
@@ -1048,6 +1070,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   let declarationChain = "";
   let declarationPrefixEnd = 0;
   const sorryStart = surfaceSorries.get(kernel)?.length ?? 0;
+  const warnings: SurfaceWarning[] = [];
   const sourceLines = source.split(/\r?\n/);
   const lines = sourceLines.map((raw, index) => {
     const narrative = /^([ \t]*)(\.\s*)?--([!|])(?:\s+(.*)|\s*)$/.exec(raw);
@@ -1523,6 +1546,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
           for (const [term, type] of cached.annotations) annotations.set(term, type);
         }
         name = cached.name;
+        if (cached.warnings) warnings.push(...cached.warnings);
         names.register(name, moduleName);
         declarationCache.delete(declarationKey);
         declarationCache.set(declarationKey, cached);
@@ -1553,14 +1577,23 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
                 ...(functions.length ? { functions } : {}) };
             }
           }
+          if (options.onTheoremFailure && (error instanceof SurfaceError || error instanceof KernelError)) {
+            options.onTheoremFailure({ line: line.number, error });
+            cursor = end;
+            continue;
+          }
           throw error;
         }
         const signature = environment.signatures.get(name)!;
         const statement = kernel.theorems.get(name)!;
         const proof = kernel.theoremProofs.get(name)!;
+        const theoremWarnings = sections.length
+          ? unusedSectionHypothesisWarnings(kernel, name, line.text.split(/\s+/)[1] ?? name, sectionHypotheses(), line.number) : [];
+        warnings.push(...theoremWarnings);
         if ((surfaceSorries.get(kernel)?.length ?? 0) === sorryCount) {
           declarationCache.set(declarationKey, {
             name, statement, proof, signature,
+            ...(theoremWarnings.length ? { warnings: theoremWarnings } : {}),
             capturesTacticTrace: environment.captureTacticTraces && kernel.theoremTacticTraces.has(name),
             ...(kernel.theorems.size > theoremCount + 1 && kernel.theorems.has(`${name}.generalized_induction_aux`)
               ? { auxiliary: {
@@ -1653,7 +1686,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     environment.modules.set(moduleName, { name: moduleName, imports, exportedOpens, definitions, theorems, namespaces: [...declaredNamespaces] });
     moduleAnnotationsFor(kernel).set(moduleName, new Map(kernelAnnotations.get(kernel) ?? []));
   }
-  return { definitions, theorems, theoremLocations, evaluations, sorries: (surfaceSorries.get(kernel) ?? []).slice(sorryStart) };
+  return { definitions, theorems, theoremLocations, evaluations, sorries: (surfaceSorries.get(kernel) ?? []).slice(sorryStart), warnings };
 }
 
 /**
@@ -4853,6 +4886,75 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
   return name!;
 }
 
+/**
+ * Which of the formulas a proof assumes: one pass over the proof, shared
+ * subproofs visited once, stopping as soon as every formula is found. A
+ * nested introduction of a formula counts as a use, which errs toward
+ * keeping a premise.
+ */
+function assumptionsUsed(proof: Proof, formulas: readonly Formula[]): boolean[] {
+  const used = formulas.map(() => false);
+  let remaining = formulas.length;
+  const visited = new Set<object>();
+  const walk = (node: unknown): void => {
+    if (remaining === 0 || typeof node !== "object" || node === null) return;
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if ("tag" in node || visited.has(node)) return;
+    visited.add(node);
+    if ("rule" in node && (node as Proof).rule === "assumption") {
+      const formula = (node as { formula: Formula }).formula;
+      for (let index = 0; index < formulas.length; index += 1) {
+        if (!used[index] && formulaEquals(formulas[index]!, formula)) { used[index] = true; remaining -= 1; }
+      }
+      return;
+    }
+    for (const key in node) walk((node as Record<string, unknown>)[key]);
+  };
+  walk(proof);
+  return used;
+}
+
+/**
+ * The section hypotheses a theorem's proof does not use, each a warning:
+ * the hypothesis stays a premise of the theorem, which every application
+ * then has to supply, and a theorem that needs none of a section's
+ * hypotheses may belong outside the section. The message says when the
+ * part of the statement outside the section hypotheses shares no
+ * variable with the hypothesis either.
+ */
+function unusedSectionHypothesisWarnings(
+  kernel: Kernel, name: string, written: string, hypotheses: readonly SourceLine[], line: number,
+): SurfaceWarning[] {
+  const statement = kernel.theorems.get(name);
+  const proof = kernel.theoremProofs.get(name);
+  if (!statement || !proof) return [];
+  const formulas = hypotheses.flatMap(item => item.parsedFormula ? [item.parsedFormula] : []);
+  const own: Formula[] = [];
+  let spine: Formula = statement;
+  for (;;) {
+    if (spine.tag === "forall") { spine = spine.body; continue; }
+    if (spine.tag === "imp") {
+      if (!formulas.some(item => formulaEquals(item, spine.left))) own.push(spine.left);
+      spine = spine.right;
+      continue;
+    }
+    break;
+  }
+  own.push(spine);
+  const mentioned = new Set(own.flatMap(item => [...freeFormulaVariables(item)]));
+  const warnings: SurfaceWarning[] = [];
+  const used = assumptionsUsed(proof, formulas);
+  for (const item of hypotheses) {
+    const formula = item.parsedFormula;
+    if (!formula || used[formulas.indexOf(formula)]) continue;
+    const label = /^requires\s+(\S+)\s*:/.exec(item.text)?.[1] ?? formatFormula(formula);
+    const shared = [...freeFormulaVariables(formula)].some(variable => mentioned.has(variable));
+    warnings.push({ theorem: name, line, message:
+      `section hypothesis ${label} is a premise of ${written} that its proof does not use${shared ? "" : " and that shares no variable with its statement"}` });
+  }
+  return warnings;
+}
+
 function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: SurfaceScope): string {
   const header = block[0]!;
   block = joinTheoremClauseContinuations(block);
@@ -4872,6 +4974,7 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
     !line.text.startsWith("simp") && !line.text.startsWith("ring") && !line.text.startsWith("linear_combination ") && !line.text.startsWith("rewrite ") && !line.text.startsWith("rw ") && !line.text.startsWith("rwa ") &&
     !line.text.startsWith("cases ") && !line.text.startsWith("rcases ") && !line.text.startsWith("clear ") &&
     !line.text.startsWith("rename ") && !line.text.startsWith("revert ") && !line.text.startsWith("symm at ") && !line.text.startsWith("set ") &&
+    !/^(?:cc|congruence)\s*\[/u.test(line.text) &&
     !["left", "right", "constructor", "split", "assumption", "contradiction", "exfalso", "by_contra", "reflexivity", "rfl", "symm", "compute", "decide", "ring", "arith", "linarith", "tauto", "cc", "congruence", "sorry"].includes(line.text) &&
     !isUserTacticInvocation(kernel, line.text, scope));
   if (stray) {
@@ -7277,7 +7380,16 @@ function elaborateTacticTheorem(
     if (have) {
       if (current.locals.has(have[1]!)) throw new SurfaceError(line.number, `local proof ${have[1]} already exists`);
       const stated = have[2] ? parseFormula(have[2], kernel, variables, line.number, scope) : undefined;
-      let proof = parseProofExpression(kernel, command.slice(haveAssignment + 2).trim(), current, variables, line.number, scope,
+      const expression = command.slice(haveAssignment + 2).trim();
+      // `have g := y = x by cc` wants the statement form: the text after
+      // := reads as a proposition and ends in a tactic.
+      const byAt = findTopLevelWord(expression, "by");
+      if (byAt > 0 && formulaLike(expression.slice(0, byAt).trim())) {
+        throw new SurfaceError(line.number,
+          `\`have ${have[1]} := …\` takes a proof reference; a statement proved by a tactic is written ` +
+          `\`have ${have[1]} : ${expression.slice(0, byAt).trim()} by ${expression.slice(byAt + 2).trim()}\``);
+      }
+      let proof = parseProofExpression(kernel, expression, current, variables, line.number, scope,
         { expectedConclusion: stated });
       let actual = kernel.checkProof(proof, current.assumptions);
       if (stated && !formulaEquals(stated, actual)) {
@@ -8168,13 +8280,34 @@ function elaborateTacticTheorem(
         continue;
       }
     }
-    if (command === "cc" || command === "congruence") {
-      close(line, proveCongruence(
-        kernel, current.goal, current.assumptions, [
-          ...[...current.locals.values()].map(item => item.proof),
-          ...openedGuardFacts(kernel, current.assumptions, current.locals.values(), visibility).map(item => item.proof),
-        ],
-      ));
+    const congruence = /^(?:cc|congruence)(?:\s*\[(.*)\])?$/su.exec(command);
+    if (congruence) {
+      const guards = openedGuardFacts(kernel, current.assumptions, current.locals.values(), visibility);
+      if (congruence[1] === undefined) {
+        close(line, proveCongruence(kernel, current.goal, current.assumptions,
+          [...[...current.locals.values()].map(item => item.proof), ...guards.map(item => item.proof)]));
+        continue;
+      }
+      // `cc [h, k, thm at a with facts]`: the listed facts alone, with the
+      // opened guard facts, are the equalities the closure chains; a
+      // listed theorem is instantiated as a `rw` or `simp` entry is, and
+      // its statement joins them.
+      const entries = splitTopLevel(congruence[1], ",").map(item => item.trim()).filter(Boolean);
+      const listed = entries.map((entry): LocalProof => {
+        const local = resolveLocalProof(current.locals, entry, line.number, { kernel, scope, assumptions: current.assumptions });
+        if (local) return local;
+        let proof: Proof;
+        try { proof = parseProofExpression(kernel, entry, current, variables, line.number, scope, {}); }
+        catch (error) {
+          if (error instanceof SurfaceError && /^[\p{L}_][\p{L}\p{M}\p{N}_.]*$/u.test(entry)) {
+            throw new SurfaceError(line.number, `${command.split(/[\s[]/)[0]}: ${entry} is neither a local fact nor a theorem`);
+          }
+          throw error;
+        }
+        return { formula: kernel.checkProof(proof, current.assumptions), proof };
+      });
+      close(line, proveCongruence(kernel, current.goal, current.assumptions, [],
+        [...listed, ...guards].map(item => ({ formula: item.formula, proof: item.proof }))));
       continue;
     }
     const witness = /^(?:witness|use)\s+(.+)$/.exec(command);
@@ -12759,6 +12892,10 @@ function parseProofExpression(
   // then discharges the requirements from local facts as `with *` does.
   let autoDischarge = false;
   let reorderedPremises: string[] | undefined;
+  /** The class predicates the visible instances supply, prepared on first use. */
+  let classPredicateSet: ReadonlySet<string> | undefined;
+  const classPredicates = (): ReadonlySet<string> =>
+    classPredicateSet ??= instancePredicates(kernel, visibleInstanceNames(kernel, scope));
   // A bare `with *` on a source theorem also infers: its requirements are
   // matched against local facts, and unique matches fix the parameters.
   if (!atList && allLocal &&
@@ -13162,11 +13299,23 @@ function parseProofExpression(
             };
             const openRequirements = targets.filter(requirement =>
               [...freeFormulaVariables(requirement)].some(name => names.has(name) && !inferred.has(name)));
-            for (const requirement of openRequirements) {
-              const distinct = factMatches(requirement);
-              if (distinct.length === 1 && distinct[0]!.size > inferred.size) {
-                for (const [name, value] of distinct[0]!) inferred.set(name, value);
-                changed = true;
+            // A requirement the instance search can discharge once its
+            // parameters are known, a section hypothesis CommRing(S) with
+            // an instance for CommRing in scope, fixes S from a lone local
+            // fact of its shape only after every other requirement has
+            // had its turn: the hypothesis f : R →+* S fixes S from the
+            // homomorphism, and CommRing(S) is then found by the instance.
+            const suppliedByInstance = (requirement: Formula): boolean =>
+              requirement.tag === "pred" && classPredicates().has(requirement.pred);
+            for (const deferred of [false, true]) {
+              if (deferred && changed) break;
+              for (const requirement of openRequirements) {
+                if (suppliedByInstance(requirement) !== deferred) continue;
+                const distinct = factMatches(requirement);
+                if (distinct.length === 1 && distinct[0]!.size > inferred.size) {
+                  for (const [name, value] of distinct[0]!) inferred.set(name, value);
+                  changed = true;
+                }
               }
             }
             // A guard such as (g ∘ f : a ⟶ b) with an open endpoint and no
@@ -17857,6 +18006,12 @@ function balanced(text: string): boolean {
 }
 
 /** Position of a standalone word outside brackets, or -1. */
+/** Whether a text reads as a proposition: a connective, a relation, or a quantifier at its top level. */
+function formulaLike(text: string): boolean {
+  if (/^[¬∀∃]/u.test(text) || /^(?:not|forall|exists)\s/u.test(text)) return true;
+  return ["=", "≠", "∈", "∉", "⊆", "∧", "∨", "↔", "→", "<", "≤", ">", "≥"].some(operator => findTopLevel(text, operator) >= 0);
+}
+
 function findTopLevelWord(text: string, word: string): number {
   let depth = 0;
   for (let index = 0; index < text.length; index++) {

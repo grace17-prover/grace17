@@ -653,6 +653,7 @@ function dependencyCheckpoint(
       theoremLocations: [],
       evaluations: [],
       sorries: [],
+      warnings: [],
     }));
     setSurfaceTraceCapture(kernel, false);
     const started = performance.now();
@@ -1009,6 +1010,7 @@ function renderWorkbenchCheck(
       theoremLocations: item.theoremLocations ?? [],
       evaluations: item.evaluations,
       sorries: item.sorries.map(sorry => ({ theorem: sorry.theorem, axiom: sorry.axiom, line: sorry.line, goal: display(sorry.goal) })),
+      warnings: item.warnings,
     })),
   } : {};
   return {
@@ -1189,7 +1191,7 @@ export function workbenchFailureEnvironment(error: unknown, files: readonly Work
     const relativePath = `${module.split(".").join("/")}.g17`;
     return roots.roots.map(root => resolve(root, relativePath)).find(candidate => safeRead(candidate) !== undefined);
   };
-  const empty = { definitions: [], theorems: [], theoremLocations: [], evaluations: [], sorries: [] } as const;
+  const empty = { definitions: [], theorems: [], theoremLocations: [], evaluations: [], sorries: [], warnings: [] } as const;
   const loaded: LoadedModule[] = moduleReport(kernel).map(record => ({ file: fileOf(record.name) ?? record.name, module: record.name, ...empty }));
   // The failing file's own declarations before the failure are in the
   // kernel whether or not its module is registered yet.
@@ -1549,6 +1551,13 @@ export function proofRanges(source: string): readonly { lineStart: number; lineE
   return declarationRanges(source, true);
 }
 
+const DECLARATION_BOUNDARY = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|register|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
+
+/** Whether a source line begins a declaration, a directive, or a section clause: the boundaries of `theoremRanges`. */
+export function declarationBoundary(text: string): boolean {
+  return DECLARATION_BOUNDARY.test(text);
+}
+
 function declarationRanges(source: string, definitions: boolean): readonly { lineStart: number; lineEnd: number }[] {
   const lines = source.split(/\r?\n/);
   // Instances are checked theorems and occupy entries in
@@ -1557,7 +1566,7 @@ function declarationRanges(source: string, definitions: boolean): readonly { lin
   // predecessor's trace and appears permanently complete in the Workbench.
   const proof = /^\s*(?:theorem|lemma|instance)\s+\S+/;
   const defined = /^\s*(?:defgraph|defchoose|defunique|def|define)\s+\S+/;
-  const boundary = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|register|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
+  const boundary = DECLARATION_BOUNDARY;
   const ranges: { lineStart: number; lineEnd: number }[] = [];
   let nextBoundary = lines.length + 1;
   let proofLine = false;

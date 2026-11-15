@@ -189,7 +189,10 @@ The shape:
   (loaded as a dependency, not reported), `failed`, or `unchecked`; a
   checked file also carries its `module`, and counts of `definitions`,
   `theorems`, `evaluations`, `sorries` (the `sorry` lines in the file's
-  own proofs: its own obligations), `admittedSorries` (the distinct
+  own proofs: its own obligations), the `loaded` report of a module
+  carrying its `warnings` as well (`theorem`, `line`, `message`: a section
+  hypothesis a proof does not use, which `g17 check` prints as
+  `warning:` lines for the files it was given), `admittedSorries` (the distinct
   admissions its theorems rest on, own or inherited through citation),
   `admittedTheorems` (its theorems with a `sorry` of their own), and
   `dependentTheorems` (its complete proofs that cite an admitted theorem).
@@ -275,12 +278,21 @@ environment, one `audit` record per theorem. `g17 audit` with several
 every module of the import graph is elaborated in its own fork of the
 kernel, a module whose import failed or was skipped is skipped, and the
 end of the run lists every failure with its file, line, and message and
-every skipped module with the import that blocked it. The exit status is 1
-when anything failed. With `--json` the result carries `failures` (each a
-diagnostic with `module` and `file`), `skipped` (`module`, `file`,
-`because`), the `diagnostics` and partial-trace `theorems` of every
-failure, and `status: "failed"`; without it, `failed ...` and
-`skipped ...` lines and a count follow the checked modules. With
+every skipped module with the import that blocked it. Within a module, a
+failed theorem, lemma, or instance is reported and the next declaration
+is checked, so one run reports every failing proof of the module; the
+module counts as failed once, nothing of it is kept, and its dependents
+are skipped. A failure outside a proof, in a definition, a notation, or a
+section clause, leaves an environment the later declarations cannot use,
+so the module stops there and its remaining theorems are reported as
+`skipped after failure`, by name, with the line of the failure. The exit
+status is 1 when anything failed. With `--json` the result carries
+`failures` (each a diagnostic with `module` and `file`, a module with
+several failures appearing once per failure), `skipped` (`module`, `file`,
+`because`), `skippedAfterFailure` (`module`, `file`, `line`, `theorems`),
+the `diagnostics` and partial-trace `theorems` of every failure, and
+`status: "failed"`; without it, `failed ...`, `skipped after failure ...`,
+and `skipped ...` lines and a count follow the checked modules. With
 `--quiet`, only the failures, the skipped modules, and the final count are
 printed, each failure once, without the per-module `checked` and `eval`
 lines. The flag takes no `--artifacts`: it elaborates from source.
@@ -630,6 +642,15 @@ which is a workspace with `file` (optional with one file) and an optional
 `line`, or a `module` to import, or neither for the core prelude;
 optionally `kind` (`formula`, `term`, or `auto`, the default) and
 `variables`, binder groups for the free variables of the text.
+
+At a `line`, the text is read with the facts in force there: the section
+variables and hypotheses up to and including a clause on that line, and,
+inside a theorem, lemma, or instance, that declaration's own binders and
+`requires` premises, in which case the result names it as `theorem`. A
+line inside a definition reads the text before the definition. No proof
+of the file is elaborated: every proof before the line is replaced by
+`sorry`, so the cost is the import closure and the declarations above the
+line, and the file need not check.
 
 ```json
 {"id": 11, "method": "elaborate",

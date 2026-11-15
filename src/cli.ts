@@ -214,6 +214,7 @@ export function runCli(args: readonly string[]): void {
             ...(continued ? {
               failures: failures.map((item, index) => ({ module: item.module, file: item.file, ...failed[index]!.diagnostics[0]! })),
               skipped,
+              skippedAfterFailure: continued.skippedAfterFailure,
             } : {}),
             milliseconds: Number((performance.now() - started).toFixed(3)),
           };
@@ -234,6 +235,9 @@ export function runCli(args: readonly string[]): void {
           const own = checked.filter(item => entries.includes(item.file));
           for (const warning of shadowedPropertyWarnings(shadowedProperties(kernel, own))) {
             console.log(`warning: ${warning.file}:${warning.line}: ${warning.message}`);
+          }
+          for (const item of own) {
+            for (const warning of item.warnings) console.log(`warning: ${item.file}:${warning.line}: ${warning.message}`);
           }
           if (importAudit) {
             const sources: WorkbenchFile[] = entries.map(name => ({ name, source: readFileSync(name, "utf8") }));
@@ -266,8 +270,12 @@ export function runCli(args: readonly string[]): void {
           }
           if (continued) {
             for (const item of failures) console.log(`failed ${item.file} [${item.module}]: ${failureText(item.error)}`);
+            for (const item of continued.skippedAfterFailure) {
+              console.log(`skipped after failure ${item.file} [${item.module}]: ${item.theorems.join(", ")} after line ${item.line}`);
+            }
             for (const item of skipped) console.log(`skipped ${item.file} [${item.module}]: imports ${item.because}`);
-            console.log(`${checked.length} modules checked, ${failures.length} failed, ${skipped.length} skipped`);
+            const failedModules = new Set(failures.map(item => item.module)).size;
+            console.log(`${checked.length} modules checked, ${failedModules} failed, ${skipped.length} skipped`);
           }
         }
         if (failures.length) process.exitCode = 1;
@@ -359,8 +367,19 @@ function failureText(error: unknown): string {
 interface ContinuedCheck {
   readonly kernel: Kernel;
   readonly loaded: readonly LoadedModule[];
+  /** Every failure, a module's failed theorems each once; a module with several appears several times. */
   readonly failures: readonly { readonly module: string; readonly file: string; readonly source: string; readonly error: unknown }[];
   readonly skipped: readonly { readonly module: string; readonly file: string; readonly because: string }[];
+  /** The theorems a module could not go on to after a failure outside a proof, by name. */
+  readonly skippedAfterFailure: readonly { readonly module: string; readonly file: string; readonly line: number; readonly theorems: readonly string[] }[];
+}
+
+/** The theorems, lemmas, and instances declared after a line of a module's source. */
+function theoremsAfterLine(source: string, line: number): string[] {
+  return source.split(/\r?\n/).flatMap((text, index) => {
+    const header = index + 1 > line ? /^(?:theorem|lemma|instance)\s+(\S+)/.exec(text) : null;
+    return header ? [header[1]!] : [];
+  });
 }
 
 /**
@@ -368,6 +387,10 @@ interface ContinuedCheck {
  * each module is elaborated in a fork of the kernel, so a failed module
  * leaves nothing behind, and the modules that import a failed or skipped
  * module are skipped and reported with the import that blocked them.
+ * Within a module, a failed theorem is reported and the next declaration
+ * is checked, so one run reports every failing proof of the module; a
+ * failure outside a proof, in a definition or a notation, stops the module
+ * there, and the theorems after it are reported as skipped after it.
  */
 function checkContinuing(initial: Kernel, entries: readonly string[], roots: readonly string[], log?: (line: string) => void): ContinuedCheck {
   const resolvedRoots = roots.map(root => resolve(root));
@@ -414,6 +437,7 @@ function checkContinuing(initial: Kernel, entries: readonly string[], roots: rea
   const loaded: LoadedModule[] = [];
   const failures: { module: string; file: string; source: string; error: unknown }[] = [];
   const skipped: { module: string; file: string; because: string }[] = [];
+  const skippedAfterFailure: { module: string; file: string; line: number; theorems: string[] }[] = [];
   const blocked = new Set<string>();
   for (const item of ordered) {
     const blocking = item.imports.find(name => blocked.has(name));
@@ -425,18 +449,32 @@ function checkContinuing(initial: Kernel, entries: readonly string[], roots: rea
     }
     const attempt = kernel.fork();
     forkSurfaceEnvironment(kernel, attempt);
-    try {
-      loaded.push(...loadModuleSourceGraph(attempt, [{ file: item.file, source: item.source }], roots, undefined, [], derive));
-      kernel = attempt;
-    } catch (error) {
-      if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
+    const fail = (error: SurfaceError | KernelError): void => {
       rememberFailureDisplay(error, attempt);
       blocked.add(item.module);
       failures.push({ module: item.module, file: item.file, source: item.source, error });
       log?.(`failed ${item.file}: ${failureText(error)}`);
+    };
+    try {
+      const modules = loadModuleSourceGraph(attempt, [{ file: item.file, source: item.source }], roots, undefined, [], derive,
+        { onTheoremFailure: failure => fail(failure.error) });
+      // A module with a failed theorem is a failed module: its checked
+      // theorems are reported, nothing of it is kept, and its dependents
+      // are skipped.
+      if (blocked.has(item.module)) loaded.push(...modules.filter(module => module.module !== item.module));
+      else { loaded.push(...modules); kernel = attempt; }
+    } catch (error) {
+      if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
+      fail(error);
+      const line = error instanceof SurfaceError ? error.line : undefined;
+      const theorems = line === undefined ? [] : theoremsAfterLine(item.source, line);
+      if (theorems.length) {
+        skippedAfterFailure.push({ module: item.module, file: item.file, line: line!, theorems });
+        log?.(`skipped after failure ${item.file}: ${theorems.length} ${theorems.length === 1 ? "theorem" : "theorems"} after line ${line}`);
+      }
     }
   }
-  return { kernel, loaded, failures, skipped };
+  return { kernel, loaded, failures, skipped, skippedAfterFailure };
 }
 
 const machineCommands = new Set(["serve", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations", "closure"]);

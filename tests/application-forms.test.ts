@@ -277,3 +277,15 @@ proof
   exact h
 `);
 });
+
+test("a have := whose text is a statement proved by a tactic is told the statement form", () => {
+  const message = failure("HaveHint", `
+theorem flip (x y : Set)
+  requires h : x = y
+  shows y = x
+proof
+  have g := y = x by cc
+  exact g
+`);
+  assert.match(message, /line 7: `have g := …` takes a proof reference; a statement proved by a tactic is written `have g : y = x by cc`/);
+});

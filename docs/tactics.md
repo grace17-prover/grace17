@@ -41,7 +41,7 @@ ends with the natural-deduction rule schema its proof term reduces to, with
 | [The first moves](#the-first-moves) | [`intro h`](#intro-h), [`intros x hx y hy`](#intros-x-hx-y-hy), [`exact fact`](#exact-fact), [`show P := fact`](#show-p-fact), [`assumption`](#assumption), [`rfl  /  reflexivity`](#rfl-reflexivity), [`apply fact`](#apply-fact), [`have h := fact with premises`](#have-h-fact-with-premises), [`fact with ⟨a, b⟩`](#fact-with-a-b), [`fact at terms with *`](#fact-at-terms-with), [`fact at terms with *{n}`](#fact-at-terms-with-n), [`have h : P := fact with *`](#have-h-p-fact-with), [`have h : P`](#have-h-p), [`have h : P by tactic`](#have-h-p-by-tactic), [`calc`](#calc), [`specialize h with x, hx`](#specialize-h-with-x-hx) |
 | [Logic and witnesses](#logic-and-witnesses) | [`constructor  /  split`](#constructor-split), [`refine ⟨a, ha, b, hb, _⟩`](#refine-a-ha-b-hb), [`left  /  right`](#left-right), [`witness t  /  use t`](#witness-t-use-t), [`rcases h with ⟨h₁, h₂, h₃⟩`](#rcases-h-with-h1-h2-h3), [`obtain ⟨x, hx, rfl⟩ := fact`](#obtain-x-hx-rfl-fact), [`cases h with hp \| hq`](#cases-h-with-hp-hq), [`rcases h with hp \| hq \| hr`](#rcases-h-with-hp-hq-hr), [`obtain ⟨x, hx, y, hy⟩ := fact`](#obtain-x-hx-y-hy-fact), [`exfalso`](#exfalso), [`by_contra h`](#bycontra-h), [`by_cases h : P`](#bycases-h-p), [`contradiction`](#contradiction), [`tauto`](#tauto) |
 | [Changing the view](#changing-the-view) | [`symm  /  symm at h`](#symm-symm-at-h), [`rw h  /  rewrite h  /  rw ← h`](#rw-h-rewrite-h-rw-h), [`rw [h₁, h₂] / rwa h`](#rw-h1-h2-rwa-h), [`rw under h at fact`](#rw-under-h-at-fact), [`simp [rules]`](#simp-rules), [`simpa [rules] using fact`](#simpa-rules-using-fact), [`unfold name`](#unfold-name), [`ext x`](#ext-x), [`clear h`](#clear-h), [`rename h => betterName`](#rename-h-bettername), [`revert h`](#revert-h), [`set x := t with h`](#set-x-t-with-h) |
-| [Search and automation](#search-and-automation) | [`exact?`](#exact), [`apply?`](#apply), [`rw?`](#rw), [`settle with rules`](#settle-with-rules), [`typecheck`](#typecheck), [`synthesize`](#synthesize), [`cc  /  congruence`](#cc-congruence), [`decide`](#decide), [`compute`](#compute) |
+| [Search and automation](#search-and-automation) | [`exact?`](#exact), [`apply?`](#apply), [`rw?`](#rw), [`settle with rules`](#settle-with-rules), [`typecheck`](#typecheck), [`synthesize`](#synthesize), [`cc  /  congruence  /  cc [facts]`](#cc-congruence-cc-facts), [`decide`](#decide), [`compute`](#compute) |
 | [Arithmetic](#arithmetic) | [`ring`](#ring), [`ring [h₁, h₂]`](#ring-h1-h2), [`ring (monomials := N)`](#ring-monomials-n), [`ring_nf`](#ringnf), [`linear_combination 2 * h1 - h2`](#linearcombination-2-h1---h2), [`arith`](#arith), [`linarith`](#linarith) |
 | [Shaping a development](#shaping-a-development) | [`sorry`](#sorry), [`. tactic`](#tactic), [`tactic1; . tactic2`](#tactic1-tactic2), [`tactic solve(rule) := simp [$rule]`](#tactic-solverule-simp-rule) |
 | [Induction](#induction) | [`induction n [generalizing s ...] [with]`](#induction-n-generalizing-s-with), [`induction finite with G a`](#induction-finite-with-g-a), [`induction x using membership`](#induction-x-using-membership), [`induction x over A ordered by r certified by founded`](#induction-x-over-a-ordered-by-r-certified-by-founded) |
@@ -257,6 +257,8 @@ the constructor is checked against the premise it fills
 Bare `*` stops at a source theorem's `shows` boundary even when evidence for an antecedent in the conclusion is available, so conditional and negative results are preserved. To eliminate such an implication, name the evidence after the star: `with *, evidence`. A named premise may also precede the star: `with named, *`.
 
 `with *` draws on local facts, instance synthesis, and Tau refinement reconstruction, in that order. It does not find library theorems or prove reflexive equalities: bind `have one := realZero.lt_one` or `have same : t = t` with `rfl` first, or list the premise explicitly.
+
+A requirement an instance in scope can supply, such as a section hypothesis `CommRing(S)` with an instance for `CommRing` visible, fixes `S` from a lone local fact of its shape only after every other requirement has had its turn, so `rw RingHom.map_pow with *` finds `S` from the homomorphism fact `f : R →+* S` and `CommRing(S)` from the instance.
 
 For local proof values and declarations without a source boundary, `*` consumes the leading implication chain; use a count to preserve a remainder.
 
@@ -1103,9 +1105,11 @@ visible instance declarations derive C(args) from Γ
 search is indexed, tabled, cycle-checked, and bounded
 ```
 
-### `cc  /  congruence`
+### `cc  /  congruence  /  cc [facts]`
 
-**Finish a ground equality or predicate congruence.** Congruence closure by union-find, then an equality proof assembled from the facts it used. A disequality goal, or a denied predicate, is assumed and refuted from the conflict it creates with the local equalities.
+**Finish a ground equality or predicate congruence.** Congruence closure by union-find, then an equality proof assembled from the facts it used. A disequality goal, or a denied predicate, is assumed and refuted from the conflict it creates with the local equalities. cc [h, k] uses the listed facts alone, with the opened guard facts; an entry may be a theorem instance, thm at a, b with facts or (thm with h), as a rw or simp list accepts it, and its statement joins the equalities.
+
+`cc [h, k]` chains the listed facts alone, with the opened guard facts, instead of every local fact: a listed entry is a local fact, a theorem, or a theorem instance `thm at a, b with facts` or `(thm with h)` as a `rw` or `simp` list accepts it, and an instantiated theorem's statement joins the equalities. A listed name that is neither a local fact nor a theorem is an error. Bare `cc` keeps its meaning.
 
 `cc` chains local equalities, closes function congruences, transports positive predicate facts across congruent arguments, and derives arbitrary goals from a congruent disequality or a positive/negative predicate conflict. A disequality goal `s ≠ t`, or a denied predicate `¬P(t)`, is assumed and refuted: the equation or predicate joins the facts and ⊥ follows from the conflict it creates, so `rightEnd(e) ≠ v` follows from `leftEnd(e) = rightEnd(e)` and `leftEnd(e) ≠ v`. The explanation is built from the original equalities, equality transitivity and symmetry, function congruence, and equality elimination. `cc` does no quantifier instantiation and no conditional rewriting; use `specialize`, `rw`, and `simp` for those.
 
@@ -1115,13 +1119,15 @@ cc
 -- loop : leftEnd(e) = rightEnd(e), atV : leftEnd(e) ≠ v
 -- goal: rightEnd(e) ≠ v
 cc
+-- xy : x = y, goal: twice(x) = pair(y, y)
+cc [xy, double at x]
 ```
 
 Rule schema:
 
 ```text
-equalities in Γ place s and t in one congruence class
-─────────────────────────────────────────────────────  cc
+equalities in Γ, or the listed facts, place s and t in one congruence class
+───────────────────────────────────────────────────────────────────────────  cc
 Γ ⊢ s = t
 the equality explanation is checked
 ```

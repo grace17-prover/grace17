@@ -3,7 +3,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { elaborateModule, moduleReport, SurfaceError, type ElaboratedModule } from "./surface.ts";
+import { elaborateModule, moduleReport, SurfaceError, type ElaboratedModule, type TheoremFailure } from "./surface.ts";
 import { moduleNameFromPath, resolveImportName } from "./module-names.ts";
 import type { Kernel } from "./kernel.ts";
 
@@ -45,6 +45,16 @@ export function setLibraryModuleLoader(loader?: LibraryModuleLoader): void {
  * the only platform hook: Node supplies filesystem reads, while the browser
  * supplies versioned standard-library source strings.
  */
+/** How a module graph is loaded beyond its sources and roots. */
+export interface ModuleGraphOptions {
+  /**
+   * Called with each theorem whose proof failed, with its file and module,
+   * when a module is to go on past a failed theorem to its next
+   * declaration; see ElaborateModuleOptions.onTheoremFailure.
+   */
+  readonly onTheoremFailure?: (failure: TheoremFailure & { readonly file: string; readonly module?: string }) => void;
+}
+
 export function loadModuleSourceGraphResolved(
   kernel: Kernel,
   entries: readonly ModuleSourceFile[],
@@ -52,6 +62,7 @@ export function loadModuleSourceGraphResolved(
   resolveSource?: ModuleSourceResolver,
   entryModules: readonly string[] = [],
   deriveName: ModuleNameDeriver = file => moduleNameFromPath(file, ["lib"]),
+  options: ModuleGraphOptions = {},
 ): readonly LoadedModule[] {
   const sources = new Map<string, ModuleSource>();
 
@@ -117,7 +128,16 @@ export function loadModuleSourceGraphResolved(
 
   const results: LoadedModule[] = [];
   const elaborate = (item: ModuleSource): ElaboratedModule => {
-    try { return elaborateModule(kernel, item.source, item.name ? { moduleName: item.name } : {}); }
+    const onTheoremFailure = options.onTheoremFailure;
+    try {
+      return elaborateModule(kernel, item.source, {
+        ...(item.name ? { moduleName: item.name } : {}),
+        ...(onTheoremFailure ? { onTheoremFailure: (failure: TheoremFailure) => {
+          if (failure.error instanceof SurfaceError) failure.error.file ??= item.file;
+          onTheoremFailure({ ...failure, file: item.file, ...(item.name ? { module: item.name } : {}) });
+        } } : {}),
+      });
+    }
     catch (error) {
       if (error instanceof SurfaceError) error.file ??= item.file;
       throw error;

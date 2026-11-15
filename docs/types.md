@@ -82,6 +82,16 @@ you write can still discharge the premise. Exact local evidence and cached
 results are consulted before the work and depth limits. These limits bound
 elaboration; they say nothing about what the kernel can check.
 
+A typing rule belongs in the module that defines the function it types, so
+that every module which sees the function sees the rule: `cardinality.nat`,
+`Finite(A) → Nat(cardinality(A))`, stands beside the `defunique` of
+`cardinality`, and `typecheck`, the placement of operands, and `arith` all
+read `cardinality(S)` as a natural number wherever `Finite(S)` holds. The
+law a `defunique` generates for its own bound, `cardinality.selected`,
+concludes a conjunction, `cardinality(A) ∈ ℕ ∧ HasCardinality(A,
+cardinality(A))`, which is not one of the rule forms above; the one-line
+theorem is what makes the bound a rule.
+
 The index holds every checked declaration of the kernel, but a scope
 consults only the rules of the declarations it sees: those declared outside
 any module, those of the current module, and those of the modules it

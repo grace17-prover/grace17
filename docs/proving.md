@@ -538,6 +538,13 @@ when specializing a local fact: `specialize h with *{2}`.
 reflexivity, so bind `have one := realZero.lt_one` or `have same : t = t` with
 `rfl` first, or list the premise.
 
+A requirement an instance in scope can supply, such as a section hypothesis
+`CommRing(S)` where an instance for `CommRing` is visible, fixes `S` from a
+lone local fact of its shape only after every other requirement has had its
+turn. So `rw RingHom.map_pow with *` finds `S` from the homomorphism fact
+`f : R →+* S`, and `CommRing(S)` is then discharged by the instance; no
+`have complexes := complexRing.comm_ring` is needed to name it.
+
 ## Local facts
 
 `have h : P` opens an indented proof of the local proposition `P`. Once that
@@ -587,7 +594,10 @@ implication introduction and elimination, so a universally quantified local
 lemma can be reused under a later binder with the same variable name without
 capturing the lemma's bound variable. The local proposition is not available
 as an assumption while proving itself. `have h := theorem at arguments` is the
-short way to bind a fact that already exists.
+short way to bind a fact that already exists. The `:=` form takes a proof
+reference, never a proposition: a statement proved by a tactic is written
+with a colon, `have g : y = x by cc`, and writing `have g := y = x by cc`
+is an error that says so.
 
 Use `have h : P := fact with *` to supply an expected proposition for a
 one-line local fact. As with `exact ... with *`, bounded structural inference

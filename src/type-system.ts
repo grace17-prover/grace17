@@ -490,6 +490,29 @@ interface PreparedInstanceRules {
 const preparedInstanceRules = new WeakMap<Kernel, Map<string, PreparedInstanceRules>>();
 
 /**
+ * The class predicates the named instances supply. A requirement of that
+ * shape, such as CommRing(S), is discharged by the instance search once S
+ * is known, so parameter inference lets every other requirement fix S
+ * before a lone local fact of that shape does.
+ */
+export function instancePredicates(kernel: Kernel, instanceNames: ReadonlySet<string>): ReadonlySet<string> {
+  const index = typeIndex(kernel);
+  // The names of a scope are one cached set; its predicates are kept with
+  // it and recomputed when the index has grown since, as when an instance
+  // declared later in the module is admitted.
+  const cached = instancePredicateCache.get(instanceNames);
+  if (cached && cached.stamp === index.stamp) return cached.predicates;
+  const predicates = new Set<string>();
+  for (const name of instanceNames) {
+    const rule = index.byName.get(name);
+    if (rule) predicates.add(rule.predicate);
+  }
+  instancePredicateCache.set(instanceNames, { stamp: index.stamp, predicates });
+  return predicates;
+}
+const instancePredicateCache = new WeakMap<ReadonlySet<string>, { readonly stamp: string; readonly predicates: ReadonlySet<string> }>();
+
+/**
  * Resolve evidence using only registered instance declarations.
  *
  * Search is first-order and indexed by the requested conclusion predicate.

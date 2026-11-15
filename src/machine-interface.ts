@@ -27,7 +27,7 @@ import { sha256Hex } from "./hash.ts";
 import { SurfaceError } from "./surface.ts";
 import {
   auditWorkbenchTheorem, checkWorkbenchFiles, declarationAtLine, describeWorkbenchProperty, describeWorkbenchStatement,
-  pinWorkbenchDependencies, pinnedWorkbenchDependencies, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
+  pinWorkbenchDependencies, pinnedWorkbenchDependencies, declarationBoundary, proofRanges, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
   type WorkbenchCheckResult, type WorkbenchFile, type WorkbenchFoundation, type WorkbenchState, type WorkbenchStep,
   type WorkbenchStepInfo, type WorkbenchSuggestion, type WorkbenchTheorem,
 } from "./workbench.ts";
@@ -1255,20 +1255,48 @@ function generatedSignature(params: Params, name: string, module: string | undef
 const PROBE_THEOREM = "g17probe.elaborate";
 
 /**
- * The prefix of a file in which a probe theorem can stand at a line: the
- * lines before the declaration holding the line, with every proof before it
- * replaced by `sorry` (the definitions, notations, and section scope are
- * what the probe needs; the proofs are not), and the `end` lines that close
- * the sections and namespaces still open there.
+ * The prefix of a file in which a probe theorem stands at a line, with the
+ * facts in force there: the lines before the declaration holding the line,
+ * every proof among them replaced by `sorry` (the definitions, notations,
+ * and section clauses are what the probe needs; no proof is), and the
+ * `end` lines that close the sections and namespaces still open there. A
+ * line inside a theorem lends the probe its header, so the theorem's
+ * binders and premises are in force as well; a line on a section clause or
+ * a directive keeps that clause in force; a line inside a definition stands
+ * before it.
  */
-function probePrefix(source: string, line: number | undefined): { readonly lines: string[]; readonly line: number; readonly closers: string[] } {
+function probePrefix(source: string, line: number | undefined): {
+  readonly lines: string[]; readonly line: number; readonly closers: string[]; readonly header: string[]; readonly theorem?: string;
+} {
   const lines = source.split(/\r?\n/);
   let at = Math.min(line ?? lines.length + 1, lines.length + 1);
-  const ranges = theoremRanges(source);
-  const holder = ranges.find(range => at >= range.lineStart && at <= range.lineEnd);
-  if (holder) at = holder.lineStart;
+  let header: string[] = [];
+  let theorem: string | undefined;
+  const holder = theoremRanges(source).find(range => at >= range.lineStart && at <= range.lineEnd);
+  if (holder) {
+    let last = holder.lineEnd;
+    while (last > holder.lineStart && !lines[last - 1]!.trim()) last -= 1;
+    if (at > last) at = last + 1;
+    else {
+      const shows = lines.findIndex((text, index) => index + 1 >= holder.lineStart && index + 1 <= holder.lineEnd && /^\s*shows\b/.test(text));
+      const named = /^\s*(?:theorem|lemma|instance)\s+(\S+)/.exec(lines[holder.lineStart - 1]!);
+      if (shows >= 0 && named) {
+        theorem = named[1]!;
+        header = lines.slice(holder.lineStart - 1, shows).map((text, index) =>
+          index === 0 ? text.replace(/^(\s*)(?:theorem|lemma|instance)\s+\S+/, `$1theorem ${PROBE_THEOREM}`) : text);
+      }
+      at = holder.lineStart;
+    }
+  } else if (line !== undefined && at <= lines.length) {
+    let start = at;
+    while (start > 1 && !declarationBoundary(lines[start - 1]!)) start -= 1;
+    let end = at;
+    while (end < lines.length && !declarationBoundary(lines[end]!)) end += 1;
+    const clause = /^\s*(?:hypothesis|variable|module|import|namespace|section|end|open|export\s+open|notation|tactic|eval)\b/.test(lines[start - 1]!);
+    at = clause ? end + 1 : start;
+  }
   const kept = lines.slice(0, at - 1);
-  for (const range of ranges) {
+  for (const range of proofRanges(source)) {
     if (range.lineEnd >= at) continue;
     let proofLine = -1;
     for (let index = range.lineStart; index <= range.lineEnd; index += 1) {
@@ -1284,7 +1312,7 @@ function probePrefix(source: string, line: number | undefined): { readonly lines
     if (/^\s*(?:section|namespace)\b/.test(code)) depth += 1;
     else if (/^\s*end(?:\s|$)/.test(code)) depth = Math.max(0, depth - 1);
   }
-  return { lines: kept, line: at, closers: Array.from({ length: depth }, () => "end") };
+  return { lines: kept, line: at, closers: Array.from({ length: depth }, () => "end"), header, ...(theorem ? { theorem } : {}) };
 }
 
 /** The function and predicate symbols a formula or term mentions, in first-use order. */
@@ -1327,7 +1355,7 @@ function elaborate(params: Params) {
     if (source === undefined) throw new MachineError("unknown_file", `${file} is not among the files`, { file });
     const line = integerParam(params, "line");
     prefix = probePrefix(source, line);
-    context = { file, line: prefix.line };
+    context = { file, line: prefix.line, ...(prefix.theorem ? { theorem: prefix.theorem } : {}) };
   } else {
     workspace = moduleWorkspace(params, module);
     file = "Probe.g17";
@@ -1336,7 +1364,9 @@ function elaborate(params: Params) {
   }
   const attempt = (kind: "formula" | "term"): { readonly raw: RawCheck; readonly files: readonly WorkbenchFile[] } => {
     const shows = kind === "formula" ? text : `${text} = ${text}`;
-    const probe = [...prefix.lines, `theorem ${PROBE_THEOREM}${variables ? ` ${variables}` : ""}`, `  shows ${shows}`, "proof", "  sorry", ...prefix.closers].join("\n");
+    const header = prefix.header.length ? [...prefix.header] : [`theorem ${PROBE_THEOREM}`];
+    if (variables) header[0] = header[0]!.replace(`theorem ${PROBE_THEOREM}`, `theorem ${PROBE_THEOREM} ${variables}`);
+    const probe = [...prefix.lines, ...header, `  shows ${shows}`, "proof", "  sorry", ...prefix.closers].join("\n");
     const files = workspace.files.map(item => item.name === file ? { name: file, source: probe } : item);
     return { raw: rawCheck({ ...workspace, files, activeFile: file, entry: [file] }, plainCheck), files };
   };

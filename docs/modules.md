@@ -135,6 +135,13 @@ So `hypothesis` introduces a premise, and the kernel checks the universally
 quantified implication. A hypothesis is a premise, never an axiom. Closing
 the section removes its local context; the checked theorem remains available.
 
+Every theorem of a section takes every hypothesis of the section as a
+premise, whether or not its proof uses it, so its applications supply all of
+them and its `with` list has the section's arity. The check warns about a
+section hypothesis a theorem's proof does not use, and says when the
+statement shares no variable with it either: such a theorem may belong
+outside the section, or in a narrower one. The premise is kept all the same.
+
 ### Nested sections
 
 You can add assumptions for just part of a development:

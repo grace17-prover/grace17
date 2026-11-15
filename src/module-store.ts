@@ -240,6 +240,7 @@ export function loadModuleStore(
       theoremLocations: artifact.loaded.theoremLocations,
       evaluations: [],
       sorries: artifact.loaded.sorries,
+      warnings: [],
     });
   }
   return { kernel: current, loaded };
