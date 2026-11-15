@@ -6,9 +6,13 @@ angle of sixty degrees cannot be trisected. This blueprint plans the
 formalization in Cumulus as checked Grace17 modules: every definition
 final, every theorem stated in full and admitted with `sorry` until proved,
 the import graph the dependency graph of the proof. It is now proved in
-full: no module has an admission left, and the four final theorems audit
-to the ZF axioms alone, without choice. `npm run blueprint:status` reports
-the count per module.
+full and promoted into Cumulus under the home named in each row below,
+held to the Cumulus rules: at most three imports for a proof module,
+headers, and no admissions. The constructions live under
+`Grace.Cumulus.Geometry.Construction`, the field theory under
+`Grace.Cumulus.Algebra.Field`, the number theory under
+`Grace.Cumulus.NumberTheory`, and the rational quotients under
+`Grace.Cumulus.Real`.
 
 ```sh
 npm run blueprint:check     # the whole blueprint elaborates
@@ -97,19 +101,19 @@ only the conjugation of a single square root and descent through a tower.
 
 | module | layer | home in Cumulus (relative to `Grace.Cumulus`) |
 |---|---|---|
-| ReducedFraction | 1 | NumberTheory/ReducedFraction |
-| RationalQuotients | 1 | Real/RationalQuotients |
-| RealSubfield | 2 | Algebra/Field/RealSubfield |
-| QuadraticAdjoin | 3 | Algebra/Field/QuadraticAdjoin |
-| Numbers | 3 | Geometry/Construction/Numbers |
-| CubicConjugation | 4 | Algebra/Field/CubicConjugation |
-| QuadraticTower | 4 | Algebra/Field/QuadraticTower |
-| Intersections | 4 | Geometry/Construction/Intersections |
-| CubicIntegerRoots | 5 | NumberTheory/CubicIntegerRoots |
-| Tower | 5 | Geometry/Construction/Tower |
-| Descent | 6 | Geometry/Construction/Descent |
-| Impossibility | 7 | Geometry/Construction/Impossibility |
-| Points | 8 | Geometry/Construction/Points |
+| ReducedFraction | 1 | promoted: NumberTheory/ReducedFraction |
+| RationalQuotients | 1 | promoted: Real/RationalQuotients |
+| RealSubfield | 2 | promoted: Algebra/Field/RealSubfield |
+| QuadraticAdjoin | 3 | promoted: Algebra/Field/QuadraticAdjoin |
+| Numbers | 3 | promoted: Geometry/Construction/Numbers |
+| CubicConjugation | 4 | promoted: Algebra/Field/CubicConjugation |
+| QuadraticTower | 4 | promoted: Algebra/Field/QuadraticTower |
+| Intersections | 4 | promoted: Geometry/Construction/Intersections |
+| CubicIntegerRoots | 5 | promoted: NumberTheory/CubicIntegerRoots |
+| Tower | 5 | promoted: Geometry/Construction/Tower |
+| Descent | 6 | promoted: Geometry/Construction/Descent |
+| Impossibility | 7 | promoted: Geometry/Construction/Impossibility |
+| Points | 8 | promoted: Geometry/Construction/Points |
 
 ```mermaid
 graph TD
@@ -210,18 +214,5 @@ solver may be inlined if the count matters).
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| Constructible.RationalQuotients | 17 | 17 | 0 |
-| Constructible.RealSubfield | 19 | 19 | 0 |
-| Constructible.QuadraticAdjoin | 10 | 10 | 0 |
-| Constructible.CubicConjugation | 7 | 7 | 0 |
-| Constructible.ReducedFraction | 2 | 2 | 0 |
-| Constructible.CubicIntegerRoots | 5 | 5 | 0 |
-| Constructible.QuadraticTower | 13 | 13 | 0 |
-| Constructible.Numbers | 19 | 19 | 0 |
-| Constructible.Tower | 8 | 8 | 0 |
-| Constructible.Descent | 3 | 3 | 0 |
-| Constructible.Impossibility | 4 | 4 | 0 |
-| Constructible.Intersections | 6 | 6 | 0 |
-| Constructible.Points | 14 | 14 | 0 |
-| **total** | **127** | **127** | **0** |
+| **total** | **0** | **0** | **0** |
 <!-- /blueprint-status -->

@@ -434,6 +434,22 @@ medians, centroids, circumcenters, the Euler line, Heron's formula, and the
 power of a point are stated in these terms. Public theorems use geometric
 lemmas; the coordinate identities behind them stay in a helper layer.
 
+`Grace.Cumulus.Geometry.Construction` holds the constructions with
+straightedge and compass: the constructible real numbers as the least
+subfield of the reals closed under square roots, the constructible points
+as the least set of points closed under the intersections of lines and
+circles through points already constructed, and the two impossibilities
+of antiquity, that no constructible number is a cube root of two and that
+no constructible point on the unit circle has its cube at sixty degrees,
+so the cube cannot be doubled and the angle cannot be trisected. The
+proof needs no dimension theory: a constructible number lies at the top
+of a tower of quadratic extensions, a cubic over a field with a root in a
+quadratic extension has a root in the field, and a rational root of a
+monic integer cubic is an integer. The real subfields, quadratic
+adjunction, the conjugation lemma, and the towers live under
+`Grace.Cumulus.Algebra.Field`, the reduced fractions and the integer
+roots of cubics under `Grace.Cumulus.NumberTheory`.
+
 ## The Banach–Tarski paradox
 
 `Grace.Cumulus.Geometry.BanachTarski` proves that the closed unit ball of ℝ³

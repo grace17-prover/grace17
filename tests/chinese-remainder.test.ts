@@ -68,7 +68,7 @@ test("CRT retains intermediate goal states cold and after editing", () => {
 test("Top 100 catalogue has current source statements, proof links, and audited counts", () => {
   assert.equal(readFileSync("docs/top-100.md", "utf8"), renderTop100());
   const entries = JSON.parse(readFileSync("docs/top-100.json", "utf8"));
-  assert.equal(entries.filter(e => e.status === "verified").length, 52);
+  assert.equal(entries.filter(e => e.status === "verified").length, 53);
   assert.equal(entries.filter(e => e.status === "scoped").length, 0);
   assert.equal(entries.filter(e => e.status === "planned").length, 0);
   assert.ok(!entries.some(e => /Chinese remainder/i.test(e.title)));
