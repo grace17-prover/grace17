@@ -3,11 +3,12 @@
 No number constructible with ruler and compass is a cube root of 2, and
 none is the cosine of twenty degrees: the cube cannot be doubled and the
 angle of sixty degrees cannot be trisected. This blueprint plans the
-formalization in Cumulus as checked Grace17 modules: every definition here
-is final, every theorem is stated in full and admitted with `sorry`, and
-the import graph is the dependency graph of the proof. The blueprint checks
-as it stands; filling it in replaces admissions with proofs, one theorem at
-a time, and `npm run blueprint:status` reports what remains.
+formalization in Cumulus as checked Grace17 modules: every definition
+final, every theorem stated in full and admitted with `sorry` until proved,
+the import graph the dependency graph of the proof. It is now proved in
+full: no module has an admission left, and the four final theorems audit
+to the ZF axioms alone, without choice. `npm run blueprint:status` reports
+the count per module.
 
 ```sh
 npm run blueprint:check     # the whole blueprint elaborates
@@ -201,18 +202,18 @@ solver may be inlined if the count matters).
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| Constructible.RationalQuotients | 13 | 0 | 13 |
-| Constructible.RealSubfield | 18 | 0 | 18 |
-| Constructible.QuadraticAdjoin | 10 | 0 | 10 |
-| Constructible.CubicConjugation | 7 | 2 | 5 |
-| Constructible.ReducedFraction | 2 | 0 | 2 |
-| Constructible.CubicIntegerRoots | 5 | 0 | 5 |
-| Constructible.QuadraticTower | 11 | 0 | 11 |
-| Constructible.Numbers | 18 | 0 | 18 |
-| Constructible.Tower | 5 | 0 | 5 |
-| Constructible.Descent | 2 | 0 | 2 |
-| Constructible.Impossibility | 4 | 0 | 4 |
-| Constructible.Intersections | 4 | 0 | 4 |
-| Constructible.Points | 8 | 0 | 8 |
-| **total** | **107** | **2** | **105** |
+| Constructible.RationalQuotients | 17 | 17 | 0 |
+| Constructible.RealSubfield | 18 | 18 | 0 |
+| Constructible.QuadraticAdjoin | 10 | 10 | 0 |
+| Constructible.CubicConjugation | 8 | 8 | 0 |
+| Constructible.ReducedFraction | 2 | 2 | 0 |
+| Constructible.CubicIntegerRoots | 5 | 5 | 0 |
+| Constructible.QuadraticTower | 13 | 13 | 0 |
+| Constructible.Numbers | 18 | 18 | 0 |
+| Constructible.Tower | 7 | 7 | 0 |
+| Constructible.Descent | 3 | 3 | 0 |
+| Constructible.Impossibility | 4 | 4 | 0 |
+| Constructible.Intersections | 6 | 6 | 0 |
+| Constructible.Points | 14 | 14 | 0 |
+| **total** | **125** | **125** | **0** |
 <!-- /blueprint-status -->
