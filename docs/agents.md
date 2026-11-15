@@ -56,7 +56,7 @@ that loops over check, goal, suggest, and paste should use it rather than
 read printed text.
 
 ```sh
-node bin/g17.ts check --json --module-root lib Probe.g17
+node bin/g17.ts check --json Probe.g17
 node bin/g17.ts goal Probe.g17 --line 11 --column 12
 node bin/g17.ts suggest Probe.g17 --line 12 --tactic 'exact?'
 node bin/g17.ts search 'name:transitive module:Set.Core'
@@ -67,7 +67,8 @@ node bin/g17.ts search 'name:transitive module:Set.Core'
 | Interface | Use it for | Returns |
 | --- | --- | --- |
 | `g17 serve`, `g17 check --json`, `g17 goal`, `g17 suggest` | A tool or agent driving the checker | The Workbench's states, suggestions, search results, declarations, and audits as JSON; see [machine interface](machine-interface.md) |
-| `g17 check --artifacts build/modules` | Checking files from a shell | Pass or fail; on failure the message, line, and the remaining goals with named hypotheses (`--json` adds the full tactic trace and every theorem's step states); with `--artifacts`, library imports replay from compiled artifacts in about a second |
+| `g17 check --store` | Checking files from a shell | Pass or fail; on failure the message, line, and the remaining goals with named hypotheses (`--json` adds the full tactic trace and every theorem's step states); with `--store`, or `"artifacts": true` in a `g17.json`, library imports replay from the shared artifact store in about a second after the first run |
+| `g17 settings` | What a run resolves | The module roots (the bundled library is always one), the artifact store, the foundation, and the heap, from flags, the environment, `g17.json`, and the user configuration; see [settings](machine-interface.md#settings) |
 | Workbench HTTP API, `POST /api/check` | Structured proof states | Every tactic's before and after goals, named hypotheses, search suggestions, `sorry` goals, statements, dependencies |
 | TypeScript API, `checkWorkbenchFiles` | The same data in-process | The same structure, without a server |
 | `g17 axiom-audit --json` | What a proof depends on | Named axioms, schema instances, Choice usage, dependency paths |
@@ -245,8 +246,19 @@ add it to the module where it belongs. Do not inline it in your proof.
 
 Checking the probe file above from the command line takes about half a
 second. Files that import large subjects such as real analysis take longer,
-because their imports are elaborated too; the in-process API keeps a loaded
-workspace between calls.
+because their imports are elaborated too; `g17 serve` keeps the loaded
+imports between requests, so a loop of check, goal, and suggest on one file
+costs a fraction of a second per call after the first, and the in-process
+API does the same. `serve` speaks over standard input and output; an agent
+that wants a socket wraps it in a few lines.
+
+When several agents prove at once, each works in a private copy of the
+files it owns, relies on sibling modules only through their statements,
+never edits a sibling, and reports a statement it believes false with the
+fix it proposes rather than changing it; the integrator merges the copies
+and runs the checks. A blueprint, a module root of statements admitted
+with `sorry` whose import graph is the dependency graph of a proof, is how
+a theorem campaign is planned and divided; see `blueprints/*/README.md`.
 
 ## Foundations and the axiom audit
 
@@ -254,7 +266,7 @@ The command line accepts `--foundation ZF`, `ZFC`, or `ZFG`. A theorem checked
 under ZFG may still have a Choice-free proof; the audit tells you:
 
 ```sh
-node bin/g17.ts axiom-audit --json --foundation ZF --module-root lib Probe.g17 --theorem Probe.subset_chain
+node bin/g17.ts axiom-audit --json --foundation ZF Probe.g17 --theorem Probe.subset_chain
 ```
 
 The report lists direct and hereditary named axioms, schema instances
@@ -275,7 +287,7 @@ Before presenting a theorem as done:
   independent checker:
 
 ```sh
-node bin/g17.ts compile --module-root lib Probe.g17 --out probe.g17m --environment probe.g17env
+node bin/g17.ts compile Probe.g17 --out probe.g17m --environment probe.g17env
 python3 checkers/python/g17check.py probe.g17m --environment probe.g17env
 ```
 
@@ -317,9 +329,11 @@ The checker's message is quoted for each so it can be matched.
   `{ T ∈ ℝ | (0:R) ≤ (T:R) ∧ (T:R) * (T:R) ≤ X }`; the message is "cannot
   resolve notation ≤ for operand types Nat, ?". In a real statement, `-1` has
   to be written `-(1:R)` for the same reason.
-- **`unfold` also rewrites with local equalities.** After `unfold f`, a
-  following `rw h` can fail with "rewrite rule does not match" because the
-  goal is already in the rewritten form; close with `cc` instead.
+- **`unfold` never rewrites with local equalities.** After `unfold f`, a
+  context equality `h` is applied by `rw h` or `simp [f, h]`, and `cc`
+  closes a goal the context equalities settle. `simp … at h` likewise uses
+  a context equation only when it is named, so `simp [rules] at h` cannot
+  collapse `h` into a tautology by the fact it was meant to transform.
 - **Two soft-typed operands may not resolve notation.** For
   `(X Y : NonnegativeReal)`, `X ≤ Y` fails with "cannot resolve notation ≤
   for operand types NonnegativeReal|Real, NonnegativeReal", and `(X:R)` is
@@ -331,23 +345,64 @@ The checker's message is quoted for each so it can be matched.
 - **Generated names can collide.** `defunique f` publishes `f.exists`,
   `f.unique`, and `f.selected`; a theorem named `f.exists` nearby fails
   with "Duplicate proposition name" reported at the `defunique` line.
-- **`with *` only looks at local facts.** It will not fetch a library theorem
-  or prove `t = t` for you. Bind `have one := realZero.lt_one` or
-  `have same : T * T = T * T` with `rfl` first, or name the premise.
+- **`with *` takes local facts and instances, not library theorems.** It
+  fills a premise from a unique local match or from an instance (a class
+  predicate such as `CommRing(S)`, a membership an `instance` supplies, a
+  typing rule), and it will not fetch an ordinary library theorem or prove
+  `t = t`. Bind `have one := realZero.lt_one` or `have same : T * T = T * T`
+  with `rfl` first, or name the premise; a `rfl` entry and a bare
+  ∀-theorem are accepted in a `with` list.
 - **Destructure predicates directly.** The style gate rejects `unfold P at h`
   followed by `rcases h with ...` ("recursive destructuring follows
   transparent predicates directly"); write `rcases h with ...` alone.
-- **`with *` already fills declared `requires` premises.** Listing one again,
-  `lemma at a, b with *, different`, fails with "has no remaining argument at
-  different". Name a premise after the star only for an implication inside
-  the conclusion, as in `with *, positive` for `shows 0 < n → …`.
+- **A named fact must prove some premise.** Naming a fact that `with *` or
+  an `at` argument already discharged is accepted as redundant evidence;
+  naming one that matches no premise fails with "matches no requirement".
+  A partial `at` list seeds the leading parameters and the named facts fix
+  the rest, so `lemma at K with h` works when `K` occurs only in the
+  conclusion.
 - **`?_` takes the whole remaining proposition.** In
   `refine ⟨w, h, ?_, ?_⟩` against `∃ z, A ∧ (B ∧ C)`, the first `?_` captures
   `B ∧ C` and the message is "refine has 1 unused constructor entry". Use
   `_` for leaf holes when several goals are wanted.
-- **`rw` does not rewrite under a binder.** With `equal : y = x` and a goal
-  `∀ q, …` or `∃ zs, …`, the message is "rewrite rule does not match";
-  `intros` or `refine` first, then rewrite inside the component.
+- **`rw` under an existential goal.** `rw` reaches under `∀` and at
+  projections, but with a goal `∃ zs, …` the message is "rewrite rule does
+  not match"; `refine ⟨…, ?_⟩` first, then rewrite inside the component.
+  `rw thm with *` rewrites every instance present and reports "nothing left
+  to rewrite" when none is; a rule whose guard is not in context reports
+  "does not match", so supply the guard (`List(ℝ, xs)`, a membership) first.
+- **A power in a section over a polynomial ring needs the coefficient ring.**
+  In a section with `CommRing(polynomialRing(K, 4))` but no `CommRing(K)`,
+  `X(K, 4, 1) ^ 2` cannot be placed in a ring and the message is "cannot
+  place X(K, 4, 1) for ^ … by X.mem needs CommRing(K)". Add the hypothesis;
+  an operand no ring places is never read as natural arithmetic silently.
+- **Binders over a ring value read its carrier.** Under a ring fact in
+  scope, `∀ a ∈ R` means `a ∈ Ring.carrier(R)` whether `R` is a variable,
+  a constant such as `complexRing`, or a projection such as
+  `Algebra.ring(A)`; so does the arrow guard `f : R → S`. Write
+  `Ring.carrier(R)` to say it outright.
+- **A statement proved by a tactic uses the colon.** `have g := y = x by
+  cc` fails, with the hint to write `have g : y = x by cc`; `have g := …`
+  takes a proof reference.
+- **`cc` takes a list.** `cc [h, k]` uses only the listed facts, and
+  `cc [thm at a, b]` adds a theorem instance; bare `cc` uses every local
+  fact.
+- **A fact for an existential conjunct.** `exact ⟨fibre, h⟩` against
+  `(∃ e, …) ∧ P` with `fibre : ∃ e, …` fills the conjunct with the fact; a
+  term in that position is a witness only when no fact proves it.
+- **Instances in sections.** Every section variable must occur in an
+  instance's conclusion and every section hypothesis must be a predicate
+  (no equation hypotheses), so per-value membership facts in a section with
+  an equation go in a separate section or become theorems. An instance
+  declared later in a module is invisible earlier. Several instances
+  proving the same fact are not an ambiguity; the first stands.
+- **An unused section hypothesis is a warning.** A section hypothesis that
+  a theorem's statement does not mention and its proof does not use is
+  still a premise, and `g17 check` reports it as a warning; move
+  projection lemmas that must be premise-free out of the section.
+- **Division by a numeral is an atom to `ring`.** `(1:R) / (8:R)` is not
+  normalized; rewrite with `realDiv.eq_mul_inv` and cancel through
+  `realInvValue.mul_right`, or state the equation multiplied out.
 - **Nat `arith` needs a comparison goal.** After `exfalso` it reports "arith
   requires a linear equality or comparison goal". Derive `have bad : p < p`
   by `arith` and finish with `Less.irreflexive at p with *, bad`.

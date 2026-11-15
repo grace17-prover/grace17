@@ -10,7 +10,7 @@ developments in Cumulus.
 - [Ordinals](ordinals.md): von Neumann ordinals and executable Cantor normal forms
 - [Datatypes](datatypes.md): inductively defined classes of sets, and `structure` declarations for groups, rings, orders, and categories
 - [Types and instances](types.md): soft types, classes, and instance resolution
-- [Notation](notation.md): mathematical notation, Unicode and ASCII, and `notation` declarations
+- [Notation](notation.md): mathematical notation, Unicode and ASCII, `notation` declarations, and the `register` declarations that tell the elaborator how a structure's elements are read
 - [Proving theorems](proving.md): writing statements and proofs, applying theorems, and using the automation
 - [Tactic reference](tactics.md): every tactic, organized as in the Workbench Help, with examples and rule schemas
 - [Modules, namespaces, and sections](modules.md): how files, imports, names, and shared hypotheses organize a development
@@ -43,7 +43,7 @@ developments in Cumulus.
 ## For AI agents
 
 - [Grace17 for AI agents](agents.md): the checking API, goal states, search, and a working loop for agents that prove theorems
-- [Machine interface](machine-interface.md): `g17 serve` and the method subcommands, the JSON protocol that exposes what the Workbench shows
+- [Machine interface](machine-interface.md): `g17 serve` and the method subcommands, the JSON protocol that exposes what the Workbench shows, and the settings a run resolves from flags, the environment, and `g17.json`
 - Claude Code users: `/plugin install grace17 --marketplace grace17-prover/grace17` installs the Grace17 skill
 - [AGENTS.md](../AGENTS.md): expectations for coding agents that modify Grace17 itself
 

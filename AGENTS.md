@@ -35,24 +35,30 @@ Node.js 24 or later. Run `npm ci` once.
 
 | Task | Command |
 | --- | --- |
-| Check one file | `node bin/g17.ts check --module-root lib path/to/File.g17` |
+| Check one file | `node bin/g17.ts check path/to/File.g17` (the library is always a module root; `--module-root dir` adds another) |
 | Check under ZF only | add `--foundation ZF` |
-| Check all of Cumulus | `npm run check:cumulus` |
-| Check all of Cumulus, continuing past failures | `npm run check:cumulus -- --continue` |
-| Axiom audit for a theorem | `node bin/g17.ts axiom-audit --module-root lib File.g17 --theorem Full.Name` |
-| Goal at a position, as JSON | `node bin/g17.ts goal --module-root lib File.g17 --line N --column C` |
-| Query tactic at a position, as JSON | `node bin/g17.ts suggest --module-root lib File.g17 --line N --tactic 'exact?'` |
+| Check all of Cumulus | `npm run check:cumulus` (about two and a half minutes) |
+| Check all of Cumulus, continuing past failures | `npm run check:cumulus -- --continue --quiet` (every failed theorem of a module is reported) |
+| Replay library imports from the shared artifact store | add `--store` (or `"artifacts": true` in `g17.json`); the first run compiles, later runs replay |
+| What a run resolves: roots, store, foundation, heap | `node bin/g17.ts settings` |
+| Axiom audit for a theorem | `node bin/g17.ts axiom-audit File.g17 --theorem Full.Name` |
+| Goal at a position, as JSON | `node bin/g17.ts goal File.g17 --line N --column C` |
+| Query tactic at a position, as JSON | `node bin/g17.ts suggest File.g17 --line N --tactic 'exact?'` |
+| What a term means at a line | `node bin/g17.ts elaborate '<text>' --file File.g17 --line N` |
 | Library search | `node bin/g17.ts search 'name:transitive module:Set.Core'` |
 | The JSON protocol over stdio | `node bin/g17.ts serve` (see [docs/machine-interface.md](docs/machine-interface.md)) |
-| One test file | `node --test tests/name.test.ts` |
-| Full suite (slow) | `npm test` |
+| One test file, or several by name fragment | `node scripts/run-tests.ts name-fragment [more]` (the harness preloads the library store that many tests need; a bare `node --test` does not) |
+| Full suite (about an hour) | `npm test` |
 | Cumulus header check | `npm run check:headers` |
+| Library style and module tests | `node scripts/run-tests.ts cumulus-style module-headers unique-definitions` |
 | Conformance, TypeScript and Python | `npm run conformance && npm run conformance:python` |
 | OCaml checker, if installed | `npm run test:ocaml` |
 | Rust checker, if installed | `npm run test:rust` |
+| Regenerate the tactic reference from the Workbench Help | `npm run docs:tactics` (never edit `docs/tactics.md` by hand; edit `workbench/tactics-guide.js` and `workbench/tactics-reference.js`) |
 | Regenerate the Top 100 page | `npm run docs:top100` |
 | Verify introduction excerpts | `npm run docs:introduction:check` |
-| Browser bundle and Workbench | `npm run workbench` |
+| Browser bundle and Workbench | `npm run workbench`; `npm run build:browser` alone refreshes the bundle the browser tests read |
+| A blueprint's status | `npm run blueprint:status` (see `blueprints/*/README.md`) |
 
 Checker output is JSON with `--json`: every theorem's status and the goal
 state after each step, and on failure a diagnostic with its position and
@@ -60,6 +66,23 @@ the partial trace. Error messages carry source line numbers. A `settle` or
 `exact` failure reports the goal that remains.
 
 ## Rules
+
+**No library knowledge by name in the elaborator.** Do not add a string
+naming a Cumulus theorem, definition, or field to `src/`. The elaborator is
+generic machinery: what a library notion needs from it is declared in the
+library, by `notation`, `instance`, typing rules, structure laws, or a
+`register` declaration (see [docs/notation.md](docs/notation.md)), and the
+existing lists of names are being retired, not extended.
+
+**Budgets are options.** A step limit, a size cap, or any other
+computational budget a tactic uses must be settable by the user on the
+call, as `simp (compute := N)` and `ring (monomials := N)` are.
+
+**The elaborator must not get slower.** Measure the whole-library check
+before and after an elaborator change on a quiet machine
+(`time npm run -s check:cumulus -- --continue --quiet`, about 150 seconds
+of user time), and record both numbers in the commit message. A change
+that is slower beyond noise does not merge.
 
 **The trusted boundary is not yours to move.** Do not add kernel rules,
 axioms, foundation profiles, trusted evaluation shortcuts, or changes to the
@@ -86,7 +109,11 @@ A bundled structure keeps the plain noun (`Group(G)`, `CommRing(R)`,
 `IsIdeal(A, add, zero, neg, mul, I)`), and so do its lemmas
 (`IsCommRing.mul_comm`).
 Prefer named hypotheses, `have` with stated propositions, `calc`, and
-sections over long tactic runs. The style test rejects mechanical verbosity.
+sections over long tactic runs. A proof module imports at most three
+modules (an area's entry point is exempt). The style test rejects
+mechanical verbosity: `have h := …` followed by `exact h` or by
+`specialize h with …`, two adjacent `intro` lines, `unfold P at h` followed
+by a destructuring of `h`, and hyphens in names.
 
 **Documentation is timeless and impersonal.** Describe the system as it is.
 Do not write version numbers, dates, checkpoint names, validation logs, or
@@ -103,6 +130,14 @@ A checker shortcut that names a library definition (`Grace.Core.Nat.Rec.predeces
 must be updated in the runtime and in all three checkers together.
 
 ## Working on a proof
+
+The proving loop, the module header, and the elaborator's pitfalls are in
+the skill at `.claude/skills/grace17-proving/SKILL.md` (the plugin at
+`plugins/grace17/skills/grace17-proving/` links to the same file) and in
+[docs/agents.md](docs/agents.md). Several agents proving at once each work
+in a private copy of the files they own and never edit a sibling's module;
+the integrator merges and runs the checks.
+
 
 1. State the theorem with named `requires` hypotheses and a `shows` clause.
    Check the statement reads as the intended mathematics before proving it.

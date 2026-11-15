@@ -14,7 +14,12 @@ reference is `docs/tactics.md`; the JSON interface is
 
 Run every command from the repository root with
 `node --disable-warning=ExperimentalWarning bin/g17.ts …` (written `g17 …`
-below). Every method subcommand prints JSON (`--text` gives the readable
+below; `npm link` puts `g17` on the path). The bundled library is always a
+module root, so no `--module-root lib` is needed; `g17 settings` prints the
+roots, the artifact store, the foundation, and the heap a run resolves,
+from flags, the environment, a `g17.json` found walking up from the working
+directory, and `~/.config/grace17/config.json`. The launcher gives the run
+the heap it needs, so no Node flags either. Every method subcommand prints JSON (`--text` gives the readable
 form of `search` and `goal`); read results as JSON, do not scrape printed
 text. A method subcommand prints the envelope `{"ok", "version",
 "method", "result"}` and the fields named below are in `result`;
@@ -77,7 +82,7 @@ prints the usage.
    declarations are usable by short name and as `Module.name`. At most three
    imports per module (root modules excepted); Unicode symbols (∀ ∃ ∈ ⊆ ∧ ∨ ¬ →);
    lines under 80 columns where practical.
-3. Check it: `g17 check --json --module-root lib <file>`. The result has
+3. Check it: `g17 check --json <file>`. The result has
    `status` (`checked` or `failed`), `theorems` (each with `status`
    `proved`, `admitted`, or `failed`, and the goal state after every step),
    and `diagnostics` (each with `file`, `line`, `column`, `message`, and the
@@ -89,14 +94,18 @@ prints the usage.
    A `defgraph`'s codomain proof is a proof block like a theorem's, named
    `ident.closed`. `python3 scripts/all-errors.py <file>` lists the
    first error of every theorem in one run; `g17 check --continue` goes on
-   past a failing module and lists every failure at the end (`--quiet`
-   prints the failures and the summary alone). `g17 check --imports`
+   past a failed theorem to the next one of the same module and past a
+   failing module to the others, and lists every failure at the end
+   (`--quiet` prints the failures and the summary alone); a failure
+   outside a proof stops the module and its later theorems are reported
+   as skipped after it. A `warning` names a section hypothesis a theorem's
+   proof does not use. `g17 check --imports`
    adds a `note` diagnostic for every declaration the module uses only
    through a transitive import, with the `module` to import directly:
    add that import, so an unrelated module dropping its own does not
    break yours. A `warning` of kind `shadowed-property` says a theorem
    restates a generated property under the same name; rename it.
-4. Read the goal where you are: `g17 goal --module-root lib <file> --line N
+4. Read the goal where you are: `g17 goal <file> --line N
    --column C` returns `state.goals`, each with `goal` and `locals` (name
    and formula), as the Workbench goal pane shows them. It answers in a
    failing file too: in an earlier theorem that completed, or in the
@@ -107,9 +116,12 @@ prints the usage.
    warning. To see what a written term or formula means where the module
    reads it, `g17 elaborate '<text>' --file <file> --line N` (or
    `--module <Module>`, with `--variables '(x : Set)'` for free variables)
-   prints its kernel form as the goal pane prints it and with full names.
+   prints its kernel form as the goal pane prints it and with full names;
+   at a line inside a theorem the theorem's binders and premises are in
+   force, and on a section clause the clause is. Use it to confirm that a
+   `^` or `+` in a definition reads in the ring you mean.
 5. Ask for suggestions before guessing a lemma name: `g17 suggest
-   --module-root lib <file> --line N --tactic 'exact?'` (or `apply?`,
+   <file> --line N --tactic 'exact?'` (or `apply?`,
    `rw?`) runs the query tactic at that position without editing the file.
    Each suggestion has `command` (the line that pastes), `name` (the full
    theorem name), `arguments`, `premises` with their `evidence`, and
@@ -121,7 +133,7 @@ prints the usage.
    `admitted with sorry`), `node scripts/shorten-proofs.ts --write --root lib <file>`
    to apply the standard simplifications, and the tests that touch the
    library: `node scripts/run-tests.ts cumulus-style site-integration`.
-7. Before handing off: `g17 check --json --audit --module-root lib <file>`
+7. Before handing off: `g17 check --json --audit <file>`
    adds each theorem's axiom audit in one run (a one-shot `g17 audit` loads
    the environment every time; several `--theorem` options share one load
    and answer `audits`, one entry per name, with an `error` entry for a
@@ -142,13 +154,13 @@ other agents edit them.
 Example of the loop on a proof that ends in `sorry`:
 
 ```sh
-g17 check --json --module-root lib Probe.g17      # status checked, admitted
-g17 goal --module-root lib Probe.g17 --line 10    # goal: f(Xₖ) ∈ B
-g17 suggest --module-root lib Probe.g17 --line 10 --tactic 'exact?'
+g17 check --json Probe.g17      # status checked, admitted
+g17 goal Probe.g17 --line 10    # goal: f(Xₖ) ∈ B
+g17 suggest Probe.g17 --line 10 --tactic 'exact?'
 #  suggestions[0].command =
 #  "exact FunctionBetween.apply_closed at f, A, B, Xₖ with fFunction, (inA at k with hk)"
 #  → replace the sorry line with it
-g17 check --json --audit --module-root lib Probe.g17   # status proved
+g17 check --json --audit Probe.g17   # status proved
 ```
 
 ## Proof style
@@ -162,10 +174,21 @@ Cumulus. Theorem names are dotted and descriptive (`Subset.transitive`,
 ## Applying theorems
 
 - `have h := theorem with hyp1, hyp2` names the premises; parameters are
-  inferred from them. `have h := theorem with *` fills every premise from
-  unique local matches; `exact theorem with *` also matches the conclusion
-  against the goal. Write `theorem at a, b with …` only when a parameter
-  appears in the conclusion alone, or two local facts match one premise.
+  inferred from them, and a fact that fits several premises is read each
+  way until the parameters are fixed. `have h := theorem with *` fills
+  every premise from unique local matches and from instances (class
+  predicates, memberships an `instance` supplies, typing rules);
+  `exact theorem with *` also matches the conclusion against the goal.
+  Write `theorem at a, b with …` only when a parameter appears in the
+  conclusion alone, or two local facts match one premise; a partial `at`
+  list seeds the leading parameters and the facts fix the rest. Naming a
+  fact `with *` already used is accepted; `g17 signature <Name>` shows the
+  order.
+- `have h : P by tactic` states a fact and proves it; `have h := …` takes
+  a proof reference, and a statement after `:=` gets the hint to use the
+  colon.
+- `cc [h, k, thm at a]` runs congruence closure over the listed facts and
+  theorem instances alone; bare `cc` takes every local fact.
 - Equivalences: `h.forward`, `h.backward`; conjunctions: `h.left`, `h.right`
   (bind the fact first; `(theorem with …).left` is not allowed).
 - Destructure directly: `obtain ⟨k, hk, eq⟩ := le` sees through a defined
@@ -175,7 +198,13 @@ Cumulus. Theorem names are dotted and descriptive (`Subset.transitive`,
 
 ## Pitfalls that cost time
 
-- `rw` works only under a single binder; for `∀ i ∈ n, …` goals, `intros i hi` first.
+- `rw` reaches under `∀` and at projections but not under an existential goal; `refine ⟨…, ?_⟩` first. `rw thm with *` rewrites every instance present and says "nothing left to rewrite" when none is; a guarded rule needs its guard (`List(ℝ, xs)`, a membership) in context or it reports "does not match".
+- A power or product in a section over `polynomialRing(K, n)` needs `CommRing(K)` in the section too, or the operand cannot be placed in a ring and the check says so; never a silent natural-number reading.
+- `simp [rules] at h` uses a context equation only when it is named; `unfold` never rewrites with local equalities.
+- Instances in a section: every section variable in the conclusion, every section hypothesis a predicate; instances declared later in the module are invisible earlier; several instances proving the same fact are not an ambiguity.
+- A section hypothesis the statement does not mention is still a premise (and a warning); keep projection lemmas that must be premise-free outside sections.
+- Division by a numeral, `(1:R) / (8:R)`, is an atom to `ring` and `linear_combination`; rewrite with `realDiv.eq_mul_inv` or state the equation multiplied out.
+- `linear_combination k * h` takes a negated or ring numeral `k`, but not `k * (h₁ - h₂)`; distribute by hand.
 - Parenthesize quantified formulas inside connectives: `P ∧ (∃ j ∈ n, A ∨ B)`.
 - Facts proved before `induction m` are not visible in the branches; re-derive them inside each branch.
 - A bound variable from `∀ k ∈ m` with `m : Nat` needs `have kNat := natural.member at m with hk` before it is used as a natural.
@@ -194,4 +223,8 @@ Cumulus. Theorem names are dotted and descriptive (`Subset.transitive`,
 - Reals: `Real/*` (Dedekind reals, `Real/FiniteSum`, `Real/Power`, `Real/Analysis/*`).
 - Sets, relations, functions, ordinals, cardinals: `Set/*`, `Relation/*`, `Cardinal/*`.
 - Fixed points and game theory: `FixedPoint/*` (Kuhn, Brouwer), `GameTheory/*` (Nash).
+- Algebra: `Algebra/Ring/*` (bundled rings, ideals, quotients, polynomials), `Algebra/Algebras/*` (algebras over a base ring), `Algebra/Polynomial/*` (polynomial algebras, derivatives, the chain rule), `Algebra/Field/*` (fields, real subfields, quadratic towers).
+- Geometry: `Geometry/*` (the plane), `Geometry/Construction/*` (straightedge and compass), `AlgebraicGeometry/Coordinates/*` (the noncoordinate polynomial).
+- Categories: `Category/*`; how the elaborator reads functors applied is declared there by `register` lines (`docs/notation.md`, Registrations).
+- Campaigns: `blueprints/*/README.md` records how each theorem was planned, divided among agents, and promoted.
 - The Top 100 catalogue: `docs/top-100.json`, regenerated with `npm run -s docs:top100`.
