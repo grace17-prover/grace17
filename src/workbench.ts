@@ -19,7 +19,7 @@ import {
 import { scanModule, type ModuleNameDeriver } from "./module-source-loader.ts";
 import { openParentheses } from "./library-search.ts";
 import { resolveImportName } from "./module-names.ts";
-import { classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
+import { applicationProjections, classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, registrationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
 import { compileSeparateKernelModule, replaySeparateKernelModuleExact, type CompiledModuleDependency } from "./compiled-module.ts";
 import { installStandardCheckpoint, standardDependencyCheckpoints, type StandardDependencyCheckpoint } from "./standard-checkpoints.ts";
 export { installStandardCheckpoint };
@@ -420,6 +420,7 @@ function formulaDisplay(
   const options: PrettyOptions = {
     symbol: name => shortNames.get(name) ?? name,
     classPredicate: name => classNames.has(name), notations, rings, operations, predicates, functors, carriers, functions,
+    ...(functors?.length ? { applicationProjections: applicationProjections(kernel) } : {}),
   };
   const cache = new WeakMap<Formula, string>();
   return Object.assign((formula: Formula): string => {
@@ -1022,6 +1023,7 @@ function renderWorkbenchCheck(
     checkedFiles: workspaceModules.map(item => item.file),
     modules: moduleRecords.length,
     notations: reportedNotations,
+    registrations: registrationReport(kernel),
     tactics: tacticReport(kernel).map(tactic => ({
       ...tactic,
       short: tactic.name.split(".").at(-1)!,
@@ -1555,7 +1557,7 @@ function declarationRanges(source: string, definitions: boolean): readonly { lin
   // predecessor's trace and appears permanently complete in the Workbench.
   const proof = /^\s*(?:theorem|lemma|instance)\s+\S+/;
   const defined = /^\s*(?:defgraph|defchoose|defunique|def|define)\s+\S+/;
-  const boundary = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
+  const boundary = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|register|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
   const ranges: { lineStart: number; lineEnd: number }[] = [];
   let nextBoundary = lines.length + 1;
   let proofLine = false;

@@ -191,7 +191,7 @@ export function proofRewrites(lines: readonly string[]): Rewrite[] {
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
     const text = line.trim();
-    if (/^(theorem|lemma|instance|def|predicate|class|eval|section|end|namespace|module|import|notation|tactic|datatype|open|export)\b/u.test(line)) inProof = /^(theorem|lemma|instance)\b/u.test(line);
+    if (/^(theorem|lemma|instance|def|predicate|class|eval|section|end|namespace|module|import|notation|register|tactic|datatype|open|export)\b/u.test(line)) inProof = /^(theorem|lemma|instance)\b/u.test(line);
     if (line === "proof") continue;
     if (!inProof || indentOf(line) === 0 || text.startsWith("--")) continue;
     const indent = indentOf(line);

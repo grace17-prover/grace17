@@ -164,7 +164,7 @@ Result, abridged, for a file whose proof stops one step short:
    "file": "Probe.g17", "line": 11, "column": 1, "endColumn": 2,
    "message": "1 goal remains; next is x ∈ C",
    "theorem": "Probe.subset_chain"}],
- "checked": [], "modules": [], "notations": [], "sorries": [],
+ "checked": [], "modules": [], "notations": [], "registrations": [], "sorries": [],
  "evaluations": [], "milliseconds": 0}
 ```
 
@@ -743,7 +743,8 @@ prelude.
 ```
 
 Result: `notations`, the notation table in scope, exactly the records the
-Workbench receives, and `tactics`, the tactic macros in scope.
+Workbench receives, `registrations`, the `register` declarations in scope,
+and `tactics`, the tactic macros in scope.
 
 ```json
 {"module": "Grace.Cumulus.Set.Core", "foundation": "ZFG",
@@ -751,6 +752,11 @@ Workbench receives, and `tactics`, the tactic macros in scope.
    "kind": "predicate", "reversed": false,
    "target": "Grace.Cumulus.Set.Basic.Set.Subset",
    "module": "Grace.Cumulus.Set.Basic"}, ...],
+ "registrations": [{"form": "kinds",
+   "predicate": "Grace.Cumulus.Category.Core.Category", "arity": 1,
+   "kinds": [{"name": "object", "projection": "Grace.Cumulus.Category.Core.Category.obj"},
+             {"name": "morphism", "projection": "Grace.Cumulus.Category.Core.Category.mor"}],
+   "module": "Grace.Cumulus.Category.Core"}, ...],
  "tactics": [...]}
 ```
 
@@ -761,6 +767,12 @@ that declares it; a non-infix form carries `fixity` (`prefix`, `postfix`,
 its `parameters` and `expansion`, and the typed forms carry
 `operandType`, `leftOperandType`, `rightOperandType`, or `resultType`. A
 tool that prints or parses with this table agrees with the Workbench.
+Each registration has its `form` (`kinds`, `application`, or `facts`), the
+`predicate` it is about, and the `module` that declares it; a `kinds` or
+`application` form carries its `kinds`, each a `name` and the `projection`
+of its field, an `application` form its pattern `names` and the position
+`over` whose kinds classify the argument, and a `facts` form its
+`pattern`, `variables`, `with` facts, and the facts it `gives`.
 
 ### pin
 

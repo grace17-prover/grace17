@@ -100,8 +100,10 @@ export interface PrettyOptions {
   readonly operations?: readonly OperationNotation[];
   /** Mixfix predicate forms supplied by hypotheses in scope. */
   readonly predicates?: readonly PredicateNotation[];
-  /** Functors in scope: `obj(F)(x)` and `map(F)(x)` print as `F(x)`. */
+  /** Structure values in scope under a `register application` declaration: `F.obj(x)` and `F.map(x)` print as `F(x)`. */
   readonly functors?: readonly Term[];
+  /** The projections the `register application` declarations apply by, which print as the structure applied. */
+  readonly applicationProjections?: ReadonlySet<string>;
   /**
    * The carriers that hypotheses in scope give structure variables, `G` for
    * `G.carrier` under `Group(G)`: a membership binder in one prints as the
@@ -545,10 +547,11 @@ export function formatTerm(term: Term, options?: PrettyOptions): string {
   }
   const applyNotation = leaf === "apply" && term.args.length === 2 ? termNotation(term, options) : undefined;
   if (leaf === "apply" && term.args.length === 2 && !applyNotation) {
-    // A functor's object and morphism maps print as the functor applied.
+    // The fields a structure applies by print as the structure applied:
+    // F.obj(x) and F.map(x) as F(x) under a functor hypothesis about F.
     const graph = term.args[0]!;
     const functor = graph.tag === "app" && graph.args.length === 1 &&
-      ["obj", "map"].includes(graph.fn.slice(graph.fn.lastIndexOf(".") + 1)) &&
+      options?.applicationProjections?.has(graph.fn) &&
       options?.functors?.some(item => termEquals(item, graph.args[0]!)) ? graph.args[0]! : undefined;
     const base = formatTerm(functor ?? graph, options);
     // A postfix form applies without parentheses: f′(x) and f⁽ᵏ⁾(A).

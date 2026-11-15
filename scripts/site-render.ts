@@ -123,7 +123,7 @@ const foundationSymbols = new Set(["empty", "pair", "union", "powerset", "omega"
 const reservedWords = new Set([
   "module", "import", "open", "export", "namespace", "section", "variable", "hypothesis", "end",
   "def", "define", "defgraph", "defunique", "defchoose", "predicate", "class", "datatype", "structure", "theorem", "lemma",
-  "instance", "notation", "tactic", "noncomputable", "transfinite", "foundation", "well-founded",
+  "instance", "notation", "register", "tactic", "noncomputable", "transfinite", "foundation", "well-founded",
   "requires", "shows", "proof", "uniqueness", "with", "at", "using", "by", "descends", "over", "ordered", "certified",
   "forall", "exists", "and", "or", "not", "in", "Set", "Class", "Prop", "self",
   "intro", "intros", "exact", "show", "apply", "assumption", "rfl", "reflexivity", "have", "calc", "specialize",
@@ -138,7 +138,7 @@ export function slugify(text: string): string {
   return unescapeEntities(text.replace(/<[^>]+>/g, "")).normalize("NFKD").toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").trim().replace(/\s+/g, "-");
 }
 
-const declarationStart = /^\s*(module|import|namespace|theorem|lemma|def|predicate|class|datatype|structure|notation|eval|section|instance|variable|hypothesis|noncomputable|tactic|open|end|defgraph|defchoose|defunique|define|axiom)\b/m;
+const declarationStart = /^\s*(module|import|namespace|theorem|lemma|def|predicate|class|datatype|structure|notation|register|eval|section|instance|variable|hypothesis|noncomputable|tactic|open|end|defgraph|defchoose|defunique|define|axiom)\b/m;
 export function looksLikeGrace17(text: string): boolean {
   const first = text.split("\n").find(line => line.trim() && !line.trim().startsWith("--")) ?? "";
   return declarationStart.test(first) || /^proof$/m.test(text) || /^\s*\|\s.*=>/m.test(text);

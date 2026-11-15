@@ -371,7 +371,7 @@ export function tacticHelpEntries(name) {
 
 const declarationWords = new Set([
   "module", "import", "open", "def", "defgraph", "defchoose", "defunique", "predicate", "class", "theorem", "lemma", "instance",
-  "requires", "shows", "proof", "notation", "infix", "infixl", "infixr", "tactic",
+  "requires", "shows", "proof", "notation", "register", "infix", "infixl", "infixr", "tactic",
   "noncomputable", "transfinite", "foundation", "well-founded", "define", "datatype", "structure", "mixfix", "prefix", "postfix", "scoped", "guard", "binder", "namespace", "section", "variable", "hypothesis", "end", "where",
   "eval", "export", "self", "uniqueness", "descends", "over", "ordered", "certified",
 ]);
@@ -434,7 +434,7 @@ export function declarationHelpAtTextOffset(source, offset) {
   const start = source.lastIndexOf("\n", offset - 1) + 1;
   const end = source.indexOf("\n", offset);
   const line = source.slice(start, end < 0 ? source.length : end);
-  const header = /^(\s*)((?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def)|(?:defgraph|defchoose|defunique|def|define|predicate|class|datatype|structure|notation|instance|tactic|section|variable|hypothesis))(?=\s+\S)/u.exec(line);
+  const header = /^(\s*)((?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def)|(?:defgraph|defchoose|defunique|def|define|predicate|class|datatype|structure|notation|register|instance|tactic|section|variable|hypothesis))(?=\s+\S)/u.exec(line);
   if (!header) return undefined;
   const prefixStart = start + header[1].length;
   const tokens = [...header[2].matchAll(/[a-z]+(?:-[a-z]+)?/g)];

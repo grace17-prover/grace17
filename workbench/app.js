@@ -2452,7 +2452,7 @@ function configureGrace17Language() {
     unicode: true,
     keywords: [
       "module", "import", "namespace", "section", "variable", "hypothesis", "export", "open", "end", "datatype", "structure", "self", "noncomputable",
-      "transfinite", "foundation", "well-founded", "limit", "over", "ordered", "certified", "defgraph", "defchoose", "defunique", "uniqueness", "def", "define", "predicate", "class", "theorem", "lemma", "instance", "eval", "notation",
+      "transfinite", "foundation", "well-founded", "limit", "over", "ordered", "certified", "defgraph", "defchoose", "defunique", "uniqueness", "def", "define", "predicate", "class", "theorem", "lemma", "instance", "eval", "notation", "register",
       "tactic", "infix", "infixl", "infixr", "mixfix", "prefix", "postfix", "guard", "scoped", "binder", "reverse", "requires", "shows", "proof", "where",
       "decreasing_by",
     ],

@@ -97,7 +97,7 @@ theorem loose (F C D x : Set)
   shows F(x) = F(x)
 proof
   rfl
-`), /F is a functor, and x is not known to be an object or a morphism of C.*obj\(F\)\(x\).*map\(F\)\(f\)/u);
+`), /F is a functor, and x is not known to be an object or a morphism of C.*obj\(F\)\(x\).*map\(F\)\(x\)/u);
 });
 
 test("a Set-valued functor applies as a function: F(g ∘ f)(x) = F(g)(F(f)(x)) is one simp, and pointwise equality is Sets.ext", () => {

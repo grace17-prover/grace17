@@ -33,7 +33,7 @@ export function tacticTokenAtTextOffset(text, offset, tacticNames = []) {
 export function proofDeclarationContext(text, lineNumber) {
   const lines = String(text || "").split(/\r?\n/);
   const declaration = /^\s*(?:theorem|lemma|instance|defgraph)\b(?:\s+(\S+))?/;
-  const boundary = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
+  const boundary = /^\s*(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|register|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/;
   let start = -1;
   for (let index = Math.min((lineNumber || lines.length) - 1, lines.length - 1); index >= 0; index -= 1) {
     if (!boundary.test(lines[index])) continue;

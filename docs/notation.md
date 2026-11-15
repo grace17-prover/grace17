@@ -515,9 +515,11 @@ definitional conjuncts of a fact such as `InversePair(C, f, g)`, a composite
 `g ∘ f`, or a value `C.id(a)`, `C.dom(f)`, `G(x)` of a function into one of
 the two sets. An argument the facts do not place is an error that names
 both spellings. Statements and goals print `F.obj(x)` and `F.map(x)` as
-`F(x)` while a functor or transformation hypothesis about `F` is in scope,
-so the functor laws read `F(g ∘ f) = F(g) ∘ F(f)` and
-`F(C.id(a)) = D.id(F(a))`. The categories of
+`F(x)` while a functor hypothesis about `F` is in scope, so the functor
+laws read `F(g ∘ f) = F(g) ∘ F(f)` and `F(C.id(a)) = D.id(F(a))`. None of
+this is built into the elaborator: the Category modules declare it with
+`register` declarations, described under [Registrations](#registrations)
+below, and a structure of your own can declare the same. The categories of
 `Sets(U)`, whose morphisms apply as functions, let `F(f)(x)` be written for
 a functor `F : C ⥤ Sets(U)`, and `F(g ∘ f)(x) = F(g)(F(f)(x))` follows from
 `Functor.map_comp` and `Sets.comp_apply` in one `simp`.
@@ -1033,6 +1035,63 @@ whose left side is being mapped to its right side. Theorems about a constructor
 keep stable identifier names such as `singleton.membership`, `pair.membership`,
 and `orderedPair.injective` even when their statements use `{x}`, `{x, y}`, and
 `(x, y)`.
+
+## Registrations
+
+A notation tells the elaborator how a token is read and printed. A
+registration tells it how the values of a structure are read: which kinds
+of element they have, how they apply, and what a fact about them places
+where. I keep this knowledge in the library beside the structure it is
+about, in `register` declarations, rather than in the elaborator, which
+learns only the three general shapes below. Like a notation, a
+registration is declared on one line, inherited by every module that
+imports the declaring module, listed by `g17 notations` beside the
+notation table, and resolved once when its module is loaded; nothing is
+searched while a term is read. And like a notation it proves nothing: it
+decides how source is read, and the kernel checks what results.
+
+`register kinds Category object obj morphism mor` says that a category has
+two kinds of element, its objects in the field `obj` and its morphisms in
+the field `mor`. The kind names are mine to choose; the fields are fields
+of the structure. The declaration stands in `Category.Core`, right after
+`structure Category`.
+
+`register application Functor(F, C, D) over C object obj morphism map`
+says that under a fact `Functor(F, C, D)`, the first pattern variable
+applies to a term by the field of the term's kind, the kinds being those
+registered for the variable after `over`: `F(x)` is `F.obj(x)` when the
+facts in scope place `x` among the objects of `C`, by a membership in
+`C.obj`, and `F.map(x)` when among the morphisms. A value of a registered
+field is of that field's kind, so `G(a)` is an object and `F(G(a))` reads
+`F.obj(G.obj(a))`; a value of any other function or operation is placed by
+the function facts in scope, so `C.id(a)` and `g ∘ f` are morphisms. An
+argument the facts place in no kind is an error that names the kinds and
+both spellings. Statements and goals print `F.obj(x)` and `F.map(x)` as
+`F(x)` while a fact of the registered predicate about `F` is in scope. The
+declaration stands in `Category.Functor`, right after `structure Functor`,
+and the kinds it names must be registered in a module it can see.
+
+`register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`
+says what a fact of that shape places where, for the elaborator as for the
+reader: a guard `(f : a ⟶ b)` makes `f` a morphism and `a` and `b`
+objects, so `F(f)`, `F(a)`, and `F(b)` all read. The identifiers of the
+pattern that name no declared symbol are its variables. The pattern may be
+a membership in a function value, `f ∈ hom(C, a, b)`, and then the
+registration also places the set itself: a function into `hom(C, a, b)`
+takes its values among the morphisms. A `with` clause names facts that
+must also be in scope, matched in order, which bind variables the pattern
+leaves free:
+
+```
+register facts η : F ⟹ G with F : C ⥤ D ∧ G : C ⥤ D gives η : obj(C) → mor(D)
+```
+
+reads a transformation together with the functor facts about `F` and `G`,
+and so places the component `η(a)` among the morphisms of `D`, where a
+functor out of `D` applies to it by its morphism map. The `gives` facts
+join the facts a notation consults, wherever a hypothesis supplies an
+operation or an arrow, so a member of a hom-set composes under `∘` and
+appears in `f : a ⟶ b` as a member of `C.mor` does.
 
 ## Lists and reopened namespaces
 

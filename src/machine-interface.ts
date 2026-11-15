@@ -82,7 +82,7 @@ export const MACHINE_METHODS: readonly { readonly name: string; readonly descrip
   { name: "elaborate", description: "Elaborate a written term or formula in a module context and print its kernel form with resolved names." },
   { name: "audit", description: "The axioms a theorem depends on, direct and inherited." },
   { name: "library", description: "The library's modules and their declarations, optionally by area or module." },
-  { name: "notations", description: "The notation table and tactic macros in scope for a workspace or module." },
+  { name: "notations", description: "The notation table, the register declarations, and the tactic macros in scope for a workspace or module." },
   { name: "pin", description: "Pin the dependency sources this process has read, so later requests keep answering over them." },
   { name: "closure", description: "The import closure of a module in dependency order, each module marked choice-free or not, and the import chain to a named dependency." },
 ];
@@ -495,6 +495,7 @@ function presentCheck(workspace: Workspace, raw: RawCheck, options: CheckOptions
       checked: [],
       modules: [],
       notations: [],
+      registrations: [],
       theorems,
       diagnostics: [failureDiagnostic(failure, file, source, failed?.name), ...completed.flatMap(theorem => theorem.sorries.map(sorryDiagnostic))],
       sorries: completed.flatMap(theorem => theorem.sorries),
@@ -543,6 +544,7 @@ export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
     checked: result.loaded ?? [],
     modules: result.moduleReport ?? [],
     notations: result.notations,
+    registrations: result.registrations ?? [],
     theorems,
     diagnostics,
     sorries: result.sorries,
@@ -1446,7 +1448,7 @@ function notations(params: Params) {
   const single = workspace.entry ?? (workspace.files.length === 1 ? [workspace.files[0]!.name] : undefined);
   const raw = rawCheckAny({ ...workspace, entry: single });
   if (!raw.ok) throw checkFailed(raw, workspace.activeFile);
-  return { ...(module ? { module } : {}), foundation: workspace.profile, notations: raw.result.notations, tactics: raw.result.tactics };
+  return { ...(module ? { module } : {}), foundation: workspace.profile, notations: raw.result.notations, registrations: raw.result.registrations ?? [], tactics: raw.result.tactics };
 }
 
 function pin(params: Params) {

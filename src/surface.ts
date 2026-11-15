@@ -139,6 +139,45 @@ export interface SurfaceNotationRecord {
 }
 
 /**
+ * A `register` declaration, which tells the elaborator how the values of a
+ * structure are read and printed. Like a notation, a registration is
+ * declared in the module beside the structure it is about, inherited by the
+ * modules that import it, and never proves anything: it decides how source
+ * is read, and the kernel checks what results.
+ *
+ * `register kinds Category object obj morphism mor`: a structure's values
+ * have kinds of element, each the field named.
+ *
+ * `register application Functor(F, C, D) over C object obj morphism map`:
+ * under a fact of the predicate, the first pattern variable applies to a
+ * term by the field of the term's kind, the kinds being those of the
+ * pattern variable named by `over`.
+ *
+ * `register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`:
+ * a fact matching the pattern places its terms as the formula says; a
+ * `with` clause names facts that must also be in scope, which bind the
+ * variables the pattern leaves free.
+ */
+export interface SurfaceRegistrationRecord {
+  readonly form: "kinds" | "application" | "facts";
+  /** The predicate the registration is about; for `facts`, the head symbol of the pattern. */
+  readonly predicate: string;
+  readonly arity: number;
+  /** `application`: the pattern variables, the applied structure first. */
+  readonly names?: readonly string[];
+  /** `application`: the position of the pattern variable whose kinds classify the argument. */
+  readonly over?: number;
+  /** `kinds` and `application`: each kind by name, with the projection of the field that carries it. */
+  readonly kinds?: readonly { readonly name: string; readonly projection: string }[];
+  /** `facts`: the pattern, its variables, the facts it is read with, and what it gives. */
+  readonly pattern?: Formula;
+  readonly variables?: readonly string[];
+  readonly with?: readonly Formula[];
+  readonly gives?: readonly Formula[];
+  readonly module?: string;
+}
+
+/**
  * `notation infixr 70 "∘" => call2(comp(C), _, _) via hypothesis Category(C) for mor(C)`:
  * a hypothesis `predicate(...)` in scope binds its pattern variables to its
  * arguments, the operation is the template `output` at those arguments, and
@@ -255,6 +294,7 @@ interface SurfaceEnvironment {
   readonly classes: Map<string, SurfaceClassRecord>;
   readonly classDefinitions: Map<string, SurfaceClassDefinition>;
   readonly notations: SurfaceNotationRecord[];
+  readonly registrations: SurfaceRegistrationRecord[];
   readonly tactics: SurfaceTacticRecord[];
   readonly instances: SurfaceInstanceRecord[];
   readonly datatypes: Map<string, SurfaceDatatypeRecord>;
@@ -297,6 +337,8 @@ export interface SurfaceEnvironmentIndex {
   }[];
   /** Declaration order is significant when equal-precedence notation overlaps. */
   readonly notations: readonly SurfaceNotationRecord[];
+  /** The `register` declarations, in declaration order; absent in an index written before they existed. */
+  readonly registrations?: readonly SurfaceRegistrationRecord[];
   /** Declaration order is retained for deterministic tactic shadowing checks. */
   readonly tactics: readonly SurfaceTacticRecord[];
   /** Proof-producing instance declarations; declaration order has no priority. */
@@ -331,6 +373,8 @@ export interface SurfaceEnvironmentDelta {
   readonly classes: readonly SurfaceClassRecord[];
   readonly classDefinitions: SurfaceEnvironmentIndex["classDefinitions"];
   readonly notations: readonly SurfaceNotationRecord[];
+  /** The `register` declarations the module adds; absent in a delta written before they existed. */
+  readonly registrations?: readonly SurfaceRegistrationRecord[];
   readonly tactics: readonly SurfaceTacticRecord[];
   readonly instances: readonly SurfaceInstanceRecord[];
   readonly datatypes: readonly SurfaceDatatypeRecord[];
@@ -347,6 +391,7 @@ export interface SurfaceBaseline {
   readonly classes: ReadonlySet<string>;
   readonly classDefinitions: ReadonlySet<string>;
   readonly notations: number;
+  readonly registrations: number;
   readonly tactics: number;
   readonly instances: number;
   readonly datatypes: ReadonlySet<string>;
@@ -475,6 +520,7 @@ interface SurfaceVisibilityCache {
   readonly instances: Map<string, ReadonlySet<string>>;
   readonly notationGroups: Map<string, ReadonlyMap<string, readonly SurfaceNotationRecord[]>>;
   readonly resultTypes: Map<string, ReadonlyMap<string, readonly SurfaceNotationRecord[]>>;
+  readonly registrations: Map<string, RegistrationTables>;
   readonly visibility: Map<string, ScopeVisibility>;
 }
 const surfaceVisibilityCaches = new WeakMap<Kernel, SurfaceVisibilityCache>();
@@ -512,6 +558,7 @@ export function forkSurfaceEnvironment(source: Kernel, target: Kernel): void {
     classes: new Map(environment.classes),
     classDefinitions: new Map(environment.classDefinitions),
     notations: [...environment.notations],
+    registrations: [...environment.registrations],
     tactics: [...environment.tactics],
     instances: [...environment.instances],
     datatypes: new Map(environment.datatypes),
@@ -563,7 +610,7 @@ export function setSurfaceTraceCapture(kernel: Kernel, enabled: boolean): void {
   if (environment) environment.captureTacticTraces = enabled;
   else surfaceEnvironments.set(kernel, {
     modules: new Map(), namespaces: new Set(), classes: new Map(), classDefinitions: new Map(),
-    notations: [], tactics: [], instances: [], datatypes: new Map(), signatures: new Map(), captureTacticTraces: enabled,
+    notations: [], registrations: [], tactics: [], instances: [], datatypes: new Map(), signatures: new Map(), captureTacticTraces: enabled,
   });
 }
 
@@ -603,6 +650,26 @@ export function notationReport(kernel: Kernel): readonly SurfaceNotationRecord[]
     a.token.localeCompare(b.token) || a.target.localeCompare(b.target));
 }
 
+/** The `register` declarations in the kernel, as `g17 notations` lists them beside the notation table. */
+export function registrationReport(kernel: Kernel): readonly SurfaceRegistrationRecord[] {
+  const environment = surfaceEnvironments.get(kernel);
+  return environment ? [...environment.registrations].sort((a, b) =>
+    a.form.localeCompare(b.form) || a.predicate.localeCompare(b.predicate) || (a.module ?? "").localeCompare(b.module ?? "")) : [];
+}
+
+/**
+ * The projections of the `register application` declarations in the kernel,
+ * whose values applied print as the structure applied: `F.obj(x)` as `F(x)`.
+ */
+export function applicationProjections(kernel: Kernel): ReadonlySet<string> {
+  const environment = surfaceEnvironments.get(kernel);
+  const result = new Set<string>();
+  for (const record of environment?.registrations ?? []) {
+    if (record.form === "application") for (const kind of record.kinds ?? []) result.add(kind.projection);
+  }
+  return result;
+}
+
 export function tacticReport(kernel: Kernel): readonly SurfaceTacticRecord[] {
   const environment = surfaceEnvironments.get(kernel);
   return environment ? [...environment.tactics].sort((a, b) => a.name.localeCompare(b.name)) : [];
@@ -636,6 +703,7 @@ export function exportSurfaceEnvironmentIndex(
     classDefinitions: [...environment.classDefinitions].map(([name, definition]) => ({ name, ...definition }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     notations: [...environment.notations],
+    registrations: [...environment.registrations],
     tactics: [...environment.tactics],
     instances: [...environment.instances],
     datatypes: [...environment.datatypes.values()].sort((a, b) => a.name.localeCompare(b.name)),
@@ -683,6 +751,7 @@ export function installSurfaceEnvironmentIndex(kernel: Kernel, index: SurfaceEnv
     classes: new Map(index.classes.map(item => [item.name, item])),
     classDefinitions: new Map(index.classDefinitions.map(({ name, ...definition }) => [name, definition])),
     notations: [...index.notations],
+    registrations: [...(index.registrations ?? [])],
     tactics: [...index.tactics],
     instances: [...index.instances],
     datatypes: new Map(index.datatypes.map(item => [item.name, item])),
@@ -696,7 +765,7 @@ export function installSurfaceEnvironmentIndex(kernel: Kernel, index: SurfaceEnv
 function emptySurfaceEnvironment(): SurfaceEnvironment {
   return {
     modules: new Map(), namespaces: new Set(), classes: new Map(), classDefinitions: new Map(),
-    notations: [], tactics: [], instances: [], datatypes: new Map(), signatures: new Map(), captureTacticTraces: false,
+    notations: [], registrations: [], tactics: [], instances: [], datatypes: new Map(), signatures: new Map(), captureTacticTraces: false,
   };
 }
 
@@ -708,6 +777,7 @@ export function captureSurfaceBaseline(kernel: Kernel): SurfaceBaseline {
     classes: new Set(environment.classes.keys()),
     classDefinitions: new Set(environment.classDefinitions.keys()),
     notations: environment.notations.length,
+    registrations: environment.registrations.length,
     tactics: environment.tactics.length,
     instances: environment.instances.length,
     datatypes: new Set(environment.datatypes.keys()),
@@ -734,6 +804,7 @@ export function exportSurfaceEnvironmentDelta(
     classDefinitions: [...environment.classDefinitions].filter(([name]) => !baseline.classDefinitions.has(name))
       .map(([name, definition]) => ({ name, ...definition })).sort(byName),
     notations: environment.notations.slice(baseline.notations),
+    registrations: environment.registrations.slice(baseline.registrations),
     tactics: environment.tactics.slice(baseline.tactics),
     instances: environment.instances.slice(baseline.instances),
     datatypes: [...environment.datatypes.values()].filter(item => !baseline.datatypes.has(item.name)).sort(byName),
@@ -778,6 +849,7 @@ export function mergeSurfaceEnvironmentDelta(kernel: Kernel, delta: SurfaceEnvir
   for (const { name, ...definition } of delta.classDefinitions) environment.classDefinitions.set(name, definition);
   environment.notations.push(...delta.notations);
   registerNotationGuards(kernel, delta.notations);
+  environment.registrations.push(...(delta.registrations ?? []));
   environment.tactics.push(...delta.tactics);
   environment.instances.push(...delta.instances);
   // Records are keyed by their refinement predicate, as a declaration keys
@@ -844,6 +916,17 @@ function surfaceIndexContentsMalformed(value: Record<string, unknown>): boolean 
         (item.hypothesis !== undefined && (!surfaceIndexRecord(item.hypothesis) ||
           typeof item.hypothesis.predicate !== "string" || !Number.isSafeInteger(item.hypothesis.arity) ||
           !Array.isArray(item.hypothesis.names) || !Array.isArray(item.hypothesis.carriers)))) ||
+      (value.registrations !== undefined && (!Array.isArray(value.registrations) ||
+        value.registrations.some(item => !surfaceIndexRecord(item) || !["kinds", "application", "facts"].includes(item.form as string) ||
+          typeof item.predicate !== "string" || !Number.isSafeInteger(item.arity) ||
+          (item.kinds !== undefined && (!Array.isArray(item.kinds) || item.kinds.some(kind =>
+            !surfaceIndexRecord(kind) || typeof kind.name !== "string" || typeof kind.projection !== "string"))) ||
+          (item.names !== undefined && (!Array.isArray(item.names) || item.names.some(name => typeof name !== "string"))) ||
+          (item.variables !== undefined && (!Array.isArray(item.variables) || item.variables.some(name => typeof name !== "string"))) ||
+          (item.over !== undefined && !Number.isSafeInteger(item.over)) ||
+          (item.pattern !== undefined && !surfaceIndexRecord(item.pattern)) ||
+          (item.with !== undefined && (!Array.isArray(item.with) || item.with.some(formula => !surfaceIndexRecord(formula)))) ||
+          (item.gives !== undefined && (!Array.isArray(item.gives) || item.gives.some(formula => !surfaceIndexRecord(formula))))))) ||
       value.tactics.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string" || typeof item.body !== "string") ||
       value.instances.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string") ||
       value.datatypes.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string") ||
@@ -992,7 +1075,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   const evaluations: SurfaceEvaluation[] = [];
   const environment = surfaceEnvironments.get(kernel) ?? {
     modules: new Map(), namespaces: new Set<string>(), classes: new Map<string, SurfaceClassRecord>(),
-    classDefinitions: new Map<string, SurfaceClassDefinition>(), notations: [], tactics: [], instances: [], datatypes: new Map(),
+    classDefinitions: new Map<string, SurfaceClassDefinition>(), notations: [], registrations: [], tactics: [], instances: [], datatypes: new Map(),
     signatures: new Map<string, SurfaceSignature>(), captureTacticTraces: true,
   };
   surfaceEnvironments.set(kernel, environment);
@@ -1299,7 +1382,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       continue;
     }
     let end = cursor + 1;
-    while (end < lines.length && !/^(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|structure|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/.test(lines[end]!.text)) end += 1;
+    while (end < lines.length && !/^(?:noncomputable\s+(?:transfinite|foundation|well-founded)\s+def|datatype|structure|class|defgraph|defchoose|defunique|def|define|predicate|theorem|lemma|instance|eval|notation|register|tactic|module|import|namespace|section|variable|hypothesis|export\s+open|open|end)\b/.test(lines[end]!.text)) end += 1;
     let block = clauseSpan > 1 ? [line, ...lines.slice(cursor + clauseSpan, end)] : lines.slice(cursor, end);
     currentBlock = block;
     if (sections.length) {
@@ -1456,7 +1539,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
             const conclusions = goals.map(goal => goal.goal);
             const operations = displayOperations(kernel, scope(), facts, conclusions);
             const predicates = displayPredicates(kernel, scope(), facts);
-            const functors = displayFunctors(facts);
+            const functors = displayApplications(kernel, scope(), facts);
             const carriers = displayCarriers(kernel, scope(), facts, conclusions);
             const functions = displayFunctions(kernel, scope(), facts);
             if (scope().rings?.length || operations.length || predicates.length || functors.length || carriers.length ||
@@ -1507,7 +1590,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
         const conclusions = [statementConclusion(kernel.theorems.get(name)!)];
         const operations = displayOperations(kernel, scope(), hypotheses, conclusions);
         const predicates = displayPredicates(kernel, scope(), hypotheses);
-        const functors = displayFunctors(hypotheses);
+        const functors = displayApplications(kernel, scope(), hypotheses);
         const carriers = displayCarriers(kernel, scope(), hypotheses, conclusions);
         const functions = displayFunctions(kernel, scope(), hypotheses);
         if (scope().rings?.length || operations.length || predicates.length || functors.length || carriers.length ||
@@ -1532,8 +1615,11 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     else if (line.text.startsWith("notation ")) {
       elaborateNotation(kernel, block, scope(), environment);
       notationDeclarations += 1;
+    } else if (line.text.startsWith("register ")) {
+      elaborateRegistration(kernel, block, scope(), environment);
+      notationDeclarations += 1;
     } else if (line.text.startsWith("tactic ")) elaborateTacticDeclaration(block, scope(), environment);
-    else throw new SurfaceError(line.number, "expected a module directive, open/export open, datatype, structure, definition, class, theorem, lemma, instance, notation, tactic, recursive definition, or eval command");
+    else throw new SurfaceError(line.number, "expected a module directive, open/export open, datatype, structure, definition, class, theorem, lemma, instance, notation, register, tactic, recursive definition, or eval command");
     for (let i = definitionStart; i < definitions.length; i++) names.register(definitions[i]!, moduleName);
     for (let i = theoremStart; i < theorems.length; i++) names.register(theorems[i]!, moduleName);
     cursor = end;
@@ -3332,6 +3418,335 @@ function registerNotationGuards(kernel: Kernel, notations: readonly SurfaceNotat
       registerGuardPredicate(kernel, notation.target, "transparent", notation.module);
     }
   }
+}
+
+const REGISTRATION_FORMS = "`register kinds Category object obj morphism mor`, " +
+  "`register application Functor(F, C, D) over C object obj morphism map`, or " +
+  "`register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`";
+
+/**
+ * A `register` declaration, resolved once here and kept on the environment
+ * beside the notations: the kinds of element a structure has, how a
+ * structure's values apply, or the facts a fact shape gives. Each is read
+ * back by `registrationTables` wherever the elaborator classifies a term.
+ */
+function elaborateRegistration(
+  kernel: Kernel, block: readonly SourceLine[], scope: SurfaceScope, environment: SurfaceEnvironment,
+): void {
+  const line = block[0]!;
+  if (block.length !== 1) throw new SurfaceError(block[1]!.number, "register declarations must fit on one line");
+  const kinds = /^register\s+kinds\s+(\S+)((?:\s+\S+\s+\S+)+)$/u.exec(line.text);
+  if (kinds) { elaborateKindsRegistration(kernel, line, scope, environment, kinds[1]!, kinds[2]!); return; }
+  const application = /^register\s+application\s+(\S+?)\((.*?)\)\s+over\s+(\S+)((?:\s+\S+\s+\S+)+)$/u.exec(line.text);
+  if (application) {
+    elaborateApplicationRegistration(kernel, line, scope, environment, application[1]!, application[2]!, application[3]!, application[4]!);
+    return;
+  }
+  const facts = /^register\s+facts\s+(.+?)(?:\s+with\s+(.+?))?\s+gives\s+(.+)$/u.exec(line.text);
+  if (facts) { elaborateFactsRegistration(kernel, line, scope, environment, facts[1]!, facts[2], facts[3]!); return; }
+  throw new SurfaceError(line.number, `expected ${REGISTRATION_FORMS}`);
+}
+
+/** The `name field` pairs after a registration's head, each field a field of the structure. */
+function registrationKinds(
+  kernel: Kernel, line: SourceLine, rawPairs: string, record: SurfaceDatatypeRecord, role: string,
+): { readonly name: string; readonly projection: string }[] {
+  const words = rawPairs.trim().split(/\s+/u);
+  const structure = record.structure!;
+  const result: { name: string; projection: string }[] = [];
+  for (let index = 0; index < words.length; index += 2) {
+    const name = words[index]!;
+    const field = words[index + 1]!;
+    if (!SIMPLE_IDENTIFIER.test(name) || !SIMPLE_IDENTIFIER.test(field)) {
+      throw new SurfaceError(line.number, `a ${role} names each kind and its field as two identifiers, as in \`object obj\`; found \`${name} ${field}\``);
+    }
+    if (result.some(item => item.name === name)) throw new SurfaceError(line.number, `the kind ${name} is named twice`);
+    const position = structure.fields.indexOf(field);
+    if (position < 0) {
+      throw new SurfaceError(line.number, `${field} is not a field of ${shortName(structure.predicate)}; its fields are ${structure.fields.join(", ")}`);
+    }
+    result.push({ name, projection: structure.projections[position]! });
+  }
+  return result;
+}
+
+/** The structure a registration's predicate names, with its arity. */
+function registrationStructure(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, rawPredicate: string, arity: number | undefined, role: string,
+): SurfaceDatatypeRecord {
+  const predicate = resolveExisting(surfaceSymbol(rawPredicate), scope, candidate =>
+    (arity === undefined || kernel.predicates.get(candidate) === arity) && visibleDeclaration(candidate, scope) &&
+    structureOfPredicate(kernel, candidate)?.structure?.predicate === candidate, line.number, `${role} structure predicate`);
+  return structureOfPredicate(kernel, predicate)!;
+}
+
+function registrationDeclared(
+  environment: SurfaceEnvironment, scope: SurfaceScope, line: SourceLine, form: SurfaceRegistrationRecord["form"], predicate: string,
+): void {
+  if (environment.registrations.some(item => item.form === form && item.predicate === predicate && item.module === scope.moduleName)) {
+    throw new SurfaceError(line.number, `register ${form} ${shortName(predicate)} is already declared in this module`);
+  }
+}
+
+/** `register kinds Category object obj morphism mor`: the kinds of element a structure's values have. */
+function elaborateKindsRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment, rawPredicate: string, rawPairs: string,
+): void {
+  const record = registrationStructure(kernel, line, scope, rawPredicate, undefined, "register kinds");
+  const predicate = record.structure!.predicate;
+  registrationDeclared(environment, scope, line, "kinds", predicate);
+  const kinds = registrationKinds(kernel, line, rawPairs, record, "kinds registration");
+  environment.registrations.push({
+    form: "kinds", predicate, arity: kernel.predicates.get(predicate)!, kinds,
+    ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/**
+ * `register application Functor(F, C, D) over C object obj morphism map`:
+ * under a fact of the predicate, the first pattern variable applies to a
+ * term by the field of the term's kind among the kinds of the variable
+ * named by `over`, which a `register kinds` declaration in scope names.
+ */
+function elaborateApplicationRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment,
+  rawPredicate: string, rawArguments: string, overName: string, rawPairs: string,
+): void {
+  const names = splitTopLevel(rawArguments, ",").map(piece => piece.trim());
+  if (names.length < 2 || names.some(piece => !SIMPLE_IDENTIFIER.test(piece)) || new Set(names).size !== names.length) {
+    throw new SurfaceError(line.number, "the arguments of an application registration are distinct pattern variables, the applied structure first, as in `Functor(F, C, D)`");
+  }
+  const record = registrationStructure(kernel, line, scope, rawPredicate, names.length, "register application");
+  const predicate = record.structure!.predicate;
+  registrationDeclared(environment, scope, line, "application", predicate);
+  const over = names.indexOf(overName);
+  if (over <= 0) {
+    throw new SurfaceError(line.number, `\`over\` names one of the pattern variables after the applied structure, ${names.slice(1).join(", ")}; found ${overName}`);
+  }
+  const kinds = registrationKinds(kernel, line, rawPairs, record, "application registration");
+  const tables = registrationTables(kernel, scope);
+  for (const kind of kinds) {
+    if (!tables.kinds.some(item => item.kinds!.some(other => other.name === kind.name))) {
+      throw new SurfaceError(line.number, `no \`register kinds\` declaration in scope names the kind ${kind.name}; declare the kinds of the structure ${overName} is, as in \`register kinds Category ${kind.name} …\``);
+    }
+  }
+  environment.registrations.push({
+    form: "application", predicate, arity: names.length, names, over, kinds,
+    ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/**
+ * `register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`
+ * and `register facts η : F ⟹ G with F : C ⥤ D ∧ G : C ⥤ D gives η : obj(C) → mor(D)`:
+ * a fact matching the pattern, read with the `with` facts in scope, gives
+ * the conjuncts after `gives`. The identifiers of the pattern that name no
+ * declared symbol are its variables; the `with` facts may bind more.
+ */
+function elaborateFactsRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment,
+  rawPattern: string, rawWith: string | undefined, rawGives: string,
+): void {
+  const identifiers = (text: string): string[] => [...new Set(text.match(/[\p{L}_][\p{L}\p{M}\p{N}_]*/gu) ?? [])];
+  const declared = (name: string): boolean => resolveOptional(surfaceSymbol(name), scope,
+    candidate => kernel.functions.has(candidate) || kernel.predicates.has(candidate)) !== undefined;
+  const patternVariables = identifiers(rawPattern).filter(name => !declared(name));
+  const read = (text: string, variables: ReadonlySet<string>, facts: readonly Formula[], role: string): Formula => {
+    const templateScope: SurfaceScope = { ...scope, localFormulas: () => facts };
+    try { return parseFormula(text, kernel, variables, line.number, templateScope); }
+    catch (error) {
+      if (!(error instanceof SurfaceError)) throw error;
+      throw new SurfaceError(line.number, `the ${role} of a facts registration must be a formula over its variables: ${error.message}`);
+    }
+  };
+  const pattern = read(rawPattern, new Set(patternVariables), [], "pattern");
+  if (pattern.tag !== "pred" || (pattern.pred === "in" && pattern.args[1]!.tag !== "app")) {
+    throw new SurfaceError(line.number, "the pattern of a facts registration is a predicate fact or a membership in a function value, as in `Morphism(C, f, a, b)` or `f ∈ hom(C, a, b)`");
+  }
+  const variables = patternVariables.filter(name => freeFormulaVariables(pattern).has(name));
+  const withVariables = rawWith === undefined ? [] : identifiers(rawWith).filter(name => !declared(name) && !variables.includes(name));
+  const allVariables = new Set([...variables, ...withVariables]);
+  const withFacts = rawWith === undefined ? [] : formulaConjuncts(read(rawWith, allVariables, [pattern], "with clause"));
+  if (withFacts.some(fact => fact.tag !== "pred")) {
+    throw new SurfaceError(line.number, "the with clause of a facts registration is a conjunction of predicate facts");
+  }
+  const gives = formulaConjuncts(read(rawGives, allVariables, [pattern, ...withFacts], "gives clause"));
+  const free = new Set<string>();
+  for (const formula of [pattern, ...withFacts, ...gives]) freeFormulaVariables(formula, free);
+  const head = pattern.pred === "in" ? (pattern.args[1]! as Extract<Term, { readonly tag: "app" }>) : undefined;
+  const predicate = head ? head.fn : pattern.pred;
+  const arity = head ? head.args.length : pattern.args.length;
+  environment.registrations.push({
+    form: "facts", predicate, arity, pattern, variables: [...allVariables].filter(name => free.has(name)),
+    ...(withFacts.length ? { with: withFacts } : {}), gives,
+    ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/** The registrations in scope, indexed for the places that classify terms. */
+interface RegistrationTables {
+  /** The `kinds` registrations, in declaration order. */
+  readonly kinds: readonly SurfaceRegistrationRecord[];
+  /** The `kinds` registration of a structure, by its predicate and by its data predicate. */
+  readonly kindsByPredicate: ReadonlyMap<string, SurfaceRegistrationRecord>;
+  /** The `application` registrations by predicate. */
+  readonly applications: ReadonlyMap<string, readonly SurfaceRegistrationRecord[]>;
+  /** The kind whose field each `application` projection is. */
+  readonly applicationKinds: ReadonlyMap<string, string>;
+  /** The `facts` registrations by the head of their pattern: `pred:P` for a predicate, `in:f` for a membership in `f(…)`. */
+  readonly facts: ReadonlyMap<string, readonly SurfaceRegistrationRecord[]>;
+}
+
+const EMPTY_REGISTRATION_TABLES: RegistrationTables = {
+  kinds: [], kindsByPredicate: new Map(), applications: new Map(), applicationKinds: new Map(), facts: new Map(),
+};
+
+/** The key a fact is looked up under among the `facts` registrations. */
+function registrationFactKey(fact: Extract<Formula, { readonly tag: "pred" }>): string | undefined {
+  if (fact.pred !== "in") return `pred:${fact.pred}`;
+  const set = fact.args[1];
+  return set?.tag === "app" ? `in:${set.fn}` : undefined;
+}
+
+/**
+ * The registrations the modules this scope can see declare, indexed once
+ * per visibility and kept on the visibility cache beside the notation
+ * groups, so that no declaration is searched while a term is read.
+ */
+function registrationTables(kernel: Kernel, scope: SurfaceScope): RegistrationTables {
+  const environment = surfaceEnvironments.get(kernel);
+  if (!environment || environment.registrations.length === 0) return EMPTY_REGISTRATION_TABLES;
+  const cache = surfaceVisibilityCache(kernel, environment);
+  const key = scopeVisibilityKey(scope);
+  const cached = cache.registrations.get(key);
+  if (cached) return cached;
+  const reachable = reachableImports(cache, environment, scope);
+  const visible = environment.registrations.filter(item =>
+    item.module === undefined || item.module === scope.moduleName || reachable.has(item.module));
+  const kinds = visible.filter(item => item.form === "kinds");
+  const kindsByPredicate = new Map<string, SurfaceRegistrationRecord>();
+  for (const item of kinds) {
+    kindsByPredicate.set(item.predicate, item);
+    const record = structureOfPredicate(kernel, item.predicate);
+    if (record) kindsByPredicate.set(record.predicate, item);
+  }
+  const applications = new Map<string, SurfaceRegistrationRecord[]>();
+  const applicationKinds = new Map<string, string>();
+  for (const item of visible) {
+    if (item.form !== "application") continue;
+    const list = applications.get(item.predicate);
+    if (list) list.push(item); else applications.set(item.predicate, [item]);
+    for (const kind of item.kinds!) applicationKinds.set(kind.projection, kind.name);
+  }
+  const facts = new Map<string, SurfaceRegistrationRecord[]>();
+  for (const item of visible) {
+    if (item.form !== "facts") continue;
+    const factKey = registrationFactKey(item.pattern as Extract<Formula, { readonly tag: "pred" }>)!;
+    const list = facts.get(factKey);
+    if (list) list.push(item); else facts.set(factKey, [item]);
+  }
+  const tables: RegistrationTables = { kinds, kindsByPredicate, applications, applicationKinds, facts };
+  cache.registrations.set(key, tables);
+  return tables;
+}
+
+/** The conjuncts of a formula, through its conjunctions. */
+function formulaConjuncts(formula: Formula, into: Formula[] = []): Formula[] {
+  if (formula.tag === "and") { formulaConjuncts(formula.left, into); formulaConjuncts(formula.right, into); }
+  else into.push(formula);
+  return into;
+}
+
+/** A formula over pattern variables at a substitution, the variables renamed first so that none captures a value. */
+function instantiateRegistration(formula: Formula, variables: readonly string[], substitution: ReadonlyMap<string, Term>): Formula {
+  let result = formula;
+  variables.forEach((name, index) => { result = substituteFormula(result, name, v(`$registered${index}`)); });
+  variables.forEach((name, index) => {
+    const value = substitution.get(name);
+    if (value) result = substituteFormula(result, `$registered${index}`, value);
+  });
+  return result;
+}
+
+/**
+ * The facts the `facts` registrations give for the facts in scope: for
+ * each fact matching a pattern, with the `with` facts found among the facts
+ * in scope binding the variables the pattern leaves free, the instantiated
+ * `gives` conjuncts not already among the facts.
+ */
+function registeredConsequences(tables: RegistrationTables, facts: readonly Formula[]): Formula[] {
+  if (tables.facts.size === 0) return [];
+  const result: Formula[] = [];
+  let known: Set<string> | undefined;
+  for (const fact of facts) {
+    if (fact.tag !== "pred") continue;
+    const key = registrationFactKey(fact);
+    const rules = key === undefined ? undefined : tables.facts.get(key);
+    if (!rules) continue;
+    for (const rule of rules) {
+      const names = rule.variables!;
+      const substitution = new Map<string, Term>();
+      if (!matchFormula(rule.pattern!, fact, new Set(names), substitution)) continue;
+      // The `with` facts are matched among the facts in scope, in order,
+      // each binding the variables it mentions for those after it.
+      let matched = true;
+      for (const condition of rule.with ?? []) {
+        const free = names.filter(name => !substitution.has(name) && freeFormulaVariables(condition).has(name));
+        const instance = instantiateRegistration(condition, names, substitution);
+        const renamed = new Set(free.map(name => `$registered${names.indexOf(name)}`));
+        const binding = new Map<string, Term>();
+        const found = facts.some(candidate => {
+          binding.clear();
+          return candidate.tag === "pred" && candidate.pred === (condition as Extract<Formula, { readonly tag: "pred" }>).pred &&
+            matchFormula(instance, candidate, renamed, binding);
+        });
+        if (!found) { matched = false; break; }
+        for (const name of free) substitution.set(name, binding.get(`$registered${names.indexOf(name)}`)!);
+      }
+      if (!matched) continue;
+      known ??= new Set(facts.map(formulaCanonical));
+      for (const consequence of rule.gives!) {
+        const instance = instantiateRegistration(consequence, names, substitution);
+        const canonicalForm = formulaCanonical(instance);
+        if (known.has(canonicalForm)) continue;
+        known.add(canonicalForm);
+        result.push(instance);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * The sets a `facts` registration places the members of a set in: for
+ * `hom(C, a, b)`, the registration `f ∈ hom(C, a, b) gives f ∈ C.mor ∧ …`
+ * answers `C.mor`.
+ */
+function registeredSupersets(tables: RegistrationTables, set: Term): Term[] {
+  if (set.tag !== "app" || tables.facts.size === 0) return [];
+  const rules = tables.facts.get(`in:${set.fn}`);
+  if (!rules) return [];
+  const element = v("$member");
+  const membership = pred("in", element, set);
+  const result: Term[] = [];
+  for (const rule of rules) {
+    if (rule.with?.length) continue;
+    const substitution = new Map<string, Term>();
+    if (!matchFormula(rule.pattern!, membership, new Set(rule.variables!), substitution)) continue;
+    for (const consequence of rule.gives!) {
+      const instance = instantiateRegistration(consequence, rule.variables!, substitution);
+      if (instance.tag === "pred" && instance.pred === "in" && instance.args.length === 2 && termEquals(instance.args[0]!, element)) {
+        result.push(instance.args[1]!);
+      }
+    }
+  }
+  return result;
+}
+
+/** Whether a set lies in one of the carriers: by being one, or by a `facts` registration placing its members in one. */
+function setInCarriers(tables: RegistrationTables, set: Term, carriers: readonly Term[]): boolean {
+  return carriers.some(carrier => termEquals(carrier, set)) ||
+    registeredSupersets(tables, set).some(superset => carriers.some(carrier => termEquals(carrier, superset)));
 }
 
 /** The literal tokens of a mixfix pattern such as `_ : _ → _`, between its placeholders. */
@@ -11659,7 +12074,8 @@ function goalDisplayOptions(
     ...(scope.rings?.length ? { rings: scope.rings } : {}),
     operations: displayOperations(kernel, scope, facts, conclusions),
     predicates: displayPredicates(kernel, scope, facts),
-    functors: displayFunctors(facts),
+    functors: displayApplications(kernel, scope, facts),
+    applicationProjections: applicationProjections(kernel),
     carriers: displayCarriers(kernel, scope, facts, conclusions),
     functions: displayFunctions(kernel, scope, facts),
   };
@@ -15885,12 +16301,12 @@ function notationTypeLabel(item: SurfaceNotationRecord): string {
 }
 
 function surfaceVisibilityCache(kernel: Kernel, environment: SurfaceEnvironment): SurfaceVisibilityCache {
-  const stamp = `${environment.modules.size}:${environment.notations.length}:${environment.instances.length}`;
+  const stamp = `${environment.modules.size}:${environment.notations.length}:${environment.registrations.length}:${environment.instances.length}`;
   const cached = surfaceVisibilityCaches.get(kernel);
   if (cached?.environment === environment && cached.stamp === stamp) return cached;
   const fresh: SurfaceVisibilityCache = {
     environment, stamp, reachable: new Map(), instances: new Map(), notationGroups: new Map(), resultTypes: new Map(),
-    visibility: new Map(),
+    registrations: new Map(), visibility: new Map(),
   };
   surfaceVisibilityCaches.set(kernel, fresh);
   return fresh;
@@ -16483,13 +16899,6 @@ interface HypothesisShape {
   readonly carriers: readonly Term[];
 }
 
-/** Whether a hom-set `hom(C, a, b)` lies in the morphisms `mor(C)` among these carriers. */
-function homSetInCarriers(set: Term, carriers: readonly Term[]): boolean {
-  return set.tag === "app" && shortName(set.fn) === "hom" && set.args.length === 3 &&
-    carriers.some(carrier => carrier.tag === "app" && shortName(carrier.fn) === "mor" && carrier.args.length === 1 &&
-      termEquals(carrier.args[0]!, set.args[0]!));
-}
-
 /** The distinct shapes the hypotheses in scope supply for the declarations of one mixfix token. */
 function hypothesisShapes(facts: readonly Formula[], notations: readonly SurfaceNotationRecord[]): HypothesisShape[] {
   const shapes: HypothesisShape[] = [];
@@ -16536,7 +16945,7 @@ function selectHypothesisShape(
     .filter(item => item.hypothesis && !item.hypothesis.fixed);
   const operations = hypothesisOperations(facts, functionNotations);
   const inShape = (term: Term, shape: HypothesisShape): boolean =>
-    operandInShape(kernel, facts, operations, shape, operands.length, term);
+    operandInShape(kernel, scope, facts, operations, shape, operands.length, term);
   const placed = (term: Term): boolean => shapes.some(shape => inShape(term, shape));
   const matching = shapes.filter(shape => operands.some(term => inShape(term, shape)) &&
     operands.every(term => !placed(term) || inShape(term, shape)));
@@ -16554,11 +16963,12 @@ function selectHypothesisShape(
  * being the value of a function into one.
  */
 function operandInShape(
-  kernel: Kernel, facts: readonly Formula[], operations: readonly HypothesisOperation[], shape: HypothesisShape,
+  kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], operations: readonly HypothesisOperation[], shape: HypothesisShape,
   operandCount: number, term: Term,
 ): boolean {
   const carriers = [...shape.fixed.values(), ...shape.carriers];
-  const inside = (set: Term): boolean => carriers.some(carrier => termEquals(carrier, set)) || homSetInCarriers(set, carriers);
+  const tables = registrationTables(kernel, scope);
+  const inside = (set: Term): boolean => setInCarriers(tables, set, carriers);
   for (const fact of facts) {
     if (fact.tag !== "pred") continue;
     if (fact.pred === "in" && fact.args.length === 2 && termEquals(fact.args[0]!, term) && inside(fact.args[1]!)) return true;
@@ -16606,7 +17016,7 @@ function selectInfixPredicateShape(
   }
   const operations = hypothesisOperations(facts, visibleHypothesisFunctionNotations(kernel, scope, line));
   const inShape = (term: Term, shape: HypothesisShape): boolean =>
-    operandInShape(kernel, facts, operations, shape, operands.length, term);
+    operandInShape(kernel, scope, facts, operations, shape, operands.length, term);
   const placed = (term: Term): boolean => shapes.some(shape => inShape(term, shape));
   if (typed.length) {
     const sorts = new Set(typed.flatMap(item => notationOperandTypes(item).filter((type): type is string => type !== undefined)));
@@ -16663,12 +17073,17 @@ function displayCarriers(
   return found.filter(item => !found.some(other => other.structure !== item.structure && termEquals(other.carrier, item.carrier)));
 }
 
-/** The local formulas in scope, with transparent guard facts opened to their conjuncts. */
+/**
+ * The local formulas in scope, with transparent guard facts opened to their
+ * conjuncts, and the facts the `facts` registrations give for them.
+ */
 function expandedLocalFormulas(kernel: Kernel, scope: SurfaceScope): Formula[] {
   const facts = scope.localFormulas?.() ?? [];
   const opened = facts.flatMap(formula => [formula,
     ...openGuardFact(kernel, { formula, proof: assume(formula) }, scopeVisibility(kernel, scope)).map(item => item.formula)]);
-  return [...opened, ...derivedStructureFacts(kernel, scope, opened)];
+  const all = [...opened, ...derivedStructureFacts(kernel, scope, opened)];
+  const tables = registrationTables(kernel, scope);
+  return tables.facts.size ? [...all, ...registeredConsequences(tables, all)] : all;
 }
 
 /**
@@ -17932,131 +18347,157 @@ function definitionConjuncts(kernel: Kernel, facts: readonly Formula[], depth = 
 }
 
 /**
- * `F(x)` for a functor `F` in scope is `obj(F)(x)` when `x` is an object of
- * the source category and `map(F)(x)` when it is a morphism, as the local
- * facts decide, so that both are written as `F` applied, in the manner of
- * a structure's `F.obj` and `F.map`. Undefined when no `Functor(F, C, D)` fact is
- * in scope; an error when the facts do not place the argument.
+ * `F(x)` under a `register application` declaration whose predicate has a
+ * fact about `F` in scope: `F.obj(x)` when the local facts place `x` among
+ * the objects of the source category and `F.map(x)` when among its
+ * morphisms, so that both are written as `F` applied, in the manner of a
+ * structure's `F.obj` and `F.map`. Undefined when no such fact is in scope;
+ * an error when the facts do not place the argument in a kind the
+ * registration applies by.
  */
-function functorApplication(kernel: Kernel, scope: SurfaceScope, base: Term, argument: Term, line: number): Term | undefined {
+function registeredApplication(kernel: Kernel, scope: SurfaceScope, base: Term, argument: Term, line: number): Term | undefined {
+  const tables = registrationTables(kernel, scope);
+  if (tables.applications.size === 0) return undefined;
   const facts = expandedLocalFormulas(kernel, scope);
-  const functor = facts.find(fact => fact.tag === "pred" && shortName(fact.pred) === "Functor" &&
-    fact.args.length === 3 && termEquals(fact.args[0]!, base));
-  if (!functor || functor.tag !== "pred") return undefined;
-  const source = functor.args[1]!;
-  const kind = functorArgumentKind(kernel, scope, facts, argument, source);
-  if (!kind) {
-    throw new SurfaceError(line, `${formatTerm(base)} is a functor, and ${formatTerm(argument)} is not known to be an object or a morphism of ${formatTerm(source)}; add a binder such as (x ∈ obj(${formatTerm(source)})) or (f : a ⟶ b), or write obj(${formatTerm(base)})(x) for an object and map(${formatTerm(base)})(f) for a morphism`);
+  let registration: SurfaceRegistrationRecord | undefined;
+  let about: Extract<Formula, { readonly tag: "pred" }> | undefined;
+  for (const fact of facts) {
+    if (fact.tag !== "pred") continue;
+    const candidates = tables.applications.get(fact.pred);
+    if (!candidates) continue;
+    registration = candidates.find(item => item.arity === fact.args.length);
+    if (registration && termEquals(fact.args[0]!, base)) { about = fact; break; }
+    registration = undefined;
   }
-  const field = kind === "object" ? "obj" : "map";
-  const structure = structureOfPredicate(kernel, functor.pred)?.structure;
-  const projection = structure && structure.fields.includes(field)
-    ? structure.projections[structure.fields.indexOf(field)]!
-    : resolveExisting(field, scope, candidate => kernel.functions.get(candidate) === 1, line, "functor projection");
+  if (!registration || !about) return undefined;
+  const source = about.args[registration.over!]!;
+  const kind = registeredArgumentKind(kernel, tables, registration, facts, argument, source);
+  const projection = kind === undefined ? undefined : registration.kinds!.find(item => item.name === kind)?.projection;
+  if (!projection) {
+    const kinds = registration.kinds!;
+    const base_ = formatTerm(base);
+    const argument_ = formatTerm(argument);
+    const named = (name: string): string => `${/^[aeiou]/iu.test(name) ? "an" : "a"} ${name}`;
+    const sets = registrationKindSets(kernel, tables, registration, facts, source);
+    throw new SurfaceError(line, `${base_} is ${named(shortName(registration.predicate).toLowerCase())}, and ${argument_} is not known to be ${kinds.map(item => named(item.name)).join(" or ")} of ${formatTerm(source)}; add a binder such as ${kinds.map(item => `(${argument_} ∈ ${formatTerm(sets?.get(item.name) ?? app(item.projection, source))})`).join(" or ")}, or write ${kinds.map(item => `${shortName(item.projection)}(${base_})(${argument_}) for ${named(item.name)}`).join(" and ")}`);
+  }
   const applySymbol = resolveExisting("apply", scope, candidate => kernel.functions.get(candidate) === 2, line, "function application");
   return app(applySymbol, app(projection, base), argument);
 }
 
-/** Whether the facts place a term among the objects or the morphisms of a category. */
-function functorArgumentKind(
-  kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], term: Term, source: Term,
-): "object" | "morphism" | undefined {
-  // The objects and morphisms of the source are its projections, read off
-  // the category structure that the facts place the source in.
-  const category = facts.flatMap(fact => fact.tag === "pred" && fact.args.length === 1 && termEquals(fact.args[0]!, source)
-    ? [structureOfPredicate(kernel, fact.pred)?.structure] : []).find(Boolean) ??
-    [...(surfaceEnvironments.get(kernel)?.datatypes.values() ?? [])]
-      .find(item => item.structure && ["obj", "mor"].every(field => item.structure!.fields.includes(field)))?.structure;
-  const projection = (field: string): string | undefined => category && category.fields.includes(field)
-    ? category.projections[category.fields.indexOf(field)]
-    : resolveOptional(field, scope, candidate => kernel.functions.get(candidate) === 1 && !projectionOf(kernel, candidate));
-  const obj = projection("obj");
-  const mor = projection("mor");
-  if (!obj || !mor) return undefined;
-  const objects = app(obj, source);
-  const morphisms = app(mor, source);
-  const classify = (set: Term): "object" | "morphism" | undefined => termEquals(set, objects) ? "object"
-    : termEquals(set, morphisms) || homSetInCarriers(set, [morphisms]) ? "morphism" : undefined;
-  for (const fact of [...facts, ...definitionConjuncts(kernel, facts)]) {
-    if (fact.tag !== "pred") continue;
-    if (fact.pred === "in" && fact.args.length === 2 && termEquals(fact.args[0]!, term)) {
-      const kind = classify(fact.args[1]!);
-      if (kind) return kind;
+/**
+ * The sets of each kind of a structure value, from the `register kinds`
+ * declaration of the structure that the facts place the value in, or else
+ * of the one whose kinds the application names. Undefined when none is in
+ * scope.
+ */
+function registrationKindSets(
+  kernel: Kernel, tables: RegistrationTables, application: SurfaceRegistrationRecord, facts: readonly Formula[], source: Term,
+): ReadonlyMap<string, Term> | undefined {
+  let kinds: SurfaceRegistrationRecord | undefined;
+  for (const fact of facts) {
+    if (fact.tag !== "pred" || fact.args.length === 0 || !termEquals(fact.args[0]!, source)) continue;
+    kinds = tables.kindsByPredicate.get(fact.pred);
+    if (kinds) break;
+  }
+  kinds ??= tables.kinds.find(item => application.kinds!.every(kind => item.kinds!.some(other => other.name === kind.name)));
+  return kinds ? new Map(kinds.kinds!.map(item => [item.name, app(item.projection, source)])) : undefined;
+}
+
+/**
+ * The kind the facts place a term in among the kinds of a structure value:
+ * by a membership in a kind's set, or in a set a `facts` registration
+ * places in one; by being the value of a registered application's field,
+ * `G.obj(y)` an object; or by being the value of a function or operation
+ * into a kind's set, read off the function facts in scope, `C.id(a)` and
+ * `g ∘ f` morphisms.
+ */
+function registeredArgumentKind(
+  kernel: Kernel, tables: RegistrationTables, application: SurfaceRegistrationRecord, facts: readonly Formula[], term: Term, source: Term,
+): string | undefined {
+  const sets = registrationKindSets(kernel, tables, application, facts, source);
+  if (!sets) return undefined;
+  const classify = (set: Term): string | undefined => {
+    for (const [kind, kindSet] of sets) if (termEquals(set, kindSet)) return kind;
+    for (const superset of registeredSupersets(tables, set)) {
+      for (const [kind, kindSet] of sets) if (termEquals(superset, kindSet)) return kind;
     }
-    // The endpoints of a hom-set membership or of a guard are objects.
-    if (fact.pred === "in" && fact.args.length === 2 && homSetInCarriers(fact.args[1]!, [morphisms]) &&
-        fact.args[1]!.tag === "app" && fact.args[1]!.args.slice(1).some(endpoint => termEquals(endpoint, term))) return "object";
-    if (shortName(fact.pred) === "Morphism" && fact.args.length === 4 && termEquals(fact.args[0]!, source)) {
-      if (termEquals(fact.args[1]!, term)) return "morphism";
-      if (fact.args.slice(2).some(endpoint => termEquals(endpoint, term))) return "object";
-    }
+    return undefined;
+  };
+  // The conjuncts of the definitions of the facts place terms as the facts
+  // themselves do, with the registered consequences of those conjuncts.
+  const conjuncts = definitionConjuncts(kernel, facts);
+  for (const fact of [...facts, ...conjuncts, ...registeredConsequences(tables, conjuncts)]) {
+    if (fact.tag !== "pred" || fact.pred !== "in" || fact.args.length !== 2 || !termEquals(fact.args[0]!, term)) continue;
+    const kind = classify(fact.args[1]!);
+    if (kind) return kind;
   }
   if (term.tag !== "app") return undefined;
   if (shortName(term.fn) === "apply" && term.args.length === 2) {
     const graph = term.args[0]!;
-    if (graph.tag === "app" && graph.args.length === 1 && shortName(graph.fn) === "obj") return "object";
-    if (graph.tag === "app" && graph.args.length === 1 && shortName(graph.fn) === "map") return "morphism";
+    if (graph.tag === "app" && graph.args.length === 1) {
+      const kind = tables.applicationKinds.get(graph.fn);
+      if (kind !== undefined && sets.has(kind)) return kind;
+    }
     for (const codomain of hypothesisCodomains(kernel, facts, graph)) {
       const kind = classify(codomain);
       if (kind) return kind;
     }
     return undefined;
   }
-  if (term.args.length === 3 && shortName(term.fn) === "call2" && term.args[0]!.tag === "app" &&
-      shortName(term.args[0]!.fn) === "comp" && term.args[0]!.args.length === 1 &&
-      termEquals(term.args[0]!.args[0]!, source)) return "morphism";
+  if (shortName(term.fn) === "call2" && term.args.length === 3) {
+    for (const codomain of hypothesisCodomains(kernel, facts, term.args[0]!)) {
+      const kind = classify(codomain);
+      if (kind) return kind;
+    }
+  }
   return undefined;
 }
 
-/** The functors that facts in scope declare, printed as `F(x)` for `obj(F)(x)` and `map(F)(x)`. */
-function displayFunctors(facts: readonly Formula[]): Term[] {
+/**
+ * The structure values that facts in scope place under a `register
+ * application` declaration, printed applied: `F(x)` for `F.obj(x)` and
+ * `F.map(x)` under `Functor(F, C, D)`.
+ */
+function displayApplications(kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[]): Term[] {
+  const tables = registrationTables(kernel, scope);
+  if (tables.applications.size === 0) return [];
   const result: Term[] = [];
-  for (const fact of facts) {
-    if (fact.tag !== "pred" || fact.args.length !== 3) continue;
-    const candidates = shortName(fact.pred) === "Functor" ? [fact.args[0]!]
-      : shortName(fact.pred) === "NaturalTransformation" ? [fact.args[1]!, fact.args[2]!] : [];
-    for (const candidate of candidates) {
-      if (!result.some(item => termEquals(item, candidate))) result.push(candidate);
-    }
+  for (const fact of [...facts, ...registeredConsequences(tables, facts)]) {
+    if (fact.tag !== "pred") continue;
+    const candidates = tables.applications.get(fact.pred);
+    if (!candidates?.some(item => item.arity === fact.args.length)) continue;
+    const candidate = fact.args[0]!;
+    if (!result.some(item => termEquals(item, candidate))) result.push(candidate);
   }
   return result;
 }
 
 /**
  * The codomains the context gives a function graph: direct `F : A → B`
- * facts and those its hypotheses assert; the components of a transformation
- * `η : F ⟹ G` lie in the morphisms of the target of `F`, read off the
- * functor hypothesis about `F`.
+ * facts and those its hypotheses assert, among them the facts the `facts`
+ * registrations give, as the components of a transformation `η : F ⟹ G`
+ * lying in the morphisms of the target of `F`.
  */
 function hypothesisCodomains(kernel: Kernel, facts: readonly Formula[], graph: Term): Term[] {
   const functionFacts = [...facts, ...definitionFunctionFacts(kernel, facts)];
-  const codomains = functionFacts.flatMap(fact =>
+  return functionFacts.flatMap(fact =>
     fact.tag === "pred" && shortName(fact.pred) === "FunctionBetween" && fact.args.length === 3 &&
       termEquals(fact.args[0]!, graph) ? [fact.args[2]!] : []);
-  for (const fact of facts) {
-    if (fact.tag !== "pred" || shortName(fact.pred) !== "NaturalTransformation" || fact.args.length !== 3 ||
-        !termEquals(fact.args[0]!, graph)) continue;
-    const functor = fact.args[1]!;
-    for (const item of functionFacts) {
-      if (item.tag === "pred" && shortName(item.pred) === "FunctionBetween" && item.args.length === 3 &&
-          item.args[0]!.tag === "app" && shortName(item.args[0]!.fn) === "map" && item.args[0]!.args.length === 1 &&
-          termEquals(item.args[0]!.args[0]!, functor)) codomains.push(item.args[2]!);
-    }
-  }
-  return codomains;
 }
 
 /**
- * Whether an operand lies in a carrier: by a membership fact, a hom-set
- * membership, being a constant or a composite already read under a
- * hypothesis token on that carrier, or being the value of a function into it.
+ * Whether an operand lies in a carrier: by a membership fact, a membership
+ * in a set a `facts` registration places in it, being a constant or a
+ * composite already read under a hypothesis token on that carrier, or
+ * being the value of a function into it.
  */
 function operandInCarrier(
-  kernel: Kernel, facts: readonly Formula[], composites: readonly HypothesisOperation[], term: Term, carrier: Term,
+  kernel: Kernel, scope: SurfaceScope, facts: readonly Formula[], composites: readonly HypothesisOperation[], term: Term, carrier: Term,
 ): boolean {
+  const tables = registrationTables(kernel, scope);
   if (facts.some(fact => fact.tag === "pred" && fact.pred === "in" && fact.args.length === 2 &&
-      termEquals(fact.args[0]!, term) &&
-      (termEquals(fact.args[1]!, carrier) || homSetInCarriers(fact.args[1]!, [carrier])))) return true;
+      termEquals(fact.args[0]!, term) && setInCarriers(tables, fact.args[1]!, [carrier]))) return true;
   if (composites.some(item => item.notation.fixity === "constant" && termEquals(item.operation, term) &&
       termEquals(item.carrier, carrier))) return true;
   if (term.tag !== "app") return false;
@@ -18087,7 +18528,7 @@ function typedOperandsOutsideHypothesis(
   if (!found.length) found = hypothesisOperations(closedInstanceFacts(kernel, scope), supplied);
   if (!found.length) return false;
   const composites = hypothesisOperations(facts, visibleHypothesisFunctionNotations(kernel, scope, line));
-  if (operands.some(term => found.some(item => operandInCarrier(kernel, facts, composites, term, item.carrier)))) return false;
+  if (operands.some(term => found.some(item => operandInCarrier(kernel, scope, facts, composites, term, item.carrier)))) return false;
   const sorts = [...new Set(typed.flatMap(item => notationOperandTypes(item).filter((type): type is string => type !== undefined)))];
   const sorted = (term: Term): boolean => naturalValue(term) !== undefined ||
     [...termTypeNames(kernel, term, scope)].some(type => sorts.includes(type));
@@ -18300,7 +18741,7 @@ function selectHypothesisOperation(
   // A composite already read under any hypothesis-supplied token, a⁻¹ among
   // them, lies in that token's carrier.
   let composites = hypothesisOperations(facts, visibleHypothesisFunctionNotations(kernel, scope, line));
-  const inCarrier = (term: Term, carrier: Term): boolean => operandInCarrier(kernel, facts, composites, term, carrier);
+  const inCarrier = (term: Term, carrier: Term): boolean => operandInCarrier(kernel, scope, facts, composites, term, carrier);
   // An operand the local facts place nowhere may be placed by the certified
   // typing rules in the carrier of a structure value an instance supplies,
   // X(R, I, j) in Ring.carrier(polynomialRing(R, I)) by X.mem: that
@@ -18416,7 +18857,7 @@ function functionNotationApplication(
   if (found.length === 1) return found[0]!.term;
   const composites = hypothesisOperations(facts, visibleHypothesisFunctionNotations(kernel, scope, line));
   const placed = found.filter(item => item.carrier &&
-    args.some(argument => operandInCarrier(kernel, facts, composites, argument, item.carrier!)));
+    args.some(argument => operandInCarrier(kernel, scope, facts, composites, argument, item.carrier!)));
   if (placed.length === 1) return placed[0]!.term;
   throw new SurfaceError(line, `ambiguous notation ${name}(${args.map(argument => formatTerm(argument)).join(", ")}); hypotheses in scope supply ${found.map(item => formatTerm(item.term)).join(" and ")}; write the function by name`);
 }
@@ -19091,7 +19532,7 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
         }
         const applySymbol = resolveExisting("apply", scope,
           candidate => kernel.functions.get(candidate) === 2, line, "function application");
-        return functorApplication(kernel, scope, v(token.text), args[0]!, line) ?? app(applySymbol, v(token.text), args[0]!);
+        return registeredApplication(kernel, scope, v(token.text), args[0]!, line) ?? app(applySymbol, v(token.text), args[0]!);
       }
       const environment = surfaceEnvironments.get(kernel);
       // A function form a hypothesis in scope supplies, ker(f) under
@@ -19224,7 +19665,7 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
         take(")");
         const symbol = resolveExisting("apply", scope,
           candidate => kernel.functions.get(candidate) === 2, line, "function application");
-        result = functorApplication(kernel, scope, result, argument, line) ?? app(symbol, result, argument);
+        result = registeredApplication(kernel, scope, result, argument, line) ?? app(symbol, result, argument);
         continue;
       }
       take("[");
