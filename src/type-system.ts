@@ -36,6 +36,12 @@ interface TypeRule {
   readonly arguments: readonly Term[];
   readonly proof: Proof;
   readonly transform?: "iffRight" | "iffLeft";
+  /**
+   * The conjunct of a conjunctive conclusion the rule proves, as the path
+   * of projections taken once the premises are relieved: a selection law
+   * `0 ≤ X → realSqrt(X) ∈ ℝ ∧ …` types `realSqrt(X)` by its first conjunct.
+   */
+  readonly projection?: readonly ("left" | "right")[];
   /** The kernel declaration the rule comes from; a local rule has none. */
   readonly origin?: string;
 }
@@ -663,8 +669,8 @@ function prepareRuleProver(
   const localRules = new Map<string, TypeRule[]>();
   if (!rejectAmbiguity) for (const [index, item] of available.entries()) {
     if (item.formula.tag !== "forall") continue;
-    const rule = compileTypeRule(kernel, `local_${index}`, item.proof, assumptions);
-    if (rule) localRules.set(rule.predicate, [...(localRules.get(rule.predicate) ?? []), rule]);
+    for (const rule of compileTypeRules(kernel, `local_${index}`, item.proof, assumptions))
+      localRules.set(rule.predicate, [...(localRules.get(rule.predicate) ?? []), rule]);
   }
   const directFacts = new GoalTable<Proof>();
   const localPredicates = new Map<string, Map<string, AvailableFact>>();
@@ -847,7 +853,7 @@ function prepareRuleProver(
           let proof = at(rule.proof, wantedArguments[0]!);
           if (rule.transform === "iffRight") proof = iffElimRight(proof);
           if (rule.transform === "iffLeft") proof = iffElimLeft(proof);
-          proof = impElim(proof, evidence);
+          proof = projectRuleConclusion(impElim(proof, evidence), rule);
           let conclusion: Formula;
           try { conclusion = kernel.checkProof(proof, assumptions); } catch { continue; }
           if (conclusion.tag !== "pred" || conclusion.pred !== wantedPredicate || !sameTerms(conclusion.args, wantedArguments)) continue;
@@ -941,6 +947,7 @@ function prepareRuleProver(
           if (rule.transform === "iffRight") proof = iffElimRight(proof);
           if (rule.transform === "iffLeft") proof = iffElimLeft(proof);
           for (const premise of evidence) proof = impElim(proof, premise);
+          proof = projectRuleConclusion(proof, rule);
           const conclusion = kernel.checkProof(proof, assumptions);
           if (conclusion.tag === "pred" && conclusion.pred === wantedPredicate &&
             sameTerms(conclusion.args, wantedArguments)) {
@@ -1051,6 +1058,7 @@ function prepareRuleProver(
         if (rule.transform === "iffRight") proof = iffElimRight(proof);
         if (rule.transform === "iffLeft") proof = iffElimLeft(proof);
         for (const premise of evidence) proof = impElim(proof, premise);
+        proof = projectRuleConclusion(proof, rule);
         const conclusion = kernel.checkProof(proof, assumptions);
         const concreteArguments = concrete as readonly Term[];
         if (conclusion.tag === "pred" && conclusion.pred === wantedPredicate &&
@@ -1282,8 +1290,8 @@ function typeIndex(kernel: Kernel): TypeIndex {
   const add = (name: string, proof: Proof, origin: string): void => {
     if (index!.processed.has(name)) return;
     index!.processed.add(name);
-    const rule = compileTypeRule(kernel, name, proof);
-    if (rule) { addRule({ ...rule, origin }); return; }
+    const rules = compileTypeRules(kernel, name, proof);
+    if (rules.length) { for (const rule of rules) addRule({ ...rule, origin }); return; }
     // Atomic equivalences include the foundational Nat ↔ membership-in-ω
     // bridge needed by parameterized datatype constructors.
     let formula = kernel.checkProof(proof);
@@ -1349,7 +1357,19 @@ function typeIndex(kernel: Kernel): TypeIndex {
   return index;
 }
 
-function compileTypeRule(kernel: Kernel, name: string, proof: Proof, assumptions: readonly Formula[] = []): TypeRule | undefined {
+function projectRuleConclusion(proof: Proof, rule: TypeRule): Proof {
+  for (const step of rule.projection ?? []) proof = step === "left" ? andElimLeft(proof) : andElimRight(proof);
+  return proof;
+}
+
+/**
+ * The refinement rules a statement yields: one for a predicate conclusion,
+ * and one for each predicate conjunct of a conjunctive conclusion that
+ * mentions an applied term, as the selection law of a defined value does.
+ * A conjunct over bare variables alone, `x ∈ A ∧ …`, answers every goal of
+ * its predicate and is not a rule.
+ */
+function compileTypeRules(kernel: Kernel, name: string, proof: Proof, assumptions: readonly Formula[] = []): TypeRule[] {
   let formula = kernel.checkProof(proof, assumptions);
   const variables: string[] = [];
   while (formula.tag === "forall") {
@@ -1360,13 +1380,29 @@ function compileTypeRule(kernel: Kernel, name: string, proof: Proof, assumptions
   const conditions: Formula[] = [];
   while (formula.tag === "imp") {
     const atoms = typePremises(formula.left);
-    if (!atoms) return undefined;
+    if (!atoms) return [];
     conditions.push(formula.left);
     premises.push(...atoms);
     formula = formula.right;
   }
-  if (formula.tag !== "pred" || formula.args.length === 0) return undefined;
-  return { name, variables, conditions, premises, predicate: formula.pred, arguments: formula.args, proof };
+  if (formula.tag === "pred") {
+    if (formula.args.length === 0) return [];
+    return [{ name, variables, conditions, premises, predicate: formula.pred, arguments: formula.args, proof }];
+  }
+  if (formula.tag !== "and") return [];
+  const rules: TypeRule[] = [];
+  const visit = (conjunct: Formula, projection: readonly ("left" | "right")[]): void => {
+    if (conjunct.tag === "and") {
+      visit(conjunct.left, [...projection, "left"]);
+      visit(conjunct.right, [...projection, "right"]);
+      return;
+    }
+    if (conjunct.tag !== "pred" || !conjunct.args.some(argument => argument.tag === "app")) return;
+    rules.push({ name: `${name}.${projection.join("_")}`, variables, conditions, premises,
+      predicate: conjunct.pred, arguments: conjunct.args, proof, projection });
+  };
+  visit(formula, []);
+  return rules;
 }
 
 function typePremises(formula: Formula): TypePremise[] | undefined {

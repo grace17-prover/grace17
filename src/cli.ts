@@ -17,7 +17,7 @@ import {
 } from "./index.ts";
 import { resolveImportName } from "./module-names.ts";
 import {
-  callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface,
+  callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface, serveMachineInterfaceOnPort,
   shadowedPropertyWarnings, transitiveImportNotes,
 } from "./machine-interface.ts";
 import { shadowedProperties } from "./workbench.ts";
@@ -69,7 +69,7 @@ export function runCli(args: readonly string[]): void {
     return values;
   };
   const optionNames = new Set(["--theorem", "--out", "--machine", "--environment", "--foundation", "--module-root", "--function", "--args", "--artifacts",
-    "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables", "--heap"]);
+    "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables", "--heap", "--port"]);
   const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet", "--store"]);
   const optionNames2 = ["--from"];
   optionNames2.forEach(name => optionNames.add(name));
@@ -498,6 +498,29 @@ function runMachineCommand(
 ): void {
   if (command === "serve") {
     if (positional.length) { usage(console.error); process.exitCode = 2; return; }
+    const port = option("--port");
+    if (port !== undefined) {
+      // The same protocol over a loopback TCP port: each connection is a
+      // session of lines. The bound address is printed as one JSON line,
+      // so a caller that asked for port 0 learns the port taken.
+      if (!/^\d+$/.test(port) || Number(port) > 65535) {
+        console.error("--port takes a port number from 0 to 65535");
+        process.exitCode = 2;
+        return;
+      }
+      serveMachineInterfaceOnPort({ port: Number(port), pin: flag("--pin") }).then(handle => {
+        process.stdout.write(`${JSON.stringify({ version: MACHINE_PROTOCOL_VERSION, listening: { host: handle.host, port: handle.port } })}\n`);
+        // A termination signal ends the process at once; a session in
+        // flight loses its connection, as the stdio session does.
+        const stop = (): void => { handle.close().catch(() => undefined); process.exit(0); };
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      }).catch(error => {
+        console.error(`serve stopped: ${error instanceof Error ? error.message : String(error)}`);
+        process.exitCode = 1;
+      });
+      return;
+    }
     serveMachineInterface(process.stdin, process.stdout, { pin: flag("--pin") }).catch(error => {
       console.error(`serve stopped: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
@@ -600,7 +623,8 @@ function usage(print: (line: string) => void): void {
   print("  g17 compile [--json] <module.g17> [...] [--out module.g17m] [--environment module.g17env]");
   print("  g17 verify-machine [--json] <module.g17> [...] --machine module.g17m");
   print("machine interface (docs/machine-interface.md); every method prints JSON, --text gives the readable form of search and goal:");
-  print("  g17 serve [--pin]                          newline-delimited JSON requests on stdin, responses on stdout");
+  print("  g17 serve [--pin] [--port N]               newline-delimited JSON requests on stdin, responses on stdout; --port N serves");
+  print("                                             the same lines over TCP on 127.0.0.1:N (0 takes a free port, printed as JSON)");
   print("  g17 goal [--text] [--foundation F] [--module-root dir ...] [--active file] <file.g17> [...] --line N [--column C]");
   print("  g17 suggest [--foundation F] [--module-root dir ...] [--active file] <file.g17> [...] --line N [--column C] --tactic exact?|apply?|rw?");
   print("  g17 search [--text] [--limit N] [--file file.g17 ...] <query>");

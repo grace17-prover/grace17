@@ -411,14 +411,20 @@ export interface SimplifiedFact {
 export class RewriteMismatch extends Error {
   readonly rule: Formula;
   readonly target: Formula;
+  /** A premise of the rule that an instance matching the target could not relieve, when that is why nothing was rewritten. */
+  readonly unrelieved: Formula | undefined;
 
-  constructor(rule: Formula, target: Formula) {
+  constructor(rule: Formula, target: Formula, unrelieved?: Formula) {
     super(`rewrite rule ${formatFormula(rule)} does not match ${formatFormula(target)}`);
     this.rule = rule;
     this.target = target;
+    this.unrelieved = unrelieved;
     this.name = "RewriteMismatch";
   }
 }
+
+/** The first premise a matched instance of a rule failed to relieve, kept for the report. */
+interface RewriteFailure { unrelieved?: Formula }
 
 /** The equality or equivalence a rule rewrites with, in the direction read. */
 function orientedRule(schema: Formula, reverse: boolean): Formula {
@@ -532,6 +538,7 @@ function instantiateRule(
   kernel: Kernel, ruleProof: Proof, variables: readonly string[], substitution: ReadonlyMap<string, Term>,
   conditions: readonly Formula[], assumptions: readonly Formula[], facts: readonly Proof[],
   relief: { rules: readonly Proof[]; state: ReliefState } | undefined, visibility: ScopeVisibility | undefined,
+  failure?: RewriteFailure,
 ): { readonly proof: Proof; readonly formula: Formula } | undefined {
   let proof = at(ruleProof, ...variables.map(name => substitution.get(name)!));
   let checked = kernel.checkProof(proof, assumptions);
@@ -539,7 +546,7 @@ function instantiateRule(
     if (checked.tag !== "imp") return undefined;
     const evidence = relieveHypothesis(kernel, checked.left, relief?.rules ?? [], assumptions, facts,
       relief?.state ?? { policy: false, remaining: 0, active: new Set(), visibility });
-    if (!evidence) return undefined;
+    if (!evidence) { if (failure) failure.unrelieved ??= checked.left; return undefined; }
     proof = impElim(proof, evidence);
     checked = kernel.checkProof(proof, assumptions);
   }
@@ -561,10 +568,11 @@ function rewriteWithEquivalence(
 ): { readonly formula: Formula; readonly forward: Proof; readonly backward: Proof } {
   const pattern = reverse ? schema.right : schema.left;
   const variableSet = new Set(variables);
+  const failure: RewriteFailure = {};
   for (const candidate of formulaCandidates(formula, underBinders)) {
     const substitution = new Map<string, Term>();
     if (!matchFormula(pattern, candidate, variableSet, substitution) || variables.some(name => !substitution.has(name))) continue;
-    const instantiated = instantiateRule(kernel, ruleProof, variables, substitution, conditions, assumptions, facts, relief, visibility);
+    const instantiated = instantiateRule(kernel, ruleProof, variables, substitution, conditions, assumptions, facts, relief, visibility, failure);
     if (!instantiated || instantiated.formula.tag !== "iff") continue;
     const equivalence = reverse ? iffIntro(iffElimRight(instantiated.proof), iffElimLeft(instantiated.proof)) : instantiated.proof;
     const source = reverse ? instantiated.formula.right : instantiated.formula.left;
@@ -579,7 +587,7 @@ function rewriteWithEquivalence(
     }
     return transported;
   }
-  throw new RewriteMismatch(orientedRule(schema, reverse), formula);
+  throw new RewriteMismatch(orientedRule(schema, reverse), formula, failure.unrelieved);
 }
 
 /**
@@ -663,10 +671,11 @@ export function rewriteFact(
   }
   if (schema.tag !== "eq") throw new Error(`rewrite needs an equality or an equivalence, under ∀ and premises; the rule states ${formatFormula(schema)}`);
   const pattern = reverse ? schema.right : schema.left;
+  const failure: RewriteFailure = {};
   for (const candidate of rewriteCandidates(original, underBinders)) {
     const substitution = new Map<string, Term>();
     if (!match(pattern, candidate, new Set(variables), substitution) || variables.some(name => !substitution.has(name))) continue;
-    const instantiated = instantiateRule(kernel, ruleProof, variables, substitution, conditions, assumptions, facts, relief, visibility);
+    const instantiated = instantiateRule(kernel, ruleProof, variables, substitution, conditions, assumptions, facts, relief, visibility, failure);
     if (!instantiated || instantiated.formula.tag !== "eq") continue;
     const equality = instantiated.proof;
     const checked = instantiated.formula;
@@ -683,7 +692,7 @@ export function rewriteFact(
     if (!formulaEquals(kernel.checkProof(proof, assumptions), formula)) throw new Error("rewrite at produced the wrong fact");
     return { formula, proof };
   }
-  throw new RewriteMismatch(orientedRule(schema, reverse), original);
+  throw new RewriteMismatch(orientedRule(schema, reverse), original, failure.unrelieved);
 }
 
 interface RewriteRule {
@@ -987,6 +996,7 @@ export function rewriteGoal(
   const prover = (): RefinementProver | undefined => {
     try { return refinements ??= prepareRefinementProver(kernel, assumptions, facts, visibility); } catch { return undefined; }
   };
+  let unrelieved: Formula | undefined;
   for (const candidate of candidates) {
     const matched = new Map<string, Term>();
     if (!match(pattern, candidate, variableSet, matched)) continue;
@@ -1000,7 +1010,7 @@ export function rewriteGoal(
         if (checked.tag !== "imp") { failed = true; break; }
         const evidence = relieveHypothesis(kernel, checked.left, relief?.rules ?? [], assumptions, facts,
           relief?.state ?? { policy: false, remaining: 0, active: new Set(), visibility });
-        if (!evidence) { failed = true; break; }
+        if (!evidence) { unrelieved ??= checked.left; failed = true; break; }
         equality = impElim(equality, evidence);
         checked = kernel.checkProof(equality, assumptions);
       }
@@ -1020,7 +1030,7 @@ export function rewriteGoal(
       };
     }
   }
-  throw new RewriteMismatch(orientedRule(schema, reverse), goal);
+  throw new RewriteMismatch(orientedRule(schema, reverse), goal, unrelieved);
 }
 
 function settleLogical(

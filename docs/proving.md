@@ -318,7 +318,13 @@ mixes facts and terms only where a fact instantiates the binders it
 matches; a fact named where a binder wants a term is reported with the
 entries of the list sorted into facts and terms and the `at` list to write
 instead, and a named premise that fits no requirement is reported with its
-formula and the requirement left open.
+formula and the requirement left open. The guard of a term written in the
+`at` list, `realSqrt(s * s) : ℝ` for an argument built from a defined
+value, is discharged as `typecheck` discharges it, from the local facts, the
+refinement rules, and the instances in scope, so an application needs no
+`have` naming the realness of a compound argument; a fact in the `with`
+list that restates such a guard is accepted as the evidence it is, and a
+guard nothing establishes is reported with the application.
 
 ### Inferring parameters without an `at` list
 
@@ -666,6 +672,12 @@ binary digit, and above 128 binary digits by splitting it in halves of its
 digits, so the nesting of the certificate grows with the logarithm of the
 digit count; each step is closed by a computation certificate.
 
+A value defined by `defunique` is typed by its selection law: the law
+`0 ≤ X → realSqrt(X) ∈ ℝ ∧ …` is a refinement rule for its first conjunct,
+so `realSqrt(s * s) ∈ ℝ` follows by `typecheck` from `0 ≤ s * s` among the
+facts, and no component of the law needs a name. Every predicate conjunct of
+a conjunctive conclusion that mentions an applied term is such a rule.
+
 With a checked local `Ring(R)` or `CommRing(R)` certificate, `typecheck` can
 also prove `R[0] ∈ R` and `R[1] ∈ R`. This fallback examines local
 certificates only and emits existing projection and membership theorem
@@ -756,8 +768,14 @@ the proof is carried through the connectives on the path, and `rw under h`
 crosses a quantifier whose variable neither side mentions. A rule that
 selects nothing is reported with its two sides and the goal or fact, printed
 with the notation in scope: `rewrite rule pow_zero (x ^ 0 = G.one) does not
-match the goal x = x`. In `rw [a, b, c]` the failing rule is reported by its
-own name and located at that rule.
+match the goal x = x`. When the other orientation would match, the report
+says so: `rw h` with `h : g * q2 = q` against the goal `q = 0` ends with
+`the other orientation, rw ← h, matches`. When the rule's side occurs but a
+premise of the rule is not established, the premise is named instead of a
+bare mismatch: `rw listDrop.zero` on `listDrop(A, 0, d :: ds)` without
+`List(A, d :: ds)` among the facts reports `its premise List(A, d :: ds) is
+not established; prove it first or supply it with \`with\``. In `rw [a, b, c]`
+the failing rule is reported by its own name and located at that rule.
 
 A set-builder `def f(…) : Set := { x ∈ A | φ }` is defined by its membership
 law, so `unfold f` opens every `t ∈ f(…)` instance into `t ∈ A ∧ φ`; when the
@@ -1227,6 +1245,16 @@ proof
   ring
 ```
 
+In a field, `ring` reads a quotient by a nonzero numeral literal as
+multiplication by the literal's inverse and knows that `k * k⁻¹ = 1`: the
+division law `a / b = a * b⁻¹` and the cancellation law `b ≠ 0 → b * b⁻¹ =
+1` are found in scope by their shape, and the nonzero premise is proved by
+a local fact or by `linarith`, never assumed, so a quotient by `0` stays an
+atom. `x / 2 + x / 2 = x` is `ring`, and `(8:R) * x = 1` gives `x = (1:R) /
+(8:R)` by `linear_combination ((1:R) / (8:R)) * h`, with no rewriting by
+`realDiv.eq_mul_inv` first; a quotient by a term that is not a literal is an
+atom.
+
 `ring at h` normalizes a proved polynomial equality in place. `ring_nf`
 normalizes every polynomial argument of the current equality or predicate goal
 without trying to close it, and `ring_nf at h` does the same to a local
@@ -1248,7 +1276,10 @@ exact member
 
 `linear_combination k * h1 + m * h2` scales equality hypotheses, adds them,
 and normalizes the resulting polynomial. Signed terms such as `h1 - h2` are
-supported. The tactic selects the commutative-ring interface used by the goal
+supported, and so is a parenthesized combination under a coefficient:
+`c * (h1 - h2)` is `c * h1 - c * h2`, and a coefficient inside the
+parentheses multiplies with the one outside, so `(3:R) * ((2:R) * h1 - h2)`
+scales `h1` by six. The tactic selects the commutative-ring interface used by the goal
 and named equations, so real and abstract-ring coefficients work as well as
 Nat coefficients. In a ring, cancellation is normalization with additive
 inverses; the certificate uses congruence and the ring laws. The Nat semiring
@@ -1262,7 +1293,10 @@ instance in that carrier. Missing carrier-membership evidence
 and incorrect combinations are rejected. The tactic combines the named
 equations and searches nothing.
 
-`arith` handles natural-number equalities and linear-order goals. For
+`arith` handles natural-number equalities and linear-order goals, and on a
+`⊥` goal it keeps the real and rational procedures of `linarith` behind its
+natural refutation, so a real disequality closes by either: `(4:R) ≠ 0`
+is `arith` or `linarith` alone, with no `intro` first. For
 equalities it first combines goal-relevant hypotheses with the semiring
 normalizer, which proves normalization, congruence, and affine substitution
 goals. It then applies antisymmetry to matching opposite bounds, and keeps an

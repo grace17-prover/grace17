@@ -7228,8 +7228,31 @@ function elaborateTacticTheorem(
             const where = location
               ? `${location} : ${formatFormula(lastError.target, options)}`
               : `the goal ${formatFormula(lastError.target, options)}`;
+            // A rule whose side occurs but whose premise is not established
+            // names the premise; a rule whose other side occurs names the
+            // orientation that would match.
+            if (lastError.unrelieved) {
+              throw new SurfaceError(line.number,
+                `rewrite rule ${reference} (${formatFormula(lastError.rule, options)}) matches ${where}, ` +
+                `but its premise ${formatFormula(lastError.unrelieved, options)} is not established; prove it first or supply it with \`with\``);
+            }
+            let orientation = "";
+            if (candidates.length === 1) {
+              try {
+                const rule = candidates[0]!;
+                if (location) {
+                  const before = current.locals.get(location)!;
+                  attempt(underBinders => rewriteFact(kernel, before.proof, rule, current.assumptions,
+                    [...current.locals.values()].filter(item => item !== before).map(item => item.proof), !reverse, underBinders, undefined, visibility));
+                } else {
+                  attempt(underBinders => rewriteGoal(kernel, current.goal, rule, current.assumptions,
+                    [...current.locals.values()].map(item => item.proof), !reverse, underBinders, undefined, visibility));
+                }
+                orientation = `; the other orientation, rw ${reverse ? "" : "← "}${reference}${location ? ` at ${location}` : ""}, matches`;
+              } catch { /* neither orientation matches */ }
+            }
             throw new SurfaceError(line.number,
-              `rewrite rule ${reference} (${formatFormula(lastError.rule, options)}) does not match ${where}`);
+              `rewrite rule ${reference} (${formatFormula(lastError.rule, options)}) does not match ${where}${orientation}`);
           }
           throw new SurfaceError(line.number, lastError instanceof Error ? lastError.message : "rewrite rule did not match");
         }
@@ -8540,28 +8563,7 @@ function elaborateTacticTheorem(
     if (linearCombination) {
       if (current.goal.tag !== "eq") throw new SurfaceError(line.number, "linear_combination requires an equality goal");
       const expression = linearCombination[1]!.trim();
-      const pieces: { text: string; negative: boolean }[] = [];
-      let depth = 0;
-      let start = 0;
-      let negative = false;
-      if (expression.startsWith("+") || expression.startsWith("-")) {
-        negative = expression[0] === "-";
-        start = 1;
-      }
-      for (let index = start; index < expression.length; index += 1) {
-        const character = expression[index]!;
-        if (character === "(") depth += 1;
-        else if (character === ")") depth -= 1;
-        else if (depth === 0 && (character === "+" || character === "-")) {
-          const text = expression.slice(start, index).trim();
-          if (!text) throw new SurfaceError(line.number, "malformed linear combination");
-          pieces.push({ text, negative });
-          negative = character === "-";
-          start = index + 1;
-        }
-      }
-      const finalPiece = expression.slice(start).trim();
-      if (finalPiece) pieces.push({ text: finalPiece, negative });
+      const pieces = linearCombinationPieces(expression, line.number);
       if (pieces.length === 0) throw new SurfaceError(line.number, "linear_combination requires at least one equality");
       const facts = [...current.locals.values()].map(item => item.proof);
       // Resolve the carrier from the goal and the named equations.
@@ -8572,7 +8574,7 @@ function elaborateTacticTheorem(
         return local?.formula.tag === "eq" ? [local.formula.left, local.formula.right] : [];
       });
       const ringSession = prepareCommutativeRing(kernel, [current.goal.left, current.goal.right, ...equationTerms],
-        current.assumptions, facts, scope, line.number);
+        current.assumptions, facts, scope, line.number, { ...defaultRingOptions, nonzero: numeralNonzeroProver(kernel, current, line, scope) });
       if (ringSession) {
         const ops = ringSession.operations;
         const plus = (a: Term, b: Term) => app(ops.call2, ops.add, a, b);
@@ -8614,14 +8616,19 @@ function elaborateTacticTheorem(
         const combined = scaled.reduce((a, b) => congr(ops.call2, refl(ops.add), a, b));
         const equation = kernel.checkProof(combined, current.assumptions);
         if (equation.tag !== "eq") throw new SurfaceError(line.number, "internal linear combination is not an equality");
-        const corrected = plus(current.goal.right, plus(equation.left, minus(equation.right)));
-        const normalized = ringSession.normalize([current.goal.left, corrected]);
-        if (!normalized || !termEquals(normalized[0]!.term, normalized[1]!.term))
-          throw new SurfaceError(line.number, "linear_combination does not normalize to the current goal");
-        const substitution = congr(ops.call2, refl(ops.add), refl(current.goal.right),
-          congr(ops.call2, refl(ops.add), combined, refl(minus(equation.right))));
-        close(line, calc(normalized[0]!.proof, symm(normalized[1]!.proof), substitution,
-          ringSession.cancelDifference(current.goal.right, equation.right)));
+        let closed = closeByRingCombination(kernel, ringSession, current.goal.left, current.goal.right, combined, current.assumptions);
+        if (!closed) {
+          // The sides may differ by the inverses of numeral literals that
+          // division introduced; the cancellation laws join the combination.
+          const corrected = plus(current.goal.right, plus(equation.left, minus(equation.right)));
+          const inverse = numeralInverseCombination(kernel, ringSession, current.assumptions, current.goal.left, corrected);
+          if (inverse) {
+            closed = closeByRingCombination(kernel, ringSession, current.goal.left, current.goal.right,
+              congr(ops.call2, refl(ops.add), combined, inverse), current.assumptions);
+          }
+        }
+        if (!closed) throw new SurfaceError(line.number, "linear_combination does not normalize to the current goal");
+        close(line, closed);
         continue;
       }
       const scaled: Proof[] = pieces.map(piece => {
@@ -8925,13 +8932,20 @@ function elaborateTacticTheorem(
     const ring = /^ring(?:\s+at\s+([\p{L}_][\p{L}\p{M}\p{N}_]*))?$/u.exec(command);
     if (ring) {
       if (!ring[1] && current.goal.tag === "eq") {
-        const generic = normalizeCommutativeRing(kernel, [current.goal.left, current.goal.right],
-          current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number, ringOptions);
+        const session = prepareCommutativeRing(kernel, [current.goal.left, current.goal.right],
+          current.assumptions, [...current.locals.values()].map(item => item.proof), scope, line.number,
+          { ...ringOptions, nonzero: numeralNonzeroProver(kernel, current, line, scope) });
+        const generic = session?.normalize([current.goal.left, current.goal.right]);
         if (generic) {
           if (termEquals(generic[0]!.term, generic[1]!.term)) {
             close(line, calc(generic[0]!.proof, symm(generic[1]!.proof)));
             continue;
           }
+          // Sides that differ by the inverses of numeral literals, x / 2 +
+          // x / 2 against x, meet through the cancellation laws k * k⁻¹ = 1.
+          const inverse = numeralInverseCombination(kernel, session!, current.assumptions, current.goal.left, current.goal.right);
+          const cancelled = inverse && closeByRingCombination(kernel, session!, current.goal.left, current.goal.right, inverse, current.assumptions);
+          if (cancelled) { close(line, cancelled); continue; }
           // Match an available equality modulo the same checked normalizer.
           // This mirrors Nat ring's existing contextual equality behavior;
           // it does not search for combinations of hypotheses.
@@ -9103,11 +9117,24 @@ function elaborateTacticTheorem(
             return split;
           }
         };
-        if (command !== "linarith") { close(line, refuteOrSplit()); continue; }
         // linarith keeps its own procedures: an equation of real literals,
-        // 2 = 0, is refuted below when the natural refutation finds nothing.
+        // 2 = 0, is refuted below when the natural refutation finds nothing;
+        // arith reaches the same procedures through linarith, so a real
+        // disequality `(4:R) ≠ 0` closes by arith as it does by linarith.
+        let naturalFailure: SurfaceError | undefined;
         try { close(line, refuteOrSplit()); continue; }
-        catch (error) { if (!(error instanceof SurfaceError)) throw error; }
+        catch (error) { if (!(error instanceof SurfaceError)) throw error; naturalFailure = error; }
+        if (command !== "linarith") {
+          const scriptLines = [{ number: line.number, text: "linarith", indent: line.indent + 2 }].flatMap(splitTacticLine);
+          let nested: Proof | undefined;
+          try {
+            nested = elaborateTacticTheorem(kernel, "", [], [], [], current.goal, scriptLines, scope,
+              { assumptions: current.assumptions, locals: current.locals, variables: current.variables })?.proof;
+          } catch (error) { if (!(error instanceof SurfaceError)) throw error; }
+          if (!nested) throw naturalFailure;
+          close(line, nested);
+          continue;
+        }
       }
     }
     if (command === "arith" || command === "__arith_direct" || command === "linarith") {
@@ -13534,8 +13561,12 @@ function parseProofExpression(
       }
       throw error;
     }
+    // The guard of an at argument is discharged as `typecheck` would
+    // discharge it: by the refinement rules, and for the zero and one of a
+    // ring over separate pieces by the local structure fact.
     return proveRefinement(kernel, wanted.args.at(-1)!, wanted.pred, wanted.args.slice(0, -1),
-      current.assumptions, localProofs(), visibility);
+      current.assumptions, localProofs(), visibility) ??
+      proveRingConstantMembership(kernel, wanted, current.assumptions, localProofs());
   };
   const explicitEvidence = (argument: string, wanted: Formula): Proof | undefined => {
     if (argument === "assumption") return inferredEvidence(wanted);
@@ -13619,7 +13650,14 @@ function parseProofExpression(
   const redundant = (argument: string): boolean => {
     if (argument === "*" || argument === "assumption" || argument === "rfl") return false;
     const statement = evidenceFormula(argument);
-    return Boolean(statement) && discharged.some(item => formulaEquals(item, statement!));
+    if (!statement) return false;
+    if (discharged.some(item => formulaEquals(item, statement))) return true;
+    // A fact stated through the definition of a discharged guard, `x ∈ ℝ`
+    // for the guard `Real(x)` that soft typing discharged, is that evidence too.
+    const local = resolveLocalProof(current.locals, argument, line, { kernel, scope, assumptions: current.assumptions });
+    if (!local) return false;
+    return discharged.some(item => item.tag === "pred" && statement.tag === "pred" &&
+      bridgeDefinition(kernel, scope, line, local.proof, statement, item, current.assumptions, current.locals) !== undefined);
   };
   const consume = (argument: string): void => {
     projectDirection();
@@ -13876,7 +13914,8 @@ function quotientAtomNote(kernel: Kernel, goal: Formula, scope: SurfaceScope): s
     term.args.forEach(visit);
   };
   if (goal.tag === "eq") { visit(goal.left); visit(goal.right); }
-  return found ? "; a quotient t / k is an atom for ring: for a linear goal use linarith, which reads t / k as " +
+  return found ? "; a quotient t / u by a term is an atom for ring, and t / k by a numeral literal is t * k⁻¹ with " +
+    "k * k⁻¹ = 1 known once k ≠ 0 is proved: for a linear goal use linarith, which reads t / k as " +
     "the k-th part of t, or rewrite with realDiv.eq_mul_inv or a named constant such as oneHalf" : "";
 }
 
@@ -14677,6 +14716,65 @@ function preparedRingRules(kernel: Kernel, line: number, scope: SurfaceScope): P
  * `2 ∈ 5`; undefined when the goal is not of that shape or the laws are
  * not loaded.
  */
+/**
+ * The scaled equations of a `linear_combination` expression: the top-level
+ * sum of pieces `c * h`, `h`, and `-h`, with a parenthesized combination
+ * distributed, so `c * (h₁ - h₂)` is `c * h₁ - c * h₂` and a coefficient
+ * inside the parentheses multiplies with the one outside.
+ */
+function linearCombinationPieces(expression: string, line: number): { readonly text: string; readonly negative: boolean }[] {
+  const pieces: { text: string; negative: boolean }[] = [];
+  const collect = (text: string, negated: boolean, coefficient: string | undefined): void => {
+    let depth = 0;
+    let start = 0;
+    let negative = negated;
+    if (text.startsWith("+") || text.startsWith("-")) {
+      if (text[0] === "-") negative = !negative;
+      start = 1;
+    }
+    const piece = (slice: string, sign: boolean): void => {
+      const item = slice.trim();
+      if (!item) throw new SurfaceError(line, "malformed linear combination");
+      // A piece ending in a parenthesized group is a combination under a
+      // coefficient, or a bare group; its matching parenthesis is found
+      // from the end, and the group is distributed.
+      if (item.endsWith(")")) {
+        let level = 0;
+        let open = -1;
+        for (let index = item.length - 1; index >= 0; index -= 1) {
+          if (item[index] === ")") level += 1;
+          else if (item[index] === "(") { level -= 1; if (level === 0) { open = index; break; } }
+        }
+        if (open >= 0) {
+          const prefix = item.slice(0, open).trim();
+          const inner = item.slice(open + 1, -1).trim();
+          if (prefix === "") { collect(inner, sign, coefficient); return; }
+          if (prefix.endsWith("*")) {
+            const factor = prefix.slice(0, -1).trim();
+            collect(inner, sign, coefficient === undefined ? `(${factor})` : `${coefficient} * (${factor})`);
+            return;
+          }
+        }
+      }
+      pieces.push({ text: coefficient === undefined ? item : `${coefficient} * ${item}`, negative: sign });
+    };
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index]!;
+      if (character === "(") depth += 1;
+      else if (character === ")") depth -= 1;
+      else if (depth === 0 && (character === "+" || character === "-")) {
+        piece(text.slice(start, index), negative);
+        negative = negated !== (character === "-");
+        start = index + 1;
+      }
+    }
+    const last = text.slice(start).trim();
+    if (last) piece(last, negative);
+  };
+  collect(expression, false, undefined);
+  return pieces;
+}
+
 function proveNumeralMembership(
   kernel: Kernel, goal: Formula, current: TacticGoal, line: SourceLine, scope: SurfaceScope,
 ): Proof | undefined {
@@ -14735,8 +14833,212 @@ function proveRingConstantMembership(kernel: Kernel, goal: Formula,
 
 /** An untrusted polynomial computation accompanied by ordinary ring-law proofs. */
 /** Computational budget of the ring normalizer, settable per call as `ring (monomials := 4096)`. */
-interface RingOptions { readonly monomials: number }
+interface RingOptions {
+  readonly monomials: number;
+  /** A proof of a nonzero premise `¬(k = 0)` a field law needs, for a numeral divisor; absent, division stays an atom. */
+  readonly nonzero?: (goal: Formula) => Proof | undefined;
+}
 const defaultRingOptions: RingOptions = { monomials: 256 };
+
+/**
+ * A nonzero premise of a field law, `(8:R) ≠ 0` for the divisor of a
+ * quotient, is proved by a local fact of that statement or by `linarith`,
+ * which knows the order of the numerals; nothing is assumed.
+ */
+function numeralNonzeroProver(kernel: Kernel, current: TacticGoal, line: SourceLine, scope: SurfaceScope): (goal: Formula) => Proof | undefined {
+  return goal => {
+    const local = [...current.locals.values()].find(item => formulaEquals(item.formula, goal));
+    if (local) return local.proof;
+    const assumed = current.assumptions.find(item => formulaEquals(item, goal));
+    if (assumed) return assume(assumed);
+    const script = [{ number: line.number, text: "linarith", indent: line.indent + 2 }].flatMap(splitTacticLine);
+    try {
+      return elaborateTacticTheorem(kernel, "", [], [], [], goal, script, scope,
+        { assumptions: current.assumptions, locals: current.locals, variables: current.variables })?.proof;
+    } catch (error) {
+      if (error instanceof SurfaceError) return undefined;
+      throw error;
+    }
+  };
+}
+
+/** A monomial of the ring normal form: a product of factors, a numeral coefficient first, with a sign. */
+interface RingMonomial { readonly factors: readonly Term[]; readonly negative: boolean }
+type RingSession = NonNullable<ReturnType<typeof prepareCommutativeRing>>;
+
+/**
+ * A law of a field read off its statement: `a / b = a * inv(b)` with the
+ * quotient on the left, or `b * inv(b) = 1` in either order of the product.
+ * The laws are found by shape, so the division, the inverse, and the ring
+ * they belong to are never named here; a scope sees the laws its
+ * declarations see.
+ */
+interface FieldLaw {
+  readonly name: string;
+  readonly variables: readonly string[];
+  readonly variableSet: ReadonlySet<string>;
+  readonly left: Term;
+  readonly right: Term;
+}
+interface FieldLawIndex { readonly division: readonly FieldLaw[]; readonly cancellation: readonly FieldLaw[] }
+const fieldLawIndices = new WeakMap<Kernel, { readonly stamp: number; readonly call2: string; readonly index: FieldLawIndex }>();
+function fieldLawIndex(kernel: Kernel, call2: string): FieldLawIndex {
+  const cached = fieldLawIndices.get(kernel);
+  if (cached && cached.stamp === kernel.theorems.size && cached.call2 === call2) return cached.index;
+  const division: FieldLaw[] = [];
+  const cancellation: FieldLaw[] = [];
+  for (const [name, statement] of kernel.theorems) {
+    let formula: Formula = statement;
+    const variables: string[] = [];
+    while (formula.tag === "forall") { variables.push(formula.variable); formula = formula.body; }
+    while (formula.tag === "imp") formula = formula.right;
+    if (formula.tag !== "eq") continue;
+    const { left, right } = formula;
+    if (left.tag !== "app" || left.fn !== call2 || left.args.length !== 3) continue;
+    const bound = (term: Term): boolean => term.tag === "var" && variables.includes(term.name);
+    const mentions = (term: Term, variable: Term): boolean => variable.tag === "var" && freeTermVariables(term).has(variable.name);
+    const [x, y] = [left.args[1]!, left.args[2]!];
+    const law: FieldLaw = { name, variables, variableSet: new Set(variables), left, right };
+    if (bound(x) && bound(y) && !termEquals(x, y) && right.tag === "app" && right.fn === call2 && right.args.length === 3 &&
+        !termEquals(right.args[0]!, left.args[0]!) && termEquals(right.args[1]!, x) &&
+        right.args[2]!.tag === "app" && mentions(right.args[2]!, y) && !mentions(right.args[2]!, x)) {
+      division.push(law);
+    } else if ((bound(y) && x.tag === "app" && mentions(x, y)) || (bound(x) && y.tag === "app" && mentions(y, x))) {
+      cancellation.push(law);
+    }
+  }
+  const index = { division, cancellation };
+  fieldLawIndices.set(kernel, { stamp: kernel.theorems.size, call2, index });
+  return index;
+}
+
+/**
+ * Close `left = right` from a combination of equations, as
+ * `linear_combination` does: the right side plus the difference of the
+ * combination's sides normalizes to the left side, and the combination's
+ * equation substitutes that difference away.
+ */
+function closeByRingCombination(
+  kernel: Kernel, session: RingSession, left: Term, right: Term, combined: Proof, assumptions: readonly Formula[],
+): Proof | undefined {
+  const ops = session.operations;
+  const plus = (a: Term, b: Term): Term => app(ops.call2, ops.add, a, b);
+  const minus = (a: Term): Term => app(ops.call1, ops.neg, a);
+  const equation = kernel.checkProof(combined, assumptions);
+  if (equation.tag !== "eq") return undefined;
+  const corrected = plus(right, plus(equation.left, minus(equation.right)));
+  const normalized = session.normalize([left, corrected]);
+  if (!normalized || !termEquals(normalized[0]!.term, normalized[1]!.term)) return undefined;
+  const substitution = congr(ops.call2, refl(ops.add), refl(right),
+    congr(ops.call2, refl(ops.add), combined, refl(minus(equation.right))));
+  return calc(normalized[0]!.proof, symm(normalized[1]!.proof), substitution, session.cancelDifference(right, equation.right));
+}
+
+/**
+ * The combination of cancellation laws `k * k⁻¹ = 1` under which
+ * `left = right` is a ring identity, when the normal form of `left - right`
+ * mentions the inverses of numeral literals that division introduced. Each
+ * monomial `c · k⁻¹ · m` whose coefficient `k` divides is `(c / k) · m`
+ * plus `(c / k) · m · (k · k⁻¹ - 1)`, and the difference is an identity when
+ * what remains cancels. When a coefficient does not divide, the difference
+ * is scaled by the product `M` of the divisors' powers, which every
+ * coefficient then divides, and the scaling is undone with the same laws:
+ * `d = Π k⁻¹ · M · d + (1 - Π (k · k⁻¹)) · d`, the second term telescoping
+ * into the laws. The result is the equation `Σ cᵢ · (kᵢ · kᵢ⁻¹) = Σ cᵢ · 1`
+ * that `closeByRingCombination` substitutes; undefined when no inverse
+ * occurs, when a cancellation law is not established, or when the identity
+ * does not hold.
+ */
+function numeralInverseCombination(
+  kernel: Kernel, session: RingSession, assumptions: readonly Formula[], left: Term, right: Term,
+): Proof | undefined {
+  const ops = session.operations;
+  const inverses = session.numeralInverses;
+  const plus = (a: Term, b: Term): Term => app(ops.call2, ops.add, a, b);
+  const times = (a: Term, b: Term): Term => app(ops.call2, ops.mul, a, b);
+  const minus = (a: Term): Term => app(ops.call1, ops.neg, a);
+  const polynomial = (terms: readonly Term[]): Term => terms.length ? terms.reduce((a, b) => plus(a, b)) : session.ring.zero;
+  const difference = plus(left, minus(right));
+  let normalized: readonly { readonly items: readonly RingMonomial[] }[] | undefined;
+  try { normalized = session.normalize([difference]); } catch { return undefined; }
+  if (!normalized) return undefined;
+  const exponents = new Map<bigint, number>();
+  const monomials = normalized[0]!.items.map(item => {
+    const counts = new Map<bigint, number>();
+    const rest: Term[] = [];
+    for (const factor of inverses.body(item)) {
+      const value = inverses.numeral(factor);
+      if (value === undefined) rest.push(factor);
+      else counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    for (const [value, count] of counts) exponents.set(value, Math.max(exponents.get(value) ?? 0, count));
+    return { coefficient: inverses.coefficient(item), negative: item.negative, counts, rest };
+  });
+  if (exponents.size === 0) return undefined;
+  const divisors = [...exponents.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const pairs = new Map(divisors.map(value => [value, inverses.of(value)] as const));
+  if ([...pairs.values()].some(pair => pair === undefined)) return undefined;
+  interface Cofactor { readonly coefficient: bigint; readonly body: readonly Term[]; readonly negative: boolean }
+  const inverseFactors = (counts: ReadonlyMap<bigint, number>): Term[] =>
+    divisors.flatMap(value => Array.from({ length: counts.get(value) ?? 0 }, () => pairs.get(value)!.inverse));
+  const reduce = (scale: bigint): Map<bigint, Cofactor[]> | undefined => {
+    const cofactors = new Map<bigint, Cofactor[]>();
+    const residual = new Map<string, bigint>();
+    for (const monomial of monomials) {
+      let coefficient = monomial.coefficient * scale;
+      const counts = new Map(monomial.counts);
+      for (const value of divisors) {
+        for (let step = counts.get(value) ?? 0; step > 0; step -= 1) {
+          if (coefficient % value !== 0n) return undefined;
+          coefficient /= value;
+          counts.set(value, step - 1);
+          const body = [...monomial.rest, ...inverseFactors(counts)];
+          const bucket = cofactors.get(value) ?? [];
+          bucket.push({ coefficient, body, negative: monomial.negative });
+          cofactors.set(value, bucket);
+        }
+      }
+      const key = monomial.rest.map(termCanonical).join("\u0000");
+      residual.set(key, (residual.get(key) ?? 0n) + (monomial.negative ? -coefficient : coefficient));
+    }
+    if ([...residual.values()].some(value => value !== 0n)) return undefined;
+    return cofactors;
+  };
+  let cofactors = reduce(1n);
+  const scaled = cofactors === undefined;
+  if (!cofactors) {
+    const scale = divisors.reduce((product, value) => product * value ** BigInt(exponents.get(value)!), 1n);
+    cofactors = reduce(scale);
+    if (!cofactors) return undefined;
+  }
+  const laws = new Map<bigint, Proof>();
+  for (const value of divisors) {
+    const law = inverses.cancellation(value);
+    if (!law) return undefined;
+    laws.set(value, law);
+  }
+  const inverseProduct = divisors
+    .flatMap(value => Array.from({ length: exponents.get(value)! }, () => pairs.get(value)!.inverse))
+    .reduce((a, b) => times(a, b));
+  let prefix: Term = session.ring.one;
+  const pieces: Proof[] = [];
+  for (const value of divisors) {
+    const pair = pairs.get(value)!;
+    const base = polynomial((cofactors.get(value) ?? []).map(item => inverses.monomial(item.coefficient, item.body, item.negative)));
+    let coefficient = base;
+    if (scaled) {
+      const unit = times(pair.divisor, pair.inverse);
+      const exponent = exponents.get(value)!;
+      const powers: Term[] = [];
+      let power: Term = session.ring.one;
+      for (let step = 0; step < exponent; step += 1) { powers.push(power); power = times(power, unit); }
+      coefficient = plus(times(inverseProduct, base), minus(times(difference, times(prefix, polynomial(powers)))));
+      prefix = times(prefix, power);
+    }
+    pieces.push(congr(ops.call2, refl(ops.mul), refl(coefficient), laws.get(value)!));
+  }
+  return pieces.reduce((a, b) => congr(ops.call2, refl(ops.add), a, b));
+}
 
 /**
  * How far the ring certificate opens defining bodies to find the operations
@@ -15549,6 +15851,83 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       value.fn === call1 && termEquals(value.args[0]!, neg))) return undefined;
     return { term: value, proof };
   };
+  // Division by a nonzero numeral literal is multiplication by the
+  // literal's inverse, through the field's division law found by its
+  // shape; the inverse is an atom whose cancellation law, `k * k⁻¹ = 1`
+  // under `k ≠ 0`, the tactics combine in through `numeralInverses`. The
+  // nonzero premise is proved by the caller's prover, never assumed.
+  const fieldLaws = fieldLawIndex(kernel, call2);
+  const lawVisible = (item: FieldLaw): boolean => visibility === undefined || visibility.declaration(item.name);
+  const relieveLawPremises = (proof: Proof): Proof | undefined => {
+    for (;;) {
+      const statement = kernel.checkProof(proof, assumptions);
+      if (statement.tag !== "imp") return proof;
+      const premise = statement.left;
+      let evidence: Proof | undefined;
+      const assumed = assumptions.find(item => formulaEquals(item, premise));
+      if (assumed) evidence = assume(assumed);
+      else if (premise.tag === "pred" && premise.args.length > 0) {
+        evidence = refinements.prove(premise.args.at(-1)!, premise.pred, premise.args.slice(0, -1));
+        if (!evidence) { try { evidence = instances.prove(premise.args.at(-1)!, premise.pred, premise.args.slice(0, -1)); } catch { evidence = undefined; } }
+      } else if (premise.tag === "imp" && premise.right.tag === "bottom" && premise.left.tag === "eq") {
+        evidence = options.nonzero?.(premise);
+      }
+      if (!evidence) return undefined;
+      proof = impElim(proof, evidence);
+    }
+  };
+  const applyFieldLaw = (item: FieldLaw, target: Term): { readonly proof: Proof; readonly right: Term } | undefined => {
+    const substitution = new Map<string, Term>();
+    if (!matchImplicitTerm(item.left, target, item.variableSet, substitution) || item.variables.some(name => !substitution.has(name))) return undefined;
+    let proof: Proof | undefined;
+    try { proof = relieveLawPremises(at(theorem(item.name), ...item.variables.map(name => substitution.get(name)!))); } catch { return undefined; }
+    if (!proof) return undefined;
+    const statement = kernel.checkProof(proof, assumptions);
+    if (statement.tag !== "eq" || !termEquals(statement.left, target)) return undefined;
+    return { proof, right: statement.right };
+  };
+  const inverseAtoms = new Map<number, bigint>();
+  const divisorPairs = new Map<bigint, { readonly divisor: Term; readonly inverse: Term }>();
+  const unfoldDivision = (term: Term): { term: Term; proof: Proof } | undefined => {
+    if (term.tag !== "app" || term.fn !== call2 || term.args.length !== 3 || fieldLaws.division.length === 0) return undefined;
+    const operation = term.args[0]!;
+    if (termEquals(operation, add) || termEquals(operation, mul)) return undefined;
+    const divisor = aliasValue(term.args[2]!) ?? numeralValue(term.args[2]!);
+    if (divisor === undefined || divisor === 0n) return undefined;
+    for (const item of fieldLaws.division) {
+      if (!lawVisible(item)) continue;
+      const applied = applyFieldLaw(item, term);
+      if (!applied) continue;
+      const value = applied.right;
+      if (value.tag !== "app" || value.fn !== call2 || value.args.length !== 3 || !termEquals(value.args[0]!, mul) ||
+          !termEquals(value.args[1]!, term.args[1]!)) continue;
+      inverseAtoms.set(termId(value.args[2]!), divisor);
+      if (!divisorPairs.has(divisor)) divisorPairs.set(divisor, { divisor: term.args[2]!, inverse: value.args[2]! });
+      return { term: value, proof: applied.proof };
+    }
+    return undefined;
+  };
+  const cancellationCache = new Map<bigint, Proof | undefined>();
+  const cancellation = (value: bigint): Proof | undefined => {
+    if (cancellationCache.has(value)) return cancellationCache.get(value);
+    cancellationCache.set(value, undefined);
+    const pair = divisorPairs.get(value);
+    if (!pair) return undefined;
+    const forward = times(pair.divisor, pair.inverse);
+    const backward = times(pair.inverse, pair.divisor);
+    for (const item of fieldLaws.cancellation) {
+      if (!lawVisible(item)) continue;
+      const direct = applyFieldLaw(item, forward);
+      if (direct && termEquals(direct.right, one)) { cancellationCache.set(value, direct.proof); return direct.proof; }
+      const swapped = applyFieldLaw(item, backward);
+      if (swapped && termEquals(swapped.right, one)) {
+        const proof = chain(equation("IsCommRing.mul_comm", [pair.divisor, pair.inverse], forward, backward), swapped.proof);
+        cancellationCache.set(value, proof);
+        return proof;
+      }
+    }
+    return undefined;
+  };
   const normalCache = new Map<number, { items: Mono[]; proof: Proof }>();
   const normalize = (term: Term): { items: Mono[]; proof: Proof } => {
     const key = termId(term);
@@ -15595,6 +15974,11 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       const inner = normalize(alias.term);
       return { items: inner.items, proof: chain(alias.proof, inner.proof) };
     }
+    const divided = unfoldDivision(term);
+    if (divided) {
+      const inner = normalize(divided.term);
+      return { items: inner.items, proof: chain(divided.proof, inner.proof) };
+    }
     const summed = sum(term);
     if (summed) {
       const a = normalize(summed[0]);
@@ -15636,11 +16020,22 @@ function prepareCommutativeRing(kernel: Kernel, terms: readonly Term[],
       lift(call2, identity(add), identity(a), equation("IsRing.add_inverse_right", [b],
         plus(b, minus(b)), zero)),
       equation("IsRing.add_right_identity", [a], plus(a, zero), a)),
-    normalize: (inputs: readonly Term[]): readonly { term: Term; proof: Proof }[] | undefined => {
+    // The inverses of numeral literals that division introduced: their
+    // atoms, the divisor and inverse terms of a literal, the cancellation
+    // law of one, and the monomial pieces the combination is built from.
+    numeralInverses: {
+      numeral: (term: Term): bigint | undefined => inverseAtoms.get(termId(term)),
+      of: (value: bigint): { readonly divisor: Term; readonly inverse: Term } | undefined => divisorPairs.get(value),
+      cancellation,
+      coefficient: (item: RingMonomial): bigint => coefficientOf(item),
+      body: (item: RingMonomial): readonly Term[] => bodyOf(item),
+      monomial: (coefficient: bigint, body: readonly Term[], negative: boolean): Term => monoTerm(scaled(coefficient, body, negative)),
+    },
+    normalize: (inputs: readonly Term[]): readonly { term: Term; proof: Proof; items: readonly RingMonomial[] }[] | undefined => {
       try {
         return inputs.map(term => {
           const result = normalize(term);
-          return { term: polyTerm(result.items), proof: result.proof };
+          return { term: polyTerm(result.items), proof: result.proof, items: result.items };
         });
       } catch (error) {
         if (typeof process !== "undefined" && process.env?.G17_RING_DEBUG) console.error("[ring]", error);
@@ -18475,6 +18870,29 @@ function elaborateApplicationArguments(
   for (const { pattern, carrier } of literalDefaults) {
     if (pattern.tag === "var" && implicitNames.has(pattern.name) && !inferred.has(pattern.name))
       inferred.set(pattern.name, carrier);
+  }
+  // An implicit the arguments' sorts leave open is fixed by a fact in scope
+  // of the parameter's class about the argument: `append(ds, es)` with
+  // `List(ℝ, ds)` among the local facts takes `A := ℝ`. A fact of the class
+  // about each argument is read in turn; facts that disagree fix nothing.
+  if (implicit.some(parameter => !inferred.has(parameter.name)) && scope.localFormulas) {
+    const facts = scope.localFormulas().filter(fact => fact.tag === "pred" && fact.args.length > 0);
+    ordinary.forEach((parameter, index) => {
+      const expected = parameter.typeArguments ?? [];
+      if (expected.length === 0 || parameter.type === "Set" || parameter.type === "Class") return;
+      if (!expected.some(argument => [...freeTermVariables(argument)].some(name => implicitNames.has(name) && !inferred.has(name)))) return;
+      const argument = explicitArguments[index]!;
+      let fixed: Map<string, Term> | undefined;
+      for (const fact of facts) {
+        if (fact.tag !== "pred" || fact.pred !== parameter.type || fact.args.length !== expected.length + 1 ||
+            !termEquals(fact.args.at(-1)!, argument)) continue;
+        const candidate = new Map(inferred);
+        if (!expected.every((pattern, position) => matchImplicitTerm(pattern, fact.args[position]!, implicitNames, candidate))) continue;
+        if (fixed && [...candidate].some(([name, value]) => !termEquals(fixed!.get(name) ?? value, value))) { fixed = undefined; break; }
+        fixed = candidate;
+      }
+      if (fixed) for (const [name, value] of fixed) inferred.set(name, value);
+    });
   }
   for (const parameter of implicit) {
     if (!inferred.has(parameter.name) && variables.has(parameter.name)) inferred.set(parameter.name, v(parameter.name));

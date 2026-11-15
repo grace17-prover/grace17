@@ -148,7 +148,9 @@ closure a one-shot call spends tens of seconds loading the environment;
 in `serve` the second request on the same files answers in milliseconds,
 whichever method. The fast loop in `docs/machine-interface.md` is ten
 lines of shell or Node that keep one `serve` and pipe requests through
-it. `g17 serve --pin` keeps the dependency sources it first read while
+it, and `g17 serve --port 0` serves the same lines over a loopback TCP
+port, printing the port it took as one JSON line, so a socket needs no
+wrapper. `g17 serve --pin` keeps the dependency sources it first read while
 other agents edit them.
 
 Example of the loop on a proof that ends in `sorry`:

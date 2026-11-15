@@ -249,8 +249,9 @@ second. Files that import large subjects such as real analysis take longer,
 because their imports are elaborated too; `g17 serve` keeps the loaded
 imports between requests, so a loop of check, goal, and suggest on one file
 costs a fraction of a second per call after the first, and the in-process
-API does the same. `serve` speaks over standard input and output; an agent
-that wants a socket wraps it in a few lines.
+API does the same. `serve` speaks over standard input and output, and
+`serve --port N` speaks the same lines over a loopback TCP port, one session
+per connection, so an agent that wants a socket needs no wrapper.
 
 When several agents prove at once, each works in a private copy of the
 files it owns, relies on sibling modules only through their statements,

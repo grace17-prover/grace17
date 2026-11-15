@@ -126,7 +126,10 @@ lemma length.nonnegative {A : Set} (xs : List(A))
 The kernel still sees the complete application `length(A, xs)` and the
 complete quantified theorem. The elaborator inserts a metavariable for `A`
 and solves it by deterministic first-order unification against local binder
-refinements and known result signatures. It does not invoke open-ended theorem
+refinements and known result signatures, and then against the facts in
+scope of the parameter's class about the argument: `append(ds, es)` with
+`ds` obtained from an existential takes `A := ℝ` from a local `List(ℝ, ds)`,
+and facts that disagree fix nothing. It does not invoke open-ended theorem
 search. Checked Tau evidence discharges the resulting soft-type side conditions
 when an implicit theorem is instantiated.
 

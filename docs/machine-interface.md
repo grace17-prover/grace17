@@ -15,6 +15,13 @@ There are two ways in:
   object on one line. A process that keeps `serve` running keeps the
   checked environments cached, so a loop of check, goal, and suggest calls
   on one file costs a fraction of a second per call after the first.
+  `g17 serve --port N` speaks the same lines over TCP on `127.0.0.1:N`:
+  every connection is a session of the stdio protocol, one request per
+  line and one response per line in order, and the connections share the
+  cached environments. `--port 0` takes a free port. The process prints
+  one JSON line when it listens, `{"version": "1", "listening": {"host":
+  "127.0.0.1", "port": N}}`, and serves until it is terminated; `--pin`
+  holds for every connection.
 - **Subcommands** run one method and exit: `g17 check --json`, `g17 goal`,
   `g17 suggest`, `g17 search`, `g17 declaration`, `g17 signature`,
   `g17 elaborate`, `g17 audit`, `g17 library`, `g17 notations`, and
@@ -1010,6 +1017,30 @@ serve.stdin.end();
 Send an edited file as `source` in the next request; the dependency
 environment stays, and only the edited file is rechecked.
 
+The same loop over TCP needs no pipes: `g17 serve --port 0` prints the port
+it took, and a client connects, writes one request per line, and reads one
+response per line, ending its connection when it is done:
+
+```js
+import { spawn } from "node:child_process";
+import { connect } from "node:net";
+import { createInterface } from "node:readline";
+const serve = spawn("node", ["--disable-warning=ExperimentalWarning",
+  "bin/g17.ts", "serve", "--port", "0"], { stdio: ["ignore", "pipe", "inherit"] });
+const started = createInterface({ input: serve.stdout })[Symbol.asyncIterator]();
+const { listening } = JSON.parse((await started.next()).value);
+const socket = connect(listening.port, listening.host);
+const lines = createInterface({ input: socket })[Symbol.asyncIterator]();
+const ask = async request => {
+  socket.write(`${JSON.stringify(request)}\n`);
+  return JSON.parse((await lines.next()).value);
+};
+const checked = await ask({ id: 1, method: "check", params });
+console.log(checked.result.status);
+socket.end();
+serve.kill();
+```
+
 ## Semantics
 
 - **Printing.** Every formula and term string comes from the Workbench's
@@ -1042,7 +1073,10 @@ environment stays, and only the edited file is rechecked.
   serialized, and an error raised outside any handler while the session
   runs are each answered with an error object (`id` null when no request
   can be blamed), and the next line is read. The session ends with its
-  input, or when its output can no longer be written.
+  input, or when its output can no longer be written. Over `--port`, the
+  connections are served one request at a time between them, and a
+  connection ends with its input as the stdio session does; an error
+  raised outside any request is reported on the stdio session only.
 - A failed check stops at the first error. To see every theorem's first
   error in a module, end each unfinished proof with `sorry` and read the
   warnings, or run `python3 scripts/all-errors.py`; to see every failing

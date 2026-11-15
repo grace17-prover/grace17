@@ -12,6 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import type { Formula, Term } from "./ast.ts";
 import { KernelError } from "./kernel.ts";
@@ -1650,6 +1651,20 @@ export interface ServeOptions {
   readonly pin?: boolean;
 }
 
+export interface ServePortOptions extends ServeOptions {
+  /** The TCP port to listen on; 0 takes a free port, which the result reports. */
+  readonly port: number;
+  /** The interface to listen on; the loopback interface unless another is named. */
+  readonly host?: string;
+}
+
+export interface ServePortHandle {
+  readonly host: string;
+  readonly port: number;
+  /** Stop accepting connections; the connections being served end with their input. */
+  close(): Promise<void>;
+}
+
 /** A response line; a result that cannot be serialized as JSON becomes an error response instead of a failed write. */
 function responseLine(response: MachineResponse): string {
   try {
@@ -1671,8 +1686,48 @@ function responseLine(response: MachineResponse): string {
  * and the next line is read. The session ends with its input, or when the
  * output can no longer be written.
  */
-export async function serveMachineInterface(input: NodeJS.ReadableStream, output: NodeJS.WritableStream, options: ServeOptions = {}): Promise<void> {
-  if (options.pin) pinWorkbenchDependencies(true);
+/**
+ * Serve the protocol over TCP: every connection is a session of the
+ * stdio protocol, one JSON request per line, one JSON response per line,
+ * answered in order over that connection; connections are served one
+ * request at a time between them, since the methods share the kept
+ * environments. The listener is bound to the loopback interface unless
+ * the options name another; a port of 0 takes a free port, and the handle
+ * reports the port bound.
+ */
+export async function serveMachineInterfaceOnPort(options: ServePortOptions): Promise<ServePortHandle> {
+  if (options.pin) pinWorkbenchDependenciesOnce();
+  const host = options.host ?? "127.0.0.1";
+  const server = createServer(socket => {
+    socket.on("error", () => { /* a connection that drops ends its session */ });
+    serveMachineInterface(socket, socket, { pin: false }, { session: true })
+      .catch(() => undefined)
+      .finally(() => { if (!socket.destroyed) socket.end(); });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, host, () => { server.off("error", reject); resolve(); });
+  });
+  const address = server.address();
+  const port = address && typeof address === "object" ? address.port : options.port;
+  return {
+    host, port,
+    close: () => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())),
+  };
+}
+
+let dependenciesPinned = false;
+function pinWorkbenchDependenciesOnce(): void {
+  if (dependenciesPinned) return;
+  dependenciesPinned = true;
+  pinWorkbenchDependencies(true);
+}
+
+export async function serveMachineInterface(
+  input: NodeJS.ReadableStream, output: NodeJS.WritableStream, options: ServeOptions = {},
+  mode: { readonly session?: boolean } = {},
+): Promise<void> {
+  if (options.pin) pinWorkbenchDependenciesOnce();
   const version = MACHINE_PROTOCOL_VERSION;
   const lines = createInterface({ input, crlfDelay: Infinity });
   const respond = (response: MachineResponse): void => {
@@ -1682,8 +1737,12 @@ export async function serveMachineInterface(input: NodeJS.ReadableStream, output
     respond({ id: null, version, ok: false, error: { code: "internal", message: `unexpected error outside a request: ${error instanceof Error ? error.message : String(error)}` } });
   };
   const onOutputError = (): void => lines.close();
-  process.on("uncaughtException", onUnexpected);
-  process.on("unhandledRejection", onUnexpected);
+  // The stdio session answers for errors raised outside any request; a TCP
+  // session is one of several and leaves the process handlers alone.
+  if (!mode.session) {
+    process.on("uncaughtException", onUnexpected);
+    process.on("unhandledRejection", onUnexpected);
+  }
   output.on("error", onOutputError);
   try {
     for await (const line of lines) {
@@ -1703,8 +1762,10 @@ export async function serveMachineInterface(input: NodeJS.ReadableStream, output
       respond(response);
     }
   } finally {
-    process.off("uncaughtException", onUnexpected);
-    process.off("unhandledRejection", onUnexpected);
+    if (!mode.session) {
+      process.off("uncaughtException", onUnexpected);
+      process.off("unhandledRejection", onUnexpected);
+    }
     output.off("error", onOutputError);
   }
 }
