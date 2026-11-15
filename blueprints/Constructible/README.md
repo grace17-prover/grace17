@@ -190,7 +190,15 @@ solver may be inlined if the count matters).
   `towerField.constructible`, `constructibles.eq_tower`,
   `cubic.no_rational_cube_root_two`, `cubic.no_rational_trisection_root`,
   `cubeRootTwo.not_constructible`, `ConstructiblyClosed.quadratic_root`,
-  and `constructiblePoints.least/point/origin/unit`.
+  and `constructiblePoints.least/point/origin/unit`. The proofs added a
+  few more: `realInt.nonzero`, `realNat.gap`,
+  `rationalReals.of_scaled/of_quotient`, `realNumeral.subfield_mem`,
+  `constructibles.intro`, `towerField.subset_append_right`,
+  `QuadraticTower.append_subset`, `towerReals.subset_reals/of_tower/
+  common_tower`, `cubic.tower_descent_all`,
+  `ConstructiblyClosed.of_square_mem/circle_line_root`,
+  `point.of_product/product_mem`, and the set `coordinatePoints` of points
+  with constructible coordinates, with `mem_iff/unpack/intro/closed`.
 - Proofs follow the Cumulus style: readable steps, Unicode notation, lines
   within 80 columns, and no proof much longer than its informal
   counterpart. Each agent works through the machine interface on one
@@ -203,17 +211,17 @@ solver may be inlined if the count matters).
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | Constructible.RationalQuotients | 17 | 17 | 0 |
-| Constructible.RealSubfield | 18 | 18 | 0 |
+| Constructible.RealSubfield | 19 | 19 | 0 |
 | Constructible.QuadraticAdjoin | 10 | 10 | 0 |
-| Constructible.CubicConjugation | 8 | 8 | 0 |
+| Constructible.CubicConjugation | 7 | 7 | 0 |
 | Constructible.ReducedFraction | 2 | 2 | 0 |
 | Constructible.CubicIntegerRoots | 5 | 5 | 0 |
 | Constructible.QuadraticTower | 13 | 13 | 0 |
-| Constructible.Numbers | 18 | 18 | 0 |
-| Constructible.Tower | 7 | 7 | 0 |
+| Constructible.Numbers | 19 | 19 | 0 |
+| Constructible.Tower | 8 | 8 | 0 |
 | Constructible.Descent | 3 | 3 | 0 |
 | Constructible.Impossibility | 4 | 4 | 0 |
 | Constructible.Intersections | 6 | 6 | 0 |
 | Constructible.Points | 14 | 14 | 0 |
-| **total** | **125** | **125** | **0** |
+| **total** | **127** | **127** | **0** |
 <!-- /blueprint-status -->
