@@ -102,7 +102,7 @@ only the conjugation of a single square root and descent through a tower.
 | module | layer | home in Cumulus (relative to `Grace.Cumulus`) |
 |---|---|---|
 | ReducedFraction | 1 | promoted: NumberTheory/ReducedFraction |
-| RationalQuotients | 1 | promoted: Real/RationalQuotients |
+| RationalQuotients | 1 | promoted: Real/Rationals, Real/Integer, Real/Natural |
 | RealSubfield | 2 | promoted: Algebra/Field/RealSubfield |
 | QuadraticAdjoin | 3 | promoted: Algebra/Field/QuadraticAdjoin |
 | Numbers | 3 | promoted: Geometry/Construction/Numbers |
