@@ -49,7 +49,7 @@ proof
 end Rings
 end QuotientSyntax
 `),/Ideal/);
- assert.throws(()=>load(header+"notation ring Q := Missing ⧸ J\n"+theorem),/unknown quotient base ring notation Missing/);
+ assert.throws(()=>load(header+"notation ring Q := Missing ⧸ J\n"+theorem),/unknown base ring notation Missing/);
 });
 
 test("polynomial generators and ideal relations retain exact term elaboration",()=>{

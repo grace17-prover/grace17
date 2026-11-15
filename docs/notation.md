@@ -1043,12 +1043,13 @@ registration tells it how the values of a structure are read: which kinds
 of element they have, how they apply, and what a fact about them places
 where. I keep this knowledge in the library beside the structure it is
 about, in `register` declarations, rather than in the elaborator, which
-learns only the three general shapes below. Like a notation, a
-registration is declared on one line, inherited by every module that
-imports the declaring module, listed by `g17 notations` beside the
-notation table, and resolved once when its module is loaded; nothing is
-searched while a term is read. And like a notation it proves nothing: it
-decides how source is read, and the kernel checks what results.
+learns only the general shapes below. Like a notation, a registration is
+declared on one line, continued on the more indented lines beneath it when
+it is long, inherited by every module that imports the declaring module,
+listed by `g17 notations` beside the notation table, and resolved once
+when its module is loaded; nothing is searched while a term is read. And
+like a notation it proves nothing: it decides how source is read, and the
+kernel checks what results.
 
 `register kinds Category object obj morphism mor` says that a category has
 two kinds of element, its objects in the field `obj` and its morphisms in
@@ -1093,6 +1094,52 @@ join the facts a notation consults, wherever a hypothesis supplies an
 operation or an arrow, so a member of a hom-set composes under `∘` and
 appears in `f : a ⟶ b` as a member of `C.mor` does.
 
+`register simp union2.membership` says that the law joins the default
+rewrite set of `simp`: the rules `simp`, `simp at h`, and `simpa` apply
+without being named, and the laws `tauto` opens memberships with. The name
+resolves as a rule named in `simp [...]` does, to a theorem, an axiom, a
+definition, or a definition property such as `evens.membership`, and the
+orientation and the guards of the rule are read off its statement when it
+is used. The declaration stands in the module that proves the law, so a
+module sees the defaults of the modules it imports and no others: `Set.Finite`
+registers `union2.membership` and `singleton.membership`, `Set.Algebra`
+`symmetricDifference.membership`, `Set.Powerset`
+`difference.singleton_membership`, and the bootstrap, which every module
+sees, `pair.membership` and the empty-set axiom `set.empty`. The defaults
+apply in order, each once at every instance it reaches, as rules named in
+`simp [...]` do, so the law of a construction stands before the laws of
+what it is built from: the modules' laws in the order the modules are
+loaded, then the bootstrap's, which every construction ends in, and
+`h : x ∈ {a} ∪ {b, c}` opens through the union, the singleton, and the
+pair to `h : x = a ∨ x = b ∨ x = c`. A set operation of your own joins the
+defaults the same way, by a `register simp` line after its membership law;
+without one, `simp at h` leaves `h : x ∈ both(A, B)` as it is.
+
+`register ring (A, add, zero, neg, mul, one) ⧸ I := (…)` declares a form of
+the [ring scopes](#scoped-ring-operations): inside a section,
+`notation ring Q := R ⧸ J` is the six terms on the right at the pieces of
+the scope `R` and the operand `J`. The pieces and the operand are distinct
+pattern variables, the terms are read in the declaring module, and the
+form after the pieces is an infix token and an operand, or `[I]` for the
+bracket form `R[I]`. `Algebra.Ring.QuotientCore` declares
+
+```g17 fragment
+register ring (A, add, zero, neg, mul, one) ⧸ I :=
+  (A ⧸ idealRelation(A, add, neg, I),
+   quotientBinary(A, idealRelation(A, add, neg, I), add),
+   ⟦zero⟧[A, idealRelation(A, add, neg, I)],
+   quotientUnary(A, idealRelation(A, add, neg, I), neg),
+   quotientBinary(A, idealRelation(A, add, neg, I), mul),
+   ⟦one⟧[A, idealRelation(A, add, neg, I)])
+```
+
+so `Q := R ⧸ J` is the quotient of the scope `R` by the ideal `J`, its
+classes under the induced operations; `Algebra.Restriction` declares the
+restriction `S := R ↾ T` and `Algebra.Polynomial.Ring` the polynomial ring
+`P := R[I]`. A form is available wherever its module is imported, a token
+two visible modules register is an error that names them, and a form no
+module in scope registers is an error that lists the forms there are.
+
 ## Lists and reopened namespaces
 
 `[a, b, c]` abbreviates the List constructors, and `a :: b :: xs`
@@ -1136,6 +1183,10 @@ for its pieces in `IsField(R)`, `IsMaximalIdeal(P, M)`, or
 `IsRingHom(e, P, R)`.
 The declaration adds no hypotheses, axioms, or kernel operations. See
 [ring scopes over separate pieces](algebra.md#ring-scopes-over-separate-pieces).
+The forms `R[I]`, `P ⧸ J`, and `R ↾ T` are not built in: each is a
+`register ring` declaration, described under [Registrations](#registrations),
+in the module that defines the construction, and a module of your own may
+declare a form the same way.
 
 Which predicates and functions take a scope name is declared beside them,
 not built in. The declaration

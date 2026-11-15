@@ -165,10 +165,23 @@ export interface SurfaceNotationRecord {
  * a fact matching the pattern places its terms as the formula says; a
  * `with` clause names facts that must also be in scope, which bind the
  * variables the pattern leaves free.
+ *
+ * `register simp union2.membership`: the law joins the default rewrite set
+ * of `simp` and the membership opening of `tauto` wherever the declaring
+ * module is visible; its orientation and guards are read off its statement.
+ *
+ * `register ring (A, add, zero, neg, mul, one) ⧸ I := (…)`: a ring scope
+ * `Q := R ⧸ J` is the six terms on the right at the pieces of `R` and the
+ * operand; the form after the pieces is an infix token and an operand, or
+ * `[I]` for the bracket form `R[I]`.
  */
 export interface SurfaceRegistrationRecord {
-  readonly form: "kinds" | "application" | "facts";
-  /** The predicate the registration is about; for `facts`, the head symbol of the pattern. */
+  readonly form: "kinds" | "application" | "facts" | "simp" | "ring";
+  /**
+   * The declaration the registration is about: a structure predicate; for
+   * `facts`, the head symbol of the pattern; for `simp`, the rule's
+   * declaration; for `ring`, the form's token, `⧸`, `↾`, or `[]`.
+   */
   readonly predicate: string;
   readonly arity: number;
   /** `application`: the pattern variables, the applied structure first. */
@@ -182,6 +195,10 @@ export interface SurfaceRegistrationRecord {
   readonly variables?: readonly string[];
   readonly with?: readonly Formula[];
   readonly gives?: readonly Formula[];
+  /** `simp`: the rule proofs the declaration resolves to, as a rule named in `simp [...]` does. */
+  readonly rules?: readonly Proof[];
+  /** `ring`: the six terms of the result over `names`, the pieces of the base presentation and then the operand. */
+  readonly terms?: readonly Term[];
   readonly module?: string;
 }
 
@@ -926,7 +943,7 @@ function surfaceIndexContentsMalformed(value: Record<string, unknown>): boolean 
           typeof item.hypothesis.predicate !== "string" || !Number.isSafeInteger(item.hypothesis.arity) ||
           !Array.isArray(item.hypothesis.names) || !Array.isArray(item.hypothesis.carriers)))) ||
       (value.registrations !== undefined && (!Array.isArray(value.registrations) ||
-        value.registrations.some(item => !surfaceIndexRecord(item) || !["kinds", "application", "facts"].includes(item.form as string) ||
+        value.registrations.some(item => !surfaceIndexRecord(item) || !["kinds", "application", "facts", "simp", "ring"].includes(item.form as string) ||
           typeof item.predicate !== "string" || !Number.isSafeInteger(item.arity) ||
           (item.kinds !== undefined && (!Array.isArray(item.kinds) || item.kinds.some(kind =>
             !surfaceIndexRecord(kind) || typeof kind.name !== "string" || typeof kind.projection !== "string"))) ||
@@ -935,7 +952,10 @@ function surfaceIndexContentsMalformed(value: Record<string, unknown>): boolean 
           (item.over !== undefined && !Number.isSafeInteger(item.over)) ||
           (item.pattern !== undefined && !surfaceIndexRecord(item.pattern)) ||
           (item.with !== undefined && (!Array.isArray(item.with) || item.with.some(formula => !surfaceIndexRecord(formula)))) ||
-          (item.gives !== undefined && (!Array.isArray(item.gives) || item.gives.some(formula => !surfaceIndexRecord(formula))))))) ||
+          (item.gives !== undefined && (!Array.isArray(item.gives) || item.gives.some(formula => !surfaceIndexRecord(formula)))) ||
+          (item.rules !== undefined && (!Array.isArray(item.rules) || item.rules.some(rule =>
+            !surfaceIndexRecord(rule) || typeof rule.rule !== "string" || typeof rule.name !== "string"))) ||
+          (item.terms !== undefined && (!Array.isArray(item.terms) || item.terms.some(term => !surfaceIndexTerm(term))))))) ||
       value.tactics.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string" || typeof item.body !== "string") ||
       value.instances.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string") ||
       value.datatypes.some(item => !surfaceIndexRecord(item) || typeof item.name !== "string") ||
@@ -1233,57 +1253,36 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     if (line.text.startsWith("notation ring ")) {
       if (!sections.length) throw new SurfaceError(line.number, "ring notation requires an open theorem section");
       const match = /^notation ring ([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*:=\s*(.+)$/u.exec(line.text);
-      if (!match) throw new SurfaceError(line.number, "expected notation ring R := (A, add, zero, neg, mul, one) or P := R[I] or Q := R ⧸ J or S := R ↾ T");
+      // The forms beside the explicit six-tuple, `P := R[I]`, `Q := R ⧸ J`,
+      // and `S := R ↾ T`, are the `register ring` declarations in scope.
+      const ringForms = registrationTables(kernel, scope()).rings;
+      const expectedRing = (): string => "expected notation ring R := (A, add, zero, neg, mul, one)" +
+        (ringForms.size ? `, or a registered form: ${[...ringForms.keys()].map(token => `Q := ${ringFormSpelling(token)}`).join(", ")}` : "");
+      if (!match) throw new SurfaceError(line.number, expectedRing());
       const binders = parseBinderGroups(sectionVariables().join(" "), line.number).binders;
       if (binders.some(b => b.name === match[1]) || scope().rings?.some(r => r.name === match[1]))
         throw new SurfaceError(line.number, `ring notation name ${match[1]} is already in scope`);
       const variables = new Set(binders.map(b => b.name));
-      const polynomial = /^([\p{L}_][\p{L}\p{M}\p{N}_]*)\[(.+)\]$/u.exec(match[2]!);
-      const quotient = /^([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*⧸\s*(.+)$/u.exec(match[2]!);
-      const restriction = /^([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*↾\s*(.+)$/u.exec(match[2]!);
+      const bracket = /^([\p{L}_][\p{L}\p{M}\p{N}_]*)\[(.+)\]$/u.exec(match[2]!);
+      const infix = bracket || match[2]!.startsWith("(") ? undefined
+        : /^([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*([^\s\p{L}\p{N}_(\[]+)\s*(.+)$/u.exec(match[2]!);
+      const written = bracket ?? infix;
       let terms: Term[];
-      if (restriction) {
-        const base = scope().rings?.find(r => r.name === restriction[1]);
-        if (!base) throw new SurfaceError(line.number, `unknown restriction base ring notation ${restriction[1]}`);
-        const carrier = parseTerm(restriction[2]!, kernel, variables, line.number, scope());
-        const fn = (name: string): string => resolveExisting(`Grace.Cumulus.Set.Relation.${name}`, scope(),
-          candidate => kernel.functions.get(candidate) === 2, line.number,
-          "restricted ring operation (import Grace.Cumulus.Algebra.Restriction)");
-        const restrict = fn("restrict");
-        const square = app(fn("product"), carrier, carrier);
-        terms = [carrier, app(restrict, base.add, square), base.zero,
-          app(restrict, base.neg, carrier), app(restrict, base.mul, square), base.one];
-      } else if (quotient) {
-        const base = scope().rings?.find(r => r.name === quotient[1]);
-        if (!base) throw new SurfaceError(line.number, `unknown quotient base ring notation ${quotient[1]}`);
-        const ideal = parseTerm(quotient[2]!, kernel, variables, line.number, scope());
-        const fn = (name: string, arity: number): string => resolveExisting(name, scope(),
-          candidate => kernel.functions.get(candidate) === arity, line.number,
-          "quotient ring operation (import Grace.Cumulus.Algebra.Ring.Quotient)");
-        const relation = app(fn("Grace.Cumulus.Algebra.Ring.QuotientCore.idealRelation", 4), base.carrier, base.add, base.neg, ideal);
-        const binary = fn("Grace.Cumulus.Relation.QuotientOperations.quotientBinary", 3);
-        const unary = fn("Grace.Cumulus.Relation.QuotientOperations.quotientUnary", 3);
-        const cls = fn("Grace.Cumulus.Relation.Quotient.equivalenceClass", 3);
-        terms = [app(fn("Grace.Cumulus.Relation.Quotient.quotient", 2), base.carrier, relation),
-          app(binary, base.carrier, relation, base.add), app(cls, base.carrier, relation, base.zero),
-          app(unary, base.carrier, relation, base.neg), app(binary, base.carrier, relation, base.mul),
-          app(cls, base.carrier, relation, base.one)];
-      } else if (polynomial) {
-        const base = scope().rings?.find(r => r.name === polynomial[1]);
-        if (!base) throw new SurfaceError(line.number, `unknown coefficient ring notation ${polynomial[1]}`);
-        const index = parseTerm(polynomial[2]!, kernel, variables, line.number, { ...scope(), rings: [] });
-        const fn = (name: string, arity: number): string => resolveExisting(name, scope(),
-          candidate => kernel.functions.get(candidate) === arity, line.number,
-          "polynomial ring operation (import Grace.Cumulus.Algebra.Polynomial.Ring)");
-        const args = [index, base.carrier, base.add, base.zero, base.neg, base.mul, base.one];
-        terms = [app(fn("polynomials", 3), index, base.carrier, base.zero),
-          app(fn("polynomialAdd", 7), ...args),
-          app(fn("constantFunction", 3), app(fn("monomials", 1), index), base.carrier, base.zero),
-          app(fn("polynomialNeg", 7), ...args), app(fn("polynomialMul", 7), ...args),
-          app(fn("polynomialConstant", 4), index, base.carrier, base.zero, base.one)];
+      if (written) {
+        const token = bracket ? "[]" : infix![2]!;
+        const forms = ringForms.get(token);
+        if (!forms) throw new SurfaceError(line.number, `${expectedRing()}; no ring form ${ringFormSpelling(token)} is registered in scope`);
+        if (forms.length > 1) {
+          throw new SurfaceError(line.number, `the ring form ${ringFormSpelling(token)} is registered by ${forms.map(form => form.module ?? "the bootstrap").join(" and ")}; import one`);
+        }
+        const form = forms[0]!;
+        const base = scope().rings?.find(r => r.name === written[1]);
+        if (!base) throw new SurfaceError(line.number, `unknown base ring notation ${written[1]} in ${match[2]}`);
+        const operand = parseTerm(bracket ? bracket[2]! : infix![3]!, kernel, variables, line.number, scope());
+        const values = [...RING_STRUCTURE_FIELDS.map(piece => base[piece]), operand];
+        terms = form.terms!.map(term => instantiateRegistrationTerm(term, form.names!, values));
       } else {
-        if (!match[2]!.startsWith("(") || !match[2]!.endsWith(")"))
-          throw new SurfaceError(line.number, "expected notation ring R := (A, add, zero, neg, mul, one) or P := R[I] or Q := R ⧸ J or S := R ↾ T");
+        if (!match[2]!.startsWith("(") || !match[2]!.endsWith(")")) throw new SurfaceError(line.number, expectedRing());
         const parts = splitTopLevel(match[2]!.slice(1, -1), ",");
         if (parts.length !== 6) throw new SurfaceError(line.number, "ring notation expects carrier, add, zero, neg, mul, one");
         terms = parts.map(part => parseTerm(part, kernel, variables, line.number, { ...scope(), rings: [] }));
@@ -3454,20 +3453,27 @@ function registerNotationGuards(kernel: Kernel, notations: readonly SurfaceNotat
 }
 
 const REGISTRATION_FORMS = "`register kinds Category object obj morphism mor`, " +
-  "`register application Functor(F, C, D) over C object obj morphism map`, or " +
-  "`register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`";
+  "`register application Functor(F, C, D) over C object obj morphism map`, " +
+  "`register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`, " +
+  "`register simp union2.membership`, or " +
+  "`register ring (A, add, zero, neg, mul, one) ⧸ I := (…)`";
 
 /**
  * A `register` declaration, resolved once here and kept on the environment
  * beside the notations: the kinds of element a structure has, how a
- * structure's values apply, or the facts a fact shape gives. Each is read
- * back by `registrationTables` wherever the elaborator classifies a term.
+ * structure's values apply, the facts a fact shape gives, a default rule of
+ * `simp`, or a ring scope form. Each is read back by `registrationTables`
+ * wherever the elaborator classifies a term. A declaration continues on
+ * the more indented lines beneath it.
  */
 function elaborateRegistration(
   kernel: Kernel, block: readonly SourceLine[], scope: SurfaceScope, environment: SurfaceEnvironment,
 ): void {
-  const line = block[0]!;
-  if (block.length !== 1) throw new SurfaceError(block[1]!.number, "register declarations must fit on one line");
+  const first = block[0]!;
+  const continuation = block.slice(1).find(item => !item.narrative && item.indent <= first.indent);
+  if (continuation) throw new SurfaceError(continuation.number, "a register declaration continues on more indented lines only");
+  const text = block.filter(item => !item.narrative).map(item => item.text).join(" ").replace(/\s+/gu, " ");
+  const line: SourceLine = block.length === 1 ? first : { ...first, text };
   const kinds = /^register\s+kinds\s+(\S+)((?:\s+\S+\s+\S+)+)$/u.exec(line.text);
   if (kinds) { elaborateKindsRegistration(kernel, line, scope, environment, kinds[1]!, kinds[2]!); return; }
   const application = /^register\s+application\s+(\S+?)\((.*?)\)\s+over\s+(\S+)((?:\s+\S+\s+\S+)+)$/u.exec(line.text);
@@ -3477,7 +3483,88 @@ function elaborateRegistration(
   }
   const facts = /^register\s+facts\s+(.+?)(?:\s+with\s+(.+?))?\s+gives\s+(.+)$/u.exec(line.text);
   if (facts) { elaborateFactsRegistration(kernel, line, scope, environment, facts[1]!, facts[2], facts[3]!); return; }
+  const simp = /^register\s+simp\s+(\S+)$/u.exec(line.text);
+  if (simp) { elaborateSimpRegistration(kernel, line, scope, environment, simp[1]!); return; }
+  const ring = /^register\s+ring\s+\(([^()]*)\)\s*(?:\[\s*([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*\]|([^\s\p{L}\p{N}_(\[]+)\s*([\p{L}_][\p{L}\p{M}\p{N}_]*))\s*:=\s*(.+)$/u.exec(line.text);
+  if (ring) {
+    elaborateRingRegistration(kernel, line, scope, environment, ring[1]!, ring[2] === undefined ? ring[3]! : "[]", ring[2] ?? ring[4]!, ring[5]!);
+    return;
+  }
   throw new SurfaceError(line.number, `expected ${REGISTRATION_FORMS}`);
+}
+
+/**
+ * `register simp union2.membership`: the rule joins the default rewrite set
+ * of `simp`, `simp at`, `simpa`, and the membership opening of `tauto`
+ * wherever the declaring module is visible. The name resolves as a rule
+ * named in `simp [...]` does, to a theorem, an axiom, a definition, or a
+ * definition property such as `intersection.membership`; the orientation
+ * and the guards of the rule are read off its statement when it is used.
+ */
+function elaborateSimpRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment, rawName: string,
+): void {
+  let rules: Proof[];
+  try { rules = resolveRules(kernel, [rawName], line.number, scope); }
+  catch (error) {
+    if (!(error instanceof SurfaceError)) throw error;
+    throw new SurfaceError(line.number, `a simp registration names a theorem, an axiom, a definition, or a definition property; ${error.message.replace(/^line \d+: /u, "")}`);
+  }
+  const predicate = rules[0]!.rule === "definition" || rules[0]!.rule === "theorem" || rules[0]!.rule === "axiom"
+    ? (rules[0] as { readonly name: string }).name : rawName;
+  registrationDeclared(environment, scope, line, "simp", predicate, rawName);
+  environment.registrations.push({
+    form: "simp", predicate, arity: 0, rules, ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/**
+ * `register ring (A, add, zero, neg, mul, one) ⧸ I := (…)`, or `… [I] := (…)`
+ * for the bracket form: inside a section, `notation ring Q := R ⧸ J` is the
+ * six terms on the right at the pieces of the scope `R` and the operand
+ * `J`. The pieces and the operand are distinct pattern variables, and the
+ * terms are read in the declaring module, so the scope names nothing the
+ * user's module must import by name.
+ */
+function elaborateRingRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment,
+  rawPieces: string, token: string, operand: string, rawTerms: string,
+): void {
+  const pieces = splitTopLevel(rawPieces, ",").map(piece => piece.trim());
+  const names = [...pieces, operand];
+  if (pieces.length !== RING_STRUCTURE_FIELDS.length || names.some(name => !SIMPLE_IDENTIFIER.test(name)) || new Set(names).size !== names.length) {
+    throw new SurfaceError(line.number, "a ring registration names the six pieces of the base scope and the operand as distinct pattern variables, as in `(A, add, zero, neg, mul, one) ⧸ I`");
+  }
+  const parts = rawTerms.startsWith("(") && rawTerms.endsWith(")") ? splitTopLevel(rawTerms.slice(1, -1), ",") : [];
+  if (parts.length !== RING_STRUCTURE_FIELDS.length) {
+    throw new SurfaceError(line.number, `the result of a ring registration lists the six pieces of the scope it defines, (${RING_STRUCTURE_FIELDS.join(", ")}), in parentheses`);
+  }
+  const variables = new Set(names);
+  const terms = parts.map(part => {
+    try { return parseTerm(part.trim(), kernel, variables, line.number, scope); }
+    catch (error) {
+      if (!(error instanceof SurfaceError)) throw error;
+      throw new SurfaceError(line.number, `the result of a ring registration must be terms over its pattern variables: ${error.message.replace(/^line \d+: /u, "")}`);
+    }
+  });
+  registrationDeclared(environment, scope, line, "ring", token, token);
+  environment.registrations.push({
+    form: "ring", predicate: token, arity: RING_STRUCTURE_FIELDS.length, names, terms,
+    ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/** The written form of a ring registration's token, for messages: `R[I]` or `R ⧸ I`. */
+function ringFormSpelling(token: string, base = "R", operand = "I"): string {
+  return token === "[]" ? `${base}[${operand}]` : `${base} ${token} ${operand}`;
+}
+
+/** A term over pattern variables at a substitution, the variables renamed first so that none captures a value. */
+function instantiateRegistrationTerm(term: Term, variables: readonly string[], values: readonly Term[]): Term {
+  let result = term;
+  variables.forEach((name, index) => { result = substituteTerm(result, name, v(`$registered${index}`)); });
+  variables.forEach((_name, index) => { result = substituteTerm(result, `$registered${index}`, values[index]!); });
+  return result;
 }
 
 /** The `name field` pairs after a registration's head, each field a field of the structure. */
@@ -3515,9 +3602,10 @@ function registrationStructure(
 
 function registrationDeclared(
   environment: SurfaceEnvironment, scope: SurfaceScope, line: SourceLine, form: SurfaceRegistrationRecord["form"], predicate: string,
+  spelling = shortName(predicate),
 ): void {
   if (environment.registrations.some(item => item.form === form && item.predicate === predicate && item.module === scope.moduleName)) {
-    throw new SurfaceError(line.number, `register ${form} ${shortName(predicate)} is already declared in this module`);
+    throw new SurfaceError(line.number, `register ${form} ${spelling} is already declared in this module`);
   }
 }
 
@@ -3628,10 +3716,14 @@ interface RegistrationTables {
   readonly applicationKinds: ReadonlyMap<string, string>;
   /** The `facts` registrations by the head of their pattern: `pred:P` for a predicate, `in:f` for a membership in `f(…)`. */
   readonly facts: ReadonlyMap<string, readonly SurfaceRegistrationRecord[]>;
+  /** The rules of the `simp` registrations, in declaration order: the default rewrite set. */
+  readonly simp: readonly Proof[];
+  /** The `ring` registrations by token, `⧸`, `↾`, or `[]`. */
+  readonly rings: ReadonlyMap<string, readonly SurfaceRegistrationRecord[]>;
 }
 
 const EMPTY_REGISTRATION_TABLES: RegistrationTables = {
-  kinds: [], kindsByPredicate: new Map(), applications: new Map(), applicationKinds: new Map(), facts: new Map(),
+  kinds: [], kindsByPredicate: new Map(), applications: new Map(), applicationKinds: new Map(), facts: new Map(), simp: [], rings: new Map(),
 };
 
 /** The key a fact is looked up under among the `facts` registrations. */
@@ -3678,7 +3770,20 @@ function registrationTables(kernel: Kernel, scope: SurfaceScope): RegistrationTa
     const list = facts.get(factKey);
     if (list) list.push(item); else facts.set(factKey, [item]);
   }
-  const tables: RegistrationTables = { kinds, kindsByPredicate, applications, applicationKinds, facts };
+  // The default rules apply in order, each once at every instance it
+  // reaches, so the law of a construction goes before the laws of what it
+  // is built from: the modules' laws in load order, then the bootstrap's
+  // pair and empty-set laws, which every construction ends in.
+  const simp: Proof[] = [];
+  for (const item of visible) if (item.form === "simp" && item.module !== undefined) simp.push(...item.rules!);
+  for (const item of visible) if (item.form === "simp" && item.module === undefined) simp.push(...item.rules!);
+  const rings = new Map<string, SurfaceRegistrationRecord[]>();
+  for (const item of visible) {
+    if (item.form !== "ring") continue;
+    const list = rings.get(item.predicate);
+    if (list) list.push(item); else rings.set(item.predicate, [item]);
+  }
+  const tables: RegistrationTables = { kinds, kindsByPredicate, applications, applicationKinds, facts, simp, rings };
   cache.registrations.set(key, tables);
   return tables;
 }
@@ -6677,7 +6782,7 @@ function elaborateTacticTheorem(
       const localRules = [...selectedLocals.values()].flatMap(item => item ? [item.proof] : []);
       const external = names.filter(item => !selectedLocals.get(item));
       const sourceProof = parseProofExpression(kernel, simpa[3]!, current, variables, line.number, scope);
-      const rules = [...defaultSimpRules(kernel, line.number, scope),
+      const rules = [...defaultSimpRules(kernel, scope),
         ...resolveRules(kernel, external, line.number, scope), ...localRules];
       const options = createSimpSession({
         backchain, visibility, compute, instances: instanceSearch,
@@ -6730,7 +6835,7 @@ function elaborateTacticTheorem(
       const external = names.filter(item => !selectedLocals.get(item));
       const externalRules = withNegationEquivalences(kernel,
         resolveRules(kernel, external, line.number, scope), current.assumptions);
-      const defaults = withNegationEquivalences(kernel, defaultSimpRules(kernel, line.number, scope), current.assumptions);
+      const defaults = withNegationEquivalences(kernel, defaultSimpRules(kernel, scope), current.assumptions);
       const otherFacts = [...current.locals.values()].filter(item => item !== local).map(item => item.proof);
       // A predicate definition or an equivalence named among the rules is
       // opened wherever the fact mentions it, under binders included, as
@@ -6799,7 +6904,7 @@ function elaborateTacticTheorem(
       const localRules = [...selectedLocals.values()].flatMap(item => item ? [item.proof] : []);
       const external = names.filter(item => !selectedLocals.get(item));
       const rules = withNegationEquivalences(kernel,
-        [...defaultSimpRules(kernel, line.number, scope), ...resolveRules(kernel, external, line.number, scope), ...localRules],
+        [...defaultSimpRules(kernel, scope), ...resolveRules(kernel, external, line.number, scope), ...localRules],
         current.assumptions);
       if (current.goal.tag !== "eq") {
         const options = createSimpSession({
@@ -14359,7 +14464,7 @@ function tautologyOpening(
   };
   scanFormula(current.goal);
   for (const local of current.locals.values()) scanFormula(local.formula);
-  const rules = [...[...names].map(name => definition(name, "membership")), ...defaultSimpRules(kernel, line.number, scope)];
+  const rules = [...[...names].map(name => definition(name, "membership")), ...defaultSimpRules(kernel, scope)];
   if (rules.length === 0) return undefined;
   const facts = [...current.locals.values()].map(item => item.proof);
   const taken = new Set([...current.variables, ...freeFormulaVariables(current.goal)]);
@@ -16197,23 +16302,13 @@ function defaultSettleRules(kernel: Kernel, line: number, scope: SurfaceScope): 
   }
 }
 
-function defaultSimpRules(kernel: Kernel, line: number, scope: SurfaceScope): Proof[] {
-  return [
-    "Grace.Cumulus.Set.Finite.FiniteSet.union2.membership",
-    "Grace.Cumulus.Set.Finite.FiniteSet.singleton.membership",
-    "Grace.Cumulus.Set.Basic.intersection.membership",
-    "Grace.Cumulus.Set.Basic.difference.membership",
-    "Grace.Cumulus.Set.Powerset.difference.singleton_membership",
-    "Grace.Cumulus.Set.Algebra.symmetricDifference.membership",
-    "pair.membership",
-    "set.empty",
-  ].flatMap(name => {
-    try { return resolveRules(kernel, [name], line, scope); }
-    catch (error) {
-      if (error instanceof SurfaceError && error.message.includes("unknown settle rule")) return [];
-      throw error;
-    }
-  });
+/**
+ * The default rewrite set of `simp`: the rules the `register simp`
+ * declarations in scope name, the membership laws of the library's set
+ * operations among them, indexed once per visibility by `registrationTables`.
+ */
+function defaultSimpRules(kernel: Kernel, scope: SurfaceScope): readonly Proof[] {
+  return registrationTables(kernel, scope).simp;
 }
 
 function preferredDefinitionProof(name: string, record: DefinitionRecord): Proof {
