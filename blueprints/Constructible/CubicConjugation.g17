@@ -20,6 +20,14 @@ proof
   unfold cubic
   typecheck
 
+-- A real numeral literal lies in every subfield: it is realNat(n).
+theorem realNumeral.subfield_mem (F : Set) (n : Nat)
+  requires field : RealSubfield(F)
+  shows realNumeral(n) ∈ F
+proof
+  rw realNumeral.nat
+  exact RealSubfield.numeral_mem with field
+
 instance cubic.mem (F : Set) (a b c x : Real)
   requires field : RealSubfield(F)
   requires aIn : a ∈ F
@@ -28,7 +36,8 @@ instance cubic.mem (F : Set) (a b c x : Real)
   requires xIn : x ∈ F
   shows cubic(a, b, c, x) ∈ F
 proof
-  sorry
+  unfold cubic
+  typecheck
 
 -- Vieta for two distinct roots. The certificate is
 -- (r − s) · cubic(−a − r − s) = (−a − 2s − r) · cubic(r)
@@ -40,7 +49,21 @@ theorem cubic.third_root (a b c r s : Real)
   requires distinct : r ≠ s
   shows cubic(a, b, c, -a - r - s) = 0
 proof
-  sorry
+  have difference : r - s ≠ 0
+    intro zero
+    apply distinct
+    linarith
+  have cancel : (r - s) * cubic(a, b, c, -a - r - s) = 0
+    unfold cubic at rootR
+    unfold cubic at rootS
+    unfold cubic
+    linear_combination (-a - (2:R) * s - r) * rootR -
+      (-a - (2:R) * r - s) * rootS
+  have split := realMulValue.eq_zero_or with cancel
+  rcases split with zero | root
+  . exfalso
+    exact difference with zero
+  . exact root
 
 -- The value at p ± q√d splits as U ± V√d with U, V polynomial in
 -- a, b, c, p, q, d: ring after sqrt.square.
@@ -57,7 +80,16 @@ theorem cubic.split (a b c d p q : Real)
       ((3:R) * (p * p) * q + q * q * q * d + (2:R) * a * p * q + b * q) *
         √d
 proof
-  sorry
+  have rootReal : Real(√d) by typecheck
+  have nonnegative := NonnegativeReal.of_le with dNonneg
+  have square := sqrt.square at d with nonnegative
+  constructor
+  . unfold cubic
+    linear_combination ((3:R) * p * (q * q) + q * q * q * √d + a * (q * q)) *
+      square
+  . unfold cubic
+    linear_combination ((3:R) * p * (q * q) - q * q * q * √d + a * (q * q)) *
+      square
 
 -- U + V√d = 0 with U, V ∈ F and √d ∉ F forces U = V = 0, so U − V√d = 0.
 theorem cubic.conjugate_root (F : Set) (d a b c p q : Real)
@@ -73,7 +105,23 @@ theorem cubic.conjugate_root (F : Set) (d a b c p q : Real)
   requires root : cubic(a, b, c, p + q * √d) = 0
   shows cubic(a, b, c, p - q * √d) = 0
 proof
-  sorry
+  have rootReal : Real(√d) by typecheck
+  have two := realNumeral.subfield_mem at F, 2 with field
+  have three := realNumeral.subfield_mem at F, 3 with field
+  have both := cubic.split at a, b, c, d, p, q with dNonneg
+  rcases both with ⟨plus, minus⟩
+  have constantIn : p * p * p + (3:R) * p * (q * q) * d +
+      a * (p * p + q * q * d) + b * p + c ∈ F
+    typecheck
+  have rootCoefficientIn : (3:R) * (p * p) * q + q * q * q * d +
+      (2:R) * a * p * q + b * q ∈ F
+    typecheck
+  rw plus at root
+  have zeros := adjoinSqrt.coefficients_unique
+    with field, dNonneg, rootOut, constantIn, rootCoefficientIn, root
+  rcases zeros with ⟨constantZero, rootCoefficientZero⟩
+  rw [minus, constantZero, rootCoefficientZero]
+  ring
 
 -- r = p + q√d. If q = 0 or √d ∈ F then r ∈ F; otherwise the conjugate is
 -- a distinct root and the third root −a − 2p lies in F.
@@ -88,4 +136,42 @@ theorem cubic.root_descends (F : Set) (d a b c r : Real)
   requires root : cubic(a, b, c, r) = 0
   shows ∃ s ∈ F, cubic(a, b, c, s) = 0
 proof
-  sorry
+  obtain ⟨p, pIn, q, qIn, same⟩ := adjoinSqrt.cases with dNonneg, rIn
+  have realP := RealSubfield.real with field, pIn
+  have realQ := RealSubfield.real with field, qIn
+  have rootReal : Real(√d) by typecheck
+  have zeroIn := RealSubfield.zero_mem with field
+  by_cases rootIn : √d ∈ F
+  . have rInF : r ∈ F
+      rw same
+      typecheck
+    exact ⟨r, rInF, root⟩
+  . by_cases qZero : (q:R) = 0
+    . have value : r = p
+        rw [same, qZero]
+        ring
+      rw value at root
+      exact ⟨p, pIn, root⟩
+    . have rootPlus : cubic(a, b, c, (p:R) + (q:R) * √d) = 0 by rwa same at root
+      have rootMinus := cubic.conjugate_root
+        with field, dIn, dNonneg, rootIn, aIn, bIn, cIn, pIn, qIn, rootPlus
+      have rootNonzero : √d ≠ 0
+        intro zero
+        apply rootIn
+        rw zero
+        exact zeroIn
+      have distinct : (p:R) + (q:R) * √d ≠ (p:R) - (q:R) * √d
+        intro equal
+        have product : (q:R) * √d = 0 by linarith
+        have split := realMulValue.eq_zero_or with product
+        rcases split with qIsZero | rootIsZero
+        . exact qZero with qIsZero
+        . exact rootNonzero with rootIsZero
+      have third := cubic.third_root with rootPlus, rootMinus, distinct
+      have value : -a - ((p:R) + (q:R) * √d) - ((p:R) - (q:R) * √d) =
+          -a - (2:R) * (p:R)
+        ring
+      rw value at third
+      have two := realNumeral.subfield_mem at F, 2 with field
+      have thirdIn : -a - (2:R) * (p:R) ∈ F by typecheck
+      exact ⟨-a - (2:R) * (p:R), thirdIn, third⟩
