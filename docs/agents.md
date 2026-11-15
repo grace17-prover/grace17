@@ -400,6 +400,10 @@ The checker's message is quoted for each so it can be matched.
   a theorem's statement does not mention and its proof does not use is
   still a premise, and `g17 check` reports it as a warning; move
   projection lemmas that must be premise-free out of the section.
+- **Strengthen an induction with `generalizing`.** `induction xs generalizing r with`
+  moves `r`, its soft type, and the requirements that mention it into the
+  motive, so the recursive hypothesis applies to a different `r`; a helper
+  theorem with `r` in its conclusion is not needed.
 - **Division by a numeral is an atom to `ring`.** `(1:R) / (8:R)` is not
   normalized; rewrite with `realDiv.eq_mul_inv` and cancel through
   `realInvValue.mul_right`, or state the equation multiplied out.

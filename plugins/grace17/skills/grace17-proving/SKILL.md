@@ -206,7 +206,7 @@ Cumulus. Theorem names are dotted and descriptive (`Subset.transitive`,
 - Division by a numeral, `(1:R) / (8:R)`, is an atom to `ring` and `linear_combination`; rewrite with `realDiv.eq_mul_inv` or state the equation multiplied out.
 - `linear_combination k * h` takes a negated or ring numeral `k`, but not `k * (h₁ - h₂)`; distribute by hand.
 - Parenthesize quantified formulas inside connectives: `P ∧ (∃ j ∈ n, A ∨ B)`.
-- Facts proved before `induction m` are not visible in the branches; re-derive them inside each branch.
+- Facts proved before `induction m` are not visible in the branches; re-derive them inside each branch. To strengthen the hypothesis, write `induction xs generalizing r with`: the generalized variables, their soft types, and the requirements mentioning them move into the motive, so the recursive hypothesis holds for every new value; no helper theorem with the variable in its conclusion is needed.
 - A bound variable from `∀ k ∈ m` with `m : Nat` needs `have kNat := natural.member at m with hk` before it is used as a natural.
 - With real notation in scope write `(0:R)`, `(1:R)`, `(0:N)`, and casts `(t:R)`. `arith` is for naturals (no `≠`, no equalities); `linarith` and `ring` are for reals and need the atoms' realness in context (`have xReal := … ∈ ℝ`).
 - `realAddValue(a, b)` and `a + b` are different terms. `linarith` bridges them when `a`, `b` are non-literal reals with realness facts; keep `u(j) = 0` as a hypothesis rather than rewriting it into the goal.
