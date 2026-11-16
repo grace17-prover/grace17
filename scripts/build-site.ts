@@ -74,6 +74,8 @@ const editDates = new Map<string, string>();
     if (path) editDates.set(path, new Date().toLocaleDateString("en-CA"));
   }
 }
+// A page without a source of its own is dated by the site's own source or
+// the last release, whichever is later: package.json changes at a release.
 // The build date in the local calendar, as the commit dates are.
 const today = new Date().toLocaleDateString("en-CA");
 function editedOn(...paths: string[]): string {
@@ -89,7 +91,7 @@ function page(title: string, body: string, prefix = "./", options: { sidebar?: s
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Grace17</title><meta name="description" content="${escape(description)}"><link rel="icon" type="image/svg+xml" href="${prefix}grace-icon.svg"><link rel="icon" type="image/png" sizes="32x32" href="${prefix}favicon-32.png"><link rel="apple-touch-icon" href="${prefix}favicon-180.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><link rel="stylesheet" href="${prefix}site.css?v=${assetVersion}"></head><body>
 <header class="site-header"><a class="brand" href="${prefix}" aria-label="Grace17 home">${wordmark}</a><nav class="site-nav" aria-label="Site">${nav}</nav></header>
 <div class="layout${options.sidebar ? " with-sidebar" : ""}">${options.sidebar ?? ""}<main class="doc${options.wide ? " wide" : ""}">${body}</main></div>
-<footer class="site-footer"><span>Grace17 · an open source proof assistant for mathematics based on set theory</span><span>Last edited ${options.edited ?? editedOn("scripts/build-site.ts")} by Grant Olney Passmore · Apache License 2.0</span></footer>
+<footer class="site-footer"><span>Grace17 · an open source proof assistant for mathematics based on set theory</span><span>Last edited ${options.edited ?? editedOn("scripts/build-site.ts", "package.json")} by Grant Olney Passmore · Apache License 2.0</span></footer>
 <script type="module" src="${prefix}site.js?v=${assetVersion}"></script>
 ${analytics}</body></html>`;
 }
