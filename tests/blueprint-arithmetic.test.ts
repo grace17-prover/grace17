@@ -1,40 +1,49 @@
-// The Arithmetic blueprint elaborates as it stands: every module checks
-// with its admissions, the README's module table names a planned home for
-// each module, and the law of quadratic reciprocity is stated in its module.
+// The Arithmetic blueprint is fully promoted into Cumulus: no module remains
+// under blueprints/, every row of the README's module table names the
+// library module it became, the status block reports nothing left to prove,
+// and the four headline theorems live in the library without admissions.
 // Part of the Grace17 proof assistant for mathematics based on set theory.
 // Copyright (c) 2026 Grant Passmore.
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = "blueprints/Arithmetic";
+const library = "lib/Grace/Cumulus";
 
 function g17Files(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = join(directory, entry.name);
     return entry.isDirectory() ? g17Files(path) : entry.name.endsWith(".g17") ? [path] : [];
-  }).sort();
+  });
 }
 
-test("the Arithmetic blueprint elaborates with its admissions", () => {
-  const files = g17Files(root);
-  assert.ok(files.length >= 16, `the blueprint has ${files.length} modules`);
-  const run = spawnSync("node", ["--max-old-space-size=8192", "--disable-warning=ExperimentalWarning", "bin/g17.ts", "check",
-    "--json", "--continue", "--quiet", "--module-root", "blueprints", "--module-root", "lib", ...files],
-    { encoding: "utf8", maxBuffer: 1 << 28 });
-  const report = JSON.parse(run.stdout) as { checked?: { file: string; theorems: string[] }[]; failed?: { file: string; error: string }[] };
-  const failed = (report.failed ?? []).filter(item => item.file.includes(root));
-  assert.deepEqual(failed.map(item => `${item.file}: ${item.error.slice(0, 120)}`), []);
-  const checked = (report.checked ?? []).filter(item => item.file.includes(root));
-  assert.equal(checked.length, files.length);
-  const reciprocity = checked.find(item => item.file.endsWith("QuadraticReciprocity.g17"));
-  assert.ok(reciprocity?.theorems.some(name => name.endsWith("quadratic_reciprocity")),
-    "the QuadraticReciprocity module states quadratic_reciprocity");
+test("the Arithmetic blueprint is fully promoted into Cumulus", () => {
+  assert.deepEqual(g17Files(root), [], "no blueprint module remains to be promoted");
   const readme = readFileSync(join(root, "README.md"), "utf8");
   const rows = readme.match(/^\| [A-Z][\w.]* \| \d \| [^|]+ \|$/gmu) ?? [];
-  assert.equal(rows.length, files.length, "every module has a row in the module table");
+  assert.ok(rows.length >= 19, `the module table has ${rows.length} rows`);
+  for (const row of rows) {
+    const home = row.split("|")[3]!.trim();
+    assert.match(home, /^promoted: /u, row);
+    for (const module of home.slice("promoted: ".length).split(",").map(item => item.trim())) {
+      assert.ok(existsSync(join(library, `${module}.g17`)), `${module} is a Cumulus module`);
+    }
+  }
+  const status = readme.slice(readme.indexOf("<!-- blueprint-status -->"), readme.indexOf("<!-- /blueprint-status -->"));
+  assert.match(status, /\| \*\*total\*\* \| \*\*0\*\* \| \*\*0\*\* \| \*\*0\*\* \|/u);
+  const headlines: [string, RegExp][] = [
+    ["NumberTheory/QuadraticReciprocity.g17", /^theorem quadratic_reciprocity /mu],
+    ["NumberTheory/TwoSquares.g17", /^theorem fermat\.two_squares /mu],
+    ["NumberTheory/FourSquares.g17", /^theorem lagrange\.four_squares /mu],
+    ["NumberTheory/Pell.g17", /^theorem pell\.exists_nontrivial /mu],
+  ];
+  for (const [file, pattern] of headlines) {
+    const source = readFileSync(join(library, file), "utf8");
+    assert.match(source, pattern, file);
+    assert.doesNotMatch(source, /\bsorry\b/u, file);
+  }
 });

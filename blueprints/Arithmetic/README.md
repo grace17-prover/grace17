@@ -11,10 +11,11 @@ approximation and a pigeonhole on codes. This blueprint planned the
 formalization in Cumulus as checked Grace17 modules: every definition
 final, every theorem stated in full and admitted with `sorry` until proved,
 the import graph the dependency graph of the proof. It is now proved in
-full: no module has an admission left, and the four theorems audit to the
-ZF axioms alone, without choice. The planned homes are under
-`Grace.Cumulus.NumberTheory` except the floor, which goes to
-`Grace.Cumulus.Real`.
+full and promoted into Cumulus under the home named in each row below,
+held to the Cumulus rules: at most three imports for a proof module,
+headers, and no admissions. The four theorems audit to the ZF axioms
+alone, without choice. The number theory lives under
+`Grace.Cumulus.NumberTheory`, the floor under `Grace.Cumulus.Real`.
 
 ```sh
 npm run blueprint:check     # the four headline modules elaborate
@@ -115,25 +116,25 @@ cardinalities and weighted sums of `Cardinal`.
 
 | module | layer | home in Cumulus (relative to `Grace.Cumulus`) |
 |---|---|---|
-| IntegerRemainder | 1 | NumberTheory/IntegerRemainder |
-| IntegerPrime | 1 | NumberTheory/IntegerPrime |
-| RealFloor | 1 | Real/Floor |
-| EulerCriterion | 2 | NumberTheory/EulerCriterion |
-| GaussCount | 2 | NumberTheory/GaussCount |
-| Thue | 2 | NumberTheory/Thue |
-| FourSquareIdentity | 2 | NumberTheory/FourSquareIdentity |
-| FourSquaresModPrime | 2 | NumberTheory/FourSquaresModPrime |
-| SqrtNonsquare | 2 | NumberTheory/SqrtNonsquare |
-| Dirichlet | 2 | NumberTheory/Dirichlet |
-| GaussLemma | 3 | NumberTheory/GaussLemma |
-| TwoSquares | 3 | NumberTheory/TwoSquares |
-| FourSquaresDescent | 3 | NumberTheory/FourSquaresDescent |
-| PellApproximants | 3 | NumberTheory/PellApproximants |
-| GaussParity | 4 | NumberTheory/GaussParity |
-| FourSquares | 4 | NumberTheory/FourSquares |
-| Pell | 4 | NumberTheory/Pell |
-| LatticeCount | 5 | NumberTheory/LatticeCount |
-| QuadraticReciprocity | 6 | NumberTheory/QuadraticReciprocity |
+| IntegerRemainder | 1 | promoted: NumberTheory/IntegerRemainder |
+| IntegerPrime | 1 | promoted: NumberTheory/IntegerPrime |
+| RealFloor | 1 | promoted: Real/Floor |
+| EulerCriterion | 2 | promoted: NumberTheory/EulerCriterion |
+| GaussCount | 2 | promoted: NumberTheory/GaussCount |
+| Thue | 2 | promoted: NumberTheory/Thue |
+| FourSquareIdentity | 2 | promoted: NumberTheory/FourSquareIdentity |
+| FourSquaresModPrime | 2 | promoted: NumberTheory/FourSquaresModPrime |
+| SqrtNonsquare | 2 | promoted: NumberTheory/SqrtNonsquare |
+| Dirichlet | 2 | promoted: NumberTheory/Dirichlet |
+| GaussLemma | 3 | promoted: NumberTheory/GaussLemma |
+| TwoSquares | 3 | promoted: NumberTheory/TwoSquares |
+| FourSquaresDescent | 3 | promoted: NumberTheory/FourSquaresDescent |
+| PellApproximants | 3 | promoted: NumberTheory/PellApproximants |
+| GaussParity | 4 | promoted: NumberTheory/GaussParity |
+| FourSquares | 4 | promoted: NumberTheory/FourSquares |
+| Pell | 4 | promoted: NumberTheory/Pell |
+| LatticeCount | 5 | promoted: NumberTheory/LatticeCount |
+| QuadraticReciprocity | 6 | promoted: NumberTheory/QuadraticReciprocity |
 
 ```mermaid
 graph TD
@@ -281,24 +282,5 @@ proof module has at most three imports, a root counting as one.
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| Arithmetic.RealFloor | 18 | 18 | 0 |
-| Arithmetic.Dirichlet | 14 | 14 | 0 |
-| Arithmetic.EulerCriterion | 25 | 25 | 0 |
-| Arithmetic.FourSquareIdentity | 11 | 11 | 0 |
-| Arithmetic.FourSquaresModPrime | 20 | 20 | 0 |
-| Arithmetic.IntegerRemainder | 11 | 11 | 0 |
-| Arithmetic.FourSquaresDescent | 12 | 12 | 0 |
-| Arithmetic.FourSquares | 3 | 3 | 0 |
-| Arithmetic.GaussCount | 37 | 37 | 0 |
-| Arithmetic.GaussLemma | 14 | 14 | 0 |
-| Arithmetic.GaussParity | 42 | 42 | 0 |
-| Arithmetic.IntegerPrime | 8 | 8 | 0 |
-| Arithmetic.LatticeCount | 17 | 17 | 0 |
-| Arithmetic.SqrtNonsquare | 8 | 8 | 0 |
-| Arithmetic.PellApproximants | 8 | 8 | 0 |
-| Arithmetic.Pell | 18 | 18 | 0 |
-| Arithmetic.QuadraticReciprocity | 6 | 6 | 0 |
-| Arithmetic.Thue | 17 | 17 | 0 |
-| Arithmetic.TwoSquares | 8 | 8 | 0 |
-| **total** | **297** | **297** | **0** |
+| **total** | **0** | **0** | **0** |
 <!-- /blueprint-status -->

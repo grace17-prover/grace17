@@ -210,6 +210,18 @@ are written as a number theorist would write them, with `n!`, `p - 1`,
 `a ^ k % p`, and `n choose k`, and the executable functions evaluate inside
 proofs.
 
+The quadratic residues follow the classical route: Euler's criterion by
+Wilson's theorem and a pairing of the units, Gauss's lemma as the parity
+of a count of residues, Eisenstein's lattice count, and the law of
+quadratic reciprocity with its first supplement, all as congruences of
+naturals with odd primes written `p = 2h + 1`. Thue's lemma by pigeonhole
+gives Fermat's theorem that a prime 1 modulo 4 is a sum of two squares,
+Euler's four-square identity and Fermat's descent give Lagrange's theorem
+that every natural is a sum of four squares, and Dirichlet's approximation
+theorem with a pigeonhole on codes gives a nontrivial solution of Pell's
+equation `x² = d y² + 1` for every nonsquare `d`. The integers contribute
+the remainder modulo a natural and the integer form of the prime lemmas.
+
 `Grace.Cumulus.Combinatorics` counts: inclusion–exclusion, the pigeonhole
 principle in its injective, surjective, and preimage forms, Pascal's rule
 and the other binomial identities, the numbers of functions, injections,
@@ -252,7 +264,7 @@ natural powers `A ^ n`, division, numerals, and the typed notation that lets
 real arithmetic be written as `x + y`, `x * y`, `-x`, `x / y`, `√x`, and
 `x ≤ y`. Finite sums `∑ k < n, uₖ` over real sequences, with their algebra,
 the arithmetic and geometric series, and the sums of powers, are part of
-this layer.
+this layer, as are the floor and fractional part of a nonnegative real.
 
 ## Real analysis
 
