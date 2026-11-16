@@ -74,8 +74,8 @@ const editDates = new Map<string, string>();
     if (path) editDates.set(path, new Date().toLocaleDateString("en-CA"));
   }
 }
-// A page without a source of its own is dated by the site's own source or
-// the last release, whichever is later: package.json changes at a release.
+// Every page is dated by its own source or the last release, whichever is
+// later: package.json changes at a release, so a release moves every date.
 // The build date in the local calendar, as the commit dates are.
 const today = new Date().toLocaleDateString("en-CA");
 function editedOn(...paths: string[]): string {
@@ -151,7 +151,7 @@ function renderDoc(markdown: string, outName: string, fallbackTitle: string, sou
   const { title } = rendered;
   const name = title || fallbackTitle;
   const description = /^(?!#)([^\n]+)\n/m.exec(markdown.replace(/^# .*\n+/, ""))?.[1].replace(/[*_`\[\]]/g, "");
-  writeFileSync(join(out, "docs", outName), page(name, html, "../", { sidebar: docsSidebar, description, edited: editedOn(source) }));
+  writeFileSync(join(out, "docs", outName), page(name, html, "../", { sidebar: docsSidebar, description, edited: editedOn(source, "package.json") }));
   return name;
 }
 let docCount = 0;
@@ -238,7 +238,7 @@ for (const { file, source } of sources) {
   const crumbs = [`<a href="../../">Grace17</a>`, `<a href="../">Cumulus</a>`, ...(area ? [`<a href="../#${area.id}">${escape(area.title)}</a>`] : []), ...ancestors.map(name => `<a href="${modules.get(name)}">${escape(name.split(".").at(-1)!)}</a>`), `<span aria-current="page">${escape(segments.at(-1)!)}</span>`];
   const breadcrumbs = `<nav class="breadcrumbs" aria-label="Breadcrumb">${crumbs.join('<span class="sep" aria-hidden="true">›</span>')}</nav>`;
   const body = `${breadcrumbs}<h1>${escape(title)}</h1><p class="source-meta"><a class="action run" href="${workbenchLink(file, 1, "../../workbench/")}">Open in Workbench</a> <a class="action" href="../../sources/${file}" download>Download source</a></p><h2 id="imports">Imports</h2><p class="imports">${imports.join(" · ") || "None"}</p><h2 id="declarations">Declarations</h2><ul class="declarations">${toc}</ul><h2 id="source">Source</h2><pre class="source"><code>${lines}</code></pre>`;
-  writeFileSync(join(out, "cumulus/modules", modulePage(file)), page(title, body, "../../", { wide: true, description: `Source of the Cumulus module ${title}.`, edited: editedOn(file) }));
+  writeFileSync(join(out, "cumulus/modules", modulePage(file)), page(title, body, "../../", { wide: true, description: `Source of the Cumulus module ${title}.`, edited: editedOn(file, "package.json") }));
 }
 writeFileSync(join(out, "cumulus/declarations.json"), JSON.stringify(records));
 // The module index groups the library by subject. Each area is matched by
@@ -266,7 +266,7 @@ for (const file of examples) {
   const summary = (/^--\s*(.+)/.exec(source)?.[1] ?? "").replace(/\.$/, "");
   const lines = source.split("\n").map((line, i) => `<span class="source-line" id="L${i + 1}"><a class="line-number" href="#L${i + 1}" aria-label="Line ${i + 1}">${i + 1}</a>${highlightGrace17(line)}</span>`).join("");
   const body = `<h1>${escape(name)}</h1><p class="lede">${escape(summary)}</p><p class="source-meta"><a class="action run" href="${workbenchSourceLink(file, source, "../workbench/")}">Open in Workbench</a> <a class="action" href="https://github.com/grace17-prover/grace17/blob/main/examples/${file}" rel="noopener">View on GitHub</a></p><pre class="source"><code>${lines}</code></pre>`;
-  writeFileSync(join(out, "examples", `${name}.html`), page(`${name} example`, body, "../", { sidebar: examplesSidebar, wide: true, edited: editedOn(`examples/${name}.g17`), description: summary || `The ${name} example.` }));
+  writeFileSync(join(out, "examples", `${name}.html`), page(`${name} example`, body, "../", { sidebar: examplesSidebar, wide: true, edited: editedOn(`examples/${name}.g17`, "package.json"), description: summary || `The ${name} example.` }));
 }
 // The examples index page is retired; each example page remains reachable from the docs.
 
