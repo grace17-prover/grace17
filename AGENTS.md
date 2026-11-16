@@ -110,7 +110,8 @@ A bundled structure keeps the plain noun (`Group(G)`, `CommRing(R)`,
 (`IsCommRing.mul_comm`).
 Prefer named hypotheses, `have` with stated propositions, `calc`, and
 sections over long tactic runs. A proof module imports at most three
-modules (an area's entry point is exempt). The style test rejects
+modules by default (an area's entry point is exempt, and the Cumulus test
+lists the few modules allowed more). The style test rejects
 mechanical verbosity: `have h := …` followed by `exact h` or by
 `specialize h with …`, two adjacent `intro` lines, `unfold P at h` followed
 by a destructuring of `h`, and hyphens in names.

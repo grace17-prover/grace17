@@ -27,7 +27,7 @@ function g17Files(root: string): string[] {
 test("source headers end with a separating blank line", () => {
   for (const file of [...g17Files(library), ...g17Files(fileURLToPath(new URL("../examples", import.meta.url)))]) {
     const lines = readFileSync(file, "utf8").split(/\r?\n/);
-    const authors = lines.indexOf("-- Authors: Grant Passmore");
+    const authors = lines.findIndex(line => line.startsWith("-- Authors: Grant Passmore"));
     assert.notEqual(authors, -1, file);
     assert.equal(lines[authors + 1], "", file);
   }
@@ -61,8 +61,11 @@ test("Cumulus source headers stay approachable", () => {
     const localOpens = source.match(/^open /gm)?.length ?? 0;
     // Culminating algebra proofs join independently developed subjects. Keep
     // them coherent instead of introducing import-only micro-modules.
+    // The order of real powers is a ZF module: it gathers its facts from the
+    // real modules below choice directly, rather than through Analysis.
     const synthesisLimit = file.endsWith("/Algebra/MatrixAnnihilator.g17") ? 4
-      : file.endsWith("/Algebra/Polynomial/Nullstellensatz.g17") ? 8 : 3;
+      : file.endsWith("/Algebra/Polynomial/Nullstellensatz.g17") ? 8
+      : file.endsWith("/Real/PowerOrder.g17") ? 6 : 3;
     const limit = file.includes("/Real/Analysis/") ? 8 : synthesisLimit;
     // Subject entrypoints only aggregate modules: a top-level file, which the
     // separate root-file test keeps free of implementations, or a file that
