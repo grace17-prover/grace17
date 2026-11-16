@@ -77,7 +77,9 @@ const wrong=source.replace('integerOfNat(gcd(a, b))','integerOfNat(succ(gcd(a, b
 let rejected=false;
 try {checkWorkbenchFiles([{name:'BezoutRegression.g17',source:wrong}]);} catch (e) {rejected=true; console.log(e.message);}
 if(!rejected) process.exit(3);`;
-  const result = spawnSync(process.execPath, ["--max-old-space-size=768", "--disable-warning=ExperimentalWarning", "--input-type=module", "-e", runner], { encoding: "utf8", timeout: 90_000 });
+  // The NumberTheory closure alone needs over 512 MB to load; the simpa adds
+  // under 100 MB on top. A blowup in the nested existential took gigabytes.
+  const result = spawnSync(process.execPath, ["--max-old-space-size=1024", "--disable-warning=ExperimentalWarning", "--input-type=module", "-e", runner], { encoding: "utf8", timeout: 90_000 });
   assert.equal(result.status, 0, result.stderr + result.stdout + String(result.error ?? ""));
   assert.match(result.stdout, /settle stopped|did not close|unable to/);
 });
