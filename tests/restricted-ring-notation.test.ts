@@ -56,7 +56,7 @@ end RestrictionSyntax
 });
 
 test("restriction scope rejects unknown bases and does not escape its section", () => {
-  assert.throws(() => load(header + "notation ring L := Missing ↾ T\n" + theorem), /unknown restriction base ring notation Missing/);
+  assert.throws(() => load(header + "notation ring L := Missing ↾ T\n" + theorem), /unknown base ring notation Missing in Missing ↾ T/);
   assert.throws(() => load(header + "notation ring L := R ↾ T\nend Rings\ntheorem escaped\n  shows L = L\nproof\n  rfl\nend RestrictionSyntax\n"), /unknown|unbound/i);
 });
 

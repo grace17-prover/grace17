@@ -8,21 +8,16 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  canonical, compileSeparateKernelModule, createZfgFoundationKernel, describeFoundation,
-  installSetTheoryBootstrap, loadModuleGraph, replaySeparateKernelModuleExact,
+  canonical, compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
+  forkSurfaceEnvironment, loadModuleGraph,
 } from "../src/index.ts";
 
 const project = fileURLToPath(new URL("..", import.meta.url));
 const output = resolve(process.argv[2] ?? join(project, "build", "compiled"));
 const foundation = createZfgFoundationKernel();
-const bootstrapCompleted = foundation.fork();
-const bootstrapCheckpoint = bootstrapCompleted.admissionCheckpoint();
-installSetTheoryBootstrap(bootstrapCompleted);
-const bootstrap = compileSeparateKernelModule(
-  foundation, foundation, bootstrapCompleted, bootstrapCheckpoint, { module: "Grace.Bootstrap" },
-);
-const base = replaySeparateKernelModuleExact(foundation, bootstrap);
+const { compiled: bootstrap, base } = compileSetTheoryBootstrap(foundation);
 const completed = base.fork();
+forkSurfaceEnvironment(base, completed);
 const checkpoint = completed.admissionCheckpoint();
 loadModuleGraph(completed, [join(project, "lib", "Grace", "Cumulus.g17")], [join(project, "lib")]);
 const artifact = compileSeparateKernelModule(foundation, base, completed, checkpoint, {

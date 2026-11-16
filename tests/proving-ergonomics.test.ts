@@ -139,14 +139,20 @@ proof
 `);
 });
 
-test("ring says that a quotient by a numeral is an atom", () => {
-  const message = failure(real + `
+test("ring reads a quotient by a numeral, and says that a quotient by a term is an atom", () => {
+  check(real + `
 theorem halvesByRing (x : Real)
   shows x / 2 + x / 2 = x
 proof
   ring
 `);
-  assert.match(message, /different normal forms; a quotient t \/ k is an atom for ring: for a linear goal use linarith/u);
+  const message = failure(real + `
+theorem cancelByRing (x y : Real)
+  shows x / y * y = x
+proof
+  ring
+`);
+  assert.match(message, /different normal forms; a quotient t \/ u by a term is an atom for ring/u);
   assert.match(message, /realDiv\.eq_mul_inv or a named constant such as oneHalf/u);
 });
 

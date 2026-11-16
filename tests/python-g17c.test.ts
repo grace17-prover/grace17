@@ -11,8 +11,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  canonical, compileSeparateKernelModule, createZfgFoundationKernel, describeFoundation, exportKernelEnvironment,
-  installSetTheoryBootstrap, loadModuleGraph, replaySeparateKernelModuleExact,
+  canonical, compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
+  exportKernelEnvironment, forkSurfaceEnvironment, loadModuleGraph,
   type SeparateCompiledKernelModule,
 } from "../src/index.ts";
 import { sha256Hex } from "../src/hash.ts";
@@ -35,14 +35,9 @@ let fixture: { directory: string; receipt: string; legacy: string; bootstrap: st
 function files() {
   if (fixture) return fixture;
   const foundationKernel = createZfgFoundationKernel();
-  const bootstrapCompleted = foundationKernel.fork();
-  const bootstrapCheckpoint = bootstrapCompleted.admissionCheckpoint();
-  installSetTheoryBootstrap(bootstrapCompleted);
-  const compiledBootstrap = compileSeparateKernelModule(
-    foundationKernel, foundationKernel, bootstrapCompleted, bootstrapCheckpoint, { module: "Grace.Bootstrap" },
-  );
-  const base = replaySeparateKernelModuleExact(foundationKernel, compiledBootstrap);
+  const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
+  forkSurfaceEnvironment(base, completed);
   const checkpoint = completed.admissionCheckpoint();
   loadModuleGraph(completed, [cumulus], [library]);
   const compiled = compileSeparateKernelModule(foundationKernel, base, completed, checkpoint, {

@@ -17,8 +17,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  canonical, compileSeparateKernelModule, createZfgFoundationKernel, describeFoundation,
-  installSetTheoryBootstrap, loadModuleGraph, replaySeparateKernelModuleExact,
+  canonical, compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
+  forkSurfaceEnvironment, loadModuleGraph,
 } from "../src/index.ts";
 
 const project = fileURLToPath(new URL("..", import.meta.url));
@@ -38,14 +38,9 @@ const output = resolve(process.argv[3] ?? join(project, "build", `compiled-${bas
 
 const started = Date.now();
 const foundation = createZfgFoundationKernel();
-const bootstrapCompleted = foundation.fork();
-const bootstrapCheckpoint = bootstrapCompleted.admissionCheckpoint();
-installSetTheoryBootstrap(bootstrapCompleted);
-const bootstrap = compileSeparateKernelModule(
-  foundation, foundation, bootstrapCompleted, bootstrapCheckpoint, { module: "Grace.Bootstrap" },
-);
-const base = replaySeparateKernelModuleExact(foundation, bootstrap);
+const { compiled: bootstrap, base } = compileSetTheoryBootstrap(foundation);
 const completed = base.fork();
+forkSurfaceEnvironment(base, completed);
 const checkpoint = completed.admissionCheckpoint();
 loadModuleGraph(completed, [source], [join(project, "lib")]);
 const artifact = compileSeparateKernelModule(foundation, base, completed, checkpoint, {

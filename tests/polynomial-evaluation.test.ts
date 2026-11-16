@@ -62,8 +62,8 @@ proof
 });
 
 test("polynomial notation diagnoses missing imports and unknown coefficient scopes", () => {
-  assert.throws(() => load(header.replace("R[I]", "Missing[I]")), /unknown coefficient ring notation Missing/);
-  assert.throws(() => load(header.replace("Grace.Cumulus.Algebra.Polynomial.EvaluationHom", "Grace.Cumulus.Algebra.Ring")), /polynomial ring operation.*import Grace.Cumulus.Algebra.Polynomial.Ring/);
+  assert.throws(() => load(header.replace("R[I]", "Missing[I]")), /unknown base ring notation Missing/);
+  assert.throws(() => load(header.replace("Grace.Cumulus.Algebra.Polynomial.EvaluationHom", "Grace.Cumulus.Algebra.Ring")), /no ring form R\[I\] is registered in scope/);
 });
 
 test("multiplicative evaluation cannot be inferred from an arbitrary function on monomials", () => {

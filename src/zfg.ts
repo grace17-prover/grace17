@@ -9,7 +9,10 @@ import { join } from "node:path";
 import { projectRoot } from "./project-root.ts";
 import { and, app, eq, exists, forall, iff, imp, not, or, pred, v, type Formula } from "./ast.ts";
 import { Kernel, type SetTheoryProfile } from "./kernel.ts";
-import { elaborateModule } from "./surface.ts";
+import {
+  captureSurfaceBaseline, elaborateModule, exportSurfaceEnvironmentDelta, mergeSurfaceEnvironmentDelta,
+} from "./surface.ts";
+import { compileSeparateKernelModule, replaySeparateKernelModuleExact, type SeparateCompiledKernelModule } from "./compiled-module.ts";
 
 export interface SetTheoryOptions {
   readonly profile?: Exclude<SetTheoryProfile, "none">;
@@ -183,6 +186,26 @@ export function installSetTheoryBootstrap(kernel: Kernel): void {
     const file = join(projectRoot, "lib", name);
     elaborateModule(kernel, readFileSync(file, "utf8"));
   }
+}
+
+/**
+ * The bootstrap as an independent checker sees it: compiled over `foundation`
+ * from the sources, then replayed from its compiled form onto a fork of
+ * `foundation`. The replay carries the kernel declarations only, so the
+ * surface declarations the sources add (notation, registrations) are merged
+ * beside the replay's receipt, as a store merges a module's surface delta.
+ */
+export function compileSetTheoryBootstrap(
+  foundation: Kernel, module = "Grace.Bootstrap",
+): { readonly compiled: SeparateCompiledKernelModule; readonly base: Kernel } {
+  const baseline = captureSurfaceBaseline(foundation);
+  const bootstrapped = foundation.fork();
+  const checkpoint = bootstrapped.admissionCheckpoint();
+  installSetTheoryBootstrap(bootstrapped);
+  const compiled = compileSeparateKernelModule(foundation, foundation, bootstrapped, checkpoint, { module });
+  const base = replaySeparateKernelModuleExact(foundation, compiled);
+  mergeSurfaceEnvironmentDelta(base, exportSurfaceEnvironmentDelta(bootstrapped, baseline, module, compiled.digest));
+  return { compiled, base };
 }
 
 export const createZfKernel = (): Kernel => createSetTheoryKernel({ profile: "ZF" });

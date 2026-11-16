@@ -15,8 +15,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  compileSeparateKernelModule, createZfgFoundationKernel, describeFoundation, installSetTheoryBootstrap,
-  loadModuleGraph, replaySeparateKernelModuleExact,
+  compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
+  forkSurfaceEnvironment, loadModuleGraph,
 } from "../src/index.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -67,14 +67,9 @@ test("the Rust tape checker accepts freshly compiled modules and rejects mutatio
 test("the Rust module checker constructs ZFG and replays a compiled module with its bootstrap", { skip: !available && "cargo is not installed" }, () => {
   ensureBuilt();
   const foundationKernel = createZfgFoundationKernel();
-  const bootstrapCompleted = foundationKernel.fork();
-  const bootstrapCheckpoint = bootstrapCompleted.admissionCheckpoint();
-  installSetTheoryBootstrap(bootstrapCompleted);
-  const compiledBootstrap = compileSeparateKernelModule(
-    foundationKernel, foundationKernel, bootstrapCompleted, bootstrapCheckpoint, { module: "Grace.Bootstrap" },
-  );
-  const base = replaySeparateKernelModuleExact(foundationKernel, compiledBootstrap);
+  const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
+  forkSurfaceEnvironment(base, completed);
   const checkpoint = completed.admissionCheckpoint();
   loadModuleGraph(completed, [join(root, "lib/Grace/Cumulus/Relation/QuotientMap.g17")], [library]);
   const compiled = compileSeparateKernelModule(foundationKernel, base, completed, checkpoint, {
@@ -108,14 +103,9 @@ test("the Rust module checker constructs ZFG and replays a compiled module with 
 test("the Rust module checker replays the complete Cumulus from the ZFG axioms", { skip: !available && "cargo is not installed" }, () => {
   ensureBuilt();
   const foundationKernel = createZfgFoundationKernel();
-  const bootstrapCompleted = foundationKernel.fork();
-  const bootstrapCheckpoint = bootstrapCompleted.admissionCheckpoint();
-  installSetTheoryBootstrap(bootstrapCompleted);
-  const compiledBootstrap = compileSeparateKernelModule(
-    foundationKernel, foundationKernel, bootstrapCompleted, bootstrapCheckpoint, { module: "Grace.Bootstrap" },
-  );
-  const base = replaySeparateKernelModuleExact(foundationKernel, compiledBootstrap);
+  const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
+  forkSurfaceEnvironment(base, completed);
   const checkpoint = completed.admissionCheckpoint();
   loadModuleGraph(completed, [join(root, "lib/Grace/Cumulus.g17")], [library]);
   const compiled = compileSeparateKernelModule(foundationKernel, base, completed, checkpoint, {
