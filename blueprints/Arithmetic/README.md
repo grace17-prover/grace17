@@ -7,11 +7,13 @@ reciprocity is proved by Gauss's lemma and Eisenstein's lattice count,
 Fermat's theorem on sums of two squares by the first supplement and
 Thue's lemma, Lagrange's four-square theorem by Euler's identity and
 Fermat's descent, and the solvability of Pell's equation by Dirichlet's
-approximation and a pigeonhole on codes. This blueprint plans the
+approximation and a pigeonhole on codes. This blueprint planned the
 formalization in Cumulus as checked Grace17 modules: every definition
 final, every theorem stated in full and admitted with `sorry` until proved,
-the import graph the dependency graph of the proof. The planned homes are
-under `Grace.Cumulus.NumberTheory` except the floor, which goes to
+the import graph the dependency graph of the proof. It is now proved in
+full: no module has an admission left, and the four theorems audit to the
+ZF axioms alone, without choice. The planned homes are under
+`Grace.Cumulus.NumberTheory` except the floor, which goes to
 `Grace.Cumulus.Real`.
 
 ```sh
@@ -279,24 +281,24 @@ proof module has at most three imports, a root counting as one.
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| Arithmetic.RealFloor | 16 | 1 | 15 |
-| Arithmetic.Dirichlet | 8 | 3 | 5 |
-| Arithmetic.EulerCriterion | 18 | 0 | 18 |
-| Arithmetic.FourSquareIdentity | 10 | 0 | 10 |
-| Arithmetic.FourSquaresModPrime | 13 | 6 | 7 |
-| Arithmetic.IntegerRemainder | 12 | 1 | 11 |
-| Arithmetic.FourSquaresDescent | 7 | 0 | 7 |
-| Arithmetic.FourSquares | 3 | 0 | 3 |
-| Arithmetic.GaussCount | 26 | 2 | 24 |
-| Arithmetic.GaussLemma | 9 | 0 | 9 |
-| Arithmetic.GaussParity | 25 | 15 | 10 |
-| Arithmetic.IntegerPrime | 9 | 0 | 9 |
-| Arithmetic.LatticeCount | 8 | 0 | 8 |
-| Arithmetic.SqrtNonsquare | 8 | 0 | 8 |
-| Arithmetic.PellApproximants | 7 | 0 | 7 |
-| Arithmetic.Pell | 13 | 3 | 10 |
-| Arithmetic.QuadraticReciprocity | 6 | 0 | 6 |
-| Arithmetic.Thue | 12 | 3 | 9 |
-| Arithmetic.TwoSquares | 5 | 0 | 5 |
-| **total** | **215** | **34** | **181** |
+| Arithmetic.RealFloor | 18 | 18 | 0 |
+| Arithmetic.Dirichlet | 14 | 14 | 0 |
+| Arithmetic.EulerCriterion | 24 | 24 | 0 |
+| Arithmetic.FourSquareIdentity | 11 | 11 | 0 |
+| Arithmetic.FourSquaresModPrime | 18 | 18 | 0 |
+| Arithmetic.IntegerRemainder | 12 | 12 | 0 |
+| Arithmetic.FourSquaresDescent | 13 | 13 | 0 |
+| Arithmetic.FourSquares | 3 | 3 | 0 |
+| Arithmetic.GaussCount | 37 | 37 | 0 |
+| Arithmetic.GaussLemma | 15 | 15 | 0 |
+| Arithmetic.GaussParity | 43 | 43 | 0 |
+| Arithmetic.IntegerPrime | 9 | 9 | 0 |
+| Arithmetic.LatticeCount | 17 | 17 | 0 |
+| Arithmetic.SqrtNonsquare | 8 | 8 | 0 |
+| Arithmetic.PellApproximants | 9 | 9 | 0 |
+| Arithmetic.Pell | 18 | 18 | 0 |
+| Arithmetic.QuadraticReciprocity | 6 | 6 | 0 |
+| Arithmetic.Thue | 18 | 18 | 0 |
+| Arithmetic.TwoSquares | 8 | 8 | 0 |
+| **total** | **301** | **301** | **0** |
 <!-- /blueprint-status -->
