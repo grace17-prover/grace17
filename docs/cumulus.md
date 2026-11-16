@@ -191,7 +191,10 @@ for subsets of ℕ is proved. Arithmetic evaluates with native large integers,
 so `compute` settles ground equations at any size. The everyday lemma
 library covers order, minimum and maximum, powers, parity, truncated
 subtraction, the distance between naturals, and the positions below a sum
-m + n with the offset j ↦ m + j.
+m + n with the offset j ↦ m + j. `NatBigO(f, g)` says that a sequence of
+naturals is eventually at most a constant multiple of another; it is
+reflexive and transitive, survives reindexing by any p(n) ≥ n, and is
+closed under sums, products, and constant factors.
 
 `Grace.Cumulus.List` develops finite sequences as the `List` datatype:
 append and reverse, take and drop, filtering by a set, counts and
