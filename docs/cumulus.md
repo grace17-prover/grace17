@@ -187,7 +187,9 @@ the set-theoretic naturals: cancellation laws, powers, factorials, parity,
 truncated subtraction, natural order with its membership interpretation,
 executable remainders `n % d` and quotients, and the least element of an
 inhabited subset of ℕ, from which the principle of mathematical induction
-for subsets of ℕ is proved. Arithmetic evaluates with native large integers,
+for subsets of ℕ is proved, and the integer logarithm `logNat(b, n)` and
+integer root `rootNat(q, n)` are defined by their bounds
+b ^ k ≤ n < b ^ (k + 1) and r ^ q ≤ n < (r + 1) ^ q. Arithmetic evaluates with native large integers,
 so `compute` settles ground equations at any size. The everyday lemma
 library covers order, minimum and maximum, powers, parity, truncated
 subtraction, the distance between naturals, and the positions below a sum
