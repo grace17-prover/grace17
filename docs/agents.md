@@ -260,6 +260,13 @@ fix it proposes rather than changing it; the integrator merges the copies
 and runs the checks. A blueprint, a module root of statements admitted
 with `sorry` whose import graph is the dependency graph of a proof, is how
 a theorem campaign is planned and divided; see `blueprints/*/README.md`.
+Once a blueprint is proved, a pass makes it readable before it is promoted:
+a sweep that drops each `have` in turn and rechecks the module over a
+`serve` daemon lists the steps the elaborator supplies on its own (typing
+and realness facts, mostly), and the agent keeps the steps that name the
+mathematics; the sweep's verdicts are not independent, so a second sweep
+follows the edits, and a step `typecheck` takes from a library theorem
+without naming it looks removable when it is not.
 
 ## Foundations and the axiom audit
 
