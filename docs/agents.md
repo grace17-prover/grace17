@@ -411,6 +411,11 @@ The checker's message is quoted for each so it can be matched.
 - **Nat `arith` needs a comparison goal.** After `exfalso` it reports "arith
   requires a linear equality or comparison goal". Derive `have bad : p < p`
   by `arith` and finish with `Less.irreflexive at p with *, bad`.
+- **Nat `arith` reads only the hypotheses that are comparisons.** A fact
+  `both : 0 < k ∧ k ≤ 0` does not refute `k ≤ 0`; destructure it first
+  with `obtain ⟨positive, bound⟩ := both`. Truncated subtraction is outside
+  `arith` too: `p - 1 = 2 * h` from `p = 2 * h + 1` is `rw odd` and
+  `sub.add_one_right`.
 - **Nat `arith` proves comparisons more readily than equalities.** When
   "arith found no supported linear arithmetic step" appears on an equality
   goal, prove `x ≤ 0` (or both directions) by `arith` and finish with
