@@ -283,22 +283,22 @@ proof module has at most three imports, a root counting as one.
 |---|---:|---:|---:|
 | Arithmetic.RealFloor | 18 | 18 | 0 |
 | Arithmetic.Dirichlet | 14 | 14 | 0 |
-| Arithmetic.EulerCriterion | 24 | 24 | 0 |
+| Arithmetic.EulerCriterion | 25 | 25 | 0 |
 | Arithmetic.FourSquareIdentity | 11 | 11 | 0 |
-| Arithmetic.FourSquaresModPrime | 18 | 18 | 0 |
-| Arithmetic.IntegerRemainder | 12 | 12 | 0 |
-| Arithmetic.FourSquaresDescent | 13 | 13 | 0 |
+| Arithmetic.FourSquaresModPrime | 20 | 20 | 0 |
+| Arithmetic.IntegerRemainder | 11 | 11 | 0 |
+| Arithmetic.FourSquaresDescent | 12 | 12 | 0 |
 | Arithmetic.FourSquares | 3 | 3 | 0 |
 | Arithmetic.GaussCount | 37 | 37 | 0 |
-| Arithmetic.GaussLemma | 15 | 15 | 0 |
-| Arithmetic.GaussParity | 43 | 43 | 0 |
-| Arithmetic.IntegerPrime | 9 | 9 | 0 |
+| Arithmetic.GaussLemma | 14 | 14 | 0 |
+| Arithmetic.GaussParity | 42 | 42 | 0 |
+| Arithmetic.IntegerPrime | 8 | 8 | 0 |
 | Arithmetic.LatticeCount | 17 | 17 | 0 |
 | Arithmetic.SqrtNonsquare | 8 | 8 | 0 |
-| Arithmetic.PellApproximants | 9 | 9 | 0 |
+| Arithmetic.PellApproximants | 8 | 8 | 0 |
 | Arithmetic.Pell | 18 | 18 | 0 |
 | Arithmetic.QuadraticReciprocity | 6 | 6 | 0 |
-| Arithmetic.Thue | 18 | 18 | 0 |
+| Arithmetic.Thue | 17 | 17 | 0 |
 | Arithmetic.TwoSquares | 8 | 8 | 0 |
-| **total** | **301** | **301** | **0** |
+| **total** | **297** | **297** | **0** |
 <!-- /blueprint-status -->
