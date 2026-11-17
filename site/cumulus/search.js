@@ -11,12 +11,19 @@ const normalize = value => value.normalize('NFKC').toLocaleLowerCase('en');
 try {
   const response = await fetch('./declarations.json');
   if (!response.ok) throw new Error('Index unavailable');
-  const records = (await response.json()).map(item => ({ ...item, text: normalize(`${item.name} ${item.signature} ${item.context}`) }));
+  const records = (await response.json()).map(item => ({ ...item, short: normalize(item.name), text: normalize(`${item.name} ${item.signature} ${item.context}`) }));
   function render() {
     const terms = normalize(input.value.trim()).split(/\s+/).filter(Boolean);
     results.replaceChildren();
     if (!terms.length) { status.textContent = `${records.length.toLocaleString()} declarations. Enter a name or words from a statement, or browse modules below.`; return; }
-    const matches = records.filter(r => terms.every(t => r.text.includes(t)));
+    // Names that carry the query, with or without its spaces, come first:
+    // "big o" leads with NatBigO rather than with the big_union lemmas.
+    const joined = terms.join('');
+    const rank = r => r.short.includes(joined) ? 0 : terms.every(t => r.short.includes(t)) ? 1 : 2;
+    const matches = records.filter(r => terms.every(t => r.text.includes(t)))
+      .map((r, index) => ({ r, index, rank: rank(r) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map(({ r }) => r);
     status.textContent = `${matches.length} matches${matches.length > 60 ? ' · showing the first 60; add words to narrow the search' : ''}`;
     for (const item of matches.slice(0, 60)) {
       const article = document.createElement('article'); article.className = 'result';
