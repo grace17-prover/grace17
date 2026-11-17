@@ -27,7 +27,7 @@ function g17Files(root: string): string[] {
 test("source headers end with a separating blank line", () => {
   for (const file of [...g17Files(library), ...g17Files(fileURLToPath(new URL("../examples", import.meta.url)))]) {
     const lines = readFileSync(file, "utf8").split(/\r?\n/);
-    const authors = lines.findIndex(line => line.startsWith("-- Authors: Grant Passmore"));
+    const authors = lines.findIndex(line => line.startsWith("-- Authors: "));
     assert.notEqual(authors, -1, file);
     assert.equal(lines[authors + 1], "", file);
   }
