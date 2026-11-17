@@ -27,10 +27,14 @@ const shardIndex = Number(shard[1]) - 1;
 const shardCount = Number(shard[2]);
 const concurrency = Number(option("--concurrency") ?? Math.max(1, Math.min(2, cpus().length >> 1)));
 const heap = option("--heap") ?? "8192";
+// A file that replays the whole library in one process grows with the
+// library: the complete Cumulus replay reached eight gigabytes in November
+// 2026. Such files run alone, so they may take the larger heap.
+const heavyHeap = option("--heavy-heap") ?? "12288";
 // `--exclude a,b` leaves out every test file whose name contains one of the
 // pieces, before sharding, so a heavy file can run in its own job.
 const excluded = (option("--exclude") ?? "").split(",").map(item => item.trim()).filter(Boolean);
-const filters = args.filter((item, index) => !item.startsWith("--") && !["--shard", "--concurrency", "--heap", "--exclude"].includes(args[index - 1] ?? ""));
+const filters = args.filter((item, index) => !item.startsWith("--") && !["--shard", "--concurrency", "--heap", "--heavy-heap", "--exclude"].includes(args[index - 1] ?? ""));
 // Library imports come from a module store unless --from-source is given.
 const preload = args.includes("--from-source") ? [] : ["--import", fileURLToPath(new URL("../tests/helpers/library-store.ts", import.meta.url))];
 
@@ -48,13 +52,14 @@ const started = performance.now();
 function runOne(name: string): Promise<void> {
   return new Promise(resolveRun => {
     const fileStarted = performance.now();
+    const fileHeap = heavy.has(name) ? heavyHeap : heap;
     const child = spawn(process.execPath, [
-      `--max-old-space-size=${heap}`, "--disable-warning=ExperimentalWarning", ...preload, "--test", join(tests, name),
+      `--max-old-space-size=${fileHeap}`, "--disable-warning=ExperimentalWarning", ...preload, "--test", join(tests, name),
     ], {
       stdio: ["ignore", "pipe", "pipe"],
       // The processes a test spawns (a compile of the library, a checker) get
       // the same heap as the test itself, as they do under the CI workflow.
-      env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${heap}` },
+      env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${fileHeap}` },
     });
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
