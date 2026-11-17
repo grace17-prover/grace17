@@ -32,7 +32,9 @@ writeFileSync(join(output, "monaco-assets.json"), JSON.stringify(monacoAssets, n
 for (const name of readdirSync(join(project, "src"))) {
   if (!name.endsWith(".ts")) continue;
   const source = readFileSync(join(project, "src", name), "utf8");
-  const javascript = stripTypeScriptTypes(source, { mode: "transform" })
+  // Strip mode keeps the source layout and comments and runs on every Node
+  // release that has the function; transform mode is refused by Node 26.
+  const javascript = stripTypeScriptTypes(source, { mode: "strip" })
     .replaceAll(/(from\s+["'][^"']+)\.ts(["'])/g, "$1.js$2")
     .replaceAll('"node:fs"', '"../shims/fs.js"')
     .replaceAll('"node:path"', '"../shims/path.js"')
