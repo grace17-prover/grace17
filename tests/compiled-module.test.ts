@@ -17,6 +17,7 @@ import {
   substituteFormula, v,
   theorem, type CompiledKernelModule, type DenseCompiledKernelModule, type SeparateCompiledKernelModule,
 } from "../src/index.ts";
+import { forkSurfaceEnvironment } from "../src/surface.ts";
 import { sha256Hex } from "../src/hash.ts";
 
 const library = fileURLToPath(new URL("../lib", import.meta.url));
@@ -45,6 +46,9 @@ function fixture() {
   if (cached) return cached;
   const base = createZfgKernel();
   const source = base.fork();
+  // A fork carries the kernel's declarations only; the bootstrap's notation
+  // and default rules, which the library's modules rely on, are copied here.
+  forkSurfaceEnvironment(base, source);
   const checkpoint = source.admissionCheckpoint();
   loadModuleGraph(source, roots, [library]);
   // Each format still exercises the whole graph. Do not retain the unused
