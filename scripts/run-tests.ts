@@ -27,10 +27,12 @@ const shardIndex = Number(shard[1]) - 1;
 const shardCount = Number(shard[2]);
 const concurrency = Number(option("--concurrency") ?? Math.max(1, Math.min(2, cpus().length >> 1)));
 const heap = option("--heap") ?? "8192";
-// A file that replays the whole library in one process grows with the
-// library: the complete Cumulus replay reached eight gigabytes in November
-// 2026. Such files run alone, so they may take the larger heap.
-const heavyHeap = option("--heavy-heap") ?? "12288";
+// The files that replay the whole library in one process run alone, so a
+// machine with more memory may give them a larger heap with --heavy-heap.
+// The default stays at the ordinary heap: a larger cap lets their garbage
+// grow to fill it, and a sixteen-gigabyte machine, or a CI runner, is then
+// killed outright rather than running a slower collection.
+const heavyHeap = option("--heavy-heap") ?? heap;
 // `--exclude a,b` leaves out every test file whose name contains one of the
 // pieces, before sharding, so a heavy file can run in its own job.
 const excluded = (option("--exclude") ?? "").split(",").map(item => item.trim()).filter(Boolean);
