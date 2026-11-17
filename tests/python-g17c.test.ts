@@ -53,7 +53,11 @@ function files() {
   writeFileSync(legacy, JSON.stringify(exportKernelEnvironment(foundationKernel)));
   writeFileSync(bootstrap, JSON.stringify(compiledBootstrap));
   writeFileSync(artifact, JSON.stringify(compiled));
-  return fixture = { directory, receipt, legacy, bootstrap, artifact, compiledBootstrap, compiled };
+  fixture = { directory, receipt, legacy, bootstrap, artifact, compiledBootstrap, compiled };
+  // The kernels above are no longer reachable; under --expose-gc (the test
+  // runner sets it) they are collected before the checker runs beside us.
+  (globalThis as { gc?: () => void }).gc?.();
+  return fixture;
 }
 
 const command = (artifact: string, bootstrap: string, foundation: string) =>

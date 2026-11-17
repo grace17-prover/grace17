@@ -31,7 +31,9 @@ const heap = option("--heap") ?? "8192";
 // machine with more memory may give them a larger heap with --heavy-heap.
 // The default stays at the ordinary heap: a larger cap lets their garbage
 // grow to fill it, and a sixteen-gigabyte machine, or a CI runner, is then
-// killed outright rather than running a slower collection.
+// killed outright rather than running a slower collection. The CI shards pass
+// ten gigabytes, which the complete-library exports need from source, and
+// those tests collect the library before any checker runs beside them.
 const heavyHeap = option("--heavy-heap") ?? heap;
 // `--exclude a,b` leaves out every test file whose name contains one of the
 // pieces, before sharding, so a heavy file can run in its own job.
@@ -56,7 +58,9 @@ function runOne(name: string): Promise<void> {
     const fileStarted = performance.now();
     const fileHeap = heavy.has(name) ? heavyHeap : heap;
     const child = spawn(process.execPath, [
-      `--max-old-space-size=${fileHeap}`, "--disable-warning=ExperimentalWarning", ...preload, "--test", join(tests, name),
+      // --expose-gc lets a test that has held the whole library collect it
+      // before a checker runs beside it.
+      `--max-old-space-size=${fileHeap}`, "--expose-gc", "--disable-warning=ExperimentalWarning", ...preload, "--test", join(tests, name),
     ], {
       stdio: ["ignore", "pipe", "pipe"],
       // The processes a test spawns (a compile of the library, a checker) get

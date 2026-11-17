@@ -100,8 +100,11 @@ test("the Rust module checker constructs ZFG and replays a compiled module with 
   assert.notEqual(wrongProfile.status, 0);
 });
 
-test("the Rust module checker replays the complete Cumulus from the ZFG axioms", { skip: !available && "cargo is not installed" }, () => {
-  ensureBuilt();
+// The whole library in one kernel, compiled and written as an artifact. The
+// kernels are locals here so that nothing keeps them once the files are
+// written: the checker then runs beside a process that holds only the
+// result environment, not a second copy of the library.
+function writeCompleteCumulus(directory: string): { bootstrap: string; artifact: string; environment: string } {
   const foundationKernel = createZfgFoundationKernel();
   const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
@@ -112,16 +115,24 @@ test("the Rust module checker replays the complete Cumulus from the ZFG axioms",
     module: "Grace.Cumulus",
     dependencies: [{ module: compiledBootstrap.module, digest: compiledBootstrap.digest }],
   });
-  const directory = mkdtempSync(join(tmpdir(), "g17-rust-cumulus-"));
   const bootstrap = join(directory, "Bootstrap.g17c");
   const artifact = join(directory, "Cumulus.g17c");
   writeFileSync(bootstrap, JSON.stringify(compiledBootstrap));
   writeFileSync(artifact, JSON.stringify(compiled));
+  return { bootstrap, artifact, environment: compiled.resultEnvironment };
+}
+
+test("the Rust module checker replays the complete Cumulus from the ZFG axioms", { skip: !available && "cargo is not installed" }, () => {
+  ensureBuilt();
+  const { bootstrap, artifact, environment } = writeCompleteCumulus(mkdtempSync(join(tmpdir(), "g17-rust-cumulus-")));
+  // Under --expose-gc (the test runner sets it) the library's kernels are
+  // collected now rather than when the checker's memory forces it.
+  (globalThis as { gc?: () => void }).gc?.();
   const run = spawnSync(modules, [artifact, "--foundation", "ZFG", "--dependency", bootstrap, "--json"],
     { cwd: root, encoding: "utf8", timeout: 900_000, maxBuffer: 64 * 1024 * 1024 });
   assert.equal(run.status, 0, run.stderr);
   const result = JSON.parse(run.stdout);
   assert.equal(result.ok, true);
   assert.equal(result.module, "Grace.Cumulus");
-  assert.equal(result.environment, compiled.resultEnvironment);
+  assert.equal(result.environment, environment);
 });
