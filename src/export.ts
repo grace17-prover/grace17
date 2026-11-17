@@ -151,22 +151,57 @@ function validateTacticTrace(trace: TacticTrace): void {
   });
 }
 
+/**
+ * An assumption context interned by the canonical forms of its formulas, so
+ * two judgments share a trace node exactly when their proof node and their
+ * assumption lists agree.
+ */
+interface TraceContext {
+  readonly id: number;
+  readonly children: Map<string, TraceContext>;
+}
+
 function buildProofTrace(kernel: Kernel, root: Proof, nodeIds: ReadonlyMap<Proof, number>): ProofTrace {
   const nodes: ProofTraceNode[] = [];
-  const interned = new Map<string, number>();
+  // Memo keyed by context id, then proof node. A child's assumption list
+  // extends its parent's, so its context is reached from the parent's by
+  // the appended formulas alone; the key stays two small numbers however
+  // long the context grows, where a key spelling out every assumption made
+  // the walk quadratic in memory for deep proofs.
+  const interned = new Map<number, Map<number, number>>();
+  let contexts = 0;
+  const rootContext: TraceContext = { id: contexts++, children: new Map() };
+  const extend = (context: TraceContext, assumptions: readonly Formula[], from: number): TraceContext => {
+    let current = context;
+    for (let index = from; index < assumptions.length; index += 1) {
+      const key = formulaCanonical(assumptions[index]!);
+      let next = current.children.get(key);
+      if (next === undefined) {
+        next = { id: contexts++, children: new Map() };
+        current.children.set(key, next);
+      }
+      current = next;
+    }
+    return current;
+  };
 
-  const visit = (proof: Proof, assumptions: readonly Formula[]): number => {
+  const visit = (proof: Proof, assumptions: readonly Formula[], context: TraceContext): number => {
     const proofNode = nodeIds.get(proof);
     if (proofNode === undefined) throw new KernelError("Proof trace refers to an unencoded proof node");
-    const key = `${proofNode}\u001e${assumptions.map(formulaCanonical).join("\u001f")}`;
-    const previous = interned.get(key);
+    let byProof = interned.get(context.id);
+    if (byProof === undefined) {
+      byProof = new Map();
+      interned.set(context.id, byProof);
+    }
+    const previous = byProof.get(proofNode);
     if (previous !== undefined) return previous;
 
     const id = nodes.length;
-    interned.set(key, id);
+    byProof.set(proofNode, id);
     nodes.push(undefined as unknown as ProofTraceNode);
     const conclusion = kernel.checkProof(proof, assumptions);
-    const children = contextualChildren(kernel, proof, assumptions).map(item => visit(item.proof, item.assumptions));
+    const children = contextualChildren(kernel, proof, assumptions)
+      .map(item => visit(item.proof, item.assumptions, extend(context, item.assumptions, assumptions.length)));
     nodes[id] = Object.freeze({
       proofNode,
       assumptions: Object.freeze([...assumptions]),
@@ -176,7 +211,7 @@ function buildProofTrace(kernel: Kernel, root: Proof, nodeIds: ReadonlyMap<Proof
     return id;
   };
 
-  const traceRoot = visit(root, []);
+  const traceRoot = visit(root, [], rootContext);
   return Object.freeze({ root: traceRoot, nodes: Object.freeze(nodes) });
 }
 
