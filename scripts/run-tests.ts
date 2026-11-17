@@ -83,7 +83,7 @@ function runOne(name: string): Promise<void> {
 // once; two of them side by side exceed a sixteen-gigabyte machine, so they
 // run one at a time, first, and the rest share the workers. The CI workflow
 // isolates the same file in its own job.
-const heavy = new Set(["cumulus.test.ts", "zf-library.test.ts", "workbench.test.ts", "rust-checker.test.ts",
+const heavy = new Set(["cumulus.test.ts", "cumulus-checkers.test.ts", "zf-library.test.ts", "workbench.test.ts", "rust-checker.test.ts",
   "python-g17c.test.ts", "compiled-module.test.ts", "blueprint-arithmetic.test.ts"]);
 const heavyFiles = files.filter(name => heavy.has(name));
 const lightFiles = files.filter(name => !heavy.has(name));
