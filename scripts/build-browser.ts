@@ -79,9 +79,11 @@ const checkpointOutput = join(output, "checkpoints");
 rmSync(checkpointOutput, { recursive: true, force: true });
 mkdirSync(checkpointOutput, { recursive: true });
 const checkpointIndex = checkpointRoots.map(rootModule => {
+  const started = performance.now();
   const { compiled, surface, loaded, sources } = buildCheckpoint(rootModule);
   const file = `checkpoints/${rootModule}.json`;
   writeFileSync(join(output, file), JSON.stringify({ compiled, surface, loaded }));
+  console.log(`checkpoint ${rootModule} (${Math.round((performance.now() - started) / 1000)} s)`);
   return { rootModule, sources, file };
 });
 writeFileSync(join(sourceOutput, "standard-checkpoints.js"),
