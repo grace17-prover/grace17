@@ -327,7 +327,7 @@ npm run test:ocaml           # build the OCaml checker, then the corpus
 npm run test:rust            # build the Rust checker, then the corpus
 \`\`\`
 
-To replay the complete Cumulus library from the bare axioms with the Rust checker, the check the continuous integration runs on every push:
+To replay the complete Cumulus library from the bare axioms with the Rust checker:
 
 \`\`\`sh
 npm run compile:cumulus
