@@ -281,3 +281,42 @@ test("an instance proof reaching for section context the instance does not " +
   assert.throws(() => load(reaching("hy"), "Instances.g17", true),
     /hy is absent because the conclusion does not mention y/);
 });
+
+// The clauses of a section definition are patterned with the section
+// variables whether or not a clause's body stands on the arrow's line, and
+// a typed binder of a `defunique` is a set parameter with its typing as a
+// premise of the laws.
+test("a clause body on the next line and a typed defunique binder are " +
+  "accepted in a section", () => {
+  const { kernel } = load(`module Forms
+import Grace.Cumulus.Set
+import Grace.Cumulus.List.Basic
+
+section S
+variable (a : Set)
+
+def twice (k : Nat) → Set
+  | zero =>
+      a
+  | succ(k) => {twice(k)}
+
+defunique firstOr (cs : List(a)) (x ∈ {a}) := x = a
+proof
+  witness a
+  refine ⟨singleton.self at a, rfl⟩
+uniqueness
+  intro x
+  intro xMember
+  intro xValue
+  intro y
+  intro yMember
+  intro yValue
+  cc
+
+end S
+`);
+  assert.equal(kernel.functions.get("Forms.twice"), 2);
+  assert.equal(kernel.functions.get("Forms.firstOr"), 2);
+  assert.match(formatFormula(kernel.theorems.get("Forms.firstOr.selected")!),
+    /^∀ a, ∀ cs, List\(a, cs\) → firstOr\(a, cs\) ∈ \{a\} ∧ firstOr\(a, cs\) = a$/);
+});

@@ -82,3 +82,10 @@ test("integer arithmetic and CRT check with Choice absent", () => {
     }
   }
 });
+
+test("a typed binder is accepted and an implicit binder is told why it is not", () => {
+  assert.doesNotThrow(() => check(identity.replace("(A : Set)", "(A : Set) (cs : List(A))")
+    .replace("import Grace.Cumulus.Set.Basic", "import Grace.Cumulus.Set.Basic\nimport Grace.Cumulus.List.Basic")));
+  assert.throws(() => check(identity.replace("(A : Set)", "{A : Set}")),
+    /defunique parameters must be distinct explicit binders, \(x : Set\), \(n : Nat\), or \(cs : List\(A\)\); an implicit binder \{A : Set\} is not accepted/);
+});

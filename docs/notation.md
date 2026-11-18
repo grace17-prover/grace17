@@ -193,9 +193,19 @@ rule counts when its conclusion types the function at distinct variables
 and each premise is about those variables alone, `instance count.natural
 (xs : List(ℝ))` as much as `cardinality.nat`, and the rules of a function
 are found by its head, so the reading costs nothing until the proofs have
-failed. A definition's declared result sort, `def indicator (P : Set) :
-Nat` or a recursion `→ Nat`, places its values by syntax, inside its own
-recursive body too. A value the rules type in several sorts is rejected
+failed. A rule with a premise that is no predicate, a section theorem
+`sturmLength.natural` proved under `hypothesis nonzero : leading ≠ (0:R)`
+and so stated `leading ≠ 0 → Nat(sturmLength(leading, cs))`, counts where
+a fact in scope states that premise at the value's arguments, the section
+hypothesis itself or a `requires` clause, and nowhere else; such a rule
+reads the notation only, and the refinement search behind `typecheck`
+never uses it. A definition's declared result sort, `def indicator (P :
+Set) : Nat` or a recursion `→ Nat`, places its values by syntax, inside
+its own recursive body too; so do the bound of a `defunique` or
+`defchoose`, `(m ∈ ℕ)` placing `rootMultiplicity(cs, r)` in ℕ, and the
+codomain of a `defgraph`, `(X ∈ ℝ) : ℝ` placing the values `f(X)` in ℝ,
+with the selection or closure law as the evidence a proof must
+supply. A value the rules type in several sorts is rejected
 with the annotation that selects each, and, when the token has more than
 one typed declaration in scope, an operand that no fact, rule, instance,
 or declared sort places, `cardinality(S) + T` with `T` a plain set, is an
@@ -1251,15 +1261,23 @@ annotated literal, `(2:N)`, which is the natural two and fixes the
 operation it is an operand of as the natural one, so `(2:N) * j` is the
 natural product with `j` then expected natural; and a literal beside an
 operand placed in ℕ. An operand is placed in ℕ by its syntax (a binder
-`(j : Nat)`, a definition's declared result sort, as `length{A}(cs)`, or
-the value of a natural operation already read), by a fact in scope, `Nat(n)`
-or `n ∈ ℕ`, by a typing rule or instance for the function it applies, as
-`cardinality.nat` places `cardinality(S)`, or by a local equation to a
-term so placed, `n = length{A}(cs)`; then `2 * j`, `1 ≤ n`, `n = 0`,
-`2 ≤ cardinality(S)`, and `(length{A}(cs) + length{A}(ds)) - (2 * j)` are
-natural throughout, with no annotation. Two literals beside each other,
-`2 * 3`, and a literal beside an operand placed nowhere, `x + 1` with `x`
-a ring element or a plain variable, keep the ring's numerals, and `R[2]`
-always names the ring's. A natural literal beside a ring element, `(2:N) *
-x`, is read as written: the natural product, whose operands the proof must
-then show natural.
+`(j : Nat)`, a definition's declared result sort, as `length{A}(cs)`, the
+bound of a `defunique` or `defchoose`, as `(m ∈ ℕ)` places
+`rootMultiplicity(cs, r)`, or the value of a natural operation already
+read), by a fact in scope, `Nat(n)` or `n ∈ ℕ`, by a typing rule or
+instance for the function it applies, as `cardinality.nat` places
+`cardinality(S)`, or by a local equation to a term so placed, `n =
+length{A}(cs)`; then `2 * j`, `1 ≤ n`, `n = 0`, `2 ≤ cardinality(S)`, `2
+≤ rootMultiplicity(cs, r)`, and `(length{A}(cs) + length{A}(ds)) - (2 *
+j)` are natural throughout, with no annotation. Two literals beside each
+other, `2 * 3`, and a literal beside an operand placed nowhere, `x + 1`
+with `x` a ring element or a plain variable, keep the ring's numerals, and
+`R[2]` always names the ring's. A natural literal beside a ring element,
+`(2:N) * x`, is read as written: the natural product, whose operands the
+proof must then show natural. A comparison is stricter than an operation:
+the ring's numeral beside an operand of `≤`, `<`, or another relation that
+is placed in no ring, by no fact, numeral, operation, or sort, is an
+error, since `2 ≤ f(x)` with `f(x)` placed nowhere would compare the
+ring's two with a set under the natural order; the message names the two
+readings, `(2:N) ≤ f(x)` for the natural order and `R[2] ≤ f(x)` for the
+ring's numeral, and `x < 1` on an element `x ∈ A` keeps the ring's one.

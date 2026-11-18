@@ -137,3 +137,84 @@ proof
   sorry
 ` }], ["lib"]), /no Real numeral notation for 0 is in scope: it is declared in Grace\.Cumulus\.Real\.Addition and Grace\.Cumulus\.Real\.Natural; import one of them/);
 });
+
+// A typing rule with a premise that is no predicate, `n ≠ 0`, places a
+// value where a fact in scope states the premise and nowhere else; a
+// section theorem with such a premise counts the same way.
+test("a typing rule with a side condition places a value where a fact states the condition", () => {
+  const sided = prefix + `
+def half (n : Nat) : Set := n
+
+theorem half.natural (n : Nat)
+  requires nonzero : n ≠ 0
+  shows Nat(half(n))
+proof
+  sorry
+
+section Values
+variable (n : Set)
+hypothesis natural : Nat(n)
+
+def twiceHalf : Set := half(n)
+
+section Nonzero
+hypothesis nonzero : n ≠ 0
+
+theorem twiceHalf.natural
+  shows Nat(twiceHalf)
+proof
+  sorry
+
+theorem sectionPlaced
+  shows twiceHalf + twiceHalf = twiceHalf * twiceHalf
+proof
+  sorry
+
+end Nonzero
+end Values
+`;
+  const kernel = load(sided + `
+theorem placed (n : Nat)
+  requires nonzero : n ≠ 0
+  shows half(n) + half(n) = half(n) * half(n)
+proof
+  sorry
+`);
+  for (const name of ["placed", "sectionPlaced"]) {
+    const statement = canonical(kernel.theorems.get(`Placement.${name}`)!);
+    assert.match(statement, /Nat\.Rec\.add"/, name);
+    assert.match(statement, /Nat\.Rec\.mul"/, name);
+  }
+  assert.match(failure(sided + `
+theorem unplaced (n : Nat)
+  shows half(n) + half(n) = half(n) * half(n)
+proof
+  sorry
+`), /cannot resolve notation \+ for operand types/);
+  // The refinement search never applies such a rule.
+  assert.throws(() => load(sided + `
+theorem viaSearch (n : Nat)
+  requires nonzero : n ≠ 0
+  shows Nat(half(n))
+proof
+  typecheck
+`));
+});
+
+test("a graph's codomain places its values", () => {
+  const kernel = load(`module Placement
+import Grace.Cumulus.Real.Natural
+
+defgraph shift (n ∈ ℕ) : ℕ := n
+proof
+  sorry
+
+theorem graphValue (n : Nat)
+  shows shift(n) + shift(n) = shift(n) * shift(n)
+proof
+  sorry
+`);
+  const statement = canonical(kernel.theorems.get("Placement.graphValue")!);
+  assert.match(statement, /Nat\.Rec\.add"/);
+  assert.match(statement, /Nat\.Rec\.mul"/);
+});

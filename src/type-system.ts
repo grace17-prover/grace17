@@ -3,7 +3,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { pred, app, canonical, eq, formulaCanonical, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
+import { pred, app, canonical, eq, formulaCanonical, freeFormulaVariables, freeTermVariables, nat, naturalValue, termCanonical, v, type Formula, type Term } from "./ast.ts";
 import type { Kernel } from "./kernel.ts";
 import { eqElim,
   andElimLeft, andElimRight, andIntro, assume, at, axiom, definition, iffElimLeft, iffElimRight, impElim, impIntro, symm, theorem,
@@ -32,6 +32,13 @@ interface TypeRule {
   readonly variables: readonly string[];
   readonly conditions: readonly Formula[];
   readonly premises: readonly TypePremise[];
+  /**
+   * The positions in `conditions` of the premises that are not predicate
+   * atoms, `x ≠ 0` for `Real(x⁻¹)`: such a premise is relieved only by a
+   * fact in scope that states it, never by search, and is tried before any
+   * predicate premise since it costs one lookup.
+   */
+  readonly sideConditions?: readonly number[];
   readonly predicate: string;
   readonly arguments: readonly Term[];
   readonly proof: Proof;
@@ -87,6 +94,12 @@ interface TypeIndex {
   readonly byName: Map<string, TypeRule>;
   /** Rules by predicate and argument head, kept in step with `byPredicate`; `null` once a predicate's rules disagree on arity. */
   readonly heads: Map<string, readonly HeadIndexPosition[] | null>;
+  /**
+   * Rules with a side condition, by `predicate|function` of a conclusion
+   * `P(f(x…))`: they read the notation around a value and never enter the
+   * refinement search, so a proof's structure does not depend on them.
+   */
+  readonly sided: Map<string, readonly TypeRule[]>;
 }
 
 export interface SoftTypeResult {
@@ -307,6 +320,7 @@ export function forkTypeIndex(source: Kernel, target: Kernel): void {
       processed: new Set(index.processed), byName: new Map(index.byName),
       // Buckets and head tables are extended in place, so a fork takes its own copies.
       byPredicate: new Map([...index.byPredicate].map(([predicate, rules]) => [predicate, [...rules]])),
+      sided: new Map(index.sided),
       heads: new Map([...index.heads].map(([predicate, positions]) => [predicate, positions === null ? null :
         positions.map(slot => ({ byHead: new Map([...slot.byHead].map(([head, rules]) => [head, new Set(rules)])), wildcard: new Set(slot.wildcard) }))])),
     });
@@ -669,8 +683,10 @@ function prepareRuleProver(
   const localRules = new Map<string, TypeRule[]>();
   if (!rejectAmbiguity) for (const [index, item] of available.entries()) {
     if (item.formula.tag !== "forall") continue;
-    for (const rule of compileTypeRules(kernel, `local_${index}`, item.proof, assumptions))
+    for (const rule of compileTypeRules(kernel, `local_${index}`, item.proof, assumptions)) {
+      if (rule.sideConditions) continue;
       localRules.set(rule.predicate, [...(localRules.get(rule.predicate) ?? []), rule]);
+    }
   }
   const directFacts = new GoalTable<Proof>();
   const localPredicates = new Map<string, Map<string, AvailableFact>>();
@@ -1214,10 +1230,14 @@ export function inferSoftTypes(
  * from `Finite(A)`. The rule's premises are not checked here; the sort is
  * a reading of the notation around the value, and its evidence is a proof
  * obligation. The rules are found by the head index of the predicate, so a
- * lookup costs the rules of that one function, not of the sort.
+ * lookup costs the rules of that one function, not of the sort. A rule
+ * with a side condition, `leading ≠ 0` before `Nat(sturmLength(leading,
+ * cs))`, counts only where the condition at the term's arguments is among
+ * `facts`, the facts in scope.
  */
 export function functionValueSorts(
   kernel: Kernel, term: Term, predicates: readonly string[], visibility?: ScopeVisibility,
+  facts: readonly Formula[] = [],
 ): string[] {
   if (term.tag !== "app" || term.args.length === 0) return [];
   const index = typeIndex(kernel);
@@ -1225,6 +1245,7 @@ export function functionValueSorts(
   const closed = (argument: Term, variables: readonly string[]): boolean =>
     argument.tag === "var" ? !variables.includes(argument.name)
       : argument.tag !== "app" || argument.args.every(item => closed(item, variables));
+  let stated: Set<string> | undefined;
   const typesValue = (rule: TypeRule): boolean => {
     const [head] = rule.arguments;
     if (!ruleVisible(rule, visibility) || rule.arguments.length !== 1 || head?.tag !== "app" ||
@@ -1234,8 +1255,18 @@ export function functionValueSorts(
       if (argument.tag !== "var" || !rule.variables.includes(argument.name) || seen.has(argument.name)) return false;
       seen.add(argument.name);
     }
-    return rule.premises.every(premise => premise.arguments.every(argument =>
-      (argument.tag === "var" && rule.variables.includes(argument.name)) || closed(argument, rule.variables)));
+    if (!rule.premises.every(premise => premise.arguments.every(argument =>
+      (argument.tag === "var" && rule.variables.includes(argument.name)) || closed(argument, rule.variables)))) return false;
+    if (!rule.sideConditions) return true;
+    if (!facts.length) return false;
+    stated ??= new Set(facts.map(formulaCanonical));
+    const substitution = new Map(head.args.map((argument, position) => [(argument as { name: string }).name, term.args[position]!]));
+    return rule.sideConditions.every(position => {
+      const condition = rule.conditions[position]!;
+      if (![...freeFormulaVariables(condition)].every(name => seen.has(name) || !rule.variables.includes(name))) return false;
+      const instance = instantiateFormula(condition, substitution);
+      return instance !== undefined && stated!.has(formulaCanonical(instance));
+    });
   };
   const token = headToken(term, noVariables)!;
   const candidates = (predicate: string): Iterable<TypeRule> => {
@@ -1244,7 +1275,8 @@ export function functionValueSorts(
     if (positions === null || positions.length !== 1) return index.byPredicate.get(predicate) ?? [];
     return positions[0]!.byHead.get(token) ?? [];
   };
-  return predicates.filter(predicate => [...candidates(predicate)].some(typesValue));
+  return predicates.filter(predicate => [...candidates(predicate)].some(typesValue) ||
+    (index.sided.get(`${predicate}|${fn}`) ?? []).some(typesValue));
 }
 
 export function softTypeReport(kernel: Kernel): readonly SoftTypeRuleReport[] {
@@ -1286,11 +1318,18 @@ function typeIndex(kernel: Kernel): TypeIndex {
       kernel.definitions.size < index.definitionCount) {
     index = {
       stamp: "", theoremCount: 0, axiomCount: 0, definitionCount: 0, propertyCount: 0,
-      processed: new Set(), byPredicate: new Map(), byName: new Map(), heads: new Map(),
+      processed: new Set(), byPredicate: new Map(), byName: new Map(), heads: new Map(), sided: new Map(),
     };
     indices.set(kernel, index);
   }
   const addRule = (rule: TypeRule): void => {
+    if (rule.sideConditions) {
+      const [head] = rule.arguments;
+      if (rule.arguments.length !== 1 || head?.tag !== "app") return;
+      const key = `${rule.predicate}|${head.fn}`;
+      index!.sided.set(key, [...(index!.sided.get(key) ?? []), rule]);
+      return;
+    }
     index!.byName.set(rule.name, rule);
     // Insert at the sorted position; the bucket is replaced, never mutated.
     let bucket = index!.byPredicate.get(rule.predicate) as TypeRule[] | undefined;
@@ -1395,16 +1434,21 @@ function compileTypeRules(kernel: Kernel, name: string, proof: Proof, assumption
   }
   const premises: TypePremise[] = [];
   const conditions: Formula[] = [];
+  // A premise that is no predicate atom, `x ≠ 0` before `Real(x⁻¹)`, is a
+  // side condition: the rule applies where a fact states it.
+  const sides: number[] = [];
   while (formula.tag === "imp") {
     const atoms = typePremises(formula.left);
-    if (!atoms) return [];
+    if (atoms) premises.push(...atoms);
+    else if (formula.left.tag === "bottom") return [];
+    else sides.push(conditions.length);
     conditions.push(formula.left);
-    premises.push(...atoms);
     formula = formula.right;
   }
+  const sided = sides.length ? { sideConditions: sides } : {};
   if (formula.tag === "pred") {
     if (formula.args.length === 0) return [];
-    return [{ name, variables, conditions, premises, predicate: formula.pred, arguments: formula.args, proof }];
+    return [{ name, variables, conditions, premises, ...sided, predicate: formula.pred, arguments: formula.args, proof }];
   }
   if (formula.tag !== "and") return [];
   const rules: TypeRule[] = [];
@@ -1415,12 +1459,46 @@ function compileTypeRules(kernel: Kernel, name: string, proof: Proof, assumption
       return;
     }
     if (conjunct.tag !== "pred" || !conjunct.args.some(argument => argument.tag === "app")) return;
-    rules.push({ name: `${name}.${projection.join("_")}`, variables, conditions, premises,
+    rules.push({ name: `${name}.${projection.join("_")}`, variables, conditions, premises, ...sided,
       predicate: conjunct.pred, arguments: conjunct.args, proof, projection });
   };
   visit(formula, []);
   return rules;
 }
+
+/**
+ * The instance of `formula` under a simultaneous substitution of its free
+ * variables, or undefined when a replacement would be captured by a
+ * quantifier of the formula.
+ */
+function instantiateFormula(formula: Formula, substitution: ReadonlyMap<string, Term>): Formula | undefined {
+  const instantiate = (term: Term): Term => {
+    if (term.tag === "var") return substitution.get(term.name) ?? term;
+    if (term.tag === "nat") return term;
+    const args = term.args.map(instantiate);
+    return args.every((argument, index) => argument === term.args[index]) ? term : app(term.fn, ...args);
+  };
+  switch (formula.tag) {
+    case "bottom": return formula;
+    case "eq": return eq(instantiate(formula.left), instantiate(formula.right));
+    case "pred": return pred(formula.pred, ...formula.args.map(instantiate));
+    case "forall": case "exists": {
+      const inner = new Map(substitution);
+      inner.delete(formula.variable);
+      for (const replacement of inner.values()) {
+        if (freeTermVariables(replacement).has(formula.variable)) return undefined;
+      }
+      const body = instantiateFormula(formula.body, inner);
+      return body && { tag: formula.tag, variable: formula.variable, body };
+    }
+    default: {
+      const left = instantiateFormula(formula.left, substitution);
+      const right = left && instantiateFormula(formula.right, substitution);
+      return right && { tag: formula.tag, left, right };
+    }
+  }
+}
+
 
 function typePremises(formula: Formula): TypePremise[] | undefined {
   if (formula.tag === "pred" && formula.args.length > 0) {
