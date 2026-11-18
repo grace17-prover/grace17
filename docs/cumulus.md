@@ -197,9 +197,10 @@ subtraction, the distance between naturals, and the positions below a sum
 m + n with the offset j ↦ m + j. `NatBigO(f, g)` says that a sequence of
 naturals is eventually at most a constant multiple of another; it is
 reflexive and transitive, survives reindexing by any p(n) ≥ n, and is
-closed under sums, products, and constant factors. The class `bigO(g)` is
+closed under sums, products, powers, and constant factors. The class `bigO(g)` is
 the set of functions ℕ → ℕ of order at most g, so that g ∈ O(h) gives
-O(g) ⊆ O(h).
+O(g) ⊆ O(h), and a padding p(n) ≥ n of an at least linear t satisfies
+p ∈ O(t ∘ p).
 
 `Grace.Cumulus.List` develops finite sequences as the `List` datatype:
 append and reverse, take and drop, filtering by a set, counts and
