@@ -87,7 +87,7 @@ test("section hypothesis edits invalidate cached proofs", () => {
 test("section scope rejects leaked assumptions, shadowing, mismatched ends, and unclosed frames", () => {
   for (const [text, error] of [
     [source.replace("theorem outside (x : Set)\n  shows x = x\nproof\n  rfl", "theorem outside (x A : Set)\n  shows x ∈ A\nproof\n  exact hx"), /hx/],
-    [source.replace("theorem member", "theorem member (x : Set)"), /distinct/],
+    [source.replace("theorem member", "theorem member (x : Set)"), /the section already binds x; a theorem in a section takes the section variables as its leading parameters and does not restate them/],
     [source.replace("hypothesis hy : y ∈ A", "hypothesis hx : y ∈ A"), /distinct/],
     [source.replace("end Nested", "end Shared"), /expected end Nested/],
     [source.slice(0, source.indexOf("end Shared")), /not closed/],

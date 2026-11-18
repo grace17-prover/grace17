@@ -1410,20 +1410,34 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     if (sections.length) {
       const theoremHeader = /^(theorem|lemma|instance)\s+(\S+)(.*)$/.exec(line.text);
       // A definition in a section takes the section variables as its leading
-      // parameters, in order, and is applied without them inside the section.
-      const definitionHeader = theoremHeader ? undefined : /^(def|predicate)\s+(\S+)\s+(.*)$/.exec(line.text);
+      // parameters, in order, and is applied without them inside the section;
+      // a form with proof obligations takes the section hypotheses as its
+      // premises, as a theorem of the section does.
+      const definitionHeader = theoremHeader ? undefined
+        : /^(def|define|predicate|class|structure|defgraph|defunique|defchoose)\s+(\S+)(?:\s+(.*))?$/.exec(line.text);
       if (definitionHeader) {
         const variables = parseBinderGroups(sectionVariables().join(" "), line.number).binders.map(item => item.name);
         const declared = qualifyDeclaration(surfaceSymbol(definitionHeader[2]!), scope());
-        block = [{ ...line, text: `${definitionHeader[1]} ${definitionHeader[2]} ${[...sectionVariables(), definitionHeader[3]!].join(" ")}` },
-          ...block.slice(1)];
+        block = sectionDefinitionBlock(block, definitionHeader[1]!, definitionHeader[2]!, definitionHeader[3] ?? "",
+          sectionVariables(), sectionHypotheses());
         sections.at(-1)!.definitions.push({ name: declared, variables });
+        if (definitionHeader[1] === "defunique" || definitionHeader[1] === "defchoose") {
+          sections.at(-1)!.definitions.push({ name: `${declared}.candidates`, variables });
+        }
       } else if (!theoremHeader) {
-        throw new SurfaceError(line.number, "theorem sections contain variable, hypothesis, definition, and theorem/lemma/instance declarations");
+        throw new SurfaceError(line.number, "a theorem section holds variable, hypothesis, and notation ring clauses, " +
+          "theorem, lemma, and instance declarations, and the definition forms def, predicate, class, structure, " +
+          "defgraph, defunique, and defchoose; datatype, noncomputable recursion, imports, namespaces, and other " +
+          "notation belong outside sections");
       }
     }
     if (sections.length && /^(theorem|lemma|instance)\s/.test(line.text)) {
       const theoremHeader = /^(theorem|lemma|instance)\s+(\S+)(.*)$/.exec(line.text)!;
+      const restated = restatedSectionVariable(theoremHeader[3]!.trim(), sectionVariables(), line.number);
+      if (restated) {
+        throw new SurfaceError(line.number, `the section already binds ${restated}; a ${theoremHeader[1]} in a section ` +
+          "takes the section variables as its leading parameters and does not restate them");
+      }
       const binders = [...sectionVariables(), theoremHeader[3]!.trim()].filter(Boolean).join(" ");
       const parsed = parseBinderGroups(binders, line.number);
       if (parsed.rest) throw new SurfaceError(line.number, "malformed theorem section binders");
@@ -1455,6 +1469,10 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       theoremLocations.push(...graph.theorems.map(name => ({
         name, lineStart: line.number, lineEnd: block.findLast(item => item.text)?.number ?? line.number,
       })));
+      if (sections.length) {
+        warnings.push(...unusedDefinitionHypothesisWarnings(kernel, graph.definition,
+          graph.theorems.filter(name => name.endsWith(".closed")), sectionHypotheses(), line.number));
+      }
     }
     else if (line.text.startsWith("defchoose ") || line.text.startsWith("defunique ")) {
       const chosen = elaborateChosenDefinition(kernel, block, scope());
@@ -1463,6 +1481,11 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       theoremLocations.push(...chosen.theorems.map(name => ({
         name, lineStart: line.number, lineEnd: block.findLast(item => item.text)?.number ?? line.number,
       })));
+      if (sections.length) {
+        warnings.push(...unusedDefinitionHypothesisWarnings(kernel,
+          chosen.definitions.find(name => !name.endsWith(".candidates")) ?? chosen.definitions[0]!,
+          chosen.theorems.filter(name => name.endsWith(".exists") || name.endsWith(".unique")), sectionHypotheses(), line.number));
+      }
     }
     else if (line.text.startsWith("def ")) {
       const marker = block.findIndex(item => item.text === "proof");
@@ -5035,11 +5058,15 @@ function unusedSectionHypothesisWarnings(
   if (!statement || !proof) return [];
   const formulas = hypotheses.flatMap(item => item.parsedFormula ? [item.parsedFormula] : []);
   const own: Formula[] = [];
+  // The section hypotheses the statement takes: an instance takes only
+  // those its conclusion fixes, and the others are not premises to warn about.
+  const premises: Formula[] = [];
   let spine: Formula = statement;
   for (;;) {
     if (spine.tag === "forall") { spine = spine.body; continue; }
     if (spine.tag === "imp") {
-      if (!formulas.some(item => formulaEquals(item, spine.left))) own.push(spine.left);
+      const inherited = formulas.find(item => formulaEquals(item, spine.left));
+      if (inherited) premises.push(inherited); else own.push(spine.left);
       spine = spine.right;
       continue;
     }
@@ -5051,13 +5078,38 @@ function unusedSectionHypothesisWarnings(
   const used = assumptionsUsed(proof, formulas);
   for (const item of hypotheses) {
     const formula = item.parsedFormula;
-    if (!formula || used[formulas.indexOf(formula)]) continue;
+    if (!formula || !premises.includes(formula) || used[formulas.indexOf(formula)]) continue;
     const label = /^requires\s+(\S+)\s*:/.exec(item.text)?.[1] ?? formatFormula(formula);
     const shared = [...freeFormulaVariables(formula)].some(variable => mentioned.has(variable));
     warnings.push({ theorem: name, line, message:
       `section hypothesis ${label} is a premise of ${written} that its proof does not use${shared ? "" : " and that shares no variable with its statement"}` });
   }
   return warnings;
+}
+
+/**
+ * The section hypotheses that none of a definition's proof obligations
+ * uses: the premises of its laws that its existence, uniqueness, or
+ * closure proofs leave untouched.
+ */
+function unusedDefinitionHypothesisWarnings(
+  kernel: Kernel, definition: string, obligations: readonly string[], hypotheses: readonly SourceLine[], line: number,
+): SurfaceWarning[] {
+  const formulas = hypotheses.flatMap(item => item.parsedFormula ? [item.parsedFormula] : []);
+  if (!formulas.length || !obligations.length) return [];
+  const used = formulas.map(() => false);
+  for (const name of obligations) {
+    const proof = kernel.theoremProofs.get(name);
+    if (!proof) continue;
+    assumptionsUsed(proof, formulas).forEach((flag, index) => { if (flag) used[index] = true; });
+  }
+  return hypotheses.flatMap(item => {
+    const formula = item.parsedFormula;
+    if (!formula || used[formulas.indexOf(formula)]) return [];
+    const label = /^requires\s+(\S+)\s*:/.exec(item.text)?.[1] ?? formatFormula(formula);
+    return [{ theorem: definition, line, message:
+      `section hypothesis ${label} is a premise of the laws of ${shortName(definition)} that its proofs do not use` }];
+  });
 }
 
 function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: SurfaceScope): string {
@@ -5146,6 +5198,80 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   if (inlineProof && proofLines.length) throw new SurfaceError(proofLines[0]!.number, "theorem has both an inline and a proof-block proof");
   if (!inlineProof && proofLines.length === 0) throw new SurfaceError(header.number, `theorem ${name} needs a proof block or trailing by tactic`);
   const goal = parseFormula(inlineProof?.formula ?? showsBody, kernel, variables, shows.number, scope);
+  // An instance in a section takes only the section context its conclusion
+  // and own premises mention, and of the section hypotheses only those of
+  // predicate shape: synthesis matches the conclusion against a goal and
+  // supplies predicate premises from the facts in scope, so a hypothesis
+  // about a variable the conclusion does not fix, or an equation, could
+  // never be supplied. The dropped context is remembered so that a proof
+  // reaching for it is told why it is absent.
+  let sectionBindings = scope.sectionBindings?.() ?? [];
+  const sectionNames = new Set(sectionBindings.map(item => item.name));
+  const droppedContext: { readonly name: string; readonly why: string }[] = [];
+  if (declarationKind === "instance" && sectionBindings.length) {
+    const sectionVariables = new Set(sectionBindings.filter(item => item.kind === "section variable").map(item => item.name));
+    const sectionHypotheses = new Set(sectionBindings.filter(item => item.kind === "section hypothesis").map(item => item.name));
+    const own = parsedRequirements.filter(item => !item.name || !sectionHypotheses.has(item.name));
+    const mentioned = new Set([
+      ...freeFormulaVariables(goal),
+      ...own.flatMap(item => [...freeFormulaVariables(item.formula)]),
+      ...binderAssumptions(binders.filter(item => !sectionVariables.has(item.name)))
+        .flatMap(item => [...freeFormulaVariables(item)]),
+    ]);
+    // A hypothesis-shaped premise fixes its other variables from a fact of
+    // its shape once one of them is mentioned, as `Module(M, R)` fixes `R`
+    // for a conclusion about `M`; the closure is taken before any premise
+    // is judged, so declaration order does not matter.
+    const visibility = scopeVisibility(kernel, scope);
+    const binds = (formula: Formula): boolean => {
+      const atoms: Formula[] = [];
+      const flatten = (item: Formula): void => {
+        if (item.tag === "and") { flatten(item.left); flatten(item.right); } else atoms.push(item);
+      };
+      flatten(formula);
+      return atoms.every(atom => atom.tag === "pred" && isBindingPredicate(kernel, atom.pred, visibility));
+    };
+    const inherited = parsedRequirements.filter(item => item.name && sectionHypotheses.has(item.name));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const item of inherited) {
+        if (!instancePremiseShape(item.formula) || !binds(item.formula)) continue;
+        const free = [...freeFormulaVariables(item.formula)];
+        if (!free.some(name => mentioned.has(name)) || free.every(name => mentioned.has(name))) continue;
+        free.forEach(name => mentioned.add(name));
+        changed = true;
+      }
+    }
+    const kept = parsedRequirements.filter(item => {
+      if (!item.name || !sectionHypotheses.has(item.name)) return true;
+      const absent = [...freeFormulaVariables(item.formula)].filter(name => !mentioned.has(name));
+      if (absent.length) {
+        droppedContext.push({ name: item.name, why: `the conclusion does not mention ${absent.join(", ")}` });
+        return false;
+      }
+      if (!instancePremiseShape(item.formula)) {
+        droppedContext.push({ name: item.name, why: "an instance's premises must be predicates, and it is not one" });
+        return false;
+      }
+      return true;
+    });
+    if (kept.length !== parsedRequirements.length || binders.some(item => sectionVariables.has(item.name) && !mentioned.has(item.name))) {
+      for (const binder of binders) {
+        if (sectionVariables.has(binder.name) && !mentioned.has(binder.name)) {
+          droppedContext.push({ name: binder.name, why: "the conclusion does not mention it" });
+        }
+      }
+      binders = binders.filter(item => !sectionVariables.has(item.name) || mentioned.has(item.name));
+      parsedRequirements = kept;
+      requirements = kept.map(item => item.formula);
+      const droppedNames = new Set(droppedContext.map(item => item.name));
+      sectionBindings = sectionBindings.filter(item => !droppedNames.has(item.name));
+      surfaceEnvironments.get(kernel)!.signatures.set(name, {
+        kind: "theorem", parameters: binders, requirementCount: requirements.length,
+      });
+      scope = { ...scopedBinders(scope, binders), localFormulas: () => [...binderAssumptions(binders), ...requirements] };
+    }
+  }
   if (declarationKind === "instance") validateInstanceDeclaration(kernel, goal, requirements, binders, header.number, scopeVisibility(kernel, scope));
   const inductionPattern = /^induction\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)(?:\s+generalizing\s+((?!with(?:\s|$))[\p{L}_][\p{L}\p{M}\p{N}_]*(?:\s+(?!with(?:\s|$))[\p{L}_][\p{L}\p{M}\p{N}_]*)*))?(?:\s+with)?$/u;
   const inductionLines = block.filter(line => inductionPattern.test(line.text));
@@ -5155,8 +5281,6 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   // The names the proof can use without naming a declaration, for the
   // trace: section variables and hypotheses, the header's binders, and its
   // named premises, each with the line that binds it.
-  const sectionBindings = scope.sectionBindings?.() ?? [];
-  const sectionNames = new Set(sectionBindings.map(item => item.name));
   const scopeEntries: TacticScopeEntry[] = [
     ...sectionBindings,
     ...binders.filter(binder => !sectionNames.has(binder.name))
@@ -5179,19 +5303,33 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
     if (inlineProof && steps.length !== 1) {
       throw new SurfaceError(shows.number, "trailing by expects exactly one tactic; write a proof block for a sequence");
     }
-    if (narrative.length === 0 && steps.length === 1 && (steps[0]!.text.startsWith("settle") || steps[0]!.text.startsWith("witness "))) {
-      elaborateDirectTheorem(kernel, name, binders, requirements, goal, steps[0]!, scope);
-    } else {
-      if (steps.length === 0) {
-        const initial = tacticState(goal, [...binderAssumptions(binders), ...requirements], new Map());
-        throw new SurfaceError(marker.number, "empty proof block", {
-          initial,
-          steps: [],
-          ...(narrative.length ? { narrative } : {}),
-          ...(scopeEntries.length ? { scope: scopeEntries } : {}),
-        });
+    try {
+      if (narrative.length === 0 && steps.length === 1 && (steps[0]!.text.startsWith("settle") || steps[0]!.text.startsWith("witness "))) {
+        elaborateDirectTheorem(kernel, name, binders, requirements, goal, steps[0]!, scope);
+      } else {
+        if (steps.length === 0) {
+          const initial = tacticState(goal, [...binderAssumptions(binders), ...requirements], new Map());
+          throw new SurfaceError(marker.number, "empty proof block", {
+            initial,
+            steps: [],
+            ...(narrative.length ? { narrative } : {}),
+            ...(scopeEntries.length ? { scope: scopeEntries } : {}),
+          });
+        }
+        elaborateTacticTheorem(kernel, name, binders, requirements, parsedRequirements.map(item => item.name), goal, steps, scope, undefined, narrative, scopeEntries);
       }
-      elaborateTacticTheorem(kernel, name, binders, requirements, parsedRequirements.map(item => item.name), goal, steps, scope, undefined, narrative, scopeEntries);
+    } catch (error) {
+      // A proof of an instance that reaches for section context the
+      // instance does not take is told why the context is absent.
+      if (error instanceof SurfaceError && droppedContext.length) {
+        const named = droppedContext.filter(item =>
+          new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_.])${item.name}(?![\\p{L}\\p{M}\\p{N}_])`, "u").test(error.message) ||
+          steps.some(step => new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_.])${item.name}(?![\\p{L}\\p{M}\\p{N}_])`, "u").test(step.text)));
+        const explained = named.length ? named : droppedContext;
+        error.message += `; the instance ${rawName} takes only the section context its conclusion fixes: ` +
+          explained.map(item => `${item.name} is absent because ${item.why}`).join("; ");
+      }
+      throw error;
     }
     if (declarationKind === "instance") registerInstanceDeclaration(kernel, name, scope);
     return name!;
@@ -5483,7 +5621,8 @@ function validateInstanceDeclaration(
   const unsafe = binders.map(item => item.name).filter(name => !bound.has(name));
   if (unsafe.length) {
     throw new SurfaceError(line,
-      `instance variables must occur in its conclusion or in a hypothesis-shaped premise; unconstrained: ${unsafe.join(", ")}`);
+      `instance variables must occur in its conclusion or in a hypothesis-shaped premise; unconstrained: ${unsafe.join(", ")}` +
+      " (synthesis matches the conclusion against a goal and the premises against facts in scope, which is what fixes every variable)");
   }
 }
 
@@ -17055,6 +17194,102 @@ function scopedBinders(scope: SurfaceScope, binders: readonly Binder[]): Surface
   return { ...scope, binderTypes: new Map(binders.map(item => [item.name, item])) };
 }
 
+/**
+ * The names a declaration's own leading binder groups bind, read leniently:
+ * the scan stops at the first group that is not a binder group, such as
+ * the bound variable `(x ∈ A)` of a defunique or defgraph.
+ */
+function leadingBinderNames(text: string, line: number): string[] {
+  const names: string[] = [];
+  let offset = 0;
+  for (;;) {
+    while (/\s/.test(text[offset] ?? "")) offset += 1;
+    const open = text[offset];
+    if (open !== "(" && open !== "{") break;
+    const close = open === "(" ? ")" : "}";
+    let depth = 0;
+    let end = -1;
+    for (let index = offset; index < text.length; index += 1) {
+      if (text[index] === open) depth += 1;
+      else if (text[index] === close) { depth -= 1; if (depth === 0) { end = index; break; } }
+    }
+    if (end < 0) break;
+    const group = text.slice(offset + 1, end);
+    if (findTopLevel(group, "∈") >= 0 || findTopLevel(group, " in ") >= 0) break;
+    try { names.push(...parseBinders(group, line, open === "{").map(item => item.name)); } catch { break; }
+    offset = end + 1;
+  }
+  return names;
+}
+
+/** A section variable that a declaration's own binders restate, if any. */
+function restatedSectionVariable(tail: string, variableGroups: readonly string[], line: number): string | undefined {
+  if (!variableGroups.length || !tail) return undefined;
+  const bound = new Set(parseBinderGroups(variableGroups.join(" "), line).binders.map(item => item.name));
+  return leadingBinderNames(tail, line).find(name => bound.has(name));
+}
+
+/**
+ * The block of a definition declared inside a theorem section, rewritten
+ * so that the section variables are its leading parameters and, for a form
+ * with proof obligations, the section hypotheses are its premises.
+ */
+function sectionDefinitionBlock(
+  block: readonly SourceLine[], keyword: string, name: string, tail: string,
+  variableGroups: readonly string[], hypotheses: readonly SourceLine[],
+): readonly SourceLine[] {
+  const header = block[0]!;
+  const restated = restatedSectionVariable(tail, variableGroups, header.number);
+  if (restated) {
+    throw new SurfaceError(header.number, `the section already binds ${restated}; a definition in a section takes ` +
+      "the section variables as its leading parameters and does not restate them");
+  }
+  const variables = parseBinderGroups(variableGroups.join(" "), header.number).binders;
+  const names = variables.map(item => item.name);
+  const groups = variableGroups.join(" ");
+  const headed = (text: string): SourceLine => ({ ...header, text });
+  if (keyword === "class" || keyword === "structure") {
+    // These forms take one parenthesized binder list.
+    if (!names.length) return block;
+    const own = /^\(([^)]*)\)\s*(.*)$/u.exec(tail);
+    const inherited = variables.map(item => `${item.name} : ${item.type}`).join(", ");
+    const merged = own ? `(${inherited}, ${own[1]!.trim()}) ${own[2]!}` : `(${inherited}) ${tail}`;
+    return [headed(`${keyword} ${name} ${merged}`.trimEnd()), ...block.slice(1)];
+  }
+  if (keyword === "def" || keyword === "define" || keyword === "predicate") {
+    if (!names.length) return block;
+    // The clauses of an equation-style definition pattern the section
+    // variables first, as fixed parameters.
+    const prefix = names.join(", ");
+    const proofMarker = block.findIndex(line => line.text === "proof");
+    return [headed(`${keyword} ${name} ${groups} ${tail}`.trimEnd()), ...block.slice(1).map((line, index) => {
+      if (proofMarker >= 0 && index + 1 >= proofMarker) return line;
+      const clause = /^\|\s*(.*?)\s*(=>|⇒)\s*(.+)$/u.exec(line.text);
+      if (!clause) return line;
+      const patterns = clause[1] ? `${prefix}, ${clause[1]}` : prefix;
+      return { ...line, text: `| ${patterns} ${clause[2]} ${clause[3]}` };
+    })];
+  }
+  if (keyword === "defgraph" && names.length && /^\(\S+\s*:\s*(?:Nat|Real)\)\s*:\s*(?:Nat|Real)\s*:=/u.test(tail)) {
+    throw new SurfaceError(header.number, "the short defgraph form takes no parameters; in a section write the " +
+      "bounded form, `defgraph f (n ∈ ℕ) : ℝ := expression` with a closure proof, which takes the section variables");
+  }
+  // defgraph, defunique, and defchoose: the section hypotheses precede the
+  // declaration's own requires clauses, and names must stay distinct.
+  const used = new Set([...names, ...leadingBinderNames(tail, header.number)]);
+  for (const item of [...hypotheses, ...block.slice(1).filter(item => item.text.startsWith("requires "))]) {
+    const premise = /^requires\s+(\S+)\s*:/.exec(item.text)?.[1];
+    if (premise && used.has(premise)) {
+      throw new SurfaceError(item.number, `duplicate section/definition binder or hypothesis ${premise}`);
+    }
+    if (premise) used.add(premise);
+  }
+  const headerEnd = block.findIndex((item, index) => index > 0 && (item.text.startsWith("requires ") || item.text === "proof"));
+  const headerLines = headerEnd < 0 ? block : block.slice(0, headerEnd);
+  const rest = headerEnd < 0 ? [] : block.slice(headerEnd);
+  return [headed(`${keyword} ${name} ${[groups, tail].filter(Boolean).join(" ")}`), ...headerLines.slice(1), ...hypotheses, ...rest];
+}
+
 function resolvedResultType(
   source: string, kernel: Kernel, scope: SurfaceScope, line: number, variables: ReadonlySet<string>,
 ): { readonly type: string; readonly arguments: readonly Term[] } {
@@ -20247,14 +20482,20 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       if ((args.length === 1 || args.length === 2) && !overrides.length && !kernel.functions.has(symbol)) {
         const constant = resolveOptional(rawSymbol, scope,
           candidate => kernel.functions.get(candidate) === 0);
-        if (constant && args.length === 2) {
+        // A graph defined in the open section over the section variables
+        // alone is a constant there: shiftBy(x) applies shiftBy(A, …, a).
+        const sectionGraph = constant ? undefined : resolveOptional(rawSymbol, scope, candidate =>
+          (scope.sectionDefinitions?.get(candidate)?.length ?? -1) === kernel.functions.get(candidate));
+        const graph = constant ? app(constant)
+          : sectionGraph ? app(sectionGraph, ...scope.sectionDefinitions!.get(sectionGraph)!.map(name => v(name))) : undefined;
+        if (graph && args.length === 2) {
           // A constant operation graph applied to two arguments: op(a, b) = call2(op, a, b).
           const call2 = resolveOptional("call2", scope, candidate => kernel.functions.get(candidate) === 3);
-          if (call2) return app(call2, app(constant), args[0]!, args[1]!);
-        } else if (constant) {
+          if (call2) return app(call2, graph, args[0]!, args[1]!);
+        } else if (graph) {
           const applySymbol = resolveExisting("apply", scope,
             candidate => kernel.functions.get(candidate) === 2, line, "function application");
-          return app(applySymbol, app(constant), args[0]!);
+          return app(applySymbol, graph, args[0]!);
         }
       }
       if (!kernel.functions.has(symbol) && !kernel.predicates.has(symbol) && symbol !== scope.pendingFunction &&
