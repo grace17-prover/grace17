@@ -152,3 +152,57 @@ end DefinitionHover`;
     assert.equal(proof?.steps.at(-1)?.after.goals.length, 0);
   }
 });
+
+test("a recursive definition header continues on more indented lines before its equations", () => {
+  const { kernel } = check(`namespace Wrapped
+ datatype Box(A : Set)
+   | box(value : A)
+ def unboxWith (zero : Set)
+     (x : Set) → Set
+   | zero, Box.box(value) => value
+   descends x
+ def unboxArrow (zero : Set) (x : Set)
+     → Set
+   | zero, Box.box(value) => zero
+   descends x
+ theorem example
+   shows unboxWith(1, Box.box(0)) = 0
+ proof
+   compute
+ theorem arrow
+   shows unboxArrow(1, Box.box(0)) = 1
+ proof
+   compute
+end Wrapped`);
+  assert.ok(kernel.theorems.has("Wrapped.example"));
+  assert.ok(kernel.theorems.has("Wrapped.arrow"));
+  assert.throws(() => check(`namespace Wrapped
+ datatype Box(A : Set)
+   | box(value : A)
+ def unboxWith (zero : Set)
+ (x : Set) → Set
+   | zero, Box.box(value) => value
+   descends x
+end Wrapped`), /expected a defining equation or descends clause; a definition header continues on more indented lines only|malformed definition header|expected .def f/);
+});
+
+test("a parameter named after a constructor is a variable pattern; a constructor elsewhere is reported", () => {
+  const { kernel } = check(`namespace Named
+ datatype Box(A : Set)
+   | box(value : A)
+ def unboxOr (zero : Set) (x : Set) → Set
+   | zero, Box.box(value) => value
+ theorem example
+   shows unboxOr(1, Box.box(0)) = 0
+ proof
+   compute
+end Named`);
+  assert.ok(kernel.theorems.has("Named.example"));
+  assert.throws(() => check(`namespace Named
+ datatype Box(A : Set)
+   | box(value : A)
+ def unboxOr (base : Set) (x : Set) → Set
+   | 0, Box.box(value) => value
+   descends x
+end Named`), /the pattern 0 for parameter base of unboxOr names a constructor, but only the decreasing parameter x is matched structurally; write the parameter's name there/);
+});

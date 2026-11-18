@@ -2146,9 +2146,13 @@ function localNamesAtOffset(text, offset) {
   };
   const unbindAll = scope => { for (const name of scope.splice(0)) names.delete(name); };
   const lastLine = lines.length - 1;
+  // A header's binder groups may continue on more indented lines beneath it.
+  let headerOpen = false;
   for (let i = 0; i < lastLine; i++) {
     const line = lines[i];
     let match;
+    const continuesHeader = headerOpen && /^\s+[({]/u.test(line);
+    headerOpen = false;
     if (/^section\b/u.test(line)) sections.push([]);
     else if (/^end\b/u.test(line)) { if (sections.length > 1) unbindAll(sections.pop()); }
     else if ((match = /^hypothesis\s+([^\s:]+)\s*:\s*(.*)$/u.exec(line))) {
@@ -2158,6 +2162,10 @@ function localNamesAtOffset(text, offset) {
     } else if ((match = /^(theorem|lemma|instance|def\w*|predicate|class|structure|datatype|eval|notation)\b\s*(.*)$/u.exec(line))) {
       unbindAll(headerNames);
       for (const name of binderGroupNames(match[2])) bind(name, "binder", `${name} : binder of the header`, headerNames);
+      headerOpen = true;
+    } else if (continuesHeader) {
+      for (const name of binderGroupNames(line)) bind(name, "binder", `${name} : binder of the header`, headerNames);
+      headerOpen = true;
     } else if ((match = /^\s+requires\s+([^\s:]+)\s*:\s*(.*)$/u.exec(line))) {
       bind(match[1], "premise", `${match[1]} : ${match[2]}`, headerNames);
     } else if ((match = /^\s+have\s+([^\s:(]+)/u.exec(line))) {
