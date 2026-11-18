@@ -155,7 +155,9 @@ their full names and `ℝ`, `ℕ`, `ℤ`, `ℚ` work too. On a non-numeral, such
 (p[succ(i)]:R)` uses real order. The annotation is an elaboration hint and
 assumes no membership; operations still need carrier evidence in the proofs
 that use them. An unavailable typed numeral or a known conflicting type is
-rejected.
+rejected; the message for a missing numeral names the module that declares
+it when that module is loaded, and says that no imported module declares
+one otherwise.
 
 The annotation also reaches a prefix or infix notation inside the
 parentheses: `(-1:Z)` is the integer negation of the integer one, and
@@ -177,6 +179,27 @@ carriers is rejected on such a comparison, with the candidates and the
 annotation that selects each, `(twice(a):Q)` or `(twice(a):R)`. Operands
 with no such function on either side keep the natural order, the library's
 default.
+
+An operation's operands are placed the same way when their syntax fixes
+no sort, with the checked facts first: a binder, a requirement, a local
+fact, or a proof by the typing rules and instances in scope, so that
+`twice(n) + 1` is the natural sum when `twice.natural` proves
+`Nat(twice(n))` from `n : Nat`. When no proof places both operands, the
+typing rules and instances of the functions they apply give the reading
+and leave their premises as proof obligations: `cardinality(S) + twice(n)`
+is the natural sum by `cardinality.nat`, which types `cardinality(S)`
+under `Finite(S)`, whether or not the finiteness of `S` is in scope. A
+rule counts when its conclusion types the function at distinct variables
+and each premise is about those variables alone, `instance count.natural
+(xs : List(ℝ))` as much as `cardinality.nat`, and the rules of a function
+are found by its head, so the reading costs nothing until the proofs have
+failed. A definition's declared result sort, `def indicator (P : Set) :
+Nat` or a recursion `→ Nat`, places its values by syntax, inside its own
+recursive body too. A value the rules type in several sorts is rejected
+with the annotation that selects each, and, when the token has more than
+one typed declaration in scope, an operand that no fact, rule, instance,
+or declared sort places, `cardinality(S) + T` with `T` a plain set, is an
+error naming the operand sorts rather than a natural reading.
 
 ## Seeing the elaboration
 
@@ -1204,3 +1227,28 @@ must name an active scope; a parameter used only as `R.carrier` also
 accepts an ordinary set. The target may be a predicate or a function. The
 form is visible wherever the declaring module is imported, and a module
 declares scoped forms for its own predicates and functions the same way.
+
+### Numerals in a ring section
+
+Under `notation ring R := (A, add, zero, neg, mul, one)` a bare literal is
+the ring's numeral: `0` is `zero`, `1` is `one`, and `k ≥ 2` is
+`ringNat(add, zero, one, k)`, so `x + 1` on an element `x ∈ A` is
+`add(x, one)`, `x = 0` is `x = zero`, and `1 ≤ 2` compares `one` with
+`ringNat(add, zero, one, 2)`. A literal is natural instead in four
+positions: an exponent; an argument filling a parameter declared `Nat`; an
+annotated literal, `(2:N)`, which is the natural two and fixes the
+operation it is an operand of as the natural one, so `(2:N) * j` is the
+natural product with `j` then expected natural; and a literal beside an
+operand placed in ℕ. An operand is placed in ℕ by its syntax (a binder
+`(j : Nat)`, a definition's declared result sort, as `length{A}(cs)`, or
+the value of a natural operation already read), by a fact in scope, `Nat(n)`
+or `n ∈ ℕ`, by a typing rule or instance for the function it applies, as
+`cardinality.nat` places `cardinality(S)`, or by a local equation to a
+term so placed, `n = length{A}(cs)`; then `2 * j`, `1 ≤ n`, `n = 0`,
+`2 ≤ cardinality(S)`, and `(length{A}(cs) + length{A}(ds)) - (2 * j)` are
+natural throughout, with no annotation. Two literals beside each other,
+`2 * 3`, and a literal beside an operand placed nowhere, `x + 1` with `x`
+a ring element or a plain variable, keep the ring's numerals, and `R[2]`
+always names the ring's. A natural literal beside a ring element, `(2:N) *
+x`, is read as written: the natural product, whose operands the proof must
+then show natural.

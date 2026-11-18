@@ -1206,16 +1206,25 @@ export function inferSoftTypes(
 
 /**
  * The sorts among `predicates` that a visible typing rule gives every
- * value of the function `fn`: a rule `∀ x…, P₁(x₁) → … → S(fn(x…))` over
- * distinct variable arguments whose premises are unary sorts of them, as
- * `rationalCut.real` gives `Real(rationalCut(q))` from `Rational(q)`. The
- * rule's premises are not checked here; the sort is a reading of the
- * notation around the value, and its evidence is a proof obligation.
+ * value of the function applied in `term`: a rule `∀ x…, P₁(…) → … →
+ * S(fn(x…))` over distinct variable arguments whose premises are facts
+ * about those variables alone, each premise argument a variable of the
+ * rule or a closed term, as `rationalCut.real` gives `Real(rationalCut(q))`
+ * from `Rational(q)` and `cardinality.nat` gives `Nat(cardinality(A))`
+ * from `Finite(A)`. The rule's premises are not checked here; the sort is
+ * a reading of the notation around the value, and its evidence is a proof
+ * obligation. The rules are found by the head index of the predicate, so a
+ * lookup costs the rules of that one function, not of the sort.
  */
 export function functionValueSorts(
-  kernel: Kernel, fn: string, predicates: readonly string[], visibility?: ScopeVisibility,
+  kernel: Kernel, term: Term, predicates: readonly string[], visibility?: ScopeVisibility,
 ): string[] {
+  if (term.tag !== "app" || term.args.length === 0) return [];
   const index = typeIndex(kernel);
+  const fn = term.fn;
+  const closed = (argument: Term, variables: readonly string[]): boolean =>
+    argument.tag === "var" ? !variables.includes(argument.name)
+      : argument.tag !== "app" || argument.args.every(item => closed(item, variables));
   const typesValue = (rule: TypeRule): boolean => {
     const [head] = rule.arguments;
     if (!ruleVisible(rule, visibility) || rule.arguments.length !== 1 || head?.tag !== "app" ||
@@ -1225,9 +1234,17 @@ export function functionValueSorts(
       if (argument.tag !== "var" || !rule.variables.includes(argument.name) || seen.has(argument.name)) return false;
       seen.add(argument.name);
     }
-    return rule.premises.every(premise => premise.arguments.length === 1 && premise.arguments[0]!.tag === "var");
+    return rule.premises.every(premise => premise.arguments.every(argument =>
+      (argument.tag === "var" && rule.variables.includes(argument.name)) || closed(argument, rule.variables)));
   };
-  return predicates.filter(predicate => (index.byPredicate.get(predicate) ?? []).some(typesValue));
+  const token = headToken(term, noVariables)!;
+  const candidates = (predicate: string): Iterable<TypeRule> => {
+    const positions = index.heads.get(predicate);
+    if (positions === undefined) return [];
+    if (positions === null || positions.length !== 1) return index.byPredicate.get(predicate) ?? [];
+    return positions[0]!.byHead.get(token) ?? [];
+  };
+  return predicates.filter(predicate => [...candidates(predicate)].some(typesValue));
 }
 
 export function softTypeReport(kernel: Kernel): readonly SoftTypeRuleReport[] {

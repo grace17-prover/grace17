@@ -509,6 +509,13 @@ const maximumTheoremDeclarations = 2_048;
 const listLiteralCarriers = new WeakMap<object, Term>();
 const notationResultTypes = new WeakMap<object, string>();
 /**
+ * A bare literal read as a ring numeral inside a ring section, by the
+ * value it was written as. Such a numeral is a private copy of the ring
+ * term, so that an operand placed in ℕ beside it can take it back as the
+ * natural literal without touching any other occurrence of the ring term.
+ */
+const bareRingNumerals = new WeakMap<object, bigint>();
+/**
  * Expression annotations such as (x:R) on a non-numeral term, recorded per
  * kernel. AST nodes are interned process-wide, so an annotation must never be
  * stored on the node itself: that would leak the carrier into every other
@@ -18438,8 +18445,8 @@ function parseFormula(
         const term = parseTerm(text, kernel, variables, line, scope);
         return setRelation ? structureCarrier(kernel, scope, term) : term;
       };
-      const left = operand(source.slice(0, index));
-      const right = operand(source.slice(index + token.length));
+      const [left, right] = naturalizeRingNumerals(kernel, scope,
+        operand(source.slice(0, index)), operand(source.slice(index + token.length)));
       // A predicate supplied by a hypothesis in scope, `a ≤ b` under an
       // order, when an operand lies in its carrier; otherwise the typed
       // declarations of the token decide as they do with no hypothesis.
@@ -18536,7 +18543,7 @@ function parseFormula(
         notationOperandTypes(item).filter((type): type is string => type !== undefined)))];
       const valueSorts = (term: Term): ReadonlySet<string> =>
         sortsUnknown && exactTyped.length === 0 && term.tag === "app" && term.args.length > 0 && !numeral(term)
-          ? new Set(functionValueSorts(kernel, term.fn, typedSorts, scopeVisibility(kernel, scope)))
+          ? new Set(functionValueSorts(kernel, term, typedSorts, scopeVisibility(kernel, scope)))
           : new Set();
       const leftValueSorts = valueSorts(left);
       const rightValueSorts = valueSorts(right);
@@ -18584,8 +18591,9 @@ function parseFormula(
   if (equality >= 0) {
     let operands = harmonizeTypedNumerals(
       kernel, scope, line,
-      parseTerm(source.slice(0, equality), kernel, variables, line, scope),
-      parseTerm(source.slice(equality + 1), kernel, variables, line, scope),
+      ...naturalizeRingNumerals(kernel, scope,
+        parseTerm(source.slice(0, equality), kernel, variables, line, scope),
+        parseTerm(source.slice(equality + 1), kernel, variables, line, scope)),
     );
     operands = [
       harmonizeProductPairNumerals(kernel, scope, line, operands[0], operands[1]),
@@ -18598,8 +18606,9 @@ function parseFormula(
   if (inequality >= 0) {
     const operands = harmonizeTypedNumerals(
       kernel, scope, line,
-      parseTerm(source.slice(0, inequality), kernel, variables, line, scope),
-      parseTerm(source.slice(inequality + 1), kernel, variables, line, scope),
+      ...naturalizeRingNumerals(kernel, scope,
+        parseTerm(source.slice(0, inequality), kernel, variables, line, scope),
+        parseTerm(source.slice(inequality + 1), kernel, variables, line, scope)),
     );
     return not(eq(operands[0], operands[1]));
   }
@@ -18964,6 +18973,77 @@ function harmonizeCoercedEquation(
     return coercion ? app(coercion.target, term) : undefined;
   };
   return [coerce(left, leftTypes, rightTypes) ?? left, coerce(right, rightTypes, leftTypes) ?? right];
+}
+
+/**
+ * The sorts among `sorts` that place `term` with no proof search: its
+ * syntactic sorts, a typing rule or instance for the function it applies,
+ * a membership fact in a bounded carrier, or a local equation to a term so
+ * placed. A plain literal is a natural; a literal read as a ring numeral
+ * is placed in no sort, and an annotated one in the sort of its annotation.
+ */
+function placementSorts(
+  kernel: Kernel, scope: SurfaceScope, term: Term, sorts: readonly string[], throughEquations = true,
+): string[] {
+  if (bareRingNumerals.has(term)) return [];
+  if (naturalValue(term) !== undefined) {
+    const annotated = notationResultTypes.get(term);
+    if (annotated !== undefined) return sorts.includes(annotated) ? [annotated] : [];
+  }
+  const found = new Set<string>();
+  const types = termTypeNames(kernel, term, scope);
+  for (const sort of sorts) if (types.has(sort)) found.add(sort);
+  if (found.size) return [...found];
+  for (const sort of functionValueSorts(kernel, term, sorts, scopeVisibility(kernel, scope))) found.add(sort);
+  if (found.size) return [...found];
+  for (const fact of scope.localFormulas?.() ?? []) {
+    if (fact.tag === "pred" && fact.pred === "in" && fact.args.length === 2 && termEquals(fact.args[0]!, term)) {
+      const sort = carrierSortName(kernel, scope, fact.args[1]!);
+      if (sort && sorts.includes(sort)) found.add(sort);
+    } else if (throughEquations && fact.tag === "eq") {
+      const other = termEquals(fact.left, term) ? fact.right : termEquals(fact.right, term) ? fact.left : undefined;
+      if (other) for (const sort of placementSorts(kernel, scope, other, sorts, false)) found.add(sort);
+    }
+  }
+  return [...found];
+}
+
+/**
+ * A bare literal read as a ring numeral beside an operand placed in ℕ is
+ * the natural literal: `1 ≤ n` under `Nat(n)` and `2 * j` with
+ * `j : Nat` are natural inside a ring section, while `x + 1` on a ring
+ * element and `2 ≤ 3` keep the ring's numerals.
+ */
+function naturalizeRingNumerals(
+  kernel: Kernel, scope: SurfaceScope, left: Term, right: Term,
+): readonly [Term, Term] {
+  if (!scope.rings?.length) return [left, right];
+  const leftBare = bareRingNumerals.has(left);
+  const rightBare = bareRingNumerals.has(right);
+  if (leftBare === rightBare) return [left, right];
+  const natural = (term: Term): Term => {
+    const literal = Object.freeze({ ...nat(bareRingNumerals.get(term)!) });
+    notationResultTypes.set(literal, "Nat");
+    return literal;
+  };
+  if (leftBare) return placementSorts(kernel, scope, right, ["Nat"]).length ? [natural(left), right] : [left, right];
+  return placementSorts(kernel, scope, left, ["Nat"]).length ? [left, natural(right)] : [left, right];
+}
+
+/**
+ * Why an annotated numeral has no notation in its sort: the declaring
+ * modules are loaded but not imported here, or none is loaded at all.
+ */
+function missingNumeralAdvice(kernel: Kernel, label: string, type: string, value: bigint): string {
+  const declaring = [...new Set((surfaceEnvironments.get(kernel)?.notations ?? [])
+    .filter(item => item.kind === "function" && item.fixity === "numeral" && item.operandType === type &&
+      (item.token === value.toString() || item.token === "_") && item.module !== undefined)
+    .map(item => item.module!))];
+  return declaring.length
+    ? `no ${label} numeral notation for ${value} is in scope: it is declared in ${declaring.join(" and ")}; ` +
+      (declaring.length === 1 ? "import that module" : "import one of them")
+    : `no ${label} numeral notation for ${value} is in scope: no imported module declares one; ` +
+      `import the module that declares the ${label} numerals, or declare the notation`;
 }
 
 function harmonizeTypedNumerals(
@@ -20294,7 +20374,7 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
           `expression annotated ${label} already has type ${known.map(item => item.split(".").at(-1)).join(" or ")}`);
         const numeral = numeralFor(first, type);
         if (naturalValue(first) !== undefined && typeName !== "Nat" && !numeral) throw new SurfaceError(line,
-          `no ${typeName} numeral notation for ${naturalValue(first)}`);
+          missingNumeralAdvice(kernel, typeName, type, naturalValue(first)!));
         const result = numeral ?? first;
         // AST nodes are interned process-wide. The annotation belongs to this
         // occurrence in this scope, not to every later occurrence of the same
@@ -20320,8 +20400,12 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       // A literal filling a parameter declared Nat stays a natural number
       // inside a ring scope: realNumeral(2) takes the natural 2.
       const natural = expected !== undefined && shortName(expected) === "Nat";
-      return !exponentDepth && !natural && scope.rings?.length === 1 && !scope.rings[0]!.plainLiterals
-        ? ringNumeral(kernel, scope, nat(token.text), scope.rings[0]!, line) : nat(token.text);
+      if (exponentDepth || natural || scope.rings?.length !== 1 || scope.rings[0]!.plainLiterals) return nat(token.text);
+      // The ring numeral is a private copy that remembers the literal, so
+      // that an operand placed in ℕ beside it can read it as natural.
+      const numeral = Object.freeze({ ...ringNumeral(kernel, scope, nat(token.text), scope.rings[0]!, line) });
+      bareRingNumerals.set(numeral, BigInt(token.text));
+      return numeral;
     }
     const qualifier = (scope.ringAliases ?? scope.rings)?.find(ring => ring.name === token.text) ??
       (peek() === "[" && SIMPLE_IDENTIFIER.test(token.text) ? bundledRingScope(kernel, scope, token.text, variables) : undefined);
@@ -20666,18 +20750,33 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       // it, is the sort of the right operand's position: X * -1 with X real
       // reads -1 as a real.
       const leftSorts = [...leftTypes].filter(type => candidates.some(item => notationOperandTypes(item)[1] === type));
+      // Inside a ring section the token's natural declaration applies when
+      // the left operand is placed in ℕ by its syntax, a fact, a rule, or
+      // an annotation; the right operand's position is then natural too.
+      const naturalDeclaration = shape.target === "$ring" ? baseGroups.get(shape.token)?.find(item =>
+        item.operandType !== undefined && shortName(item.operandType) === "Nat" &&
+        !item.leftOperandType && !item.rightOperandType) : undefined;
+      const naturalSort = naturalDeclaration?.operandType;
+      const leftNatural = naturalSort !== undefined && placementSorts(kernel, scope, left, [naturalSort]).length > 0;
       let right = expression(shape.associativity === "left" ? shape.precedence + 1 : shape.precedence,
-        leftSorts.length === 1 ? leftSorts[0] : expected);
+        leftNatural ? naturalSort : leftSorts.length === 1 ? leftSorts[0] : expected);
       if (shape.target === "$ring") {
-        // Operands of natural-number type keep natural arithmetic inside a
-        // selected ring, as exponents do: n + 1 is the next natural number.
-        const natural = baseGroups.get(shape.token)?.find(item => item.operandType?.split(".").at(-1) === "Nat" &&
-          !item.leftOperandType && !item.rightOperandType && leftTypes.has(item.operandType!) &&
-          (termTypeNames(kernel, right, scope).has(item.operandType!) || naturalValue(right) !== undefined));
-        if (natural && naturalValue(left) === undefined) {
-          left = app(natural.target, left, right);
-          notationResultTypes.set(left, natural.operandType!);
-          continue;
+        // Operands placed in ℕ keep natural arithmetic inside a selected
+        // ring, as exponents do: n + 1 is the next natural number, a bare
+        // literal beside an operand placed in ℕ is the natural literal, and
+        // an annotated natural literal fixes the operation as natural. A
+        // literal beside an operand placed nowhere is the ring's numeral.
+        if (naturalDeclaration) {
+          const [leftRead, rightRead] = naturalizeRingNumerals(kernel, scope, left, right);
+          const placed = (term: Term): boolean => naturalValue(term) !== undefined
+            ? !bareRingNumerals.has(term) : placementSorts(kernel, scope, term, [naturalSort!]).length > 0;
+          const annotated = (term: Term): boolean =>
+            naturalValue(term) !== undefined && notationResultTypes.get(term) === naturalSort;
+          if (annotated(leftRead) || annotated(rightRead) || (placed(leftRead) && placed(rightRead))) {
+            left = app(naturalDeclaration.target, leftRead, rightRead);
+            notationResultTypes.set(left, naturalSort!);
+            continue;
+          }
         }
         const ring = selectRing(scope, [left, right], line);
         left = ringNumeral(kernel, scope, left, ring, line);
@@ -20739,11 +20838,42 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
           (termHasType(kernel, right, rightType, scope) || numeralFor(right, rightType) !== undefined);
       }) : [];
       const fallback = plain.filter(item => !notationIsTyped(item));
+      // When no proof places both operands, the typing rules and instances
+      // of the functions they apply give a reading, cardinality(S) + f(x)
+      // by cardinality.nat and f.natural, whose premises are left as proof
+      // obligations, as they are for a comparison; a numeral fits every
+      // sort, and an operand placed nowhere fits none. Tried only once the
+      // proofs have failed, so a resolved token costs nothing more.
+      const placing = plain.length > 1 && exactTyped.length === 0 && coercible.length !== 1 && typed.length === 0;
+      const typedSorts = placing ? [...new Set(plain.flatMap(item =>
+        notationOperandTypes(item).filter((type): type is string => type !== undefined)))] : [];
+      const placedSorts = (term: Term): readonly string[] | undefined =>
+        naturalValue(term) !== undefined ? undefined : placementSorts(kernel, scope, term, typedSorts);
+      const placedLeft = placing ? placedSorts(left) : [];
+      const placedRight = placing ? placedSorts(right) : [];
+      const placed = placedLeft?.length || placedRight?.length ? plain.filter(item => {
+        const [leftType, rightType] = notationOperandTypes(item);
+        if (!leftType || !rightType) return false;
+        return (placedLeft === undefined || placedLeft.includes(leftType)) &&
+          (placedRight === undefined || placedRight.includes(rightType)) &&
+          (placedLeft?.includes(leftType) === true || placedRight?.includes(rightType) === true);
+      }) : [];
+      if (placed.length > 1) {
+        const orList = (items: readonly string[]): string =>
+          items.length < 3 ? items.join(" or ") : `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
+        const valued = (placedLeft?.length ?? 0) > 1 ? left : right;
+        const sorts = [...new Set(placed.map(notationTypeLabel))];
+        throw new SurfaceError(line,
+          `cannot resolve notation ${shape.token} between ${formatTerm(left)} and ${formatTerm(right)}: ` +
+          `${formatTerm(valued)} could be ${orList(sorts.map(sort => `the ${sort} one`))}; annotate it, as in ` +
+          orList(sorts.map(sort => `(${formatTerm(valued)}:${annotationLabel(sort)})`)));
+      }
       const selected = plain.length === 1 ? plain[0]
         : exactTyped.length === 1 ? exactTyped[0]
         : exactTyped.length === 0 && coercible.length === 1 ? coercible[0]
         : exactTyped.length === 0 && typed.length === 1 ? typed[0]
         : exactTyped.length === 0 && typed.length > 1 ? expectedAmong(expected, typed)
+        : placed.length === 1 ? placed[0]
         : exactTyped.length === 0 && typed.length === 0 && fallback.length === 1 ? fallback[0]
         : undefined;
       if (!selected) {

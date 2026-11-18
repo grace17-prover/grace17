@@ -5,7 +5,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createZfKernel, createZfgKernel, loadModuleSourceGraph, exportTheoremForMachine, compileProofModule, verifyProofMachine } from "../src/index.ts";
+import { canonical, createZfKernel, createZfgKernel, loadModuleSourceGraph, exportTheoremForMachine, compileProofModule, verifyProofMachine } from "../src/index.ts";
 import { checkWorkbenchFiles } from "../src/workbench.ts";
 
 const header = (imports: string) => `module Numerals
@@ -126,4 +126,66 @@ proof
   const theorem = result.theorems.find(item => item.name === "Numerals.seven")!;
   assert.match(theorem.statement, /3 \+ 4 = 7/);
   assert.doesNotMatch(theorem.statement, /ringNat/);
+});
+
+// A bare literal inside a ring section is the ring's numeral, except beside
+// an operand placed in ℕ, and an annotated natural literal fixes its
+// operation as the natural one.
+test("a literal beside an operand placed in ℕ is natural inside a ring section", () => {
+  const kernel = load(header("import Grace.Cumulus.Algebra.Ring\nimport Grace.Cumulus.Cardinal.Enumeration") + `
+theorem annotated (j : Nat)
+  shows (2:N) * j = j + j
+proof
+  sorry
+
+theorem byBinder (j : Nat)
+  shows 2 * j = j * 2
+proof
+  sorry
+
+theorem byFact (n : Set)
+  requires natural : Nat(n)
+  shows 1 ≤ n ↔ ¬ n = 0
+proof
+  sorry
+
+theorem byRule (S : Set)
+  shows 2 ≤ cardinality(S) ∨ cardinality(S) = 0
+proof
+  sorry
+
+theorem byEquation (n : Set) (cs : List(A))
+  requires size : n = length{A}(cs)
+  shows 1 ≤ n ∨ n = 0
+proof
+  sorry
+
+theorem byResultSort (cs ds : List(A), j : Nat)
+  shows (length{A}(cs) + length{A}(ds)) - (2 * j) ≤ length{A}(cs) + length{A}(ds)
+proof
+  sorry
+
+theorem ringElements (x : Set)
+  requires hx : x ∈ A
+  shows x + 1 = 1 + x ∧ x * 2 = 2 * x ∧ (x = 0 ∨ 1 ≤ 2 ∨ 2 * 3 = 3 * 2)
+proof
+  sorry
+end Rings
+`, "ZFG");
+  const statement = (name: string): string => canonical(kernel.theorems.get(`Numerals.${name}`)!);
+  // The section's zero and one occur once each, in the IsCommRing hypothesis.
+  const occurrences = (statement: string, name: string): number =>
+    statement.split(`{"name":"${name}","tag":"var"}`).length - 1;
+  for (const name of ["annotated", "byBinder", "byFact", "byRule", "byEquation", "byResultSort"]) {
+    assert.doesNotMatch(statement(name), /ringNat"|call2"/, name);
+    assert.equal(occurrences(statement(name), "zero"), 1, name);
+    assert.equal(occurrences(statement(name), "one"), 1, name);
+    assert.match(statement(name), /Nat\.Rec\.(add|mul)"|Nat\.Rec\.sub"|LessEqual"/, name);
+  }
+  const ring = statement("ringElements");
+  assert.match(ring, /call2"/);
+  assert.match(ring, /ringNat"/);
+  assert.ok(occurrences(ring, "zero") > 1);
+  assert.ok(occurrences(ring, "one") > 1);
+  assert.doesNotMatch(ring, /Nat\.Rec\.(add|mul)"/);
 });
