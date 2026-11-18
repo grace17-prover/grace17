@@ -51,8 +51,8 @@ cs), realDerivativeList(cs))`. Four statements close the three layers:
 
 1. **`sturm.theorem`.** For a squarefree pair with `leading ≠ 0` and
    `A < B` with `p(A) ≠ 0` and `p(B) ≠ 0`,
-   `add(cardinality(rootSet(realRing, leading, cs) ∩ openInterval(A, B)),
-   sturmCount(leading, cs, B)) = sturmCount(leading, cs, A)`: the number
+   `cardinality(rootSet(realRing, leading, cs) ∩ openInterval(A, B)) +
+   sturmCount(leading, cs, B) = sturmCount(leading, cs, A)`: the number
    of roots in `(A, B)` is the drop of the Sturm count from `A` to `B`,
    where `sturmCount(leading, cs, X)` is the number of sign variations of
    the values at `X` of the Sturm sequence `p, p′, −rem(p, p′), …`.
@@ -216,14 +216,27 @@ graph TD
 ## Conventions
 
 - Every operation is defined at engine level over the ring pieces,
-  `def name {A : Set} (add z neg mul one …) (cs : List(A))`, with
+  `def name {A : Set} (add zero neg mul one …) (cs : List(A))`, with
   closure and length theorems named `.data`, value theorems named
   `.value`, and transport under ring homomorphisms named `.map`, and is
   specialized to a bundled ring or to ℝ by a thin layer
   (`derivativeLeading(R, leading, cs)`, `mulList(R, a, b, cs, ds)`,
   `resultantOf(R, a, b, cs, ds)`, `realDerivativeLeading(leading, cs)`).
-  The pattern variable of a ring zero is written `z` in recursive
-  definitions, since `zero` is a constructor pattern of ℕ.
+  The ring zero is the parameter `zero` in recursive definitions too,
+  where it is a variable pattern; the zero of ℕ in the position of a
+  decreasing natural is the pattern `0`.
+- A definition over the variables of a section stands inside the
+  section and is applied without them there: `hornerFunction(X)`,
+  `rootMultiplicity(cs, r)`, `realGreatest`, `sturmCount(X)`,
+  `derivativeSigns(X)(k)`, `mulList(a, b, cs, ds)`, and from outside
+  with the section variables in front, `hornerFunction(leading, cs)(X)`,
+  `rootMultiplicity(A, add, zero, neg, mul, one, leading, cs, r)`. A
+  `defgraph` or `defunique` takes the section hypotheses as the
+  premises of its laws, so the real modules keep `leading ≠ (0:R)` in a
+  nested section `Nonzero` below the definitions, whose laws need only
+  `Real(leading)` and `List(ℝ, cs)`. Instances stand in the same
+  sections as the theorems; an instance takes the section's predicate
+  hypotheses alone, so `sturmCount.natural` holds without `nonzero`.
 - The univariate polynomial ring of a pair is `R[oneVariable]` with
   `oneVariable := 1`, named because a numeral index set inside a ring
   scope is read as the one of the ring. Equality of pairs as polynomials
@@ -240,6 +253,17 @@ graph TD
   `Real(leading)`, `List(ℝ, cs)`, and `leading ≠ (0:R)` as section
   hypotheses; values are `hornerFunction(leading, cs)(X)`, and signs are
   `realSign`, with `(0:R)` for the real zero.
+- Counts are naturals by declaration or by instance: `signVariations`
+  has the result sort `Nat`, and `sturmCount.natural`,
+  `rootMultiplicity.natural`, and `cardinality.nat` are instances, so
+  `cardinality(S) + sturmCount(leading, cs, B)`, `sturmCount(Y) =
+  sturmCount(Z) + 1`, `2 ≤ rootMultiplicity(cs, r)`, `length{A}(cs) *
+  length{A}(ds)`, and `(length{A}(cs) + length{A}(ds)) - (2 * j)` are
+  natural arithmetic as written, inside a ring section too; a numeral
+  beside a ring element, `4 * (a * c)`, is the ring's. A trailing
+  quantifier runs to the end of its formula, `… ∧ ∀ Y ∈ ℝ, ∀ Z ∈ ℝ, …`,
+  and `(a, -b)` under the real and complex rings negates in ℝ by the
+  sort of `b`.
 - The Sylvester matrix of `(a, cs)` of declared degree `m` and `(b, ds)`
   of declared degree `n` has `n` rows of `p` then `m` rows of `q`, each
   row `i` of a block being `i` zeros followed by the coefficients from
@@ -249,9 +273,6 @@ graph TD
   `p`, `m − j` rows of `q`, and `m + n − 2j` columns. The discriminant is
   `resultant(p, p′)` with the derivative pair as it is, without the
   classical sign and division by the leading coefficient.
-- Natural sums of set-valued counts are written `add(…, …)`, since the
-  elaborator does not type `cardinality` and `sturmCount` for the infix
-  `+`; the instance `sturmCount.natural` types the count itself.
 
 ## Status
 
@@ -280,9 +301,9 @@ graph TD
 | CAD.RealFiniteExtrema | 19 | 2 | 17 |
 | CAD.StrictlyIncreasingList | 13 | 0 | 13 |
 | CAD.RealRootOrder | 11 | 0 | 11 |
-| CAD.SignVariations | 16 | 0 | 16 |
+| CAD.SignVariations | 16 | 3 | 13 |
 | CAD.Sturm | 30 | 3 | 27 |
-| CAD.Subresultant | 12 | 0 | 12 |
+| CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **408** | **28** | **380** |
+| **total** | **407** | **31** | **376** |
 <!-- /blueprint-status -->
