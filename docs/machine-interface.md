@@ -125,7 +125,7 @@ Result: the protocol version, the Grace17 version, the methods with a
 one-line description each, and the foundation profiles.
 
 ```json
-{"protocol": "1", "grace17": "1.3.0",
+{"protocol": "1", "grace17": "1.4.0",
  "methods": [{"name": "check", "description": "Check a workspace: ..."}, ...],
  "foundations": ["ZF", "ZFC", "ZFG"]}
 ```
