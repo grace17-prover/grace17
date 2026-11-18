@@ -15,20 +15,23 @@ import { join, relative, resolve } from "node:path";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import type { Formula, Term } from "./ast.ts";
-import { KernelError } from "./kernel.ts";
+import { KernelError, type Kernel } from "./kernel.ts";
+import { auditTheoremAxioms } from "./axiom-audit.ts";
+import { checkContinuing } from "./continued-check.ts";
 import {
   LibrarySearchWorkspace, moduleDocument, moduleNameOf, parseDeclarationHeader, parseHeaderBinders, scanSearchDeclarations,
   type SearchDeclaration,
 } from "./library-search.ts";
-import { beginDependencyReads, dependencyStampsCurrent, endDependencyReads, type DependencyStamp } from "./module-loader.ts";
+import { beginDependencyReads, dependencyStampsCurrent, endDependencyReads, moduleNameFromRoots, type DependencyStamp } from "./module-loader.ts";
 import { moduleNameFromPath, resolveImportName } from "./module-names.ts";
-import { scanModule } from "./module-source-loader.ts";
+import { scanModule, type LoadedModule } from "./module-source-loader.ts";
 import { projectRoot } from "./project-root.ts";
 import { sha256Hex } from "./hash.ts";
 import { SurfaceError } from "./surface.ts";
+import { createSetTheoryKernel } from "./zfg.ts";
 import {
-  auditWorkbenchTheorem, checkWorkbenchFiles, declarationAtLine, describeWorkbenchProperty, describeWorkbenchStatement,
-  pinWorkbenchDependencies, pinnedWorkbenchDependencies, declarationBoundary, proofRanges, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
+  auditWorkbenchTheorem, checkWorkbenchFiles, declarationAtLine, describeWorkbenchProperty, describeWorkbenchStatement, forkDependencyEnvironment,
+  pinWorkbenchDependencies, pinnedWorkbenchDependencies, declarationBoundary, proofRanges, renderCheckedWorkspace, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
   type WorkbenchCheckResult, type WorkbenchFile, type WorkbenchFoundation, type WorkbenchState, type WorkbenchStep,
   type WorkbenchStepInfo, type WorkbenchSuggestion, type WorkbenchTheorem,
 } from "./workbench.ts";
@@ -320,9 +323,11 @@ export interface MachineDiagnostic {
   readonly module?: string;
   readonly via?: string;
   readonly path?: readonly string[];
-  /** A shadowed-property warning: the definition whose generated property the first theorem restates, and every such theorem of the module. */
+  /** A shadowed-property warning: the definition and the property the first theorem restates, every such theorem of the module, and each with what it shadows. */
   readonly definition?: string;
+  readonly property?: string;
   readonly theorems?: readonly string[];
+  readonly shadowed?: readonly { readonly theorem: string; readonly definition: string; readonly property: string; readonly line: number }[];
 }
 
 /** The bootstrap and the core modules are the foundation every module stands on; their declarations are never import notes. */
@@ -401,13 +406,18 @@ export function shadowedPropertyWarnings(shadowed: readonly WorkbenchCheckResult
   for (const item of shadowed) byFile.set(item.file, [...(byFile.get(item.file) ?? []), item]);
   return [...byFile.values()].map(items => {
     const first = items.reduce((best, item) => item.line < best.line ? item : best);
-    const names = items.map(item => item.theorem.slice((item.module?.length ?? -1) + 1));
-    const count = items.length === 1 ? "a generated property" : `${items.length} generated properties`;
+    const local = (name: string): string => name.slice((first.module?.length ?? -1) + 1);
+    // Each theorem with the property it hides: `evens.membership shadows
+    // the membership property of evens`.
+    const shadows = items.map(item => `${local(item.theorem)} shadows the ${item.property} property of ${local(item.definition)}`);
+    const count = items.length === 1 ? "a generated property as a theorem" : `${items.length} generated properties as theorems`;
     return {
       severity: "warning" as const, kind: "shadowed-property", file: first.file, line: first.line, column: 1, endColumn: 1,
-      message: `${first.module ?? first.file} restates ${count} as a theorem of the same name: ${names.join(", ")}; such a name resolves to the theorem and hides the property`,
-      theorem: first.theorem, declaration: first.theorem, definition: first.definition, ...(first.module ? { module: first.module } : {}),
+      message: `${first.module ?? first.file} restates ${count} of the same name: ${shadows.join("; ")}; such a name resolves to the theorem and hides the property`,
+      theorem: first.theorem, declaration: first.theorem, definition: first.definition, property: first.property,
+      ...(first.module ? { module: first.module } : {}),
       theorems: items.map(item => item.theorem),
+      shadowed: items.map(item => ({ theorem: item.theorem, definition: item.definition, property: item.property, line: item.line })),
     };
   });
 }
@@ -424,6 +434,21 @@ export type MachineTheoremStatus = "proved" | "dependent" | "admitted" | "failed
 export function theoremStatus(theorem: { readonly name: string; readonly sorries: readonly { readonly theorem: string }[] }): MachineTheoremStatus {
   if (theorem.sorries.length === 0) return "proved";
   return theorem.sorries.some(sorry => sorry.theorem === theorem.name) ? "admitted" : "dependent";
+}
+
+/**
+ * The admitted theorems among presented ones, in their order: each with its
+ * file, the line it starts at, and the lines of its own `sorry` steps. What
+ * a proving agent still owes in a workspace, without reading every trace.
+ */
+function admittedTheorems(theorems: readonly {
+  readonly name?: string; readonly file: string; readonly lineStart: number; readonly status: MachineTheoremStatus;
+  readonly sorries: readonly { readonly theorem: string; readonly line: number }[];
+}[]) {
+  return theorems.flatMap(theorem => theorem.status === "admitted" && theorem.name ? [{
+    theorem: theorem.name, file: theorem.file, line: theorem.lineStart,
+    sorries: theorem.sorries.filter(sorry => sorry.theorem === theorem.name).map(sorry => sorry.line),
+  }] : []);
 }
 
 /** The failing declaration's partial trace, presented like a checked theorem. */
@@ -498,6 +523,7 @@ function presentCheck(workspace: Workspace, raw: RawCheck, options: CheckOptions
       notations: [],
       registrations: [],
       theorems,
+      admitted: admittedTheorems(completed),
       diagnostics: [failureDiagnostic(failure, file, source, failed?.name), ...completed.flatMap(theorem => theorem.sorries.map(sorryDiagnostic))],
       sorries: completed.flatMap(theorem => theorem.sorries),
       evaluations: [],
@@ -523,12 +549,17 @@ export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
     ...(options.audit ? { audit: options.audit(theorem.name) } : {}),
   }));
   const countStatus = (file: string, status: MachineTheoremStatus): number => theorems.filter(theorem => theorem.file === file && theorem.status === status).length;
+  const reported = new Set(result.checkedFiles);
+  // The admissions of the reported files are the workspace's own
+  // obligations and its warnings; those of a dependency reach a theorem
+  // that rests on them through its `sorries`, and the file summaries count
+  // them as `admittedSorries`.
+  const sorries = result.sorries.filter(sorry => reported.has(sorry.file));
   const diagnostics: MachineDiagnostic[] = [
-    ...result.sorries.map(sorryDiagnostic),
+    ...sorries.map(sorryDiagnostic),
     ...shadowedPropertyWarnings(result.shadowed ?? []),
     ...(options.imports ? transitiveImportNotes(result) : []),
   ];
-  const reported = new Set(result.checkedFiles);
   return {
     status: "checked" as const,
     foundation: result.foundationReport ?? { profile: result.foundation },
@@ -547,8 +578,9 @@ export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
     notations: result.notations,
     registrations: result.registrations ?? [],
     theorems,
+    admitted: admittedTheorems(theorems),
     diagnostics,
-    sorries: result.sorries,
+    sorries,
     evaluations: result.evaluations,
     ...(options.symbols ? { symbols: result.symbols } : {}),
   };
@@ -568,11 +600,90 @@ function checkOptions(params: Params): CheckOptions & { readonly audit: boolean;
   };
 }
 
-function check(params: Params): MachineCheckResult {
+function check(params: Params): MachineCheckResult | MachineContinuedCheckResult {
   const workspace = workspaceParam(params);
   const options = checkOptions(params);
+  if (booleanParam(params, "continue", false)) return continuedCheck(workspace, options);
   return presentCheck(workspace, rawCheck(workspace, options), options);
 }
+
+/**
+ * The kernel a continued check starts from: the checked environment of the
+ * imports the workspace files take from outside the workspace, kept
+ * between requests as a check's dependencies are, so that the files
+ * themselves are what the check elaborates. The prelude alone when those
+ * imports cannot be prepared, or when one of them reaches a workspace file
+ * on disk: the check then elaborates every module itself and reports an
+ * import that fails as a failed module.
+ */
+function continuedSeed(workspace: Workspace, roots: readonly string[]): { readonly kernel: Kernel; readonly loaded: readonly LoadedModule[] } {
+  const derive = (file: string): string | undefined => moduleNameFromRoots(file, roots);
+  const scanned = workspace.files.map(file => scanModule(file.source, file.name, derive));
+  const own = new Set(scanned.flatMap(item => item.name ? [item.name] : []));
+  const onDisk = (name: string): boolean => roots.some(root => existsSync(resolve(root, `${name.split(".").join("/")}.g17`)));
+  const exists = (name: string): boolean => own.has(name) || onDisk(name);
+  const external = new Set<string>();
+  for (const item of scanned) {
+    for (const raw of item.imports) {
+      const name = resolveImportName(item.name, raw, exists) ?? raw;
+      if (!own.has(name)) external.add(name);
+    }
+  }
+  if (external.size) {
+    const probe: WorkbenchFile = { name: "g17continue.g17", source: ["module G17Continue", ...[...external].map(name => `import ${name}`), ""].join("\n") };
+    try {
+      const forked = forkDependencyEnvironment([probe], probe, workspace.profile, { moduleRoots: workspace.moduleRoots });
+      if (forked && !forked.loaded.some(item => item.module !== undefined && own.has(item.module))) return forked;
+    } catch (error) {
+      if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
+    }
+  }
+  return { kernel: createSetTheoryKernel({ profile: workspace.profile }), loaded: [] };
+}
+
+/**
+ * The `check` of a workspace that goes on past a failing module, as
+ * `g17 check --continue` does: every workspace file is elaborated in its
+ * own fork of the environment, a file whose workspace import failed is
+ * skipped, and the result carries every failure with its partial trace,
+ * the skipped files, and the theorems a failure outside a proof left
+ * unchecked, beside the checked files presented as a checked workspace.
+ */
+function continuedCheck(workspace: Workspace, options: CheckOptions & { readonly audit: boolean; readonly symbols: boolean }) {
+  const started = performance.now();
+  const roots = [...(workspace.moduleRoots ?? []).map(root => resolve(root)), join(projectRoot, "lib")];
+  const seed = continuedSeed(workspace, roots);
+  const continued = checkContinuing(seed.kernel, workspace.files.map(file => ({ file: file.name, source: file.source })), roots);
+  const loaded = [...seed.loaded, ...continued.loaded];
+  const reported = (workspace.entry ?? workspace.files.map(file => file.name)).filter(name => loaded.some(item => item.file === name));
+  const rendered = renderCheckedWorkspace(continued.kernel, loaded, workspace.files, workspace.profile, reported, {
+    includeKernelDetails: options.kernel, includeEnvironmentDigest: options.digest, includeDependencies: options.dependencies,
+    includeDirectDependencies: options.imports, includeReports: true, moduleRoots: workspace.moduleRoots,
+  });
+  const kernel = continued.kernel;
+  const presented = presentCheckedWorkspace(rendered, {
+    kernel: options.kernel, symbols: options.symbols, imports: options.imports,
+    ...(options.audit ? { audit: (name: string) => auditTheoremAxioms(kernel, name) } : {}),
+  });
+  const failed = continued.failures.map(item => machineCheckFailure(item.error, [{ name: item.file, source: item.source }], roots));
+  const failedFiles = new Set(continued.failures.map(item => item.file));
+  const skippedFiles = new Set(continued.skipped.map(item => item.file));
+  return {
+    ...presented,
+    status: continued.failures.length ? "failed" as const : "checked" as const,
+    files: presented.files.map(file => failedFiles.has(file.name) ? { ...file, status: "failed" as const }
+      : skippedFiles.has(file.name) ? { ...file, status: "skipped" as const } : file),
+    theorems: [...presented.theorems, ...failed.flatMap(item => item.theorems)],
+    admitted: [...presented.admitted, ...failed.flatMap(item => item.admitted)],
+    diagnostics: [...failed.flatMap(item => item.diagnostics), ...presented.diagnostics],
+    failures: continued.failures.map((item, index) => ({ module: item.module, file: item.file, ...failed[index]!.diagnostics[0]! })),
+    skipped: continued.skipped,
+    skippedAfterFailure: continued.skippedAfterFailure,
+    milliseconds: Number((performance.now() - started).toFixed(3)),
+  };
+}
+
+export type MachineContinuedCheckResult = ReturnType<typeof continuedCheck>;
 
 /**
  * The checker's own JSON for a failure (`ok: false`, `kind`, `message`,
@@ -592,6 +703,7 @@ export function machineCheckFailure(error: unknown, files: readonly WorkbenchFil
     version: MACHINE_PROTOCOL_VERSION,
     status: "failed" as const,
     theorems: [...completed, ...(failed ? [failed] : [])],
+    admitted: admittedTheorems(completed),
     diagnostics: [failureDiagnostic(failure, file, source, failed?.name), ...completed.flatMap(theorem => theorem.sorries.map(sorryDiagnostic))],
   };
 }
@@ -1255,6 +1367,9 @@ function generatedSignature(params: Params, name: string, module: string | undef
 
 const PROBE_THEOREM = "g17probe.elaborate";
 
+/** A line that opens a proof obligation of a declaration: `proof`, or the `uniqueness` of a defunique. */
+const OBLIGATION_MARKER = /^\s*(?:proof|uniqueness)\s*(?:--.*)?$/;
+
 /**
  * The prefix of a file in which a probe theorem stands at a line, with the
  * facts in force there: the lines before the declaration holding the line,
@@ -1304,8 +1419,15 @@ function probePrefix(source: string, line: number | undefined): {
       if (/^\s*proof\s*(?:--.*)?$/.test(lines[index - 1]!)) { proofLine = index; break; }
     }
     if (proofLine < 0 || proofLine >= range.lineEnd) continue;
-    for (let index = proofLine + 1; index <= range.lineEnd; index += 1) kept[index - 1] = "";
-    kept[proofLine] = `${indentation(lines[proofLine - 1])}  sorry`;
+    // A block with several obligations, such as a defunique's existence
+    // proof followed by `uniqueness`, keeps each marker and admits each
+    // obligation on the line after it.
+    let owed = true;
+    for (let index = proofLine + 1; index <= range.lineEnd; index += 1) {
+      if (OBLIGATION_MARKER.test(lines[index - 1]!)) { kept[index - 1] = lines[index - 1]!; owed = true; continue; }
+      kept[index - 1] = owed ? `${indentation(lines[index - 2])}  sorry` : "";
+      owed = false;
+    }
   }
   let depth = 0;
   for (const text of kept) {
@@ -1400,12 +1522,32 @@ function elaborate(params: Params) {
 }
 
 function audit(workspace: Workspace, theorem: string) {
-  try {
-    const { ok: _ok, ...report } = auditWorkbenchTheorem(workspace.files, theorem, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots });
+  const run = (name: string) => {
+    const { ok: _ok, ...report } = auditWorkbenchTheorem(workspace.files, name, workspace.profile, workspace.entry, { moduleRoots: workspace.moduleRoots });
     return report;
+  };
+  try {
+    return run(theorem);
   } catch (error) {
-    throw auditError(error, theorem);
+    const failed = auditError(error, theorem);
+    if (!(failed instanceof MachineError) || failed.code !== "unknown_theorem") throw failed;
+    // A short name resolves as the active module's code resolves it, and
+    // the answer names the theorem audited.
+    const full = resolveAuditName(workspace, theorem);
+    if (full === undefined) throw failed;
+    try { return run(full); }
+    catch (again) { throw auditError(again, full); }
   }
+}
+
+/** The full name a short theorem name denotes in a workspace's environment, as `declaration` resolves it; undefined when none does. */
+function resolveAuditName(workspace: Workspace, name: string): string | undefined {
+  const loaded = resolvable(workspace, rawCheckAny(workspace));
+  if (!loaded) return undefined;
+  const active = workspace.files.find(item => item.name === workspace.activeFile);
+  const contextModule = active ? moduleNameOf(active.source, active.name) : undefined;
+  const symbol = resolveSymbolCandidate(loaded.environment.symbols, name, { module: contextModule, file: workspace.activeFile });
+  return symbol && symbol.name !== name ? symbol.name : undefined;
 }
 
 function auditError(error: unknown, theorem: string): unknown {

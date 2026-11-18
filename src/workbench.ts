@@ -494,6 +494,24 @@ function loadIncrementalWorkspace(
   return { kernel, loaded: [...checkpoint.loaded, ...activeLoaded], context: "workspace" as const };
 }
 
+/**
+ * A fork of the checked dependency environment of a file, with tactic
+ * tracing on, for a loader that goes on from it: the imports of the file
+ * are elaborated once and kept, as a check of the file keeps them. The
+ * file itself is not elaborated. Undefined when an import cannot be
+ * resolved; a dependency that fails to elaborate throws as a check does.
+ */
+export function forkDependencyEnvironment(
+  files: readonly WorkbenchFile[], active: WorkbenchFile, profile: WorkbenchFoundation, options: WorkbenchWorkspaceOptions = {},
+): { readonly kernel: ReturnType<typeof createSetTheoryKernel>; readonly loaded: readonly LoadedModule[] } | undefined {
+  const checkpoint = dependencyCheckpoint(files, active, profile, workspaceRoots(options.moduleRoots));
+  if (!checkpoint) return undefined;
+  const kernel = checkpoint.kernel.fork();
+  forkSurfaceEnvironment(checkpoint.kernel, kernel);
+  setSurfaceTraceCapture(kernel, true);
+  return { kernel, loaded: checkpoint.loaded };
+}
+
 // Cache processing of exact contents, never filesystem freshness. Current
 // sources are still read on every lookup, so user-library edits invalidate immediately.
 interface DependencySourceInfo {

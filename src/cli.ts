@@ -10,12 +10,12 @@ import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
 import {
   auditTheoremAxioms, callNative, compileProofModule, createSetTheoryKernel, encodeProofMachineBinary,
-  exportKernelEnvironment, exportTheorem, exportTheoremForMachine, forkSurfaceEnvironment, KernelError, loadModuleGraph, loadModuleSourceGraph,
-  moduleNameFromRoots, moduleReport, renderProofHtml, SurfaceError, verifyExportedProof, verifyProofMachineBinary,
+  exportKernelEnvironment, exportTheorem, exportTheoremForMachine, KernelError, loadModuleGraph,
+  renderProofHtml, SurfaceError, verifyExportedProof, verifyProofMachineBinary,
   workbenchFailure, rememberFailureDisplay, renderCheckedWorkspace,
   type LoadedModule, type WorkbenchFile,
 } from "./index.ts";
-import { resolveImportName } from "./module-names.ts";
+import { checkContinuing, failureText, type ContinuedCheck } from "./continued-check.ts";
 import {
   callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface, serveMachineInterfaceOnPort,
   shadowedPropertyWarnings, transitiveImportNotes,
@@ -148,7 +148,7 @@ export function runCli(args: readonly string[]): void {
           checked = [...loaded.loaded, ...loadModuleGraph(kernel, workspace, roots)];
         }
       } else if (continuing) {
-        continued = checkContinuing(kernel, modules, roots, json || quiet ? undefined : line => console.error(line));
+        continued = checkContinuing(kernel, modules.map(entry => ({ file: resolve(entry) })), roots, json || quiet ? undefined : line => console.error(line));
         kernel = continued.kernel;
         checked = continued.loaded;
       } else {
@@ -216,6 +216,7 @@ export function runCli(args: readonly string[]): void {
             ...(failures.length ? { status: "failed" as const } : {}),
             diagnostics: [...failed.flatMap(item => item.diagnostics), ...presented.diagnostics],
             theorems: [...presented.theorems, ...failed.flatMap(item => item.theorems)],
+            admitted: [...presented.admitted, ...failed.flatMap(item => item.admitted)],
             ...(continued ? {
               failures: failures.map((item, index) => ({ module: item.module, file: item.file, ...failed[index]!.diagnostics[0]! })),
               skipped,
@@ -362,124 +363,6 @@ export function runCli(args: readonly string[]): void {
       process.exitCode = 1;
     }
   }
-}
-
-function failureText(error: unknown): string {
-  const kind = error instanceof SurfaceError ? "surface" : error instanceof KernelError ? "kernel" : "io";
-  return `${kind} error: ${error instanceof Error ? error.message : String(error)}`;
-}
-
-interface ContinuedCheck {
-  readonly kernel: Kernel;
-  readonly loaded: readonly LoadedModule[];
-  /** Every failure, a module's failed theorems each once; a module with several appears several times. */
-  readonly failures: readonly { readonly module: string; readonly file: string; readonly source: string; readonly error: unknown }[];
-  readonly skipped: readonly { readonly module: string; readonly file: string; readonly because: string }[];
-  /** The theorems a module could not go on to after a failure outside a proof, by name. */
-  readonly skippedAfterFailure: readonly { readonly module: string; readonly file: string; readonly line: number; readonly theorems: readonly string[] }[];
-}
-
-/** The theorems, lemmas, and instances declared after a line of a module's source. */
-function theoremsAfterLine(source: string, line: number): string[] {
-  return source.split(/\r?\n/).flatMap((text, index) => {
-    const header = index + 1 > line ? /^(?:theorem|lemma|instance)\s+(\S+)/.exec(text) : null;
-    return header ? [header[1]!] : [];
-  });
-}
-
-/**
- * Check every module of the entries' import graph, going on past a failure:
- * each module is elaborated in a fork of the kernel, so a failed module
- * leaves nothing behind, and the modules that import a failed or skipped
- * module are skipped and reported with the import that blocked them.
- * Within a module, a failed theorem is reported and the next declaration
- * is checked, so one run reports every failing proof of the module; a
- * failure outside a proof, in a definition or a notation, stops the module
- * there, and the theorems after it are reported as skipped after it.
- */
-function checkContinuing(initial: Kernel, entries: readonly string[], roots: readonly string[], log?: (line: string) => void): ContinuedCheck {
-  const resolvedRoots = roots.map(root => resolve(root));
-  const derive = (file: string): string | undefined => moduleNameFromRoots(file, resolvedRoots);
-  interface Source { readonly module: string; readonly file: string; readonly source: string; readonly imports: readonly string[] }
-  const sources = new Map<string, Source>();
-  const libraryFile = (name: string): string | undefined => {
-    const relative = `${name.split(".").join("/")}.g17`;
-    return resolvedRoots.map(root => resolve(root, relative)).find(candidate => existsSync(candidate));
-  };
-  const alreadyLoaded = new Set(moduleReport(initial).map(item => item.name));
-  const exists = (name: string): boolean => sources.has(name) || alreadyLoaded.has(name) || libraryFile(name) !== undefined;
-  const add = (file: string): Source => {
-    const source = readFileSync(file, "utf8");
-    const metadata = scanModule(source, file, derive);
-    const module = metadata.name ?? file;
-    const known = sources.get(module);
-    if (known) return known;
-    const item = { module, file, source, imports: metadata.imports.map(raw => resolveImportName(metadata.name, raw, exists) ?? raw) };
-    sources.set(module, item);
-    return item;
-  };
-  // Dependencies before dependents, each module once.
-  const ordered: Source[] = [];
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
-  const visit = (item: Source): void => {
-    if (visited.has(item.module)) return;
-    if (visiting.has(item.module)) throw new SurfaceError(1, `cyclic module import involving ${item.module}`);
-    visiting.add(item.module);
-    for (const name of item.imports) {
-      if (alreadyLoaded.has(name)) continue;
-      const file = sources.get(name)?.file ?? libraryFile(name);
-      if (!file) throw new SurfaceError(1, `${item.file}: cannot locate imported module ${name} as ${name.split(".").join("/")}.g17`);
-      visit(add(file));
-    }
-    visiting.delete(item.module);
-    visited.add(item.module);
-    ordered.push(item);
-  };
-  entries.map(entry => add(resolve(entry))).forEach(visit);
-
-  let kernel = initial;
-  const loaded: LoadedModule[] = [];
-  const failures: { module: string; file: string; source: string; error: unknown }[] = [];
-  const skipped: { module: string; file: string; because: string }[] = [];
-  const skippedAfterFailure: { module: string; file: string; line: number; theorems: string[] }[] = [];
-  const blocked = new Set<string>();
-  for (const item of ordered) {
-    const blocking = item.imports.find(name => blocked.has(name));
-    if (blocking) {
-      blocked.add(item.module);
-      skipped.push({ module: item.module, file: item.file, because: blocking });
-      log?.(`skipped ${item.file}: imports ${blocking}`);
-      continue;
-    }
-    const attempt = kernel.fork();
-    forkSurfaceEnvironment(kernel, attempt);
-    const fail = (error: SurfaceError | KernelError): void => {
-      rememberFailureDisplay(error, attempt);
-      blocked.add(item.module);
-      failures.push({ module: item.module, file: item.file, source: item.source, error });
-      log?.(`failed ${item.file}: ${failureText(error)}`);
-    };
-    try {
-      const modules = loadModuleSourceGraph(attempt, [{ file: item.file, source: item.source }], roots, undefined, [], derive,
-        { onTheoremFailure: failure => fail(failure.error) });
-      // A module with a failed theorem is a failed module: its checked
-      // theorems are reported, nothing of it is kept, and its dependents
-      // are skipped.
-      if (blocked.has(item.module)) loaded.push(...modules.filter(module => module.module !== item.module));
-      else { loaded.push(...modules); kernel = attempt; }
-    } catch (error) {
-      if (!(error instanceof SurfaceError) && !(error instanceof KernelError)) throw error;
-      fail(error);
-      const line = error instanceof SurfaceError ? error.line : undefined;
-      const theorems = line === undefined ? [] : theoremsAfterLine(item.source, line);
-      if (theorems.length) {
-        skippedAfterFailure.push({ module: item.module, file: item.file, line: line!, theorems });
-        log?.(`skipped after failure ${item.file}: ${theorems.length} ${theorems.length === 1 ? "theorem" : "theorems"} after line ${line}`);
-      }
-    }
-  }
-  return { kernel, loaded, failures, skipped, skippedAfterFailure };
 }
 
 const machineCommands = new Set(["serve", "goal", "suggest", "search", "declaration", "signature", "elaborate", "audit", "library", "notations", "closure"]);

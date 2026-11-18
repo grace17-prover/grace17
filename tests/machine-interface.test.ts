@@ -391,8 +391,10 @@ test("check warns once per module about a theorem restating a generated property
   assert.equal(warning.theorem, "Shadow.evens.membership");
   assert.equal(warning.definition, "Shadow.evens");
   assert.deepEqual(warning.theorems, ["Shadow.evens.membership"]);
+  assert.equal(warning.property, "membership");
+  assert.deepEqual(warning.shadowed, [{ theorem: "Shadow.evens.membership", definition: "Shadow.evens", property: "membership", line: 6 }]);
   assert.equal(warning.message,
-    "Shadow restates a generated property as a theorem of the same name: evens.membership; such a name resolves to the theorem and hides the property");
+    "Shadow restates a generated property as a theorem of the same name: evens.membership shadows the membership property of evens; such a name resolves to the theorem and hides the property");
   const declared = ok(handleMachineRequest({ id: 43, method: "declaration", params: { name: "evens.membership", files, moduleRoots: ["lib"] } }));
   assert.equal(declared.kind, "theorem");
   assert.equal(declared.name, "Shadow.evens.membership");
