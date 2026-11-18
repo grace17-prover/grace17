@@ -276,9 +276,15 @@ precedence in both the definition and the generated membership proof.
 
 A theorem section shares parameters and hypotheses without adding a
 namespace; each theorem in the section exports the shared variables as
-parameters and the shared hypotheses as premises. See
-[modules, namespaces, and sections](modules.md) for nested contexts,
-exported signatures, applications, and a runnable example.
+parameters and the shared hypotheses as premises. A definition may stand in
+a section too: `def`, `predicate`, `class`, `structure`, `defgraph`,
+`defunique`, and `defchoose` take the section variables as their leading
+parameters, the forms with proof obligations take the section hypotheses as
+the premises of their laws, and inside the section the definition is
+applied without the section variables. See
+[definitions in a section](modules.md#definitions-in-a-section) for the
+rules and [modules, namespaces, and sections](modules.md) for nested
+contexts, exported signatures, applications, and a runnable example.
 
 ## Scoped ring operations
 

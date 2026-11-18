@@ -209,13 +209,61 @@ explicit arguments remain available there.
 ones.** Keep broadly useful assumptions in the outer section and stronger ones
 in a smaller nested section. Unused context is never removed for you.
 
+### Definitions in a section
+
+A definition may stand inside a section as well: `def`, `predicate`,
+`class`, `structure`, `defgraph`, `defunique`, and `defchoose`. It takes
+every section variable as its leading parameters, in order, and is applied
+without them inside the section, so `def lfp (f : Set) : Set := …` under
+`variable (P : Set)` is `lfp(f)` there and `lfp(P, f)` everywhere else. A
+form with proof obligations takes every section hypothesis as a premise of
+its generated laws, in the order the hypotheses were declared and before
+its own `requires` clauses, so a `defunique` under `hypothesis field :
+IsField(R)` proves existence and uniqueness with `field` in scope and its
+`.selected` law requires it. The check warns, once per definition, about a
+section hypothesis none of its proofs uses; the premise is kept all the
+same, so a definition that needs fewer hypotheses belongs in an outer
+section.
+
+```grace17 import=Grace.Cumulus.Set
+section Shared
+variable (A x : Set)
+hypothesis hx : x ∈ A
+
+defunique chosen (z ∈ A) := z = x
+proof
+  witness x
+  refine ⟨hx, rfl⟩
+uniqueness
+  intro z
+  intro zMember
+  intro zValue
+  intro y
+  intro yMember
+  intro yValue
+  cc
+
+theorem chosen_member
+  shows chosen ∈ A
+proof
+  have h := chosen.selected with hx
+  exact h.left
+end Shared
+```
+
+Inside the section `chosen` is the value and `chosen.selected` is applied as
+any section theorem is; outside, the value is `chosen(A, x)` and the law
+takes `A`, `x`, and `hx`. A graph defined over the section variables alone
+is applied directly, `shiftBy(x)`, inside its section. The clauses of an
+equation-style `def` pattern only its own parameters; the section variables
+are fixed parameters in front of them. A definition's own binders never
+repeat a section variable: the section already binds it, and the check says
+so. Datatypes, the noncomputable recursion forms, and `notation` other than
+`notation ring` stay outside sections.
+
 ### A typical algebra workflow
 
-Declare the mathematical objects, then share their laws. A `def` or
-`predicate` may also stand inside a section: it takes the section variables
-as its leading parameters, in order, and is applied without them inside the
-section, so `def lfp (f : Set) : Set := …` under `variable (P : Set)` is
-`lfp(f)` there and `lfp(P, f)` everywhere else.
+Declare the mathematical objects, then share their laws.
 
 
 ```grace17 import=Grace.Cumulus.Algebra.Ring
@@ -263,8 +311,24 @@ namespace leaves that namespace active.
 | `end Name` | End the innermost section; the name must match. |
 | `end` | End the innermost section without repeating its name. |
 
-- Sections support `theorem`, `lemma`, and `instance` declarations. Definitions,
-  imports, namespace declarations, and `export open` belong outside sections.
+- Sections support `theorem`, `lemma`, and `instance` declarations and the
+  definition forms listed under [definitions in a
+  section](#definitions-in-a-section). Imports, namespace declarations, and
+  `export open` belong outside sections.
+- An instance takes only the section context its conclusion fixes: the
+  section variables its conclusion, its own binders, and its own `requires`
+  clauses mention, and of the section hypotheses those about these
+  variables that are predicates or conjunctions of predicates. A
+  hypothesis-shaped premise that shares a variable with the conclusion
+  fixes its other variables too, so under `hypothesis module : Module(M, R)`
+  an instance about `M` takes `R` and `module` as well. Instance synthesis
+  matches the conclusion against a goal and supplies predicate premises
+  from the facts in scope, so a hypothesis about a variable the conclusion
+  does not fix, or an equation such as `leading ≠ 0`, could never be
+  supplied; such a hypothesis is simply not a premise of the instance, and
+  a proof that reaches for it is told why it is absent. A variable the
+  instance's own premises mention must still be fixed by the conclusion or
+  by a hypothesis-shaped premise.
 - Plain `open` directives may appear inside a section; their scope is restored
   when the section ends.
 - Write each `hypothesis` declaration on one line. Its variables must already

@@ -398,12 +398,16 @@ The checker's message is quoted for each so it can be matched.
 - **A fact for an existential conjunct.** `exact ⟨fibre, h⟩` against
   `(∃ e, …) ∧ P` with `fibre : ∃ e, …` fills the conjunct with the fact; a
   term in that position is a witness only when no fact proves it.
-- **Instances in sections.** Every section variable must occur in an
-  instance's conclusion and every section hypothesis must be a predicate
-  (no equation hypotheses), so per-value membership facts in a section with
-  an equation go in a separate section or become theorems. An instance
-  declared later in a module is invisible earlier. Several instances
-  proving the same fact are not an ambiguity; the first stands.
+- **Instances in sections.** An instance takes only the section context
+  its conclusion fixes: the section variables its conclusion mentions, the
+  predicate-shaped section hypotheses about them, and what a
+  hypothesis-shaped premise such as `Module(M, R)` fixes from them. A
+  section variable
+  the conclusion omits, and an equation hypothesis such as `leading ≠ 0`,
+  are not premises of the instance, and a proof that reaches for them is
+  told why they are absent. An instance declared later in a module is
+  invisible earlier. Several instances proving the same fact are not an
+  ambiguity; the first stands.
 - **An unused section hypothesis is a warning.** A section hypothesis that
   a theorem's statement does not mention and its proof does not use is
   still a premise, and `g17 check` reports it as a warning; move
