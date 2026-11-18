@@ -335,6 +335,8 @@ interface SurfaceSignature {
   readonly requirementCount?: number;
   readonly resultType?: string;
   readonly resultTypeArguments?: readonly Term[];
+  /** The sort of a graph's values, `f(x)` under `defgraph f (x ∈ ℕ) : ℝ`. */
+  readonly valueSort?: string;
 }
 
 interface SurfaceClassDefinition {
@@ -376,6 +378,7 @@ export interface SurfaceEnvironmentIndex {
     readonly requirementCount?: number;
     readonly resultType?: string;
     readonly resultTypeArguments?: readonly Term[];
+    readonly valueSort?: string;
   }[];
   /** Each module's expression carrier annotations after its elaboration, inherited and own. */
   readonly annotations: readonly (readonly [module: string, entries: readonly (readonly [string, string])[]])[];
@@ -4443,9 +4446,13 @@ function elaborateChosenDefinition(
     `expected \`${kind} f (parameters) (x ∈ A) := predicate\` followed by an existence proof`);
   const [, name, parameterSource, variable, domain, condition] = match;
   const parameters = parseBinderGroups(parameterSource!, header.number);
-  if (parameters.rest || parameters.binders.some(binder =>
-    !["Set", "Nat", "Real"].includes(binder.type) || binder.implicit || binder.name === variable)) {
-    throw new SurfaceError(header.number, `${kind} parameters must be distinct explicit Set, Nat, or Real binders`);
+  // A typed binder, `(cs : List(A))`, is a set parameter with its typing as
+  // a premise of the laws, as it is for a theorem; an implicit binder has
+  // no place in the laws' `at` lists.
+  if (parameters.rest || parameters.binders.some(binder => binder.implicit || binder.name === variable)) {
+    throw new SurfaceError(header.number, `${kind} parameters must be distinct explicit binders, ` +
+      "(x : Set), (n : Nat), or (cs : List(A)); an implicit binder {A : Set} is not accepted, " +
+      "so make A explicit or state the typing as a requires clause");
   }
   const requirementLines = joinTheoremClauseContinuations(block.slice(headerEnd, proofMarker))
     .filter(line => line.text && !line.narrative);
@@ -4473,6 +4480,11 @@ function elaborateChosenDefinition(
   const chosen = elaborateExplicitDefinition(kernel,
     asLines(`def ${name} ${parameterSource} : Set := ${uniqueMode ? "union" : "choose"}(${candidateTerm})`), scope);
   const environment = surfaceEnvironments.get(kernel)!;
+  // The bound of the value, `(m ∈ ℕ)`, places the value in the bound's
+  // sort for the notation around it, as a declared result sort does, with
+  // the selection law as the evidence the proofs must supply.
+  const valueSort = boundSortName(kernel, scope, parameters.binders, domain!, header.number);
+  if (valueSort) environment.signatures.set(chosen, { ...environment.signatures.get(chosen)!, resultType: valueSort });
   const previousTraces = environment.captureTacticTraces;
   environment.captureTacticTraces = false;
   try {
@@ -4627,6 +4639,9 @@ function elaborateGraphDefinition(
   }));
   const graph = elaborateExplicitDefinition(kernel,
     asLines(`def ${name} : Set := { (${index} ↦ ${value}) | ${index} ∈ ${carrier} }`), scope);
+  const graphEnvironment = surfaceEnvironments.get(kernel)!;
+  const valueSort = boundSortName(kernel, scope, [], codomain, header.number);
+  if (valueSort) graphEnvironment.signatures.set(graph, { ...graphEnvironment.signatures.get(graph)!, valueSort });
   // These proofs have generated tactic lines, not source lines. Keep their
   // kernel certificates while suppressing misleading editor step locations.
   const environment = surfaceEnvironments.get(kernel)!;
@@ -4791,6 +4806,10 @@ function elaborateBoundedGraphDefinition(
   const definition = elaborateExplicitDefinition(kernel,
     asLines(`def ${name} ${paramDecl} : Set := { (${index} ↦ (${value})) | ${index} ∈ ${domain} }`), valueScope);
   const environment = surfaceEnvironments.get(kernel)!;
+  // The codomain, `: ℝ`, places the graph's values `f(x)` in its sort for
+  // the notation around them, as a declared result sort does.
+  const valueSort = boundSortName(kernel, scope, parameters.binders, codomain!, header.number);
+  if (valueSort) environment.signatures.set(definition, { ...environment.signatures.get(definition)!, valueSort });
   const previousTraces = environment.captureTacticTraces;
   environment.captureTacticTraces = false;
   try {
@@ -17302,10 +17321,11 @@ function sectionDefinitionBlock(
     const proofMarker = block.findIndex(line => line.text === "proof");
     return [headed(`${keyword} ${name} ${groups} ${tail}`.trimEnd()), ...block.slice(1).map((line, index) => {
       if (proofMarker >= 0 && index + 1 >= proofMarker) return line;
-      const clause = /^\|\s*(.*?)\s*(=>|⇒)\s*(.+)$/u.exec(line.text);
+      // A clause whose body continues on the next line ends at the arrow.
+      const clause = /^\|\s*(.*?)\s*(=>|⇒)\s*(.*)$/u.exec(line.text);
       if (!clause) return line;
       const patterns = clause[1] ? `${prefix}, ${clause[1]}` : prefix;
-      return { ...line, text: `| ${patterns} ${clause[2]} ${clause[3]}` };
+      return { ...line, text: `| ${patterns} ${clause[2]} ${clause[3]}`.trimEnd() };
     })];
   }
   if (keyword === "defgraph" && names.length && /^\(\S+\s*:\s*(?:Nat|Real)\)\s*:\s*(?:Nat|Real)\s*:=/u.test(tail)) {
@@ -18484,6 +18504,7 @@ function parseFormula(
       };
       const [left, right] = naturalizeRingNumerals(kernel, scope,
         operand(source.slice(0, index)), operand(source.slice(index + token.length)));
+      rejectUnplacedRingComparison(kernel, scope, left, right, token, line);
       // A predicate supplied by a hypothesis in scope, `a ≤ b` under an
       // order, when an operand lies in its carrier; otherwise the typed
       // declarations of the token decide as they do with no hypothesis.
@@ -18580,7 +18601,7 @@ function parseFormula(
         notationOperandTypes(item).filter((type): type is string => type !== undefined)))];
       const valueSorts = (term: Term): ReadonlySet<string> =>
         sortsUnknown && exactTyped.length === 0 && term.tag === "app" && term.args.length > 0 && !numeral(term)
-          ? new Set(functionValueSorts(kernel, term, typedSorts, scopeVisibility(kernel, scope)))
+          ? new Set(functionValueSorts(kernel, term, typedSorts, scopeVisibility(kernel, scope), scope.localFormulas?.() ?? []))
           : new Set();
       const leftValueSorts = valueSorts(left);
       const rightValueSorts = valueSorts(right);
@@ -18971,8 +18992,13 @@ function termTypeNames(kernel: Kernel, term: Term, scope: SurfaceScope): Readonl
   if (annotated) result.add(annotated);
   for (const type of notationTypesForTerm(kernel, term, scope)) result.add(type);
   // The value f(x) of a function `f : A → B` in scope has the sort of B, so
-  // that `(f : ℝ → ℝ)` makes f(B) a real for the notation around it.
+  // that `(f : ℝ → ℝ)` makes f(B) a real for the notation around it, and
+  // so does the value of a graph defined with that codomain.
   const application = term.tag === "app" && term.args.length === 2 && shortName(term.fn) === "apply" ? term.args[0]! : undefined;
+  if (application?.tag === "app") {
+    const graphSort = surfaceEnvironments.get(kernel)?.signatures.get(application.fn)?.valueSort;
+    if (graphSort) result.add(graphSort);
+  }
   for (const formula of scope.localFormulas?.() ?? []) {
     if (formula.tag === "pred" && formula.args.length === 1 && termEquals(formula.args[0]!, term)) {
       result.add(formula.pred);
@@ -18993,6 +19019,25 @@ function carrierSortName(kernel: Kernel, scope: SurfaceScope, carrier: Term): st
   if (carrier.tag !== "app" || carrier.args.length !== 0) return undefined;
   const sort = ({ reals: "Real", rationals: "Rational", integers: "Integer" } as Readonly<Record<string, string>>)[shortName(carrier.fn)];
   return sort ? resolveOptional(sort, scope, candidate => kernel.predicates.get(candidate) === 1) : undefined;
+}
+
+/**
+ * The sort a bound written in a definition header names, `Nat` for the
+ * `ℕ` of `(m ∈ ℕ)` and `Real` for the `: ℝ` of a graph's codomain, read
+ * with the definition's own binders in scope; a bound that is no carrier
+ * of a sort, `(x ∈ A)`, names none.
+ */
+function boundSortName(
+  kernel: Kernel, scope: SurfaceScope, binders: readonly Binder[], bound: string, line: number,
+): string | undefined {
+  let carrier: Term;
+  try {
+    carrier = parseTerm(bound, kernel, new Set(binders.map(item => item.name)), line, scopedBinders(scope, binders));
+  } catch (error) {
+    if (error instanceof SurfaceError) return undefined;
+    throw error;
+  }
+  return carrierSortName(kernel, scope, carrier);
 }
 
 /** Decide an overloaded-notation operand type using both syntax and checked refinements. */
@@ -19058,9 +19103,10 @@ function placementSorts(
   const types = termTypeNames(kernel, term, scope);
   for (const sort of sorts) if (types.has(sort)) found.add(sort);
   if (found.size) return [...found];
-  for (const sort of functionValueSorts(kernel, term, sorts, scopeVisibility(kernel, scope))) found.add(sort);
+  const facts = scope.localFormulas?.() ?? [];
+  for (const sort of functionValueSorts(kernel, term, sorts, scopeVisibility(kernel, scope), facts)) found.add(sort);
   if (found.size) return [...found];
-  for (const fact of scope.localFormulas?.() ?? []) {
+  for (const fact of facts) {
     if (fact.tag === "pred" && fact.pred === "in" && fact.args.length === 2 && termEquals(fact.args[0]!, term)) {
       const sort = carrierSortName(kernel, scope, fact.args[1]!);
       if (sort && sorts.includes(sort)) found.add(sort);
@@ -19593,7 +19639,10 @@ function typedOperandsOutsideHypothesis(
   const unsorted = operands.filter(term => !sorted(term));
   if (unsorted.length < operands.length) {
     if (unsorted.some(placed)) return false;
-    const natural = (term: Term): boolean => sorts.some(type => termHasType(kernel, term, type, scope));
+    // A value the typing rules place in a sort, with a side condition met
+    // by a fact in scope, is read in that sort as it is elsewhere.
+    const natural = (term: Term): boolean => sorts.some(type => termHasType(kernel, term, type, scope)) ||
+      placementSorts(kernel, scope, term, sorts).length > 0;
     if (unsorted.some(natural)) return true;
     // An operand the typing rules place in the carrier of a structure an
     // instance supplies, polynomialConstant(B, 1)(x) in the polynomial ring
@@ -19607,7 +19656,8 @@ function typedOperandsOutsideHypothesis(
     return true;
   }
   if (unsorted.some(placed)) return false;
-  return operands.some(term => sorts.some(type => termHasType(kernel, term, type, scope)));
+  return operands.some(term => sorts.some(type => termHasType(kernel, term, type, scope)) ||
+    placementSorts(kernel, scope, term, sorts).length > 0);
 }
 
 /**
@@ -20030,6 +20080,57 @@ function statementHypotheses(statement: Formula): Formula[] {
 }
 
 /**
+ * Whether a term is placed in a ring's carrier by its shape or a fact: the
+ * ring's constants and numerals, the value of one of its operations, the
+ * value of a map into the carrier, or a membership fact.
+ */
+function ringMember(term: Term, ring: RingNotation, facts: readonly Formula[]): boolean {
+  if (termEquals(term, ring.zero) || termEquals(term, ring.one) || ringNumeralValue(term, ring) !== undefined) return true;
+  if (term.tag === "app" && ((term.fn === ring.call1 && termEquals(term.args[0]!, ring.neg)) ||
+      (term.fn === ring.call2 && (termEquals(term.args[0]!, ring.add) || termEquals(term.args[0]!, ring.mul))))) return true;
+  if (term.tag === "app" && term.fn.split(".").at(-1) === "apply" && term.args.length === 2 &&
+      facts.some(fact => fact.tag === "pred" &&
+        ((fact.pred.endsWith(".IsRingHom") && fact.args.length === 13 && termEquals(fact.args[7]!, ring.carrier)) ||
+         (fact.pred.endsWith(".FunctionBetween") && fact.args.length === 3 && termEquals(fact.args[2]!, ring.carrier))) &&
+        termEquals(fact.args[0]!, term.args[0]!))) return true;
+  return facts.some(fact => fact.tag === "pred" && fact.pred === "in" &&
+    termEquals(fact.args[0]!, term) && termEquals(fact.args[1]!, ring.carrier));
+}
+
+/**
+ * A bare literal read as a ring numeral is rejected as the operand of a
+ * comparison whose other operand is placed in no ring and in no sort:
+ * `2 ≤ f(x)` with `f(x)` placed nowhere would compare the ring's two with
+ * a set under the natural order, and `1 ≤ n` under `Nat(n)` has already
+ * taken the natural literal. The error names both readings.
+ */
+function rejectUnplacedRingComparison(
+  kernel: Kernel, scope: SurfaceScope, left: Term, right: Term, token: string, line: number,
+): void {
+  const rings = scope.rings ?? [];
+  if (!rings.length) return;
+  const leftBare = bareRingNumerals.has(left);
+  if (leftBare === bareRingNumerals.has(right)) return;
+  const numeral = leftBare ? left : right;
+  const other = leftBare ? right : left;
+  if (naturalValue(other) !== undefined) return;
+  const facts = scope.localFormulas?.() ?? [];
+  for (const ring of rings) {
+    if (ringMember(other, ring, facts)) return;
+    const sort = carrierSortName(kernel, scope, ring.carrier);
+    if (sort && placementSorts(kernel, scope, other, [sort]).length) return;
+  }
+  const ring = rings.find(item => ringMember(numeral, item, [])) ?? rings[0]!;
+  const value = bareRingNumerals.get(numeral)!.toString();
+  const otherText = formatTerm(other, { reparse: true });
+  const written = (literal: string): string => leftBare ? `${literal} ${token} ${otherText}` : `${otherText} ${token} ${literal}`;
+  throw new SurfaceError(line,
+    `cannot read ${written(value)}: ${value} is the numeral of the ring ${ring.name} and ${otherText} is placed in no ring ` +
+    `and in no sort; write ${written(`(${value}:N)`)} for the natural order, or ${written(`${ring.name}[${value}]`)} ` +
+    `to compare the ring's numeral, or place ${otherText} by a fact, a typing rule, or an instance`);
+}
+
+/**
  * The ring notation an operation reads under: the one in scope, or among
  * several the one whose carrier the operands are placed in by a fact or
  * a numeral, else by their sorts, `-b` under `(b : Real)` being the
@@ -20042,18 +20143,7 @@ function selectRing(
   const rings = scope.rings ?? [];
   if (rings.length === 1) return rings[0]!;
   const facts = scope.localFormulas?.() ?? [];
-  const inRing = (term: Term, ring: RingNotation): boolean => {
-    if (termEquals(term, ring.zero) || termEquals(term, ring.one) || ringNumeralValue(term, ring) !== undefined) return true;
-    if (term.tag === "app" && ((term.fn === ring.call1 && termEquals(term.args[0]!, ring.neg)) ||
-        (term.fn === ring.call2 && (termEquals(term.args[0]!, ring.add) || termEquals(term.args[0]!, ring.mul))))) return true;
-    if (term.tag === "app" && term.fn.split(".").at(-1) === "apply" && term.args.length === 2 &&
-        facts.some(fact => fact.tag === "pred" &&
-          ((fact.pred.endsWith(".IsRingHom") && fact.args.length === 13 && termEquals(fact.args[7]!, ring.carrier)) ||
-           (fact.pred.endsWith(".FunctionBetween") && fact.args.length === 3 && termEquals(fact.args[2]!, ring.carrier))) &&
-          termEquals(fact.args[0]!, term.args[0]!))) return true;
-    return facts.some(fact => fact.tag === "pred" && fact.pred === "in" &&
-      termEquals(fact.args[0]!, term) && termEquals(fact.args[1]!, ring.carrier));
-  };
+  const inRing = (term: Term, ring: RingNotation): boolean => ringMember(term, ring, facts);
   const candidates = rings.filter(ring => operands.every(term => naturalValue(term) !== undefined || inRing(term, ring)));
   if (candidates.length === 1) return candidates[0]!;
   if (candidates.length === 0) {

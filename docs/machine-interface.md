@@ -722,6 +722,14 @@ result's `file` and `line` say where the probe stood. Nothing on disk is
 written. A text that does not elaborate answers `elaboration_failed` with
 the elaborator's message. With typed `variables` such as `(n : Nat)`, the
 typing facts of the binders stay in front of a formula's printed form.
+At a `line` inside a theorem, that theorem's binders and the section's
+variables are already in scope, so `variables` names only the free
+variables the text adds: repeating a binder of the theorem, `(cs :
+List(A))` under `theorem rm.two (r : Set) (cs : List(A))`, is refused as
+a duplicate binder. A comprehension `{ k ∈ ℕ | … }` is the body of a
+`def`, where it becomes a Separation definition, and no term of a
+formula: the probe cannot read it, and the message says to define it and
+elaborate the name.
 
 ### audit
 

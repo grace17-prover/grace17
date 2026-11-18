@@ -1516,7 +1516,12 @@ function elaborate(params: Params) {
     return { text, kind, ...context, ...(variables ? { variables } : {}), printed, canonical, symbols };
   }
   const failure = last!.raw.failure;
-  throw new MachineError("elaboration_failed", `${text} does not elaborate as a ${requested === "auto" ? "formula or term" : last!.kind}: ${failure.message}`, {
+  // A comprehension is the body of a `def`, where it becomes a Separation
+  // definition, and no term of a formula; the probe cannot read it.
+  const comprehension = /\{\s*[\p{L}_][\p{L}\p{M}\p{N}_]*\s*(?:∈|in\s)[^{}|]*\|/u.test(text)
+    ? "; a comprehension { x ∈ A | … } is a definition body, not a term: define it, `def name : Set := { … }`, and elaborate the name"
+    : "";
+  throw new MachineError("elaboration_failed", `${text} does not elaborate as a ${requested === "auto" ? "formula or term" : last!.kind}: ${failure.message}${comprehension}`, {
     ...context, text, kind: last!.kind,
   });
 }

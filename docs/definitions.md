@@ -139,7 +139,11 @@ input and output combinations. It uses `typecheck` to prove output closure,
 without a user-written proof block. The bounded form supports explicit Set,
 Nat, and Real parameters and named, potentially multiline `requires` clauses.
 For domains ℕ and ℝ, the generated input laws can use the corresponding
-Nat/Real guard. A graph over an infinite domain is not an executable table,
+Nat/Real guard. A codomain that is the carrier of a sort, `: ℝ` or `:
+Real`, places the values `g(x)` in that sort for the notation around them,
+as a declared result sort does, so `g(X) + 1` is the real sum under
+`defgraph g (X ∈ ℝ) : ℝ := …`; the closure law is the evidence a proof
+then supplies. A graph over an infinite domain is not an executable table,
 and these laws say nothing about behavior outside its domain.
 
 ## Unique values: `defunique`
@@ -167,6 +171,17 @@ The `proof` block proves `∃ x ∈ A, P(x)`. The `uniqueness` block proves
 Introduce the two values, their membership assumptions, and their properties
 in that order. The generated laws are `.exists`, `.unique`, and `.selected`.
 The last states that the defined value lies in A and satisfies P.
+
+The parameters are explicit binders, `(x : Set)`, `(n : Nat)`, or a typed
+one such as `(cs : List(A))`, which is a set parameter whose typing is a
+premise of the laws, as a theorem's binder is; an implicit binder `{A :
+Set}` is not accepted, since the laws are applied with an `at` list. A
+bound that is the carrier of a sort, `(m ∈ ℕ)` or `(x ∈ ℝ)`, places the
+value in that sort for the notation around it, as a declared result sort
+does: under `defunique rootMultiplicity (cs r : Set) (m ∈ ℕ) := …` the
+statement `2 ≤ rootMultiplicity(cs, r)` is the natural order with the
+natural two, inside a ring section too, and `.selected` is the evidence a
+proof supplies. The same holds of `defchoose`.
 
 The implementation forms `.candidates` by Separation and defines the value
 as `union(candidates)`. Existence and uniqueness make that set a singleton;

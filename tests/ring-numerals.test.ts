@@ -189,3 +189,70 @@ end Rings
   assert.ok(occurrences(ring, "one") > 1);
   assert.doesNotMatch(ring, /Nat\.Rec\.(add|mul)"/);
 });
+
+// The bound of a `defunique`, `(m ∈ ℕ)`, places the value in ℕ for the
+// notation around it, inside its section and outside, so the literals
+// beside it are natural; and a bare literal read as a ring numeral is
+// rejected beside a comparison operand that is placed nowhere.
+test("a defunique's bound places its value, and a ring numeral beside an " +
+  "unplaced comparison operand is an error", () => {
+  const imports = "import Grace.Cumulus.Algebra.Ring\n" +
+    "import Grace.Cumulus.Cardinal.Enumeration";
+  const kernel = load(header(imports) + `
+defunique rm (cs : List(A)) (r : Set) (m ∈ ℕ) := m = m
+requires center : r ∈ A
+proof
+  sorry
+uniqueness
+  sorry
+
+theorem byBound (r : Set) (cs : List(A))
+  requires center : r ∈ A
+  shows 2 ≤ rm(cs, r) ∧ rm(cs, r) = 1 ∧ rm(cs, r) + 1 ≤ length{A}(cs)
+proof
+  sorry
+
+theorem ringElement (x : Set)
+  requires hx : x ∈ A
+  shows x < 1 ∨ x = 0
+proof
+  sorry
+end Rings
+
+theorem outsideBound (A add zero neg mul one r cs : Set)
+  shows 2 ≤ rm(A, add, zero, neg, mul, one, cs, r) ∨
+    rm(A, add, zero, neg, mul, one, cs, r) = 0
+proof
+  sorry
+`, "ZFG");
+  const statement = (name: string): string =>
+    canonical(kernel.theorems.get(`Numerals.${name}`)!);
+  const occurrences = (statement: string, name: string): number =>
+    statement.split(`{"name":"${name}","tag":"var"}`).length - 1;
+  // The section's zero and one are arguments of rm; the literals beside
+  // its values are the natural numerals.
+  const inside = statement("byBound");
+  assert.doesNotMatch(inside, /ringNat"|call2"/);
+  assert.match(inside, /"tag":"nat","value":"2"/);
+  assert.match(inside, /"tag":"nat","value":"1"/);
+  assert.match(inside, /LessEqual"/);
+  assert.match(inside, /Nat\.Rec\.add"/);
+  const outside = statement("outsideBound");
+  assert.doesNotMatch(outside, /ringNat"/);
+  assert.match(outside, /"tag":"nat","value":"2"/);
+  assert.match(outside, /"tag":"nat","value":"0"/);
+  assert.match(outside, /LessEqual"/);
+  // A ring element beside a literal keeps the ring's numeral.
+  const element = statement("ringElement");
+  assert.equal(occurrences(element, "one"), 2);
+  assert.equal(occurrences(element, "zero"), 2);
+  assert.throws(() => load(header("import Grace.Cumulus.Algebra.Ring") + `
+def f (x : Set) : Set := x
+
+theorem stray (x : Set)
+  shows 2 ≤ f(x)
+proof
+  sorry
+end Rings
+`, "ZFG"), /cannot read 2 ≤ f\(A, add, zero, neg, mul, one, x\): 2 is the numeral of the ring R and f\(A, add, zero, neg, mul, one, x\) is placed in no ring and in no sort; write \(2:N\) ≤ f\(A, add, zero, neg, mul, one, x\) for the natural order, or R\[2\] ≤ f\(A, add, zero, neg, mul, one, x\) to compare the ring's numeral/);
+});
