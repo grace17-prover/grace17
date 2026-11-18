@@ -27,9 +27,9 @@ test("the CAD blueprint elaborates with its admissions", () => {
   const run = spawnSync("node", ["--max-old-space-size=8192", "--disable-warning=ExperimentalWarning", "bin/g17.ts", "check",
     "--json", "--continue", "--quiet", "--module-root", "blueprints", "--module-root", "lib", ...files],
     { encoding: "utf8", maxBuffer: 1 << 28 });
-  const report = JSON.parse(run.stdout) as { checked?: { file: string; theorems: string[] }[]; failed?: { file: string; error: string }[] };
-  const failed = (report.failed ?? []).filter(item => item.file.includes(root));
-  assert.deepEqual(failed.map(item => `${item.file}: ${item.error.slice(0, 120)}`), []);
+  const report = JSON.parse(run.stdout) as { checked?: { file: string; theorems: string[] }[]; failures?: { file: string; line?: number; message: string }[] };
+  const failed = (report.failures ?? []).filter(item => item.file.includes(root));
+  assert.deepEqual(failed.map(item => `${item.file}:${item.line ?? "?"}: ${item.message.slice(0, 120)}`), []);
   const checked = (report.checked ?? []).filter(item => item.file.includes(root));
   assert.equal(checked.length, files.length);
   const headlines: [string, string][] = [
