@@ -424,3 +424,96 @@ test("declaration and signature take a module to pick among same-named declarati
   assert.deepEqual(generated.premises.map((item: { formula: string }) => item.formula), ["A ⊆ B", "x ∈ A"]);
   assert.equal(generated.conclusion, "x ∈ B");
 });
+
+// A blueprint module: a defunique whose existence and uniqueness proofs are
+// admitted, and a theorem admitted after it.
+const uniqueSource = `module Unique
+import Grace.Cumulus.Set.Basic
+
+defunique identity (A : Set) (x ∈ {A}) := x = A
+proof
+  sorry
+uniqueness
+  sorry
+
+theorem identity.self (A : Set)
+  shows identity(A) = A
+proof
+  sorry
+`;
+
+test("a workspace admitted with sorry is a normal workspace for every method, a defunique included", () => {
+  const files = [{ name: "Unique.g17", source: uniqueSource }];
+  const checked = ok<MachineCheckResult>(handleMachineRequest({ id: 80, method: "check", params: { files } }));
+  assert.equal(checked.status, "checked");
+  // The existence and uniqueness proofs are admitted, the selection law derived from them is dependent.
+  assert.deepEqual(checked.theorems.map(theorem => theorem.status).sort(), ["admitted", "admitted", "admitted", "dependent"]);
+  // The admitted theorems with their lines and the lines of their sorries.
+  const admitted = (checked as unknown as { admitted: { theorem: string; file: string; line: number; sorries: number[] }[] }).admitted;
+  const self = admitted.find(item => item.theorem === "Unique.identity.self");
+  assert.deepEqual(self, { theorem: "Unique.identity.self", file: "Unique.g17", line: 10, sorries: [13] });
+  assert.ok(admitted.every(item => item.sorries.length > 0 && item.file === "Unique.g17"));
+  assert.equal(admitted.length, 3);
+  // The diagnostics are the file's own admissions, one per sorry.
+  assert.deepEqual(checked.diagnostics.map(item => [item.kind, item.line]), [["sorry", 6], ["sorry", 8], ["sorry", 13]]);
+  // elaborate below the defunique keeps its uniqueness obligation admitted, as check does.
+  const term = ok(handleMachineRequest({ id: 81, method: "elaborate", params: { files, line: 13, text: "identity(A)" } }));
+  assert.equal(term.kind, "term");
+  assert.equal(term.printed, "identity(A)");
+  assert.equal(term.theorem, "identity.self");
+  const formula = ok(handleMachineRequest({ id: 82, method: "elaborate", params: { files, line: 10, text: "identity(B) ∈ {B}", variables: "(B : Set)" } }));
+  assert.equal(formula.kind, "formula");
+  // goal at the sorry says the theorem is admitted and shows the goal it admits.
+  const goal = ok(handleMachineRequest({ id: 83, method: "goal", params: { files, line: 13 } }));
+  assert.equal(goal.kind, "theorem");
+  assert.equal(goal.theoremStatus, "admitted");
+  assert.equal(goal.state.goals[0].goal, "identity(A) = A");
+  // audit takes the short name of a theorem of the workspace as declaration does.
+  const audit = ok(handleMachineRequest({ id: 84, method: "audit", params: { files, theorem: "identity.self" } }));
+  assert.equal(audit.theorem, "Unique.identity.self");
+  assert.deepEqual(audit.direct, ["sorry.Unique.identity.self.13.1"]);
+  assert.equal(failed(handleMachineRequest({ id: 85, method: "audit", params: { files, theorem: "nothing.here" } })).code, "unknown_theorem");
+  const declared = ok(handleMachineRequest({ id: 86, method: "declaration", params: { files, name: "identity.self" } }));
+  assert.equal(declared.name, "Unique.identity.self");
+  assert.equal(declared.kind, "theorem");
+});
+
+test("check with continue goes past a failing module of a served workspace and reports every failure", () => {
+  const directory = mkdtempSync(join(tmpdir(), "g17-serve-continue-"));
+  const write = (name: string, body: string): string => { writeFileSync(join(directory, `${name}.g17`), body); return join(directory, `${name}.g17`); };
+  try {
+    const a = write("A", "module A\n\ntheorem a.refl (x : Set)\n  shows x = x\nproof\n  rfl\n");
+    const b = write("B", "module B\nimport A\n\ntheorem b.broken (x : Set)\n  shows x = x\nproof\n  exact nonsense\n\ntheorem b.admitted (x : Set)\n  shows x = x\nproof\n  sorry\n");
+    const c = write("C", "module C\nimport B\n\ntheorem c.refl (x : Set)\n  shows x = x\nproof\n  rfl\n");
+    const d = write("D", "module D\nimport Grace.Cumulus.Set.Core\n\ntheorem d.refl (x : Set)\n  shows x = x\nproof\n  rfl\n");
+    const files = [{ name: a }, { name: b }, { name: c }, { name: d }];
+    const params = { files, moduleRoots: [directory], continue: true };
+    const result = ok<Record<string, any>>(handleMachineRequest({ id: 90, method: "check", params }));
+    assert.equal(result.status, "failed");
+    assert.deepEqual(result.files.map((file: { name: string; status: string }) => [file.name.split("/").at(-1), file.status]),
+      [["A.g17", "checked"], ["B.g17", "failed"], ["C.g17", "skipped"], ["D.g17", "checked"]]);
+    assert.deepEqual(result.failures.map((item: { module: string; line: number; theorem: string }) => [item.module, item.line, item.theorem]), [["B", 7, "B.b.broken"]]);
+    assert.deepEqual(result.skipped.map((item: { module: string; because: string }) => [item.module, item.because]), [["C", "B"]]);
+    assert.deepEqual(result.skippedAfterFailure, []);
+    const statuses = Object.fromEntries(result.theorems.map((theorem: { name: string; status: string }) => [theorem.name, theorem.status]));
+    assert.deepEqual(statuses, { "A.a.refl": "proved", "D.d.refl": "proved", "B.b.admitted": "admitted", "B.b.broken": "failed" });
+    assert.deepEqual(result.admitted.map((item: { theorem: string; line: number; sorries: number[] }) => [item.theorem, item.line, item.sorries]), [["B.b.admitted", 9, [12]]]);
+    assert.deepEqual(result.diagnostics.map((item: { kind: string; line: number }) => [item.kind, item.line]), [["surface", 7], ["sorry", 12]]);
+    assert.ok(result.checked.some((item: { module?: string }) => item.module === "D"));
+    assert.ok(result.checked.some((item: { module?: string }) => item.module === "Grace.Cumulus.Set.Core"));
+    // A source given with the file stands in for the file on disk.
+    const repaired = { ...params, files: [{ name: a }, { name: b, source: "module B\nimport A\n\ntheorem b.fixed (x : Set)\n  shows x = x\nproof\n  rfl\n" }, { name: c }, { name: d }] };
+    const again = ok<Record<string, any>>(handleMachineRequest({ id: 91, method: "check", params: repaired }));
+    assert.equal(again.status, "checked");
+    assert.deepEqual(again.failures, []);
+    assert.deepEqual(again.skipped, []);
+    assert.ok(again.files.every((file: { status: string }) => file.status === "checked"));
+    assert.ok(again.theorems.some((theorem: { name: string }) => theorem.name === "C.c.refl"));
+    // An active file reports its theorems alone; the others are still checked.
+    const active = ok<Record<string, any>>(handleMachineRequest({ id: 92, method: "check", params: { ...params, activeFile: d } }));
+    assert.equal(active.status, "failed");
+    assert.deepEqual(active.theorems.map((theorem: { name: string }) => theorem.name), ["D.d.refl", "B.b.admitted", "B.b.broken"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

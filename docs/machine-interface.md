@@ -136,7 +136,9 @@ Request: a workspace, and optionally `audit: true` to add each theorem's
 axiom audit, `dependencies: false` to skip each theorem's dependency lists,
 `kernel: true` to add the kernel derivation of each theorem, `symbols: true`
 to add the symbol table the hover uses, `digest: true` to add the
-environment digest, and `imports: true` to audit the imports (see below).
+environment digest, `imports: true` to audit the imports (see below), and
+`continue: true` to go on past a failing file and report every failure
+(see `--continue` below).
 
 ```json
 {"id": 2, "method": "check",
@@ -193,7 +195,8 @@ The shape:
 - `foundation` is the kernel's foundation report: `profile`, and when the
   check succeeded, `axioms` and `schemaInstances`.
 - `files` summarizes each workspace file: `status` is `checked`, `context`
-  (loaded as a dependency, not reported), `failed`, or `unchecked`; a
+  (loaded as a dependency, not reported), `failed`, `unchecked`, or, under
+  `continue`, `skipped` (an import of it failed); a
   checked file also carries its `module`, and counts of `definitions`,
   `theorems`, `evaluations`, `sorries` (the `sorry` lines in the file's
   own proofs: its own obligations), the `loaded` report of a module
@@ -214,6 +217,10 @@ The shape:
   admission it rests on, so a `dependent` theorem's list names the
   admitted theorems, with their files and lines, that it depends on; its
   `dependencies.axioms` carries the same admissions by axiom name.
+  `admitted`, beside `theorems`, lists the admitted theorems alone, in
+  the same order, each as `{ "theorem", "file", "line", "sorries" }` with
+  the line the theorem starts at and the lines of its own `sorry` steps:
+  the obligations a workspace still carries, without reading every trace.
   `statement` is the
   theorem printed as the Workbench prints it. `initial` is the state at the
   start of the proof and `steps` the checked tactic steps, each with its
@@ -234,7 +241,10 @@ The shape:
   `assumptions`, the same formulas without names. No goals means the proof
   is complete at that point. These strings are the ones the Workbench goal
   pane renders.
-- `diagnostics` carries one entry per error and one warning per `sorry`,
+- `diagnostics` carries one entry per error and one warning per `sorry`
+  of the reported files (an admission in a dependency reaches the theorems
+  that rest on it through their `sorries` and the file summaries'
+  `admittedSorries`, not the diagnostics),
   each with `file`, `line`, `column`, `endColumn`, `message`, and the
   `theorem` it falls in. The column span is the one the editor underlines.
   Two further kinds never fail a check. A `warning` of kind
@@ -243,8 +253,12 @@ The shape:
   name (a theorem `rationalCut.membership` beside the definition
   `rationalCut`, whose record already carries `membership`): the name then
   resolves to the theorem and hides the property. It stands at the first
-  such theorem and lists every one in `theorems`, with the first's
-  `definition`. With `imports: true`, a `note` of kind `transitive-import`
+  such theorem; its message names each theorem with the property it
+  shadows (`rationalCut.membership shadows the membership property of
+  rationalCut`), and it carries the first's `definition` and `property`,
+  every such theorem in `theorems`, and in `shadowed` each with its
+  `theorem`, `definition`, `property`, and `line`.
+  With `imports: true`, a `note` of kind `transitive-import`
   for every declaration a reported module uses whose module is neither
   the module itself, one of its direct imports, nor the core
   (`Grace.Core` and the bootstrap): `declaration`, its `module`, the direct
@@ -304,6 +318,19 @@ and `skipped ...` lines and a count follow the checked modules. With
 printed, each failure once, without the per-module `checked` and `eval`
 lines. The flag takes no `--artifacts`: it elaborates from source.
 `npm run check:cumulus -- --continue` is the whole library in one run.
+
+The `check` method with `continue: true` is the same run over a
+workspace: every workspace file is elaborated in its own fork of the
+environment, dependencies before dependents, and the result carries
+`failures`, `skipped`, and `skippedAfterFailure` as the command line's
+JSON does, the partial-trace `theorems` and `diagnostics` of every
+failure after those of the checked files, a `files` entry of status
+`failed` or `skipped` for each file that did not check, and
+`status: "failed"` when anything failed. The imports the workspace takes
+from outside itself are checked once and kept between requests, as a
+check's dependencies are, so a `serve` session rechecks a blueprint of
+many modules in the time its modules take. An `activeFile` reports that
+file's theorems and still checks every file.
 
 ### goal
 
@@ -687,7 +714,8 @@ as a formula first, then as a term.
 The text is elaborated where the context reads it: it becomes the `shows`
 clause of a probe theorem admitted with `sorry`, in a copy of the file at
 the given `line` (before the declaration holding that line, with every
-proof before it replaced by `sorry` and the open sections still open, so
+proof before it replaced by `sorry`, a `defunique`'s existence and
+uniqueness obligations each, and the open sections still open, so
 section variables, hypotheses, and `notation ring` scopes apply and the
 file need not check), or in a probe file importing the `module`. The
 result's `file` and `line` say where the probe stood. Nothing on disk is
@@ -697,8 +725,10 @@ typing facts of the binders stay in front of a formula's printed form.
 
 ### audit
 
-Request: a workspace and the full `theorem` name, or `theorems`, an array
-of full names audited over one loaded environment (the result is then
+Request: a workspace and the `theorem` name (its full name, or a short
+name resolved as the active file's code resolves it; the result's
+`theorem` is the full name), or `theorems`, an array
+of names audited over one loaded environment (the result is then
 `{ "foundation", "audits": [...] }`, one entry per name in order; a name
 the environment does not hold is the entry `{ "theorem", "error": {
 "code": "unknown_theorem", "message" } }` and the other audits stand).

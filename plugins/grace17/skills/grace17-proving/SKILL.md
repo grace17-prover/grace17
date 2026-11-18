@@ -84,13 +84,16 @@ prints the usage.
    lines under 80 columns where practical.
 3. Check it: `g17 check --json <file>`. The result has
    `status` (`checked` or `failed`), `theorems` (each with `status`
-   `proved`, `admitted`, or `failed`, and the goal state after every step),
-   and `diagnostics` (each with `file`, `line`, `column`, `message`, and the
-   `theorem` it falls in). On failure the theorems that completed before
-   the failure are reported as usual and the failed theorem carries the
-   partial trace up to the failing step; that step's `after` is the state
-   where the proof stopped. The JSON is on standard output whether or not
-   the file checks (the exit status says), so `> out.json` captures it.
+   `proved`, `admitted`, `dependent`, or `failed`, and the goal state
+   after every step), `admitted` (the admitted theorems with the line each
+   starts at and the lines of its `sorry` steps: what a blueprint module
+   still owes), and `diagnostics` (each with `file`, `line`, `column`,
+   `message`, and the `theorem` it falls in). On failure the theorems that
+   completed before the failure are reported as usual and the failed
+   theorem carries the partial trace up to the failing step; that step's
+   `after` is the state where the proof stopped. The JSON is on standard
+   output whether or not the file checks (the exit status says), so
+   `> out.json` captures it.
    A `defgraph`'s codomain proof is a proof block like a theorem's, named
    `ident.closed`. `python3 scripts/all-errors.py <file>` lists the
    first error of every theorem in one run; `g17 check --continue` goes on
@@ -151,7 +154,12 @@ lines of shell or Node that keep one `serve` and pipe requests through
 it, and `g17 serve --port 0` serves the same lines over a loopback TCP
 port, printing the port it took as one JSON line, so a socket needs no
 wrapper. `g17 serve --pin` keeps the dependency sources it first read while
-other agents edit them.
+other agents edit them. Over `serve`, `check` with `"continue": true`
+is `--continue` for a workspace of many files: every file is checked,
+every failure is reported with its module and line, and the files whose
+import failed are listed as skipped. A file whose proofs are `sorry`,
+a `defunique` with both obligations admitted included, is a normal
+workspace for every method.
 
 Example of the loop on a proof that ends in `sorry`:
 

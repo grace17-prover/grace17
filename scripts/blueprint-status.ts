@@ -31,19 +31,19 @@ if (run.status !== 0 && !run.stdout.trim().startsWith("{")) {
   process.exit(1);
 }
 interface Checked { file: string; module: string; theorems: string[]; sorries: { theorem: string }[] }
-const report = JSON.parse(run.stdout) as { checked?: Checked[]; failed?: { file: string; error: string }[] };
+const report = JSON.parse(run.stdout) as { checked?: Checked[]; failures?: { file: string; line?: number; message: string }[] };
 const rows = (report.checked ?? []).filter(item => item.file.startsWith(root)).map(item => {
   const admitted = new Set(item.sorries.map(sorry => sorry.theorem)).size;
   return { module: relative(blueprintRoot, item.file).replace(/\.g17$/u, "").replaceAll("/", "."), theorems: item.theorems.length, admitted, proved: item.theorems.length - admitted };
 });
 const total = rows.reduce((sum, row) => ({ theorems: sum.theorems + row.theorems, admitted: sum.admitted + row.admitted, proved: sum.proved + row.proved }), { theorems: 0, admitted: 0, proved: 0 });
-const failed = (report.failed ?? []).filter(item => item.file.startsWith(root));
+const failed = (report.failures ?? []).filter(item => item.file.startsWith(root));
 const lines = [
   "| module | theorems | proved | admitted |",
   "|---|---:|---:|---:|",
   ...rows.map(row => `| ${row.module} | ${row.theorems} | ${row.proved} | ${row.admitted} |`),
   `| **total** | **${total.theorems}** | **${total.proved}** | **${total.admitted}** |`,
-  ...failed.map(item => `| ${relative(blueprintRoot, item.file)} | failed | | ${item.error.slice(0, 80)} |`),
+  ...failed.map(item => `| ${relative(blueprintRoot, item.file)} | failed | | line ${item.line ?? "?"}: ${item.message.slice(0, 80)} |`),
 ];
 console.log(lines.join("\n"));
 if (write) {

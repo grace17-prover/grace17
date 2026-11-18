@@ -260,6 +260,22 @@ fix it proposes rather than changing it; the integrator merges the copies
 and runs the checks. A blueprint, a module root of statements admitted
 with `sorry` whose import graph is the dependency graph of a proof, is how
 a theorem campaign is planned and divided; see `blueprints/*/README.md`.
+An agent proving on a blueprint keeps one `g17 serve` open with the
+blueprint and the library as module roots (`--module-root blueprints
+--module-root lib`), opens its module as the workspace's `activeFile`,
+and reads the module's `admitted` list from `check`: each admitted
+theorem with the line it starts at and the lines of its `sorry` steps.
+`goal` at a `sorry` line shows the goal it admits with the theorem's
+status `admitted`; `suggest` runs a query tactic there; `declaration`
+and `signature` answer for a sibling's theorem by its short name, with
+the section binders and hypotheses it takes; `audit` names the
+admissions a theorem rests on. A `defunique` whose existence and
+uniqueness proofs are `sorry`, a `defgraph` whose codomain proof is,
+and a theorem citing an admitted sibling (status `dependent`) are all
+ordinary to every method. To see the whole blueprint at once, `check`
+with every module as a file and `continue: true` reports each module's
+failures and admissions in one run, and keeps the library imports
+between runs.
 Once a blueprint is proved, a pass makes it readable before it is promoted:
 a sweep that drops each `have` in turn and rechecks the module over a
 `serve` daemon lists the steps the elaborator supplies on its own (typing
