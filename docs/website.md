@@ -32,9 +32,10 @@ not load its module workers correctly.
 - `workbench/`: the full browser editor, local proof worker, search, hover and
   definition navigation, goal states, and axiom audit.
 - `try.html`: a page embedding the Workbench on the cumulative hierarchy.
-- `install.html`: clone, Node.js 24+, `npm ci`, `npm run workbench`, and a
-  CLI example. Installation is a clone of the repository; there is no npm
-  package.
+- `install.html`: requirements, clone, `npm ci`, `npm run workbench`, the
+  Claude Code skill, CLI examples, and how to build and run the three
+  independent checkers. Installation is a clone of the repository; there
+  is no npm package.
 
 Rendering lives in `scripts/site-render.ts`. Links between documents are
 rewritten to the rendered pages: `.md` to `.html`, `lib/` sources to Cumulus
