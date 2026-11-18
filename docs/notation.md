@@ -237,6 +237,10 @@ Tactics also accept a visible notation token wherever they accept its
 underlying definition. For example, `unfold %` and `unfold mod` are identical
 when remainder notation is in scope.
 
+A notation declaration is written on one line, continued on the more
+indented lines beneath it when it is long, as a `register` declaration is;
+`notation ring` inside a section continues the same way.
+
 Arithmetic notation may be overloaded by checked soft type:
 
 ```g17 fragment
@@ -1008,8 +1012,15 @@ appear as written. A negation directly after an operator keeps its
 parentheses, `x + (-x)`, and a prefix or postfix operator parenthesizes an
 operand that binds more loosely, `-(a + b)` and `(n + 1)!`. Connectives
 print the same way, `¬` tightest, then `∧`, `∨`, `→` (grouping to the
-right), and `↔`; a quantifier on the right of a connective needs no
-parentheses, since it extends to the end.
+right), and `↔`. A quantifier extends as far to the right as it can,
+whether it is plain, typed, or bounded by `∈`, `≤`, `<`, or `⊆`: a
+quantifier that is the right operand of a connective, or the operand of
+`¬`, takes everything after its comma as its body, so `P ∧ ∀ x, Q → R` is
+`P ∧ ∀ x, (Q → R)` and `¬∀ x, Q ∧ R` is `¬(∀ x, Q ∧ R)`, while a
+quantifier that must end before a connective is parenthesized,
+`(∀ x, Q) → R`. Printing follows the same rule: a quantifier on the right
+of a connective needs no parentheses, and a left operand that ends in one
+is parenthesized whatever its precedence.
 
 A soft-type guard is an ascription: on its own, `Nat(n)` prints as `n : ℕ`,
 and `Integer`, `Rational`, and `Real` print as `ℤ`, `ℚ`, and `ℝ`. A

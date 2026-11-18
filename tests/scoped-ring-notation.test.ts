@@ -143,3 +143,28 @@ end Rings
   assert.ok(formulaEquals(scoped.theorems.get("Scoped.indices")!, ordinary.theorems.get("Scoped.indices")!));
   verifyProofMachine(scoped, compileProofModule([exportTheoremForMachine(scoped, "Scoped.indices")]));
 });
+test("operand sorts select among several rings, and the error names the selecting spellings", () => {
+  const sorted = `module Sorted
+import Grace.Cumulus.Real.Field
+import Grace.Cumulus.Algebra.Ring
+section Rings
+variable (A add zero neg mul one : Set)
+hypothesis source : IsCommRing(A, add, zero, neg, mul, one)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring T := (ℝ, realAdd, realZero,
+    realNeg, realMul, realOne)
+theorem sorted (a b : Real)
+  shows (a, -b) = (a, T[-b])
+proof
+  rfl
+`;
+  const kernel = createZfKernel();
+  loadModuleSourceGraph(kernel, [{ file: "Sorted.g17", source: sorted + "end Rings\n" }], ["lib"]);
+  assert.ok(kernel.theorems.has("Sorted.sorted"));
+  assert.throws(() => loadModuleSourceGraph(createZfKernel(), [{ file: "Sorted.g17", source: sorted + `theorem unsorted (x : Set)
+  shows -x = -x
+proof
+  rfl
+end Rings
+` }], ["lib"]), /ambiguous ring notation in -x: the rings R and T are in scope.*write R\[-x\] or T\[-x\] to select one/);
+});

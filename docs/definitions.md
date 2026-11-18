@@ -233,6 +233,14 @@ Equation-style `def` supplies constructor clauses. The checker verifies
 coverage, pattern linearity, arity, fixed parameters, and permitted structural
 recursive calls. This is the executable recursion interface used by `compute`;
 unrestricted self-reference is rejected. `define` is its legacy spelling.
+The header, `def f {A : Set} (add zero : Set) (cs : List(A)) → Set`, may
+break after a binder group or before the arrow, the continuation more
+indented, as a theorem header may; the equations follow it. A name bound in
+the header is a variable in every equation, whatever constructor shares its
+spelling, so `(add zero : Set)` keeps `zero` a parameter in `| add, zero,
+List.nil => …`. Constructors are matched in the position of the decreasing
+parameter only; a constructor pattern elsewhere is an error that names the
+parameter and the decreasing one.
 The complete examples include a two-parameter recursion with one fixed Set
 parameter and one decreasing natural argument.
 
@@ -292,5 +300,10 @@ Inside a theorem section, write `notation ring R := (A, add, zero, neg, mul, one
 to use algebra syntax for those operation graphs. Several rings can coexist,
 with `R[expression]` picking one, and polynomial rings, quotients, and
 restrictions are named `R[I]`, `P ⧸ J`, and `R ↾ T`. The declaration adds no
-hypotheses, axioms, or kernel operations. See
+hypotheses, axioms, or kernel operations, and continues on more indented
+lines when it is long. With several rings in scope, an operation whose
+operands no fact or numeral places in one carrier is read in the ring whose
+carrier is the operands' sort, `-b` under `(b : Real)` in the ring over `ℝ`;
+when that settles nothing either, the error lists the rings and the
+`R[…]` spelling that selects one. See
 [ring scopes over separate pieces](algebra.md#ring-scopes-over-separate-pieces).

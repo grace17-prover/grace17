@@ -870,8 +870,12 @@ function formulaOperand(formula: Formula, parent: Shape, side: "left" | "right",
   const text = formatFormulaIn(formula, options, true);
   const shape = formulaShape(formula);
   if (!shape) return text;
-  // A quantifier extends to the end, so it needs no parentheses on the right.
+  // A quantifier extends to the end, so it needs no parentheses on the
+  // right, and a left operand that ends in one needs them whatever its
+  // precedence, since the connective after it would otherwise be read as
+  // part of the quantifier's body.
   if (shape.precedence === 10 && side === "right") return text;
+  if (side === "left" && endsInQuantifier(formula)) return `(${text})`;
   const grouped = shape.precedence > parent.precedence ||
     (shape.precedence === parent.precedence && shape.associativity === parent.associativity &&
       (parent.associativity === "left" ? side === "left" : parent.associativity === "right" && side === "right"));
@@ -1218,6 +1222,16 @@ function subsetQuantifier(
       body.left.args[0]!.name !== variable) return undefined;
   if (kind === "forall" && body.right.tag === "bottom") return undefined;
   return { bound: body.left.args[1]!, body: body.right };
+}
+
+/** Whether the printed formula ends in the body of a quantifier. */
+function endsInQuantifier(formula: Formula): boolean {
+  switch (formula.tag) {
+    case "forall": case "exists": return true;
+    case "and": case "or": case "iff": return endsInQuantifier(formula.right);
+    case "imp": return formula.right.tag !== "bottom" && endsInQuantifier(formula.right);
+    default: return false;
+  }
 }
 
 function wrapNegatedFormula(formula: Formula, options?: PrettyOptions): string {

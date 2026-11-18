@@ -2512,3 +2512,65 @@ end RebuiltNotation
 `);
   assert.ok(kernel.theorems.has("RebuiltNotation.rebuilt"));
 });
+
+test("a quantifier on the right of a connective extends to the end of the formula", () => {
+  const kernel = createZfgKernel();
+  elaborateModule(kernel, `namespace Scope
+ theorem extends (A : Set)
+   requires h : ∀ x, x ∈ A ∧ ∀ y, y ∈ A → x = y
+   shows ∀ x, x ∈ A ∧ forall y, y ∈ A → x = y
+ proof
+   exact h
+ theorem negated (A B : Set)
+   requires h : ¬∀ x, x ∈ A ∧ x ∈ B
+   shows ¬(∀ x, x ∈ A ∧ x ∈ B)
+ proof
+   exact h
+ theorem grouped (A : Set)
+   requires h : (∀ x, x ∈ A) → A = A
+   shows (∀ x, x ∈ A) → A = A
+ proof
+   exact h
+end Scope`);
+  const extended = kernel.theorems.get("Scope.extends")!;
+  assert.equal(formatFormula(extended),
+    "∀ A, (∀ x, x ∈ A ∧ ∀ y ∈ A, x = y) → ∀ x, x ∈ A ∧ ∀ y ∈ A, x = y");
+  assert.match(formatFormula(kernel.theorems.get("Scope.negated")!), /¬\(∀ x, x ∈ A ∧ x ∈ B\) → ¬\(∀ x, x ∈ A ∧ x ∈ B\)$/u);
+  assert.match(formatFormula(kernel.theorems.get("Scope.grouped")!), /\(\(∀ x, x ∈ A\) → A = A\) → \(∀ x, x ∈ A\) → A = A$/u);
+  // The printed statement reads back as the same formula.
+  const reparsed = createZfgKernel();
+  elaborateModule(reparsed, `namespace Scope
+ theorem again
+   shows ${formatFormula(extended)}
+ proof
+   intro A
+   intro h
+   exact h
+end Scope`);
+  assert.ok(formulaEquals(reparsed.theorems.get("Scope.again")!, extended));
+});
+
+test("a notation declaration continues on more indented lines only", () => {
+  const kernel = createZfgKernel();
+  elaborateModule(kernel, `
+define plus (x y : Nat) -> Nat
+  | zero, y => y
+  | succ(x), y => succ(plus(x, y))
+
+notation infixl 60 "+"
+    => plus
+
+lemma notation.continued
+  shows 2 + 3 = plus(2, 3)
+proof
+  rfl`);
+  assert.ok(kernel.theorems.has("notation.continued"));
+  assert.throws(() => elaborateModule(createZfgKernel(), `
+define plus (x y : Nat) -> Nat
+  | zero, y => y
+  | succ(x), y => succ(plus(x, y))
+
+notation infixl 60 "+"
+=> plus
+`), /a notation declaration continues on more indented lines only/);
+});

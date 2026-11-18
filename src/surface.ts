@@ -1180,11 +1180,18 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     // continues on the more indented lines beneath it until it closes, and
     // onto a more indented line that begins a further binder group.
     const wrappedHeader = /^(?:theorem|lemma|instance)\s/u.test(line.text);
-    if (/^(?:hypothesis|variable)\s/u.test(line.text) || wrappedHeader) {
+    // A recursive definition header, `def f {A : Set} (add zero : Set)` with
+    // `(cs : List(A)) → Set` beneath it, continues on the more indented
+    // lines before its first equation; a notation declaration continues on
+    // the more indented lines beneath it.
+    const wrappedDefinition = /^(?:def|define)\s/u.test(line.text) && findTopLevel(line.text, ":=") < 0;
+    const wrappedNotation = /^notation\s/u.test(line.text);
+    if (/^(?:hypothesis|variable)\s/u.test(line.text) || wrappedHeader || wrappedDefinition || wrappedNotation) {
       while (cursor + clauseSpan < lines.length) {
         const next = lines[cursor + clauseSpan]!;
         if (next.narrative || next.indent <= line.indent) break;
         if (wrappedHeader && openParentheses(line.text) <= 0 && !/^[({]/u.test(next.text)) break;
+        if (wrappedDefinition && (/^(?:\||descends\s)/u.test(next.text) || findTopLevel(line.text, ":=") >= 0)) break;
         line = { ...line, text: `${line.text} ${next.text}`, columnEnd: next.columnEnd };
         clauseSpan += 1;
       }
@@ -1298,7 +1305,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       const call1 = resolveExisting("apply", scope(), name => kernel.functions.get(name) === 2, line.number, "function application");
       const call2 = resolveExisting("call2", scope(), name => kernel.functions.get(name) === 3, line.number, "binary operation application");
       sections.at(-1)!.rings.push({ name: match[1]!, carrier, add, zero, neg, mul, one, call1, call2 });
-      cursor += 1;
+      cursor += clauseSpan;
       continue;
     }
     const variableMatch = /^variable\s+(.+)$/.exec(line.text);
@@ -2928,7 +2935,9 @@ function elaborateNotation(
   environment: SurfaceEnvironment,
 ): void {
   const line = block[0]!;
-  if (block.length !== 1) throw new SurfaceError(block[1]!.number, "notation declarations must fit on one line");
+  if (block.length !== 1) {
+    throw new SurfaceError(block[1]!.number, "a notation declaration continues on more indented lines only");
+  }
   const infix = /^notation\s+(infixl|infixr|infix)\s+(\d+)\s+"([^"]+)"\s*(?:=>|⇒)\s*(?:(reverse)\s+)?(\S+?)(?:\s+for\s+(\S+?)(?:\s*,\s*(\S+))?)?$/u.exec(line.text);
   const prefixOrPostfix = /^notation\s+(prefix|postfix)\s+(\d+)\s+"([^"]+)"\s*(?:=>|⇒)\s*(\S+?)(?:\s+for\s+(\S+))?$/u.exec(line.text);
   // A unary operator declaration, normalized to the prefix capture layout.
@@ -4929,7 +4938,10 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
   const header = block[0]!;
   block = joinDefinitionClauseContinuations(block);
   const stray = block.slice(1).find(line => !line.text.startsWith("|") && !line.text.startsWith("descends "));
-  if (stray) throw new SurfaceError(stray.number, "expected a defining equation or descends clause");
+  if (stray) {
+    throw new SurfaceError(stray.number,
+      "expected a defining equation or descends clause; a definition header continues on more indented lines only");
+  }
   const match = /^(?:def|define)\s+(\S+)\s+(.+)$/.exec(header.text);
   if (!match) throw new SurfaceError(header.number, "malformed definition header");
   const [, rawName, tail] = match;
@@ -4951,6 +4963,12 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
   if (descents.length > 1) throw new SurfaceError(descents[1]!.number, "duplicate descends clause");
   const descent = descents[0];
 
+  // A name bound by the header is a variable pattern in every equation,
+  // whatever constructors share its spelling: `(add zero : Set)` keeps
+  // `zero` a parameter. Constructors are matched in the decreasing
+  // parameter's position only.
+  const parameterNames = new Set(binders.map(item => item.name));
+  const equationLines: { readonly line: SourceLine; readonly patternTexts: readonly string[] }[] = [];
   const equations: RecursiveEquation[] = block.filter(line => line.text.startsWith("|")).map(line => {
     const equationMatch = /^\|\s*(.*?)\s*(?:=>|⇒)\s*(.+)$/.exec(line.text);
     if (!equationMatch) throw new SurfaceError(line.number, "malformed defining equation");
@@ -4962,9 +4980,10 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
     let explicitIndex = 0;
     const patterns = binders.map(binder => binder.implicit
       ? bind(binder.name)
-      : parsePattern(patternTexts[explicitIndex++]!, kernel, scope, line.number));
+      : parsePattern(patternTexts[explicitIndex++]!, kernel, scope, line.number, parameterNames));
     const variables = new Set<string>();
     patterns.forEach(pattern => collectPatternBindings(pattern, variables));
+    equationLines.push({ line, patternTexts });
     return { patterns, body: parseTerm(equationMatch[2]!, kernel, variables, line.number, scope) };
   });
   if (equations.length === 0) throw new SurfaceError(header.number, `definition ${name} has no equations`);
@@ -5006,6 +5025,18 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
     decreasingParameter = candidates[0]!.index;
     datatype = candidates[0]!.datatype;
   }
+  equations.forEach((equation, equationIndex) => {
+    const explicit = binders.flatMap((binder, index) => binder.implicit ? [] : [index]);
+    equation.patterns.forEach((pattern, index) => {
+      if (index === decreasingParameter || pattern.tag === "bind") return;
+      const { line, patternTexts } = equationLines[equationIndex]!;
+      const written = patternTexts[explicit.indexOf(index)]?.trim() ?? binders[index]!.name;
+      throw new SurfaceError(line.number,
+        `the pattern ${written} for parameter ${binders[index]!.name} of ${rawName} names a constructor, but only ` +
+        `the decreasing parameter ${binders[decreasingParameter]!.name} is matched structurally; ` +
+        `write the parameter's name there`);
+    });
+  });
   try {
     kernel.defineStructuralFunction({
       name: name!,
@@ -18373,8 +18404,14 @@ function parseFormula(
     ["<->", iff], ["↔", iff], ["->", imp], ["→", imp],
     [" or ", or], ["∨", or], [" and ", and], ["∧", and],
   ];
+  // A quantifier at the top level extends to the end of the formula, so a
+  // connective after it belongs to its body: `P ∧ ∀ x, Q → R` is
+  // `P ∧ ∀ x, (Q → R)`, and `(∀ x, Q) → R` needs its parentheses. The
+  // connectives that split the formula are sought before the quantifier.
+  const quantified = findTopLevelQuantifier(source);
+  const head = quantified < 0 ? source : source.slice(0, quantified);
   for (const [operator, build] of binary) {
-    const index = findTopLevel(source, operator);
+    const index = findTopLevel(head, operator);
     if (index >= 0) {
       const left = parseFormula(source.slice(0, index), kernel, variables, line, scope, classParameters);
       // A conjunction's left side may carry soft-type evidence used by its
@@ -18771,6 +18808,28 @@ function lastTopLevelWord(text: string, word: string): number {
   return found;
 }
 
+/**
+ * Position of the first quantifier outside every bracket, `∀`, `∃`, or the
+ * words `forall` and `exists` standing alone, or -1. Everything after it is
+ * the quantifier's body.
+ */
+function findTopLevelQuantifier(text: string): number {
+  let depth = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if ("([{⟨".includes(character)) depth += 1;
+    else if (")]}⟩".includes(character)) depth -= 1;
+    else if (depth === 0) {
+      if (character === "∀" || character === "∃") return index;
+      if ((character === "f" || character === "e") && (index === 0 || /[\s¬]/u.test(text[index - 1]!))) {
+        const word = text.startsWith("forall", index) ? 6 : text.startsWith("exists", index) ? 6 : 0;
+        if (word && /^[\s(]/u.test(text[index + word] ?? "")) return index;
+      }
+    }
+  }
+  return -1;
+}
+
 function findTopLevel(text: string, operator: string): number {
   let depth = 0;
   for (let index = 0; index <= text.length - operator.length; index += 1) {
@@ -18785,14 +18844,19 @@ function findTopLevel(text: string, operator: string): number {
   return -1;
 }
 
-function parsePattern(text: string, kernel: Kernel, scope: SurfaceScope, line: number): Pattern {
+function parsePattern(
+  text: string, kernel: Kernel, scope: SurfaceScope, line: number, parameters: ReadonlySet<string> = new Set(),
+): Pattern {
   const trimmed = text.trim();
+  // A parameter of the header is a variable, whatever constructor shares
+  // its name.
+  if (parameters.has(trimmed)) return bind(trimmed);
   const consIndex = findTopLevel(trimmed, "::");
   if (consIndex >= 0) {
     const cons = resolveExisting("Grace.Core.Data.List.cons", scope,
       candidate => kernel.functions.get(candidate) === 2, line, "List.cons constructor");
-    return ctor(cons, parsePattern(trimmed.slice(0, consIndex), kernel, scope, line),
-      parsePattern(trimmed.slice(consIndex + 2), kernel, scope, line));
+    return ctor(cons, parsePattern(trimmed.slice(0, consIndex), kernel, scope, line, parameters),
+      parsePattern(trimmed.slice(consIndex + 2), kernel, scope, line, parameters));
   }
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
     const nil = resolveExisting("Grace.Core.Data.List.nil", scope,
@@ -18801,13 +18865,13 @@ function parsePattern(text: string, kernel: Kernel, scope: SurfaceScope, line: n
       candidate => kernel.functions.get(candidate) === 2, line, "List.cons constructor");
     const body = trimmed.slice(1, -1).trim();
     return (body ? splitTopLevel(body, ",") : []).reduceRight<Pattern>(
-      (tail, head) => ctor(cons, parsePattern(head, kernel, scope, line), tail), ctor(nil));
+      (tail, head) => ctor(cons, parsePattern(head, kernel, scope, line, parameters), tail), ctor(nil));
   }
   if (trimmed === "zero" || trimmed === "0") return ctor("zero");
   // `n + 2` is the pattern succ(succ(n)) written as arithmetic.
   const offsetPattern = /^(.+?)\s*\+\s*(\d+)$/u.exec(trimmed);
   if (offsetPattern && !/[()]/u.test(offsetPattern[1]!)) {
-    let pattern = parsePattern(offsetPattern[1]!, kernel, scope, line);
+    let pattern = parsePattern(offsetPattern[1]!, kernel, scope, line, parameters);
     for (let step = 0; step < Number(offsetPattern[2]); step += 1) pattern = ctor("succ", pattern);
     return pattern;
   }
@@ -18819,7 +18883,7 @@ function parsePattern(text: string, kernel: Kernel, scope: SurfaceScope, line: n
     const arguments_ = application[2]!.trim() ? splitTopLevel(application[2]!, ",") : [];
     const arity = [...kernel.datatypes.values()].flatMap(data => data.constructors).find(item => item.name === name)!.arity;
     if (arguments_.length !== arity) throw new SurfaceError(line, `constructor ${application[1]} expects ${arity} fields`);
-    return ctor(name, ...arguments_.map(item => parsePattern(item, kernel, scope, line)));
+    return ctor(name, ...arguments_.map(item => parsePattern(item, kernel, scope, line, parameters)));
   }
   const nullary = resolveOptional(surfaceSymbol(trimmed), scope, candidate =>
     [...kernel.datatypes.values()].some(data => data.constructors.some(item => item.name === candidate && item.arity === 0)));
@@ -19054,7 +19118,8 @@ function harmonizeTypedNumerals(
   const untypedNumeral = (term: Term): boolean =>
     naturalValue(term) !== undefined && !notationResultTypes.has(term);
   if (scope.rings?.length && (untypedNumeral(left) || untypedNumeral(right))) {
-    const ring = selectRing(scope, [left, right], line);
+    const ring = selectRing(kernel, scope, [left, right], line,
+      () => formatTerm(untypedNumeral(left) ? left : right, { reparse: true }));
     return [untypedNumeral(left) ? ringNumeral(kernel, scope, left, ring, line) : left,
       untypedNumeral(right) ? ringNumeral(kernel, scope, right, ring, line) : right];
   }
@@ -19964,7 +20029,16 @@ function statementHypotheses(statement: Formula): Formula[] {
   return result;
 }
 
-function selectRing(scope: SurfaceScope, operands: readonly Term[], line: number): RingNotation {
+/**
+ * The ring notation an operation reads under: the one in scope, or among
+ * several the one whose carrier the operands are placed in by a fact or
+ * a numeral, else by their sorts, `-b` under `(b : Real)` being the
+ * negation of the ring whose carrier is ℝ. The written expression names
+ * the spelling that settles a genuine ambiguity.
+ */
+function selectRing(
+  kernel: Kernel, scope: SurfaceScope, operands: readonly Term[], line: number, written: () => string,
+): RingNotation {
   const rings = scope.rings ?? [];
   if (rings.length === 1) return rings[0]!;
   const facts = scope.localFormulas?.() ?? [];
@@ -19982,7 +20056,18 @@ function selectRing(scope: SurfaceScope, operands: readonly Term[], line: number
   };
   const candidates = rings.filter(ring => operands.every(term => naturalValue(term) !== undefined || inRing(term, ring)));
   if (candidates.length === 1) return candidates[0]!;
-  throw new SurfaceError(line, `ambiguous ring notation; use ${rings.map(r => `${r.name}[...]`).join(" or ")} to select operations`);
+  if (candidates.length === 0) {
+    const sorted = rings.filter(ring => {
+      const sort = carrierSortName(kernel, scope, ring.carrier);
+      return sort !== undefined && operands.some(term => naturalValue(term) === undefined) &&
+        operands.every(term => naturalValue(term) !== undefined || termTypeNames(kernel, term, scope).has(sort));
+    });
+    if (sorted.length === 1) return sorted[0]!;
+  }
+  const text = written();
+  throw new SurfaceError(line,
+    `ambiguous ring notation in ${text}: the rings ${rings.map(r => r.name).join(" and ")} are in scope and ` +
+    `no fact or sort places the operands in one carrier; write ${rings.map(r => `${r.name}[${text}]`).join(" or ")} to select one`);
 }
 
 
@@ -20224,7 +20309,7 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       // same position as the whole: integerPow(-1, k) reads -1 as an integer.
       const operand = expression(shape.precedence, expected);
       if (shape.target === "$ring") {
-        const ring = selectRing(scope, [operand], line);
+        const ring = selectRing(kernel, scope, [operand], line, () => `${shape.token}${formatTerm(operand, { reparse: true })}`);
         return app(ring.call1, ring.neg, ringNumeral(kernel, scope, operand, ring, line));
       }
       const operandTypes = termTypeNames(kernel, operand, scope);
@@ -20738,7 +20823,7 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       if (!candidates || !shape || shape.precedence < minimumPrecedence) break;
       take(shape.token);
       if (shape.target === "$ringPower") {
-        const ring = selectRing(scope, [left], line);
+        const ring = selectRing(kernel, scope, [left], line, () => `${formatTerm(left, { reparse: true })} ^ …`);
         exponentDepth++;
         const exponent = expression(shape.precedence);
         exponentDepth--;
@@ -20778,7 +20863,8 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
             continue;
           }
         }
-        const ring = selectRing(scope, [left, right], line);
+        const ring = selectRing(kernel, scope, [left, right], line,
+          () => `${formatTerm(left, { reparse: true })} ${shape.token} ${formatTerm(right, { reparse: true })}`);
         left = ringNumeral(kernel, scope, left, ring, line);
         right = ringNumeral(kernel, scope, right, ring, line);
         if (shape.token === "-") right = app(ring.call1, ring.neg, right);
