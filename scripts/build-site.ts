@@ -277,9 +277,10 @@ You can start immediately in the [browser Workbench](../workbench/): the full pr
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) 24 or later.
+- [Node.js](https://nodejs.org) 24 or later; the checks run on 26, the current line.
 - Python 3, only for the independent Python checker.
 - OCaml 5 with Zarith, only for the independent OCaml checker.
+- Rust, with \`cargo\` from [rustup](https://rustup.rs), only for the independent Rust checker.
 
 ## Install
 
@@ -305,14 +306,35 @@ The skill teaches the agent the write–check loop, the module conventions, and 
 ## Check a file from the command line
 
 \`\`\`sh
-node bin/g17.ts check --foundation ZF --module-root lib examples/Introduction.g17
+node bin/g17.ts check --foundation ZF examples/Introduction.g17
 \`\`\`
 
-Add \`--json\` for structured output. To see exactly which axioms a theorem depends on:
+The library is found without a flag, from any directory; \`node bin/g17.ts settings\` shows the module roots, artifact store, foundation, and heap a run uses. Add \`--json\` for structured output. To see exactly which axioms a theorem depends on:
 
 \`\`\`sh
-node bin/g17.ts axiom-audit --foundation ZF --module-root lib examples/Introduction.g17 --theorem Introduction.difference_of_squares
+node bin/g17.ts axiom-audit --foundation ZF examples/Introduction.g17 --theorem examples.Introduction.difference_of_squares
 \`\`\`
+
+A file under a module root is named by its path, and the working directory is a root, so from the checkout the example file is the module \`examples.Introduction\`.
+
+## The independent checkers
+
+Every proof the kernel accepts can be replayed by three independent checkers that share no code with it, in Python, OCaml, and Rust. Each is built and exercised on the conformance corpus through npm:
+
+\`\`\`sh
+npm run conformance:python   # the corpus with the Python checker
+npm run test:ocaml           # build the OCaml checker, then the corpus
+npm run test:rust            # build the Rust checker, then the corpus
+\`\`\`
+
+To replay the complete Cumulus library from the bare axioms with the Rust checker, the check the continuous integration runs on every push:
+
+\`\`\`sh
+npm run compile:cumulus
+npm run check:g17c:rust
+\`\`\`
+
+The [independent checkers](../checkers/README.md) page describes what each one checks, their resource limits, and how to write a checker of your own.
 
 ## Next steps
 
