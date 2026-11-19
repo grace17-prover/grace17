@@ -284,8 +284,8 @@ graph TD
 | CAD.HornerProduct | 30 | 30 | 0 |
 | CAD.HornerNormalForm | 44 | 44 | 0 |
 | CAD.Resultant | 25 | 3 | 22 |
-| CAD.HornerDivision | 15 | 0 | 15 |
-| CAD.HornerDerivative | 17 | 0 | 17 |
+| CAD.HornerDivision | 40 | 40 | 0 |
+| CAD.HornerDerivative | 25 | 25 | 0 |
 | CAD.HornerGcd | 42 | 42 | 0 |
 | CAD.ResultantGcd | 4 | 0 | 4 |
 | CAD.ResultantRoots | 8 | 0 | 8 |
@@ -305,5 +305,5 @@ graph TD
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **511** | **354** | **157** |
+| **total** | **544** | **419** | **125** |
 <!-- /blueprint-status -->
