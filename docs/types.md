@@ -18,10 +18,13 @@ an obligation.
 ## Declared function results
 
 A non-`Set` result annotation on `def` generates a checked `functionName.type`
-theorem. Bounded inference tries first; an attached `proof` block can establish
-the result by hand. Structural recursion can synthesize a checked induction.
-See [definitions.md](definitions.md) for the syntax and same-module closure
-obligations. An annotation by itself is never a Tau rule.
+theorem. The annotation takes the forms a binder's type takes, `: Nat`,
+`: List(A)`, or a carrier `: R` under `CommRing(R)`. Bounded inference tries
+first; an attached `proof` block can establish the result by hand.
+Structural recursion can synthesize a checked induction. See
+[definitions.md](definitions.md#result-annotations) for the syntax and
+same-module closure obligations. An annotation by itself is never a Tau
+rule; the proved `functionName.type` is one.
 
 ## Tau
 

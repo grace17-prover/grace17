@@ -335,8 +335,15 @@ interface SurfaceSignature {
   readonly requirementCount?: number;
   readonly resultType?: string;
   readonly resultTypeArguments?: readonly Term[];
+  /** A result annotated as a guard binder is, `: R` or `: A → B`: the typing of the value named by `variable`. */
+  readonly resultGuard?: ResultGuard;
   /** The sort of a graph's values, `f(x)` under `defgraph f (x ∈ ℕ) : ℝ`. */
   readonly valueSort?: string;
+}
+
+interface ResultGuard {
+  readonly variable: string;
+  readonly formula: Formula;
 }
 
 interface SurfaceClassDefinition {
@@ -378,6 +385,7 @@ export interface SurfaceEnvironmentIndex {
     readonly requirementCount?: number;
     readonly resultType?: string;
     readonly resultTypeArguments?: readonly Term[];
+    readonly resultGuard?: ResultGuard;
     readonly valueSort?: string;
   }[];
   /** Each module's expression carrier annotations after its elaboration, inherited and own. */
@@ -1014,6 +1022,8 @@ function surfaceIndexFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 
 interface SourceLine {
   readonly parsedFormula?: Formula;
+  /** A generated theorem header's binders, resolved already. */
+  readonly parsedBinders?: readonly Binder[];
   readonly number: number;
   readonly text: string;
   readonly indent: number;
@@ -1124,7 +1134,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   const definitions: string[] = [];
   const theorems: string[] = [];
   const theoremLocations: SurfaceTheoremLocation[] = [];
-  const pendingDefinitionTypes: { name: string; line: SourceLine; scope: SurfaceScope }[] = [];
+  const pendingDefinitionTypes: { name: string; line: SourceLine; scope: SurfaceScope; hypotheses: readonly SourceLine[] }[] = [];
   const evaluations: SurfaceEvaluation[] = [];
   const environment = surfaceEnvironments.get(kernel) ?? {
     modules: new Map(), namespaces: new Set<string>(), classes: new Map<string, SurfaceClassRecord>(),
@@ -1173,6 +1183,21 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       { moduleName, imports, namespaces, opens }),
   });
   const prefix = (): string => namespaces.join(".");
+  // The `.type` obligation of a definition's result annotation, owed under
+  // the section hypotheses when the definition stands in a section.
+  const recordDefinitionType = (name: string, line: SourceLine, block: readonly SourceLine[], marker: number): void => {
+    const hypotheses = sections.length ? sectionHypotheses() : [];
+    const result = elaborateDefinitionType(kernel, name, line, scope(),
+      marker < 0 ? undefined : block.slice(marker + 1), hypotheses);
+    if (result === "pending") pendingDefinitionTypes.push({ name, line, scope: scope(), hypotheses });
+    else if (result === "proved") {
+      theorems.push(`${name}.type`);
+      theoremLocations.push({ name: `${name}.type`, lineStart: line.number, lineEnd: block.at(-1)!.number });
+      if (hypotheses.length) {
+        warnings.push(...unusedDefinitionHypothesisWarnings(kernel, name, [`${name}.type`], hypotheses, line.number));
+      }
+    }
+  };
 
   for (let cursor = 0; cursor < lines.length;) {
     // A section clause, `hypothesis name : …` or `variable (…`, continues
@@ -1507,32 +1532,21 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
     else if (line.text.startsWith("def ")) {
       const marker = block.findIndex(item => item.text === "proof");
       const declaration = marker < 0 ? block : block.slice(0, marker);
+      // The arrow of a recursive header stands at top level; the one of a
+      // binder `(f : A → B)` does not.
       const equationStyle = declaration.slice(1).some(item => item.text.startsWith("|")) ||
-        /(?:->|→)\s*\S+\s*$/.test(line.text);
+        (!line.text.includes(":=") && (findTopLevel(line.text, "→") >= 0 || findTopLevel(line.text, "->") >= 0));
       const name = equationStyle
         ? elaborateDefinition(kernel, declaration, scope())
         : elaborateExplicitDefinition(kernel, declaration, scope());
       definitions.push(name);
-      const result = elaborateDefinitionType(kernel, name, line, scope(),
-        marker < 0 ? undefined : block.slice(marker + 1));
-      if (result === "pending") pendingDefinitionTypes.push({ name, line, scope: scope() });
-      else if (result === "proved") {
-        theorems.push(`${name}.type`);
-        theoremLocations.push({ name: `${name}.type`, lineStart: line.number,
-          lineEnd: block.at(-1)!.number });
-      }
+      recordDefinitionType(name, line, block, marker);
     }
     else if (line.text.startsWith("define ")) {
       const marker = block.findIndex(item => item.text === "proof");
       const name = elaborateDefinition(kernel, marker < 0 ? block : block.slice(0, marker), scope());
       definitions.push(name);
-      const result = elaborateDefinitionType(kernel, name, line, scope(),
-        marker < 0 ? undefined : block.slice(marker + 1));
-      if (result === "pending") pendingDefinitionTypes.push({ name, line, scope: scope() });
-      else if (result === "proved") {
-        theorems.push(`${name}.type`);
-        theoremLocations.push({ name: `${name}.type`, lineStart: line.number, lineEnd: block.at(-1)!.number });
-      }
+      recordDefinitionType(name, line, block, marker);
     }
     else if (line.text.startsWith("predicate ")) definitions.push(elaboratePredicateDefinition(kernel, block, scope()));
     else if (line.text.startsWith("class ")) definitions.push(elaborateClassDefinition(kernel, block, scope(), environment));
@@ -1699,7 +1713,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   // Foundational definitions may need a closure lemma proved later in the
   // same module. Their annotations never supply evidence while pending.
   for (const item of pendingDefinitionTypes) {
-    const result = elaborateDefinitionType(kernel, item.name, item.line, item.scope);
+    const result = elaborateDefinitionType(kernel, item.name, item.line, item.scope, undefined, item.hypotheses);
     if (result === "pending") throw new SurfaceError(item.line.number,
       `cannot prove declared result type of ${item.name}; add a proof block to the definition or prove ${item.name}.type in this module`);
     if (!theorems.includes(`${item.name}.type`)) {
@@ -4191,22 +4205,46 @@ function elaborateClassDefinition(
   return name;
 }
 
-/** Result annotations become ordinary checked theorems, never typing axioms. */
+/** The typing a result annotation states of a value, `List(A, value)` or `value ∈ R.carrier`. */
+function resultTypeGoal(signature: SurfaceSignature, value: Term): Formula {
+  if (signature.resultGuard) return substituteFormula(signature.resultGuard.formula, signature.resultGuard.variable, value);
+  return pred(signature.resultType!, ...(signature.resultTypeArguments ?? []), value);
+}
+
+/** Whether a function declares a result beyond the kernel sort, so that `f.type` is owed. */
+function hasResultAnnotation(signature: SurfaceSignature): boolean {
+  return signature.resultGuard !== undefined || (signature.resultType !== undefined && signature.resultType !== "Set");
+}
+
+/** Refinement search for a predicate goal whose last argument is the subject, `List(A, xs)` or `x ∈ A`. */
+function proveGoalByRefinement(
+  kernel: Kernel, goal: Formula, assumptions: readonly Formula[], visibility: ScopeVisibility | undefined,
+): Proof | undefined {
+  if (goal.tag !== "pred" || goal.args.length === 0) return undefined;
+  return proveRefinement(kernel, goal.args.at(-1)!, goal.pred, goal.args.slice(0, -1), assumptions, [], visibility);
+}
+
+/**
+ * Result annotations become ordinary checked theorems, never typing axioms.
+ * A definition in a section owes its `.type` under the section hypotheses,
+ * which precede the conclusion as a section theorem's premises do.
+ */
 function elaborateDefinitionType(
   kernel: Kernel, name: string, line: SourceLine, scope: SurfaceScope,
-  proofLines?: readonly SourceLine[],
+  proofLines?: readonly SourceLine[], hypotheses: readonly SourceLine[] = [],
 ): "proved" | "pending" | "set" {
   const environment = surfaceEnvironments.get(kernel)!;
   const signature = environment.signatures.get(name)!;
-  if (!signature.resultType || signature.resultType === "Set") {
+  if (!hasResultAnnotation(signature)) {
     if (proofLines) throw new SurfaceError(line.number, "Set is the kernel sort and needs no result-type proof");
     return "set";
   }
   const binders = signature.parameters;
-  const assumptions = binderAssumptions(binders);
+  const premises = hypotheses.flatMap(item => item.parsedFormula ? [item.parsedFormula] : []);
+  const assumptions = [...binderAssumptions(binders), ...premises];
   const args = binders.map(item => v(item.name));
   const term = app(name, ...args);
-  const goal = pred(signature.resultType, ...(signature.resultTypeArguments ?? []), term);
+  const goal = resultTypeGoal(signature, term);
   let statement = assumptions.reduceRight<Formula>((body, assumption) => imp(assumption, body), goal);
   for (const binder of [...binders].reverse()) statement = forall(binder.name, statement);
   const theoremName = `${name}.type`;
@@ -4216,43 +4254,31 @@ function elaborateDefinitionType(
       `${theoremName} does not establish the declared result type`);
     return "proved";
   }
-  const theoremSignature: SurfaceSignature = { kind: "theorem", parameters: binders, requirementCount: 0 };
-  const sourceTerm = (term: Term): string => term.tag === "var" ? term.name :
-    term.tag === "nat" ? term.value : term.fn + (term.args.length ? `(${term.args.map(sourceTerm).join(",")})` : "");
-  const binderSource = binders.map(item => {
-    const type = item.type + (item.typeArguments?.length
-      ? `(${item.typeArguments.map(term => sourceTerm(term)).join(",")})` : "");
-    return item.implicit ? `{${item.name} : ${type}}` : `(${item.name} : ${type})`;
-  }).join(" ");
-  const implicit = binders.filter(item => item.implicit);
-  const call = name + (implicit.length ? `{${implicit.map(item => `${item.name} := ${item.name}`).join(", ")}}` : "") +
-    `(${binders.filter(item => !item.implicit).map(item => item.name).join(", ")})`;
-  const goalSource = `${signature.resultType}(${[...(signature.resultTypeArguments ?? []).map(term => sourceTerm(term)), call].join(", ")})`;
+  const theoremSignature: SurfaceSignature = { kind: "theorem", parameters: binders, requirementCount: premises.length };
   const prefix = scope.namespaces.join(".");
   const localName = prefix ? theoremName.slice(prefix.length + 1) : theoremName;
+  // The generated theorem carries its binders and conclusion resolved: a
+  // guard such as `(leading ∈ A)` or a carrier result `: R` has no spelling
+  // the header could be re-read from.
+  const header: SourceLine = { ...line, text: `theorem ${localName}`, parsedBinders: binders };
+  const conclusion: SourceLine = { ...line, text: `shows ${formatFormula(goal)}`, parsedFormula: goal };
   if (proofLines) {
     if (!proofLines.length) throw new SurfaceError(line.number, "empty definition result-type proof");
-    elaborateTheorem(kernel, [
-      { ...line, text: `theorem ${localName} ${binderSource}` },
-      { ...line, text: `shows ${goalSource}` },
-      { ...line, text: "proof" },
-      ...proofLines,
-    ], scope);
+    elaborateTheorem(kernel, [header, ...hypotheses, conclusion, { ...line, text: "proof" }, ...proofLines], scope);
     return "proved";
   }
+  const visibility = scopeVisibility(kernel, scope);
   let evidence: Proof | undefined;
   const body = kernel.functionBodies.get(name)?.body;
   if (body) {
-    const bodyEvidence = proveRefinement(kernel, body, signature.resultType,
-      signature.resultTypeArguments ?? [], assumptions, [], scopeVisibility(kernel, scope));
+    const bodyEvidence = proveGoalByRefinement(kernel, resultTypeGoal(signature, body), assumptions, visibility);
     if (bodyEvidence) {
       const variable = freshSurfaceVariable("result", new Set(binders.map(item => item.name)));
       evidence = eqElim(at(definition(name, "equation"), ...args), variable,
-        pred(signature.resultType, ...(signature.resultTypeArguments ?? []), v(variable)), bodyEvidence, true);
+        resultTypeGoal(signature, v(variable)), bodyEvidence, true);
     }
   }
-  evidence ??= proveRefinement(kernel, term, signature.resultType,
-    signature.resultTypeArguments ?? [], assumptions, [], scopeVisibility(kernel, scope));
+  evidence ??= proveGoalByRefinement(kernel, goal, assumptions, visibility);
   if (!evidence) {
     const recursive = kernel.recursiveFunctions.get(name);
     if (recursive?.admission === "structural") {
@@ -4265,18 +4291,19 @@ function elaborateDefinitionType(
         forbidden.add(value);
         return value;
       };
-      const script = [`theorem ${localName} ${binderSource}`, `  shows ${goalSource}`, "proof",
+      const script = ["proof",
         `  induction ${decreasing.name}${others.length ? ` generalizing ${others.map(item => item.name).join(" ")}` : ""}`];
       for (const constructor of datatype.constructors) {
         const fields = Array.from({ length: constructor.arity }, (_, i) => fresh(`__field${i}`));
-        const hypotheses = constructor.recursiveFields.map((_, i) => fresh(`__ih${i}`));
-        script.push(`  | ${constructor.name}${fields.length ? `(${fields.join(", ")})` : ""}${hypotheses.length ? ` using ${hypotheses.join(", ")}` : ""} =>`);
+        const inductionHypotheses = constructor.recursiveFields.map((_, i) => fresh(`__ih${i}`));
+        script.push(`  | ${constructor.name}${fields.length ? `(${fields.join(", ")})` : ""}${inductionHypotheses.length ? ` using ${inductionHypotheses.join(", ")}` : ""} =>`);
         // Generalized binders have kernel guards in the motive.
-        const introductions = others.flatMap(item => [item.name, ...(item.type === "Set" || item.type === "Class" ? [] : [fresh(`__${item.name}_type`)])]);
+        const introductions = others.flatMap(item => [item.name, ...(isGuardBinder(item) ? [fresh(`__${item.name}_type`)] : [])]);
         if (introductions.length) script.push(`    intros ${introductions.join(" ")}`);
         script.push(`    rw ${name}`, "    typecheck");
       }
-      const lines = script.map((text, index) => ({ number: line.number + index, text: text.trim(), indent: text.length - text.trimStart().length }));
+      const lines: SourceLine[] = [header, ...hypotheses, conclusion, ...script.map((text, index) =>
+        ({ number: line.number + index, text: text.trim(), indent: text.length - text.trimStart().length }))];
       try {
         elaborateTheorem(kernel, lines, scope);
         if (environment.captureTacticTraces) kernel.setTheoremTacticTrace(theoremName, {
@@ -4310,7 +4337,9 @@ function elaborateExplicitDefinition(kernel: Kernel, block: readonly SourceLine[
   const [, rawName, tail] = match;
   if (!QUALIFIED_IDENTIFIER.test(rawName!)) throw new SurfaceError(header.number, "malformed definition name");
   const parsedHeader = parseBinderGroups(tail!, header.number);
-  const result = /^:\s*(\S+)\s*:=\s*(.+)$/.exec(parsedHeader.rest);
+  // The result annotation runs to the top-level `:=`, so that it may carry
+  // arguments with spaces, `: polynomialRing(R, I)`, as a binder's type may.
+  const result = /^:\s*(.+?)\s*:=\s*(.+)$/.exec(parsedHeader.rest);
   if (!result) throw new SurfaceError(header.number, "expected `def f {A : Set} (x : T(A)) : Set := ...`");
   const [, rawResultType, rhs] = result;
   const name = qualifyDeclaration(surfaceSymbol(rawName!), scope, { kernel, kind: "function", arity: parsedHeader.binders.length });
@@ -4318,12 +4347,13 @@ function elaborateExplicitDefinition(kernel: Kernel, block: readonly SourceLine[
   scope = scopedBinders(scope, binders);
   const rawType = surfaceType(rawResultType!);
   const variables = new Set(binders.map(item => item.name));
-  const resultDescriptor = resolvedResultType(rawType, kernel, scope, header.number, variables);
+  const resultDescriptor = resolvedResultType(rawType, kernel, scope, header.number, binders);
   const resultType = resultDescriptor.type;
   const environment = surfaceEnvironments.get(kernel)!;
   environment.signatures.set(name, {
     kind: "function", parameters: binders, resultType,
     ...(resultDescriptor.arguments ? { resultTypeArguments: resultDescriptor.arguments } : {}),
+    ...(resultDescriptor.guard ? { resultGuard: resultDescriptor.guard } : {}),
   });
   // A bounded separation `{ x ∈ A | φ }` defined under `target`.
   const defineSeparation = (target: string, binderSource: string, conditionSource: string,
@@ -4966,17 +4996,18 @@ function elaborateDefinition(kernel: Kernel, block: readonly SourceLine[], scope
   const [, rawName, tail] = match;
   if (!QUALIFIED_IDENTIFIER.test(rawName!)) throw new SurfaceError(header.number, "malformed definition name");
   const parsedHeader = parseBinderGroups(tail!, header.number);
-  const result = /^(?:->|→)\s*(\S+)$/.exec(parsedHeader.rest);
+  const result = /^(?:->|→)\s*(.+)$/.exec(parsedHeader.rest);
   if (!result) throw new SurfaceError(header.number, "expected `def f {A : Set} (x : T(A)) -> Set`");
-  const rawResultType = result[1]!;
+  const rawResultType = result[1]!.trim();
   const name = qualifyDeclaration(surfaceSymbol(rawName!), scope);
   scope = { ...scope, pendingFunction: name };
   const binders = resolveBinderTypes(parsedHeader.binders, kernel, scope, header.number);
   scope = scopedBinders(scope, binders);
-  const rawType = surfaceType(rawResultType!);
-  const resultDescriptor = resolvedResultType(rawType, kernel, scope, header.number, new Set(binders.map(item => item.name)));
+  const rawType = surfaceType(rawResultType);
+  const resultDescriptor = resolvedResultType(rawType, kernel, scope, header.number, binders);
   surfaceEnvironments.get(kernel)!.signatures.set(name, {
     kind: "function", parameters: binders, resultType: resultDescriptor.type, resultTypeArguments: resultDescriptor.arguments,
+    ...(resultDescriptor.guard ? { resultGuard: resultDescriptor.guard } : {}),
   });
   const descents = block.filter(line => line.text.startsWith("descends "));
   if (descents.length > 1) throw new SurfaceError(descents[1]!.number, "duplicate descends clause");
@@ -5207,9 +5238,10 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   if (parsedHeader.rest) throw new SurfaceError(header.number, `unexpected theorem header text ${parsedHeader.rest}`);
   // A binder typed by a structure variable of the header, (g : G), is
   // resolved once the requires clauses are read, since the hypothesis
-  // supplying G's carrier, Group(G), may be among them.
+  // supplying G's carrier, Group(G), may be among them. A generated
+  // theorem brings its binders resolved.
   const deferred = new Set<string>();
-  let binders = resolveBinderTypes(parsedHeader.binders, kernel, scope, header.number, [], new Set(), deferred);
+  let binders = header.parsedBinders ?? resolveBinderTypes(parsedHeader.binders, kernel, scope, header.number, [], new Set(), deferred);
   const outerScope = scope;
   scope = scopedBinders(scope, binders);
   if (binders.some(b => scope.rings?.some(r => r.name === b.name)))
@@ -5249,12 +5281,12 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   const shows = showsLines[0];
   if (!shows) throw new SurfaceError(header.number, `theorem ${name} needs a shows clause`);
   const showsBody = shows.text.slice("shows ".length);
-  const inlineProof = splitInlineProof(showsBody);
+  const inlineProof = shows.parsedFormula ? undefined : splitInlineProof(showsBody);
   const proofLines = block.filter(line => line.text === "proof");
   if (proofLines.length > 1) throw new SurfaceError(proofLines[1]!.number, "duplicate proof marker");
   if (inlineProof && proofLines.length) throw new SurfaceError(proofLines[0]!.number, "theorem has both an inline and a proof-block proof");
   if (!inlineProof && proofLines.length === 0) throw new SurfaceError(header.number, `theorem ${name} needs a proof block or trailing by tactic`);
-  const goal = parseFormula(inlineProof?.formula ?? showsBody, kernel, variables, shows.number, scope);
+  const goal = shows.parsedFormula ?? parseFormula(inlineProof?.formula ?? showsBody, kernel, variables, shows.number, scope);
   // An instance in a section takes only the section context its conclusion
   // and own premises mention, and of the section hypotheses only those of
   // predicate shape: synthesis matches the conclusion against a goal and
@@ -17348,10 +17380,24 @@ function sectionDefinitionBlock(
   return [headed(`${keyword} ${name} ${[groups, tail].filter(Boolean).join(" ")}`), ...headerLines.slice(1), ...hypotheses, ...rest];
 }
 
+/**
+ * A definition's result annotation, read as a binder's soft type is: the
+ * kernel sorts, a predicate with its carrier arguments, `List(A)`, or a
+ * guard form, `: R` under a hypothesis giving R a carrier, `: polynomialRing(R, I)`,
+ * or a mixfix type `: A → B`, whose typing is a formula over the value.
+ */
 function resolvedResultType(
-  source: string, kernel: Kernel, scope: SurfaceScope, line: number, variables: ReadonlySet<string>,
-): { readonly type: string; readonly arguments: readonly Term[] } {
+  source: string, kernel: Kernel, scope: SurfaceScope, line: number, binders: readonly Binder[],
+): { readonly type: string; readonly arguments: readonly Term[]; readonly guard?: ResultGuard } {
   if (source === "Set" || source === "Nat") return { type: source, arguments: [] };
+  const variables = new Set(binders.map(item => item.name));
+  const value = freshSurfaceVariable("result", variables);
+  const guardScope: SurfaceScope = {
+    ...scope, localFormulas: () => [...(scope.localFormulas?.() ?? []), ...binderAssumptions(binders)],
+  };
+  const guard = mixfixBinderGuard({ name: value, type: source }, kernel, variables, line, guardScope) ??
+    carrierBinderGuard({ name: value, type: source }, kernel, variables, line, guardScope);
+  if (guard) return { type: "Set", arguments: [], guard: { variable: value, formula: guard } };
   const application = /^([^\s(]+)(?:\((.*)\))?$/.exec(source);
   if (!application) throw new SurfaceError(line, `malformed result type ${source}`);
   const arguments_ = application[2]?.trim()
@@ -17361,14 +17407,13 @@ function resolvedResultType(
     catch (error) { throw new SurfaceError(line, `invalid result-type carrier in ${source}: ${error instanceof Error ? error.message : String(error)}`); }
   }
   const type = resolveOptional(application[1]!, scope, candidate => kernel.predicates.get(candidate) === arguments_.length + 1);
-  if (!type) throw new SurfaceError(line, `unknown definition result type ${source}`);
+  if (!type) {
+    const structure = SIMPLE_IDENTIFIER.test(source) && variables.has(source)
+      ? `; a result \`: ${source}\` needs a hypothesis in scope giving ${source} a carrier, such as Group(${source})` : "";
+    throw new SurfaceError(line, `unknown definition result type ${source}; a result is annotated as a binder is, ` +
+      `Set, Nat, a predicate such as Real or List(A), or a carrier${structure}`);
+  }
   return { type, arguments: arguments_ };
-}
-
-function resolveResultType(
-  source: string, kernel: Kernel, scope: SurfaceScope, line: number, variables: ReadonlySet<string>,
-): string {
-  return resolvedResultType(source, kernel, scope, line, variables).type;
 }
 
 function resolveBinderTypes(

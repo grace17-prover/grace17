@@ -25,6 +25,15 @@ test("definition result proofs are generated, namespaced, exported, and immediat
   assert.ok(verifyExportedProof(kernel, exportTheorem(kernel, "Example.identity.type")));
 });
 
+test("a result proof block sees the declaration's binder guards, `(x ∈ ℕ)` too", () => {
+  const { kernel, result } = check(`def after (x ∈ ℕ) : Nat := succ(x)
+ proof
+   unfold after
+   typecheck`);
+  assert.deepEqual(result.theorems, ["after.type"]);
+  assert.ok(verifyExportedProof(kernel, exportTheorem(kernel, "after.type")));
+});
+
 test("Set declarations need no result theorem", () => {
   const { result } = check("def identity (x : Set) : Set := x");
   assert.deepEqual(result.theorems, []);

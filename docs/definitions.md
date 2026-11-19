@@ -59,6 +59,8 @@ A `def` introduces a function symbol. It does not construct the set graph of
 that function. The distinction matters when a theorem expects
 `FunctionBetween(f, A, B)`, or when functions are quantified over as sets.
 
+## Result annotations
+
 A return annotation such as `: Integer` is a checked obligation. A `def` runs
 bounded type inference and publishes `f.type`, with the declaration's
 parameters and input type guards. For example:
@@ -68,8 +70,39 @@ def chineseCombination (m n a b u v : Integer) : Integer := a * v * n + b * u * 
 -- chineseCombination.type proves Integer(chineseCombination(m, n, a, b, u, v)).
 ```
 
+The annotation takes the forms a binder's type takes, spelled as in a
+binder: the kernel sorts `Set` and `Nat`; a predicate with its carrier
+arguments in parentheses, `: Real`, `: List(A)`, `: List(R.carrier)`; a
+carrier the facts in scope supply, `: R` under `hypothesis comm :
+CommRing(R)` or `: polynomialRing(R, I)`, which states membership in that
+carrier; and a mixfix type such as `: A → B`. The braces of `length{A}(cs)`
+name an implicit argument of a function and never a type, so a list result
+is `: List(A)`, as the binder is `(cs : List(A))`. The definition is the same
+set-theoretic function under any annotation; what changes is the theorem
+owed. Under `: List(A)` the obligation `f.type` states `List(A, f(…))`
+under the binder guards, and under `: R` it states `f(…) ∈ R.carrier`:
+
+```g17 import=Grace.Cumulus.Algebra.Polynomial.HornerArithmetic
+def fullList {A : Set} (leading ∈ A) (cs : List(A)) : List(A) :=
+  append{A}(leading :: [], cs)
+-- fullList.type proves ∀ A, ∀ leading ∈ A, ∀ cs, List(A, cs) →
+--   List(A, fullList(A, leading, cs)), by inference from append.type.
+```
+
+A typed result places the value for the notation around it and for the
+typing rules, as a binder of that type places a variable:
+`length(fullList{A}(leading, cs))` reads its implicit carrier from the
+result, `listMap{A}(h, fullList{A}(leading, cs))` and `typecheck` have
+`fullList.type`, and a theorem about the value needs no `requires
+coefficients : List(A, fullList{A}(leading, cs))`. A value whose typing
+needs a fact the parameters do not carry takes a guarded binder,
+`(leading ∈ A)` above, or is defined in a section whose hypotheses supply
+the fact; see
+[definitions in a section](modules.md#definitions-in-a-section).
+
 When inference needs help, attach a `proof` block. Its goal is the declared
-result predicate applied to the defined function; input guards are available:
+result predicate applied to the defined function, so the proof begins by
+unfolding it; input guards and section hypotheses are available:
 
 ```g17
 predicate EqualZero (x : Set) := x = 0
@@ -80,14 +113,15 @@ proof
   rfl
 ```
 
-Structural definitions also attempt a checked induction over their decreasing
-argument. Foundational definitions may establish closure later in the same
+An equation-style definition, `def f {A : Set} (zero : Set) (xs : List(A))
+→ List(A)`, is typed by a checked induction over its decreasing argument
+when the typing rules in scope close every clause; otherwise its `proof`
+block follows the `descends` clause and proves `f.type` by `induction`
+itself. Foundational definitions may establish closure later in the same
 module, including by an explicit theorem named `f.type`. Pending annotations
 supply no proof evidence, and the module fails if any obligation remains
 unproved. A hand-written `f.type` must have the declared guards and
-conclusion. `Set` is the kernel sort and needs no type theorem. A function
-whose stronger type needs extra hypotheses should take refined input binders,
-or return `Set` and come with a conditional closure theorem. Datatype
+conclusion. `Set` is the kernel sort and needs no type theorem. Datatype
 predicates are not carrier sets: `List(List(A))` needs a set of lists, which
 the datatype declaration does not construct. Executable Set-valued functions
 can still use exhaustive constructor patterns for structural recursion.
