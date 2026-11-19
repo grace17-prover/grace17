@@ -281,8 +281,8 @@ graph TD
 |---|---:|---:|---:|
 | CAD.ComplexEmbedding | 23 | 6 | 17 |
 | CAD.DeterminantColumns | 16 | 3 | 13 |
-| CAD.HornerProduct | 24 | 0 | 24 |
-| CAD.HornerNormalForm | 30 | 0 | 30 |
+| CAD.HornerProduct | 30 | 30 | 0 |
+| CAD.HornerNormalForm | 44 | 44 | 0 |
 | CAD.Resultant | 25 | 3 | 22 |
 | CAD.HornerDivision | 15 | 0 | 15 |
 | CAD.HornerDerivative | 17 | 0 | 17 |
@@ -305,5 +305,5 @@ graph TD
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **445** | **170** | **275** |
+| **total** | **465** | **244** | **221** |
 <!-- /blueprint-status -->
