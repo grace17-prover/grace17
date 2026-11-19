@@ -296,14 +296,14 @@ graph TD
 | CAD.Discriminant | 10 | 0 | 10 |
 | CAD.HornerRootCount | 8 | 3 | 5 |
 | CAD.RealSign | 25 | 25 | 0 |
-| CAD.RealRays | 10 | 0 | 10 |
-| CAD.RealConstantSign | 9 | 0 | 9 |
-| CAD.RealFiniteExtrema | 19 | 2 | 17 |
-| CAD.StrictlyIncreasingList | 13 | 0 | 13 |
+| CAD.RealRays | 10 | 10 | 0 |
+| CAD.RealConstantSign | 13 | 13 | 0 |
+| CAD.RealFiniteExtrema | 24 | 24 | 0 |
+| CAD.StrictlyIncreasingList | 19 | 19 | 0 |
 | CAD.RealRootOrder | 11 | 0 | 11 |
 | CAD.SignVariations | 16 | 3 | 13 |
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **430** | **106** | **324** |
+| **total** | **445** | **170** | **275** |
 <!-- /blueprint-status -->
