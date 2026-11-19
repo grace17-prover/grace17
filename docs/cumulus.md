@@ -192,8 +192,8 @@ integer root `rootNat(q, n)` are defined by their bounds
 b ^ k ≤ n < b ^ (k + 1) and r ^ q ≤ n < (r + 1) ^ q, with bounds for the
 roots of products and of roots, and cancellation of equal exponents and of
 a base above 1. The binary length `bitLength(n)` is the least k with
-n < 2 ^ k, so bitLength(0) = 0 and bitLength(n) ≤ k exactly when n < 2 ^ k.
-Arithmetic evaluates
+n < 2 ^ k, so bitLength(0) = 0 and bitLength(n) ≤ k if and only if
+n < 2 ^ k. Arithmetic evaluates
 with native large integers,
 so `compute` settles ground equations at any size. The everyday lemma
 library covers order, minimum and maximum, powers, parity, truncated
