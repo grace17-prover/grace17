@@ -220,7 +220,12 @@ form with proof obligations takes every section hypothesis as a premise of
 its generated laws, in the order the hypotheses were declared and before
 its own `requires` clauses, so a `defunique` under `hypothesis field :
 IsField(R)` proves existence and uniqueness with `field` in scope and its
-`.selected` law requires it. The check warns, once per definition, about a
+`.selected` law requires it, and a `def` with a
+[result annotation](definitions.md#result-annotations), `: List(A)` under
+`hypothesis ring : IsCommRing(R)`, owes `f.type` with the binder guards
+first and the section hypotheses after them: inside the section `f.type` is
+applied as any section theorem is, and outside it takes the hypotheses by
+`with`. The check warns, once per definition, about a
 section hypothesis none of its proofs uses; the premise is kept all the
 same, so a definition that needs fewer hypotheses belongs in an outer
 section.

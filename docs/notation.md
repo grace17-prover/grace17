@@ -201,7 +201,9 @@ hypothesis itself or a `requires` clause, and nowhere else; such a rule
 reads the notation only, and the refinement search behind `typecheck`
 never uses it. A definition's declared result sort, `def indicator (P :
 Set) : Nat` or a recursion `→ Nat`, places its values by syntax, inside
-its own recursive body too; so do the bound of a `defunique` or
+its own recursive body too, and a declared result type, `: List(A)` or
+`: R` under `CommRing(R)`, places them as a binder of that type places a
+variable, with `f.type` as the evidence; so do the bound of a `defunique` or
 `defchoose`, `(m ∈ ℕ)` placing `rootMultiplicity(cs, r)` in ℕ, and the
 codomain of a `defgraph`, `(X ∈ ℝ) : ℝ` placing the values `f(X)` in ℝ,
 with the selection or closure law as the evidence a proof must
