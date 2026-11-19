@@ -277,7 +277,7 @@ You can start immediately in the [browser Workbench](../workbench/): the full pr
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) 24 or later; the checks run on 26, the current line.
+- [Node.js](https://nodejs.org) 24 or later (26 or later preferred).
 - Python 3, only for the independent Python checker.
 - OCaml 5 with Zarith, only for the independent OCaml checker.
 - Rust, with \`cargo\` from [rustup](https://rustup.rs), only for the independent Rust checker.
