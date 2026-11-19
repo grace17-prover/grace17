@@ -279,7 +279,7 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| CAD.ComplexEmbedding | 23 | 6 | 17 |
+| CAD.ComplexEmbedding | 25 | 25 | 0 |
 | CAD.DeterminantColumns | 25 | 25 | 0 |
 | CAD.HornerProduct | 30 | 30 | 0 |
 | CAD.HornerNormalForm | 44 | 44 | 0 |
@@ -301,9 +301,9 @@ graph TD
 | CAD.RealFiniteExtrema | 24 | 24 | 0 |
 | CAD.StrictlyIncreasingList | 19 | 19 | 0 |
 | CAD.RealRootOrder | 11 | 0 | 11 |
-| CAD.SignVariations | 16 | 3 | 13 |
+| CAD.SignVariations | 30 | 30 | 0 |
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **495** | **308** | **187** |
+| **total** | **511** | **354** | **157** |
 <!-- /blueprint-status -->
