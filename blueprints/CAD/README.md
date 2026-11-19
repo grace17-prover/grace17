@@ -280,13 +280,13 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | CAD.ComplexEmbedding | 23 | 6 | 17 |
-| CAD.DeterminantColumns | 16 | 3 | 13 |
+| CAD.DeterminantColumns | 25 | 25 | 0 |
 | CAD.HornerProduct | 30 | 30 | 0 |
 | CAD.HornerNormalForm | 44 | 44 | 0 |
 | CAD.Resultant | 25 | 3 | 22 |
 | CAD.HornerDivision | 15 | 0 | 15 |
 | CAD.HornerDerivative | 17 | 0 | 17 |
-| CAD.HornerGcd | 21 | 0 | 21 |
+| CAD.HornerGcd | 42 | 42 | 0 |
 | CAD.ResultantGcd | 4 | 0 | 4 |
 | CAD.ResultantRoots | 8 | 0 | 8 |
 | CAD.HornerMultiplicity | 13 | 1 | 12 |
@@ -305,5 +305,5 @@ graph TD
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **465** | **244** | **221** |
+| **total** | **495** | **308** | **187** |
 <!-- /blueprint-status -->

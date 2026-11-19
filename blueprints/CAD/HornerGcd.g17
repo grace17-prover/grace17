@@ -67,6 +67,833 @@ predicate HornerSquarefree (A add zero neg mul one a cs : Set) :=
     hornerDerivativeLeading{A}(add, zero, one, mul, a, cs),
       hornerDerivativeList{A}(add, zero, one, mul, cs))
 
+-- The result of Euclid's algorithm on (a, cs) and (b, ds): a pair (g, gs)
+-- in normal form dividing both, divided by every common divisor, and a
+-- polynomial combination of the two.
+predicate HornerGcdResult (A add zero neg mul one a cs b ds g gs : Set) :=
+  g ∈ A ∧ List(A, gs) ∧ (g ≠ zero ∨ (g = zero ∧ gs = [])) ∧
+  HornerDivides(A, add, zero, neg, mul, one, g, gs, a, cs) ∧
+  HornerDivides(A, add, zero, neg, mul, one, g, gs, b, ds) ∧
+  (∀ h ∈ A, ∀ hs, List(A, hs) →
+    HornerDivides(A, add, zero, neg, mul, one, h, hs, a, cs) →
+    HornerDivides(A, add, zero, neg, mul, one, h, hs, b, ds) →
+    HornerDivides(A, add, zero, neg, mul, one, h, hs, g, gs)) ∧
+  (∃ us, List(A, us) ∧ ∃ vs, List(A, vs) ∧
+    hornerPoly{A}(add, zero, neg, mul, one, g, gs) =
+      call2(polynomialAdd(oneVariable, A, add, zero, neg, mul, one),
+        call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+          hornerPoly{A}(add, zero, neg, mul, one, zero, us),
+          hornerPoly{A}(add, zero, neg, mul, one, a, cs)),
+        call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+          hornerPoly{A}(add, zero, neg, mul, one, zero, vs),
+          hornerPoly{A}(add, zero, neg, mul, one, b, ds))))
+
+theorem gcdSteps.stop (A add zero neg mul one a cs ds : Set) (n : Nat)
+  shows gcdSteps{A}(add, zero, neg, mul, one, n, a, cs, zero, ds) = (a, cs)
+proof
+  induction n
+  | zero =>
+    rw gcdSteps
+    rfl
+  | succ(m) using ih =>
+    have member : zero ∈ {zero} := singleton.self at zero
+    have test := memberTest.true at {zero}, zero with member
+    rw [gcdSteps, test, boolChoice.true]
+    rfl
+
+theorem gcdSteps.step (A add zero neg mul one a cs b ds : Set) (n : Nat)
+  requires nonzero : b ≠ zero
+  shows gcdSteps{A}(add, zero, neg, mul, one, succ(n), a, cs, b, ds) =
+    gcdSteps{A}(add, zero, neg, mul, one, n, b, ds,
+      fst(hornerRemainderPair{A}(add, zero, neg, mul, one, b, a, ds, cs)),
+      snd(hornerRemainderPair{A}(add, zero, neg, mul, one, b, a, ds, cs)))
+proof
+  have absent : ¬(b ∈ {zero})
+    intro member
+    have equal := singleton.membership.forward at b, zero with member
+    exact nonzero with equal
+  have test := memberTest.false at {zero}, b with absent
+  rw [gcdSteps, test, boolChoice.false]
+  rfl
+
+theorem listCoefficient.closed (A z : Set) (xs : List(A)) (n : Nat)
+  requires zeroIn : z ∈ A
+  shows listCoefficient{A}(z, xs, n) ∈ A
+proof
+  induction xs generalizing n
+  | List.nil =>
+    intros n nNat
+    rw listCoefficient.nil
+    exact zeroIn
+  | List.cons(a, tail) using ih =>
+    intros n nNat
+    have element : a ∈ A by assumption
+    have shape := natural.zero_or_successor at n with nNat
+    rcases shape with isZero | ⟨r, rNat, isSucc⟩
+    . rw [isZero, listCoefficient.zero]
+      exact element
+    . rw [isSucc, listCoefficient.succ]
+      exact ih with r, rNat
+
+section Lists
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+
+-- A full list read with leading zero has the coefficients of the list.
+theorem hornerCoefficient.zero_leading (rs : List(A)) (k : Nat)
+  shows hornerCoefficient{A}(zero, zero, rs, k) =
+    listCoefficient{A}(zero, rs, k)
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have lengthNat : Nat(length{A}(rs)) by typecheck
+  have order := Less.trichotomy at k, length{A}(rs) with *
+  rcases order with below | same | above
+  . exact hornerCoefficient.below at A, zero, zero, rs, k with below
+  . rw same
+    have leading := hornerCoefficient.leading at A, zero, zero, rs with zeroIn
+    have bound : length{A}(rs) ≤ length{A}(rs) by arith
+    have outside := listCoefficient.outside at A, zero, rs, length{A}(rs)
+      with bound
+    rw [leading, outside]
+    rfl
+  . have bound : length{A}(rs) ≤ k by arith
+    have top := hornerCoefficient.above at A, zero, zero, rs, k with above
+    have outside := listCoefficient.outside at A, zero, rs, k with bound
+    rw [top, outside]
+    rfl
+
+-- Trimming a full list keeps its polynomial.
+theorem hornerPoly.trim (rs : List(A))
+  shows hornerPoly{A}(add, zero, neg, mul, one, hornerTrimLeading{A}(zero, rs),
+    hornerTrimLower{A}(zero, rs)) =
+    hornerPoly{A}(add, zero, neg, mul, one, zero, rs)
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have leadingIn := hornerTrimLeading.mem at A, zero, rs with zeroIn
+  have lowerList := hornerTrimLower.list at A, zero, rs
+  have rule := hornerPoly.eq_iff at A, add, zero, neg, mul, one,
+    hornerTrimLeading{A}(zero, rs), zero, hornerTrimLower{A}(zero, rs), rs
+    with ring, leadingIn, zeroIn
+  apply rule.backward
+  intros k kNat
+  have trimmed := hornerTrim.coefficient at A, zero, rs, k
+  have plain := hornerCoefficient.zero_leading at A, add, zero, neg, mul, one,
+    rs, k with ring
+  rw [trimmed, plain]
+  rfl
+
+theorem hornerPoly.zero_list
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero, []) = P[0]
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have constant := hornerPoly.constant at A, add, zero, neg, mul, one, zero
+    with ring, zeroIn
+  have same := polynomialConstant.zero at oneVariable, A, zero with zeroIn
+  rw [constant, same]
+  rfl
+
+theorem hornerPoly.one_list
+  shows hornerPoly{A}(add, zero, neg, mul, one, one, []) = P[1]
+proof
+  have oneIn : R[1] ∈ R by typecheck
+  exact hornerPoly.constant at A, add, zero, neg, mul, one, one with ring, oneIn
+
+theorem hornerPoly.singleton (c : Set)
+  requires coefficient : c ∈ R
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero, c :: []) =
+    polynomialConstant(oneVariable, R, c)
+proof
+  have full := hornerPoly.full_list at A, add, zero, neg, mul, one, c, []
+    with ring, coefficient
+  have constant := hornerPoly.constant at A, add, zero, neg, mul, one, c
+    with ring, coefficient
+  have shape : hornerFullList{A}(c, []) = c :: []
+    simp [hornerFullList, append]
+  rw shape at full
+  rw [full, constant]
+  rfl
+
+theorem hornerPoly.cons (leading c : Set) (cs : List(A))
+  requires initial : leading ∈ R
+  requires coefficient : c ∈ R
+  shows hornerPoly{A}(add, zero, neg, mul, one, leading, c :: cs) =
+    P[polynomialConstant(oneVariable, R, c) +
+      polynomialVariable(oneVariable, R, (0:N)) *
+        hornerPoly{A}(add, zero, neg, mul, one, leading, cs)]
+proof
+  unfold hornerPoly
+  exact polynomialFromHorner.cons at oneVariable, A, add, zero, neg, mul, one,
+    (0:N), leading, c, cs with ring, initial, coefficient
+
+theorem hornerPoly.constant_add (u v : Set)
+  requires first : u ∈ R
+  requires second : v ∈ R
+  shows polynomialConstant(oneVariable, R, R[u + v]) =
+    P[polynomialConstant(oneVariable, R, u) +
+      polynomialConstant(oneVariable, R, v)]
+proof
+  have ordinary := IsCommRing.ring with ring
+  have sumIn := IsRing.add_closed with ordinary, first, second
+  have nilLength : length{A}([]) = length{A}([]) by rfl
+  have sum := hornerPoly.add at A, add, zero, neg, mul, one, u, v, [], []
+    with ring, first, second, nilLength
+  have addNil : hornerAdd{A}(add, zero, [], []) = [] by rw hornerAdd
+  have constU := hornerPoly.constant at A, add, zero, neg, mul, one, u
+    with ring, first
+  have constV := hornerPoly.constant at A, add, zero, neg, mul, one, v
+    with ring, second
+  have constSum := hornerPoly.constant at A, add, zero, neg, mul, one, R[u + v]
+    with ring, sumIn
+  rw [addNil, constSum, constU, constV] at sum
+  exact sum
+
+-- The sum of two lists read with leading zero, the second no longer.
+theorem hornerPoly.add_short (us vs : List(A))
+  requires shorter : length{A}(vs) ≤ length{A}(us)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerAdd{A}(add, zero, us, vs)) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) +
+      hornerPoly{A}(add, zero, neg, mul, one, zero, vs)]
+proof
+  induction us generalizing vs
+  | List.nil =>
+    intros vs vsList shorter
+    have zeroIn : R[0] ∈ R by typecheck
+    rw length.nil at shorter
+    have zeroLength : length{A}(vs) = (0:N) by arith
+    have isNil := length.eq_zero at A, vs with zeroLength
+    have addNil : hornerAdd{A}(add, zero, [], vs) = [] by rw hornerAdd
+    have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one
+      with ring
+    rw [addNil, isNil, zeroPoly]
+    ring
+  | List.cons(u, tail) using ih =>
+    intros vs vsList shorter
+    have uIn : u ∈ R by assumption
+    have zeroIn : R[0] ∈ R by typecheck
+    have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one
+      with ring
+    have consU := hornerPoly.cons at A, add, zero, neg, mul, one, zero, u, tail
+      with ring, zeroIn, uIn
+    have oneIn : R[1] ∈ R by typecheck
+    have variableIn := polynomialVariable.member at oneVariable, A, zero, one,
+      (0:N) with zeroIn, oneIn
+    have constU := polynomialConstant.member at oneVariable, A, zero, u
+      with zeroIn, uIn
+    have tailIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, tail
+      with ring, zeroIn
+    have shape := List.cases at A, vs with vsList
+    cases shape with isNil | nonempty
+    . rw isNil
+      have nilList : List(A, []) by typecheck
+      have nilShorter : length{A}([]) ≤ length{A}(tail)
+        rw length.nil
+        arith
+      have previous := ih with [], nilList, nilShorter
+      have addCons : hornerAdd{A}(add, zero, u :: tail, []) =
+          call2(add, u, zero) :: hornerAdd{A}(add, zero, tail, [])
+        rw [hornerAdd, listHeadOr.nil, listTail.nil]
+        rfl
+      have same : call2(add, u, zero) = u by ring
+      have restList := hornerAdd.data at A, add, zero, neg, mul, one, tail, []
+        with ring, nilList
+      have consRest := hornerPoly.cons at A, add, zero, neg, mul, one, zero, u,
+        hornerAdd{A}(add, zero, tail, []) with ring, zeroIn, uIn, restList.left
+      rw [addCons, same, consRest, consU, previous, zeroPoly]
+      ring
+    . obtain ⟨v, vIn, vtail, vtailList, isCons⟩ := nonempty
+      rw isCons
+      rw isCons at shorter
+      rw [length.cons, length.cons] at shorter
+      have vtailShorter : length{A}(vtail) ≤ length{A}(tail) by arith
+      have previous := ih with vtail, vtailList, vtailShorter
+      have addCons : hornerAdd{A}(add, zero, u :: tail, v :: vtail) =
+          call2(add, u, v) :: hornerAdd{A}(add, zero, tail, vtail)
+        rw [hornerAdd, listHeadOr.cons, listTail.cons]
+        rfl
+      have ordinary := IsCommRing.ring with ring
+      have sumIn := IsRing.add_closed with ordinary, uIn, vIn
+      have restList := hornerAdd.data at A, add, zero, neg, mul, one, tail,
+        vtail with ring, vtailList
+      have consRest := hornerPoly.cons at A, add, zero, neg, mul, one, zero,
+        call2(add, u, v), hornerAdd{A}(add, zero, tail, vtail)
+        with ring, zeroIn, sumIn, restList.left
+      have consV := hornerPoly.cons at A, add, zero, neg, mul, one, zero, v,
+        vtail with ring, zeroIn, vIn
+      have constSum := hornerPoly.constant_add at A, add, zero, neg, mul, one,
+        u, v with ring, uIn, vIn
+      have constV := polynomialConstant.member at oneVariable, A, zero, v
+        with zeroIn, vIn
+      have vtailIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+        vtail with ring, zeroIn
+      rw [addCons, consRest, consU, consV, previous, constSum]
+      ring
+
+theorem hornerPoly.exists_sum (us vs : List(A))
+  shows ∃ ws, List(A, ws) ∧
+    hornerPoly{A}(add, zero, neg, mul, one, zero, ws) =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) +
+        hornerPoly{A}(add, zero, neg, mul, one, zero, vs)]
+proof
+  have usNat : Nat(length{A}(us)) by typecheck
+  have vsNat : Nat(length{A}(vs)) by typecheck
+  have zeroIn : R[0] ∈ R by typecheck
+  have usIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vsIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  have order := Less.trichotomy at length{A}(vs), length{A}(us)
+    with vsNat, usNat
+  rcases order with below | same | above
+  . have shorter : length{A}(vs) ≤ length{A}(us) by arith
+    have data := hornerAdd.data at A, add, zero, neg, mul, one, us, vs with ring
+    refine ⟨hornerAdd{A}(add, zero, us, vs), data.left, ?_⟩
+    exact hornerPoly.add_short at A, add, zero, neg, mul, one, us, vs
+      with ring, shorter
+  . have shorter : length{A}(vs) ≤ length{A}(us) by arith
+    have data := hornerAdd.data at A, add, zero, neg, mul, one, us, vs with ring
+    refine ⟨hornerAdd{A}(add, zero, us, vs), data.left, ?_⟩
+    exact hornerPoly.add_short at A, add, zero, neg, mul, one, us, vs
+      with ring, shorter
+  . have shorter : length{A}(us) ≤ length{A}(vs) by arith
+    have data := hornerAdd.data at A, add, zero, neg, mul, one, vs, us with ring
+    refine ⟨hornerAdd{A}(add, zero, vs, us), data.left, ?_⟩
+    have sum := hornerPoly.add_short at A, add, zero, neg, mul, one, vs, us
+      with ring, shorter
+    rw sum
+    ring
+
+theorem hornerPoly.mul_lists (us vs : List(A))
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerMulList{A}(add, zero, mul, zero, zero, us, vs)) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+      hornerPoly{A}(add, zero, neg, mul, one, zero, vs)]
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have product := hornerPoly.mul at A, add, zero, neg, mul, one, zero, zero, us,
+    vs with ring, zeroIn, zeroIn
+  have same : R[0 * 0] = R[0] by ring
+  rw same at product
+  exact product
+
+theorem hornerPoly.neg_list (us : List(A))
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero, hornerNeg{A}(neg, us)) =
+    P[-hornerPoly{A}(add, zero, neg, mul, one, zero, us)]
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have negation := hornerPoly.neg at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have same : R[-0] = R[0] by ring
+  rw same at negation
+  exact negation
+
+-- Evaluating a polynomial combination of two pairs at a point.
+theorem hornerPoly.value_combination (g a b x : Set) (gs cs ds us vs : List(A))
+  requires gIn : g ∈ R
+  requires aIn : a ∈ R
+  requires bIn : b ∈ R
+  requires element : x ∈ R
+  requires identity : hornerPoly{A}(add, zero, neg, mul, one, g, gs) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+        hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+      hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+        hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+  shows hornerAt{A}(add, mul, g, x, gs) =
+    R[hornerAt{A}(add, mul, zero, x, us) * hornerAt{A}(add, mul, a, x, cs) +
+      hornerAt{A}(add, mul, zero, x, vs) * hornerAt{A}(add, mul, b, x, ds)]
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have assignment := constantFunction.function at oneVariable, A, x with element
+  have hom := polynomialAt.hom at oneVariable, A, add, zero, neg, mul, one,
+    constantFunction(oneVariable, A, x) with ring, assignment
+  have polyRing : IsCommRing(P) := polynomials.comm_ring at oneVariable, A, add,
+    zero, neg, mul, one with ring
+  have ordinary := IsCommRing.ring with polyRing
+  have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, aIn
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, bIn
+  have upIn := IsRing.mul_closed with ordinary, uIn, pIn
+  have vqIn := IsRing.mul_closed with ordinary, vIn, qIn
+  have evG := hornerPoly.value at A, add, zero, neg, mul, one, g, x, gs
+    with ring, gIn, element
+  have evU := hornerPoly.value at A, add, zero, neg, mul, one, zero, x, us
+    with ring, zeroIn, element
+  have evV := hornerPoly.value at A, add, zero, neg, mul, one, zero, x, vs
+    with ring, zeroIn, element
+  have evP := hornerPoly.value at A, add, zero, neg, mul, one, a, x, cs
+    with ring, aIn, element
+  have evQ := hornerPoly.value at A, add, zero, neg, mul, one, b, x, ds
+    with ring, bIn, element
+  have splitAdd := IsRingHom.add with hom, upIn, vqIn
+  have splitU := IsRingHom.mul with hom, uIn, pIn
+  have splitV := IsRingHom.mul with hom, vIn, qIn
+  rw identity at evG
+  rw [splitAdd, splitU, splitV, evU, evP, evV, evQ] at evG
+  symm
+  exact evG
+
+end Lists
+
+section Euclid
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis field : IsField(R)
+
+theorem HornerGcdResult.zero_divisor (a : Set) (cs : List(A))
+  requires initial : a ∈ R
+  requires normal : a ≠ R[0] ∨ (a = R[0] ∧ cs = [])
+  shows HornerGcdResult(A, add, zero, neg, mul, one, a, cs, zero, [], a, cs)
+proof
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have oneIn : R[1] ∈ R by typecheck
+  have csList : List(A, cs) by assumption
+  have nilList : List(A, []) by typecheck
+  have unitList : List(A, one :: []) by typecheck
+  have reflexive := HornerDivides.refl at A, add, zero, neg, mul, one, a, cs
+    with ring, initial
+  have vanishes : HornerZero(A, zero, zero, [])
+    intros k kNat
+    have plain := hornerCoefficient.zero_leading at A, add, zero, neg, mul, one,
+      [], k with ring
+    rw plain
+    exact listCoefficient.nil at A, zero, k
+  have dividesZero := HornerDivides.zero at A, add, zero, neg, mul, one, a,
+    zero, cs, [] with ring, initial, zeroIn, vanishes
+  have greatest : ∀ h ∈ A, ∀ hs, List(A, hs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, a, cs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, zero, []) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, a, cs)
+    intros h hIn hs hsList dividesA dividesZ
+    exact dividesA
+  have unit := hornerPoly.one_list at A, add, zero, neg, mul, one with ring
+  have unitPoly := hornerPoly.singleton at A, add, zero, neg, mul, one, one
+    with ring, oneIn
+  have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one with ring
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, initial
+  have bezout : ∃ us, List(A, us) ∧ ∃ vs, List(A, vs) ∧
+      hornerPoly{A}(add, zero, neg, mul, one, a, cs) =
+        P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+            hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+          hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+            hornerPoly{A}(add, zero, neg, mul, one, zero, [])]
+    refine ⟨one :: [], unitList, [], nilList, ?_⟩
+    rw [unitPoly, zeroPoly]
+    ring
+  unfold HornerGcdResult
+  exact ⟨initial, csList, normal, reflexive, dividesZero, greatest, bezout⟩
+
+theorem HornerGcdResult.constant_divisor (a b : Set) (cs : List(A))
+  requires initial : a ∈ R
+  requires divisor : b ∈ R
+  requires nonzero : b ≠ R[0]
+  shows HornerGcdResult(A, add, zero, neg, mul, one, a, cs, b, [], b, [])
+proof
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have oneIn : R[1] ∈ R by typecheck
+  have nilList : List(A, []) by typecheck
+  have unitList : List(A, one :: []) by typecheck
+  have normal : b ≠ R[0] ∨ (b = R[0] ∧ [] = [])
+    left
+    exact nonzero
+  have remainder := hornerDivRemainder.data at A, add, zero, neg, mul, one, b,
+    a, [], cs with field, divisor, nonzero, initial
+  have remLength := remainder.right
+  rw length.nil at remLength
+  have remNil := length.eq_zero at A,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, [], cs) with remLength
+  have coefficients : ∀ k, Nat(k) → listCoefficient{A}(zero,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, [], cs), k) = zero
+    intros k kNat
+    rw remNil
+    exact listCoefficient.nil at A, zero, k
+  have rule := HornerDivides.iff_remainder_zero at A, add, zero, neg, mul, one,
+    b, a, [], cs with field, divisor, nonzero, initial
+  have dividesLeft := rule.backward with coefficients
+  have reflexive := HornerDivides.refl at A, add, zero, neg, mul, one, b, []
+    with ring, divisor
+  have greatest : ∀ h ∈ A, ∀ hs, List(A, hs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, a, cs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, b, []) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, b, [])
+    intros h hIn hs hsList dividesA dividesB
+    exact dividesB
+  have unitPoly := hornerPoly.singleton at A, add, zero, neg, mul, one, one
+    with ring, oneIn
+  have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one with ring
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, initial
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, []
+    with ring, divisor
+  have bezout : ∃ us, List(A, us) ∧ ∃ vs, List(A, vs) ∧
+      hornerPoly{A}(add, zero, neg, mul, one, b, []) =
+        P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+            hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+          hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+            hornerPoly{A}(add, zero, neg, mul, one, b, [])]
+    refine ⟨[], nilList, one :: [], unitList, ?_⟩
+    rw [unitPoly, zeroPoly]
+    ring
+  unfold HornerGcdResult
+  exact ⟨divisor, nilList, normal, dividesLeft, reflexive, greatest, bezout⟩
+
+-- One Euclidean step: the result for (b, ds) and the trimmed remainder is
+-- the result for (a, cs) and (b, ds).
+theorem HornerGcdResult.euclid (a b g : Set) (cs ds gs : List(A))
+  requires initial : a ∈ R
+  requires divisor : b ∈ R
+  requires nonzero : b ≠ R[0]
+  requires result : HornerGcdResult(A, add, zero, neg, mul, one, b, ds,
+    hornerTrimLeading{A}(zero,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)),
+    hornerTrimLower{A}(zero,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)), g, gs)
+  shows HornerGcdResult(A, add, zero, neg, mul, one, a, cs, b, ds, g, gs)
+proof
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have remainder := hornerDivRemainder.data at A, add, zero, neg, mul, one, b,
+    a, ds, cs with field, divisor, nonzero, initial
+  have remList := remainder.left
+  have quotient := hornerDivQuotient.data at A, add, zero, neg, mul, one, b, a,
+    ds, cs with field, divisor, nonzero, initial
+  have quotientList := quotient.left
+  have division := hornerDivision.poly at A, add, zero, neg, mul, one, b, a, ds,
+    cs with field, divisor, nonzero, initial
+  have trimmed := hornerPoly.trim at A, add, zero, neg, mul, one,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+    with ring, remList
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, initial
+  have dIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, divisor
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs)
+    with ring, zeroIn, quotientList
+  have remIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+    with ring, zeroIn, remList
+  -- The remainder as a polynomial is p − q·d.
+  have remValue : hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)) =
+      P[hornerPoly{A}(add, zero, neg, mul, one, a, cs) -
+        hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs)) *
+          hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+    rw division
+    ring
+  unfold HornerGcdResult at result
+  obtain ⟨gIn, gsList, gNormal, dividesD, dividesRem, greatest, us, usList,
+    vs, vsList, bezout⟩ := result
+  have gPoly := hornerPoly.member at A, add, zero, neg, mul, one, g, gs
+    with ring, gIn
+  have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  rw trimmed at bezout
+  -- (g, gs) divides p = q·d + rem.
+  have dividesP : HornerDivides(A, add, zero, neg, mul, one, g, gs, a, cs)
+    have copyD := dividesD
+    have copyRem := dividesRem
+    unfold HornerDivides at copyD
+    unfold HornerDivides at copyRem
+    obtain ⟨w1, w1List, dEq⟩ := copyD
+    obtain ⟨w2, w2List, remEq⟩ := copyRem
+    rw trimmed at remEq
+    have w1In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w1
+      with ring, zeroIn
+    have w2In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w2
+      with ring, zeroIn
+    have productData := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w1
+      with ring, zeroIn, zeroIn, quotientList, w1List
+    have productEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w1
+      with ring, quotientList, w1List
+    obtain ⟨ws, wsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero,
+      neg, mul, one, hornerMulList{A}(add, zero, mul, zero, zero,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w1), w2
+      with ring, productData.left, w2List
+    unfold HornerDivides
+    refine ⟨ws, wsList, ?_⟩
+    rw [division, dEq, remEq, sumEq, productEq]
+    ring
+  -- Every common divisor of p and d divides rem, so divides (g, gs).
+  have common : ∀ h ∈ A, ∀ hs, List(A, hs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, a, cs) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, b, ds) →
+      HornerDivides(A, add, zero, neg, mul, one, h, hs, g, gs)
+    intros h hIn hs hsList dividesA dividesB
+    have copyA := dividesA
+    have copyB := dividesB
+    unfold HornerDivides at copyA
+    unfold HornerDivides at copyB
+    obtain ⟨w1, w1List, pEq⟩ := copyA
+    obtain ⟨w2, w2List, dEq⟩ := copyB
+    have hPoly := hornerPoly.member at A, add, zero, neg, mul, one, h, hs
+      with ring, hIn
+    have w1In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w1
+      with ring, zeroIn
+    have w2In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w2
+      with ring, zeroIn
+    have productData := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w2
+      with ring, zeroIn, zeroIn, quotientList, w2List
+    have productEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w2
+      with ring, quotientList, w2List
+    have negData := hornerNeg.data at A, add, zero, neg, mul, one,
+      hornerMulList{A}(add, zero, mul, zero, zero,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w2)
+      with ring, productData.left
+    have negEq := hornerPoly.neg_list at A, add, zero, neg, mul, one,
+      hornerMulList{A}(add, zero, mul, zero, zero,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w2)
+      with ring, productData.left
+    obtain ⟨ws, wsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero,
+      neg, mul, one, w1, hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul,
+        zero, zero,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs), w2))
+      with ring, w1List, negData.left
+    have dividesRemainder : HornerDivides(A, add, zero, neg, mul, one, h, hs,
+        hornerTrimLeading{A}(zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)),
+        hornerTrimLower{A}(zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)))
+      unfold HornerDivides
+      refine ⟨ws, wsList, ?_⟩
+      rw [trimmed, remValue, pEq, dEq, sumEq, negEq, productEq]
+      ring
+    exact greatest with h, hIn, hs, hsList, dividesB, dividesRemainder
+  -- Bézout: g = u·d + v·rem = v·p + (u − v·q)·d.
+  have combination : ∃ us, List(A, us) ∧ ∃ vs, List(A, vs) ∧
+      hornerPoly{A}(add, zero, neg, mul, one, g, gs) =
+        P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+            hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+          hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+            hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+    have productData := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, vs, hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs)
+      with ring, zeroIn, zeroIn, vsList, quotientList
+    have productEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, vs,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs)
+      with ring, vsList, quotientList
+    have negData := hornerNeg.data at A, add, zero, neg, mul, one,
+      hornerMulList{A}(add, zero, mul, zero, zero, vs,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs))
+      with ring, productData.left
+    have negEq := hornerPoly.neg_list at A, add, zero, neg, mul, one,
+      hornerMulList{A}(add, zero, mul, zero, zero, vs,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs))
+      with ring, productData.left
+    obtain ⟨ws, wsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero,
+      neg, mul, one, us, hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul,
+        zero, zero, vs,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, a, ds, cs)))
+      with ring, usList, negData.left
+    refine ⟨vs, vsList, ws, wsList, ?_⟩
+    rw [bezout, remValue, sumEq, negEq, productEq]
+    ring
+  unfold HornerGcdResult
+  exact ⟨gIn, gsList, gNormal, dividesP, dividesD, common, combination⟩
+
+-- Euclid's steps with enough fuel compute a gcd of pairs in normal form.
+theorem gcdSteps.invariant (n : Nat)
+  shows ∀ a ∈ R, ∀ cs, List(A, cs) →
+    (a ≠ R[0] ∨ (a = R[0] ∧ cs = [])) →
+    ∀ b ∈ R, ∀ ds, List(A, ds) →
+    (b ≠ R[0] ∨ (b = R[0] ∧ ds = [])) →
+    length{A}(ds) < n →
+    HornerGcdResult(A, add, zero, neg, mul, one, a, cs, b, ds,
+      fst(gcdSteps{A}(add, zero, neg, mul, one, n, a, cs, b, ds)),
+      snd(gcdSteps{A}(add, zero, neg, mul, one, n, a, cs, b, ds)))
+proof
+  induction n
+  | zero =>
+    intros a ha cs csList aNormal b hb ds dsList bNormal bound
+    have lengthNat : Nat(length{A}(ds)) by typecheck
+    exfalso
+    arith
+  | succ(m) using ih =>
+    intros a ha cs csList aNormal b hb ds dsList bNormal bound
+    have ring := IsField.comm_ring with field
+    have zeroIn : R[0] ∈ R by typecheck
+    rcases bNormal with nonzero | ⟨bZero, dsNil⟩
+    . have step := gcdSteps.step at A, add, zero, neg, mul, one, a, cs, b, ds, m
+        with nonzero
+      rw step
+      have remainder := hornerDivRemainder.data at A, add, zero, neg, mul, one,
+        b, a, ds, cs with field, hb, nonzero, ha
+      have remList := remainder.left
+      have remLength := remainder.right
+      have fstValue : fst(hornerRemainderPair{A}(add, zero, neg, mul, one, b, a,
+          ds, cs)) = hornerTrimLeading{A}(zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs))
+        unfold hornerRemainderPair
+        rw fst.pair
+        rfl
+      have sndValue : snd(hornerRemainderPair{A}(add, zero, neg, mul, one, b, a,
+          ds, cs)) = hornerTrimLower{A}(zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs))
+        unfold hornerRemainderPair
+        rw snd.pair
+        rfl
+      rw [fstValue, sndValue]
+      have trimNormal := hornerTrim.normal at A, zero,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+        with remList
+      have trimIn := hornerTrimLeading.mem at A, zero,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+        with zeroIn, remList
+      have trimList := hornerTrimLower.list at A, zero,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+        with remList
+      have lengthNat : Nat(length{A}(ds)) by typecheck
+      have shape := natural.zero_or_successor at length{A}(ds) with lengthNat
+      rcases shape with isZero | ⟨k, kNat, isSucc⟩
+      . -- A constant divisor: the remainder is empty and the result is (b, []).
+        have dsNil := length.eq_zero at A, ds with isZero
+        rw isZero at remLength
+        have remNil := length.eq_zero at A,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+          with remList, remLength
+        have trimZero : hornerTrimLeading{A}(zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)) =
+            zero
+          have rule := hornerTrim.zero_iff at A, zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+            with remList
+          apply rule.backward
+          intros k kNat
+          rw remNil
+          exact listCoefficient.nil at A, zero, k
+        have trimNil : hornerTrimLower{A}(zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)) = []
+          rcases trimNormal with nonzeroLeading | ⟨zeroLeading, isNil⟩
+          . exfalso
+            exact nonzeroLeading with trimZero
+          . exact isNil
+        rw [trimZero, trimNil]
+        have stop := gcdSteps.stop at A, add, zero, neg, mul, one, b, ds, [], m
+        rw [stop, fst.pair, snd.pair, dsNil]
+        exact HornerGcdResult.constant_divisor at A, add, zero, neg, mul, one,
+          a, b, cs with field, ha, hb, nonzero
+      . -- A proper step: the trimmed remainder is shorter than ds.
+        have remNonempty :
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs) ≠ []
+          intro isNil
+          rw [isNil, length.nil] at remLength
+          arith
+        have shorter := hornerTrim.length_lt at A, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)
+          with remList, remNonempty
+        have smaller : length{A}(hornerTrimLower{A}(zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs))) < m
+          arith
+        have divisorNormal : b ≠ R[0] ∨ (b = R[0] ∧ ds = [])
+          left
+          exact nonzero
+        have recursive := ih with b, hb, ds, dsList, divisorNormal,
+          hornerTrimLeading{A}(zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)),
+          trimIn, hornerTrimLower{A}(zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, a, ds, cs)),
+          trimList, trimNormal, smaller
+        have copy := recursive
+        unfold HornerGcdResult at copy
+        have gsList := copy.right.left
+        exact HornerGcdResult.euclid with field, gsList, ha, hb, nonzero,
+          recursive
+    . rw [bZero, dsNil]
+      have stop := gcdSteps.stop at A, add, zero, neg, mul, one, a, cs, [],
+        succ(m)
+      rw [stop, fst.pair, snd.pair]
+      exact HornerGcdResult.zero_divisor with field, ha, aNormal
+
+-- The quotient and remainder lists are lists for any divisor leading
+-- coefficient, zero included.
+theorem hornerDivStep.lists (b c : Set) (ds qs rs : List(A))
+  requires divisor : b ∈ R
+  requires coefficient : c ∈ R
+  shows List(A, fst(hornerDivStep{A}(add, zero, neg, mul, one, b, ds, qs, rs,
+      c))) ∧
+    List(A, snd(hornerDivStep{A}(add, zero, neg, mul, one, b, ds, qs, rs, c)))
+proof
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have consList : List(A, c :: rs) by typecheck
+  have lengthNat : Nat(length{A}(ds)) by typecheck
+  have coefficientIn := listCoefficient.closed at A, zero, c :: rs,
+    length{A}(ds) with consList, lengthNat, zeroIn
+  have selected := fieldInverseValue.selected at A, add, zero, neg, mul, one, b
+    with field, divisor
+  have inverseIn := selected.left
+  have ordinary := IsCommRing.ring with ring
+  have factorIn := IsRing.mul_closed with ordinary, coefficientIn, inverseIn
+  have quotientList : List(A, call2(mul, listCoefficient{A}(zero, c :: rs,
+      length{A}(ds)), fieldInverseValue(A, add, zero, neg, mul, one, b)) :: qs)
+    by typecheck
+  have fullList := hornerFullList.list at A, b, ds with divisor
+  have scaled := hornerScale.data at A, add, zero, neg, mul, one,
+    call2(mul, listCoefficient{A}(zero, c :: rs, length{A}(ds)),
+      fieldInverseValue(A, add, zero, neg, mul, one, b)),
+    hornerFullList{A}(b, ds) with ring, fullList, factorIn
+  have scaledList := scaled.left
+  have difference := hornerSub.data at A, add, zero, neg, mul, one, c :: rs,
+    hornerScale{A}(mul, call2(mul, listCoefficient{A}(zero, c :: rs,
+      length{A}(ds)), fieldInverseValue(A, add, zero, neg, mul, one, b)),
+      hornerFullList{A}(b, ds)) with ring, consList, scaledList
+  have differenceList := difference.left
+  have taken := listTake.closed at A, hornerSub{A}(add, zero, neg, c :: rs,
+    hornerScale{A}(mul, call2(mul, listCoefficient{A}(zero, c :: rs,
+      length{A}(ds)), fieldInverseValue(A, add, zero, neg, mul, one, b)),
+      hornerFullList{A}(b, ds))), length{A}(ds) with differenceList, lengthNat
+  unfold hornerDivStep
+  rw [fst.pair, snd.pair]
+  exact ⟨quotientList, taken⟩
+
+theorem hornerDivPair.lists (b a : Set) (ds cs : List(A))
+  requires divisor : b ∈ R
+  requires initial : a ∈ R
+  shows List(A, fst(hornerDivPair{A}(add, zero, neg, mul, one, b, a, ds,
+      cs))) ∧
+    List(A, snd(hornerDivPair{A}(add, zero, neg, mul, one, b, a, ds, cs)))
+proof
+  induction cs
+  | List.nil =>
+    have ring := IsField.comm_ring with field
+    have zeroIn : R[0] ∈ R by typecheck
+    have nilList : List(A, []) by typecheck
+    have replicated := listReplicate.closed at A, zero, length{A}(ds)
+      with zeroIn
+    rw hornerDivPair
+    exact hornerDivStep.lists at A, add, zero, neg, mul, one, b, a, ds, [],
+      listReplicate(length{A}(ds), zero)
+      with field, nilList, replicated, divisor, initial
+  | List.cons(c, tail) using ih =>
+    have cIn : c ∈ R by assumption
+    have qsList := ih.left
+    have rsList := ih.right
+    rw hornerDivPair
+    exact hornerDivStep.lists at A, add, zero, neg, mul, one, b, c, ds,
+      fst(hornerDivPair{A}(add, zero, neg, mul, one, b, a, ds, tail)),
+      snd(hornerDivPair{A}(add, zero, neg, mul, one, b, a, ds, tail))
+      with field, qsList, rsList, divisor, cIn
+
+end Euclid
+
+
 section Fields
 variable (A add zero neg mul one a b : Set)
 notation ring R := (A, add, zero, neg, mul, one)
@@ -75,15 +902,71 @@ hypothesis field : IsField(R)
 hypothesis left : a ∈ R
 hypothesis right : b ∈ R
 
+-- The gcd pair is Euclid's result on the normal forms.
+theorem hornerGcd.result (cs ds : List(A))
+  shows HornerGcdResult(A, add, zero, neg, mul, one,
+    normalLeading{A}(zero, a, cs), normalLower{A}(zero, a, cs),
+    normalLeading{A}(zero, b, ds), normalLower{A}(zero, b, ds),
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds))
+proof
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have aFull := hornerFullList.list at A, a, cs with left
+  have bFull := hornerFullList.list at A, b, ds with right
+  have aIn := hornerTrimLeading.mem at A, zero, hornerFullList{A}(a, cs)
+    with zeroIn, aFull
+  have aList := hornerTrimLower.list at A, zero, hornerFullList{A}(a, cs)
+    with aFull
+  have aNormal := hornerTrim.normal at A, zero, hornerFullList{A}(a, cs)
+    with aFull
+  have bIn := hornerTrimLeading.mem at A, zero, hornerFullList{A}(b, ds)
+    with zeroIn, bFull
+  have bList := hornerTrimLower.list at A, zero, hornerFullList{A}(b, ds)
+    with bFull
+  have bNormal := hornerTrim.normal at A, zero, hornerFullList{A}(b, ds)
+    with bFull
+  have dsList : List(A, ds) by assumption
+  have fullLength := hornerFullList.length at A, b, ds with dsList
+  have lengthNat : Nat(length{A}(ds)) by typecheck
+  have fullNonempty : hornerFullList{A}(b, ds) ≠ []
+    intro isNil
+    rw [isNil, length.nil] at fullLength
+    arith
+  have shorter := hornerTrim.length_lt at A, zero, hornerFullList{A}(b, ds)
+    with bFull, fullNonempty
+  have bound : length{A}(hornerTrimLower{A}(zero, hornerFullList{A}(b, ds))) <
+      succ(length{A}(ds))
+    rw ← fullLength
+    exact shorter
+  have invariant := gcdSteps.invariant at A, add, zero, neg, mul, one,
+    succ(length{A}(ds)) with field
+  have result := invariant with hornerTrimLeading{A}(zero, hornerFullList{A}(a,
+    cs)), aIn, hornerTrimLower{A}(zero, hornerFullList{A}(a, cs)), aList,
+    aNormal, hornerTrimLeading{A}(zero, hornerFullList{A}(b, ds)), bIn,
+    hornerTrimLower{A}(zero, hornerFullList{A}(b, ds)), bList, bNormal, bound
+  unfold hornerGcdLeading
+  unfold hornerGcdLower
+  unfold hornerGcdPair
+  unfold normalLeading
+  unfold normalLower
+  exact result
+
 theorem hornerGcdLeading.mem (cs ds : List(A))
   shows hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds) ∈ R
 proof
-  sorry
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  exact result.left
 
 theorem hornerGcdLower.list (cs ds : List(A))
   shows List(A, hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds))
 proof
-  sorry
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  exact result.right.left
 
 -- The gcd is in normal form.
 theorem hornerGcd.normal (cs ds : List(A))
@@ -91,21 +974,46 @@ theorem hornerGcd.normal (cs ds : List(A))
     (hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds) = R[0] ∧
       hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) = [])
 proof
-  sorry
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  exact result.right.right.left
 
 theorem hornerGcd.divides_left (cs ds : List(A))
   shows HornerDivides(A, add, zero, neg, mul, one,
     hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
     hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), a, cs)
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  have dividesNormal := result.right.right.right.left
+  have normalA := hornerPoly.normal at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  unfold HornerDivides at dividesNormal
+  obtain ⟨qs, qsList, equation⟩ := dividesNormal
+  rw normalA at equation
+  unfold HornerDivides
+  exact ⟨qs, qsList, equation⟩
 
 theorem hornerGcd.divides_right (cs ds : List(A))
   shows HornerDivides(A, add, zero, neg, mul, one,
     hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
     hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), b, ds)
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  have dividesNormal := result.right.right.right.right.left
+  have normalB := hornerPoly.normal at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  unfold HornerDivides at dividesNormal
+  obtain ⟨qs, qsList, equation⟩ := dividesNormal
+  rw normalB at equation
+  unfold HornerDivides
+  exact ⟨qs, qsList, equation⟩
 
 theorem hornerGcd.greatest (g : Set) (cs ds gs : List(A))
   requires divisor : g ∈ R
@@ -117,7 +1025,33 @@ theorem hornerGcd.greatest (g : Set) (cs ds gs : List(A))
     hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
     hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds))
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have gsList : List(A, gs) by assumption
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  have common := result.right.right.right.right.right.left
+  have normalA := hornerPoly.normal at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have normalB := hornerPoly.normal at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have leftNormal : HornerDivides(A, add, zero, neg, mul, one, g, gs,
+      normalLeading{A}(zero, a, cs), normalLower{A}(zero, a, cs))
+    unfold HornerDivides at dividesLeft
+    obtain ⟨qs, qsList, equation⟩ := dividesLeft
+    unfold HornerDivides
+    refine ⟨qs, qsList, ?_⟩
+    rw normalA
+    exact equation
+  have rightNormal : HornerDivides(A, add, zero, neg, mul, one, g, gs,
+      normalLeading{A}(zero, b, ds), normalLower{A}(zero, b, ds))
+    unfold HornerDivides at dividesRight
+    obtain ⟨qs, qsList, equation⟩ := dividesRight
+    unfold HornerDivides
+    refine ⟨qs, qsList, ?_⟩
+    rw normalB
+    exact equation
+  exact common with g, divisor, gs, gsList, leftNormal, rightNormal
 
 -- Bézout: the gcd is a polynomial combination of the two pairs.
 theorem hornerGcd.bezout (cs ds : List(A))
@@ -130,20 +1064,76 @@ theorem hornerGcd.bezout (cs ds : List(A))
         hornerPoly{A}(add, zero, neg, mul, one, zero, vs) * hornerPoly{A}(add,
           zero, neg, mul, one, b, ds)]
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  have combination := result.right.right.right.right.right.right
+  obtain ⟨us, usList, vs, vsList, identity⟩ := combination
+  have normalA := hornerPoly.normal at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have normalB := hornerPoly.normal at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  rw [normalA, normalB] at identity
+  exact ⟨us, usList, vs, vsList, identity⟩
 
 theorem hornerGcd.nonzero_of_left (cs ds : List(A))
   requires nonzero : a ≠ R[0]
   shows hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds) ≠ R[0]
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  intro gZero
+  have result := hornerGcd.result at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  unfold HornerGcdResult at result
+  have gNormal := result.right.right.left
+  have dividesNormal := result.right.right.right.left
+  have gsNil : hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) = []
+    rcases gNormal with gNonzero | ⟨sameZero, isNil⟩
+    . exfalso
+      exact gNonzero with gZero
+    . exact isNil
+  unfold HornerDivides at dividesNormal
+  obtain ⟨qs, qsList, equation⟩ := dividesNormal
+  have normalA := hornerPoly.normal at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one with ring
+  rw [normalA, gZero, gsNil, zeroPoly] at equation
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, qs
+    with ring, zeroIn
+  have vanish : hornerPoly{A}(add, zero, neg, mul, one, a, cs) = P[0]
+    rw equation
+    ring
+  have rule := hornerPoly.zero_iff at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have vanishing := rule.forward with vanish
+  unfold HornerZero at vanishing
+  have lengthNat : Nat(length{A}(cs)) by typecheck
+  have top := vanishing with length{A}(cs), lengthNat
+  have leadingValue := hornerCoefficient.leading at A, zero, a, cs with left
+  rw leadingValue at top
+  exact nonzero with top
 
 theorem hornerGcd.length_le_left (cs ds : List(A))
   requires nonzero : a ≠ R[0]
   shows length{A}(hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs,
     ds)) ≤ length{A}(cs)
 proof
-  sorry
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a, b, cs,
+    ds with field, left, right
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have dividesRight := hornerGcd.divides_right at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right
+  have gNonzero := hornerGcd.nonzero_of_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right, nonzero
+  exact HornerDivides.length_le at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), a,
+    hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), cs
+    with field, gIn, gNonzero, gsList, left, nonzero, dividesLeft
 
 -- A root of the gcd is a common root, and conversely.
 theorem hornerGcd.root_iff (x : Set) (cs ds : List(A))
@@ -155,14 +1145,192 @@ theorem hornerGcd.root_iff (x : Set) (cs ds : List(A))
     (hornerAt{A}(add, mul, a, x, cs) = R[0] ∧ hornerAt{A}(add, mul, b, x,
       ds) = R[0])
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a, b, cs,
+    ds with field, left, right
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have dividesRight := hornerGcd.divides_right at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right
+  constructor
+  . intro gRoot
+    constructor
+    . exact HornerDivides.root at A, add, zero, neg, mul, one,
+        hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), a, x,
+        hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), cs
+        with ring, gIn, left, element, gsList, dividesLeft, gRoot
+    . exact HornerDivides.root at A, add, zero, neg, mul, one,
+        hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), b, x,
+        hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), ds
+        with ring, gIn, right, element, gsList, dividesRight, gRoot
+  . intro roots
+    have combination := hornerGcd.bezout at A, add, zero, neg, mul, one, a, b,
+      cs, ds with field, left, right
+    obtain ⟨us, usList, vs, vsList, identity⟩ := combination
+    have value := hornerPoly.value_combination at A, add, zero, neg, mul, one,
+      hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), a, b, x,
+      hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), cs, ds, us, vs
+      with ring, gsList, gIn, left, right, element, identity
+    have uIn := hornerAt.closed at A, add, zero, neg, mul, one, zero, x, us
+      with ring, zeroIn, element
+    have vIn := hornerAt.closed at A, add, zero, neg, mul, one, zero, x, vs
+      with ring, zeroIn, element
+    rw [value, roots.left, roots.right]
+    ring
 
 theorem HornerCoprime.iff_gcd_constant (cs ds : List(A))
   shows HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds) ↔
     (hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds) ≠ R[0] ∧
       hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) = [])
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have oneIn : R[1] ∈ R by typecheck
+  have nontrivial := IsField.nontrivial with field
+  have oneNonzero : R[1] ≠ R[0]
+    intro same
+    have flipped : R[0] = R[1]
+      rw same
+      rfl
+    exact nontrivial.right.right with flipped
+  have nilList : List(A, []) by typecheck
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a, b, cs,
+    ds with field, left, right
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have dividesRight := hornerGcd.divides_right at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right
+  have gNormal := hornerGcd.normal at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gPoly := hornerPoly.member at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds)
+    with ring, gIn, gsList
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one with ring
+  have onePoly := hornerPoly.one_list at A, add, zero, neg, mul, one with ring
+  constructor
+  . intro coprime
+    unfold HornerCoprime at coprime
+    obtain ⟨us, usList, vs, vsList, identity⟩ := coprime
+    have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+      with ring, zeroIn
+    have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+      with ring, zeroIn
+    unfold HornerDivides at dividesLeft
+    unfold HornerDivides at dividesRight
+    obtain ⟨w1, w1List, pEq⟩ := dividesLeft
+    obtain ⟨w2, w2List, qEq⟩ := dividesRight
+    have w1In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w1
+      with ring, zeroIn
+    have w2In := hornerPoly.member at A, add, zero, neg, mul, one, zero, w2
+      with ring, zeroIn
+    have product1 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, us, w1 with ring, zeroIn, zeroIn
+    have product1Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, us,
+      w1 with ring
+    have product2 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, vs, w2 with ring, zeroIn, zeroIn
+    have product2Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, vs,
+      w2 with ring
+    obtain ⟨ws, wsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero,
+      neg, mul, one, hornerMulList{A}(add, zero, mul, zero, zero, us, w1),
+      hornerMulList{A}(add, zero, mul, zero, zero, vs, w2)
+      with ring, product1.left, product2.left
+    -- The gcd divides the constant one.
+    have dividesOne : HornerDivides(A, add, zero, neg, mul, one,
+        hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds),
+        hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), one, [])
+      unfold HornerDivides
+      refine ⟨ws, wsList, ?_⟩
+      rw [identity, pEq, qEq, sumEq, product1Eq, product2Eq]
+      ring
+    have gNonzero :
+        hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds) ≠ R[0]
+      intro gZero
+      have gsNil :
+          hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) = []
+        rcases gNormal with nonzero | ⟨sameZero, isNil⟩
+        . exfalso
+          exact nonzero with gZero
+        . exact isNil
+      unfold HornerDivides at dividesOne
+      obtain ⟨t, tList, tEq⟩ := dividesOne
+      have tIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, t
+        with ring, zeroIn
+      rw [gZero, gsNil, zeroPoly, onePoly] at tEq
+      have collapse : P[1] = P[0]
+        rw tEq
+        ring
+      have zeroConstant := polynomialConstant.zero at oneVariable, A, zero
+        with zeroIn
+      rw ← zeroConstant at collapse
+      have same := polynomialConstant.injective at oneVariable, A, zero, one,
+        zero with zeroIn, oneIn, zeroIn, collapse
+      exact oneNonzero with same
+    have bound := HornerDivides.length_le at A, add, zero, neg, mul, one,
+      hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), one,
+      hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), []
+      with field, gIn, gNonzero, gsList, oneIn, oneNonzero, dividesOne
+    rw length.nil at bound
+    have zeroLength :
+        length{A}(hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds)) =
+          (0:N)
+      arith
+    have gsNil := length.eq_zero at A,
+      hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds)
+      with gsList, zeroLength
+    exact ⟨gNonzero, gsNil⟩
+  . intro constant
+    obtain ⟨gNonzero, gsNil⟩ := constant
+    have combination := hornerGcd.bezout at A, add, zero, neg, mul, one, a, b,
+      cs, ds with field, left, right
+    obtain ⟨us, usList, vs, vsList, identity⟩ := combination
+    rw gsNil at identity
+    have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+      with ring, zeroIn
+    have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+      with ring, zeroIn
+    obtain ⟨y, inverse⟩ := IsField.inverse_exists at A, add, zero, neg, mul,
+      one, hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds)
+      with field, gIn, gNonzero
+    have yIn := inverse.right.left
+    have cancel := inverse.right.right.left
+    have scaled := hornerPoly.scale at A, add, zero, neg, mul, one, y,
+      hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), []
+      with ring, yIn, gIn
+    have scaleNil : hornerScale{A}(mul, y, []) = []
+      rw hornerScale
+      rfl
+    rw [scaleNil, cancel, identity] at scaled
+    have yList : List(A, y :: []) by typecheck
+    have yPoly := hornerPoly.singleton at A, add, zero, neg, mul, one, y
+      with ring, yIn
+    rw ← yPoly at scaled
+    have product1 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, y :: [], us with ring, zeroIn, zeroIn
+    have product1Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one,
+      y :: [], us with ring
+    have product2 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+      zero, y :: [], vs with ring, zeroIn, zeroIn
+    have product2Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one,
+      y :: [], vs with ring
+    have ySingle := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+      y :: [] with ring, zeroIn
+    unfold HornerCoprime
+    refine ⟨hornerMulList{A}(add, zero, mul, zero, zero, y :: [], us),
+      product1.left, hornerMulList{A}(add, zero, mul, zero, zero, y :: [], vs),
+      product2.left, ?_⟩
+    rw [scaled, product1Eq, product2Eq]
+    ring
 
 -- Coprime pairs have no common root.
 theorem HornerCoprime.no_common_root (x : Set) (cs ds : List(A))
@@ -171,13 +1339,47 @@ theorem HornerCoprime.no_common_root (x : Set) (cs ds : List(A))
   requires rootLeft : hornerAt{A}(add, mul, a, x, cs) = R[0]
   shows hornerAt{A}(add, mul, b, x, ds) ≠ R[0]
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  have oneIn : R[1] ∈ R by typecheck
+  have nontrivial := IsField.nontrivial with field
+  unfold HornerCoprime at coprime
+  obtain ⟨us, usList, vs, vsList, identity⟩ := coprime
+  have value := hornerPoly.value_combination at A, add, zero, neg, mul, one,
+    one, a, b, x, [], cs, ds, us, vs
+    with ring, oneIn, left, right, element, identity
+  have uIn := hornerAt.closed at A, add, zero, neg, mul, one, zero, x, us
+    with ring, zeroIn, element
+  have vIn := hornerAt.closed at A, add, zero, neg, mul, one, zero, x, vs
+    with ring, zeroIn, element
+  rw [hornerAt.nil, rootLeft] at value
+  intro rootRight
+  rw rootRight at value
+  have collapse : R[0] = R[1]
+    rw value
+    ring
+  exact nontrivial.right.right with collapse
 
 theorem HornerCoprime.symmetric (cs ds : List(A))
   requires coprime : HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds)
   shows HornerCoprime(A, add, zero, neg, mul, one, b, ds, a, cs)
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  unfold HornerCoprime at coprime
+  obtain ⟨us, usList, vs, vsList, identity⟩ := coprime
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  unfold HornerCoprime
+  refine ⟨vs, vsList, us, usList, ?_⟩
+  rw identity
+  ring
 
 -- Euclid's lemma: a pair coprime to p that divides p·q divides q.
 theorem HornerCoprime.divides_of_divides_mul (c : Set) (cs ds es : List(A))
@@ -187,7 +1389,50 @@ theorem HornerCoprime.divides_of_divides_mul (c : Set) (cs ds es : List(A))
     hornerMulList{A}(add, zero, mul, b, c, ds, es))
   shows HornerDivides(A, add, zero, neg, mul, one, a, cs, c, es)
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have zeroIn : R[0] ∈ R by typecheck
+  unfold HornerCoprime at coprime
+  obtain ⟨us, usList, vs, vsList, identity⟩ := coprime
+  unfold HornerDivides at divides
+  obtain ⟨ws, wsList, product⟩ := divides
+  have expand := hornerPoly.mul at A, add, zero, neg, mul, one, b, c, ds, es
+    with ring, right, third
+  rw expand at product
+  have onePoly := hornerPoly.one_list at A, add, zero, neg, mul, one with ring
+  rw onePoly at identity
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have rIn := hornerPoly.member at A, add, zero, neg, mul, one, c, es
+    with ring, third
+  have uIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  have wIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, ws
+    with ring, zeroIn
+  have fullList := hornerFullList.list at A, c, es with third
+  have rFull := hornerPoly.full_list at A, add, zero, neg, mul, one, c, es
+    with ring, third
+  have product1 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+    zero, us, hornerFullList{A}(c, es) with ring, zeroIn, zeroIn, fullList
+  have product1Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, us,
+    hornerFullList{A}(c, es) with ring, fullList
+  have product2 := hornerMulList.data at A, add, zero, neg, mul, one, zero,
+    zero, vs, ws with ring, zeroIn, zeroIn
+  have product2Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, vs, ws
+    with ring
+  obtain ⟨ts, tsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero, neg,
+    mul, one, hornerMulList{A}(add, zero, mul, zero, zero, us,
+      hornerFullList{A}(c, es)), hornerMulList{A}(add, zero, mul, zero, zero,
+      vs, ws)
+    with ring, product1.left, product2.left
+  unfold HornerDivides
+  refine ⟨ts, tsList, ?_⟩
+  rw [sumEq, product1Eq, product2Eq, rFull]
+  linear_combination hornerPoly{A}(add, zero, neg, mul, one, c, es) * identity +
+    hornerPoly{A}(add, zero, neg, mul, one, zero, vs) * product
 
 -- Not coprime: a common divisor of positive degree in normal form.
 theorem HornerCoprime.of_no_common_factor (cs ds : List(A))
@@ -197,7 +1442,28 @@ theorem HornerCoprime.of_no_common_factor (cs ds : List(A))
       HornerDivides(A, add, zero, neg, mul, one, g, gs, b, ds))
   shows HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds)
 proof
-  sorry
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a, b, cs,
+    ds with field, left, right
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have dividesRight := hornerGcd.divides_right at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right
+  have gNonzero := hornerGcd.nonzero_of_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right, leftNonzero
+  have rule := HornerCoprime.iff_gcd_constant at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  apply rule.backward
+  constructor
+  . exact gNonzero
+  . by_contra gsNonempty
+    have excluded := noFactor with
+      hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), gIn,
+      gNonzero,
+      hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), gsList,
+      gsNonempty
+    exact excluded with ⟨dividesLeft, dividesRight⟩
 
 theorem HornerCoprime.common_factor_of_not (cs ds : List(A))
   requires leftNonzero : a ≠ R[0]
@@ -207,7 +1473,26 @@ theorem HornerCoprime.common_factor_of_not (cs ds : List(A))
     HornerDivides(A, add, zero, neg, mul, one, g, gs, a, cs) ∧
     HornerDivides(A, add, zero, neg, mul, one, g, gs, b, ds)
 proof
-  sorry
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a, b, cs, ds
+    with field, left, right
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a, b, cs,
+    ds with field, left, right
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have dividesRight := hornerGcd.divides_right at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right
+  have gNonzero := hornerGcd.nonzero_of_left at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right, leftNonzero
+  have rule := HornerCoprime.iff_gcd_constant at A, add, zero, neg, mul, one, a,
+    b, cs, ds with field, left, right
+  have gsNonempty :
+      hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) ≠ []
+    intro isNil
+    have coprime := rule.backward with ⟨gNonzero, isNil⟩
+    exact notCoprime with coprime
+  refine ⟨hornerGcdLeading{A}(add, zero, neg, mul, one, a, b, cs, ds), gIn,
+    gNonzero, hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds), gsList,
+    gsNonempty, dividesLeft, dividesRight⟩
 
 end Fields
 
@@ -239,7 +1524,17 @@ theorem HornerSquarefree.simple_root (x : Set) (cs : List(A))
     a, cs), x,
     hornerDerivativeList{A}(add, zero, one, mul, cs)) ≠ R[0]
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have derivativeIn := hornerDerivativeLeading.closed at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeData := hornerDerivativeList.data at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeList := derivativeData.left
+  unfold HornerSquarefree at squarefree
+  exact HornerCoprime.no_common_root at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), x, cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, element, derivativeList, squarefree, root
 
 -- The gcd of a squarefree pair with its derivative is a nonzero constant.
 theorem HornerSquarefree.gcd_constant (cs : List(A))
@@ -248,28 +1543,128 @@ theorem HornerSquarefree.gcd_constant (cs : List(A))
     hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
     hornerDerivativeList{A}(add, zero, one, mul, cs)) = []
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have derivativeIn := hornerDerivativeLeading.closed at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeData := hornerDerivativeList.data at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeList := derivativeData.left
+  unfold HornerSquarefree at squarefree
+  have rule := HornerCoprime.iff_gcd_constant at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have constant := rule.forward with squarefree
+  exact constant.right
 
 theorem squarefreePartList.list (cs : List(A))
   shows List(A, squarefreePartList{A}(add, zero, neg, mul, one, a, cs))
 proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have derivativeIn := hornerDerivativeLeading.closed at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeData := hornerDerivativeList.data at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeList := derivativeData.left
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have lists := hornerDivPair.lists at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), a,
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), cs
+    with field, gIn, gsList, initial
+  unfold squarefreePartList
+  unfold hornerDivQuotient
+  exact lists.left
 
 theorem squarefreePartList.divides (cs : List(A))
   requires nonzero : a ≠ R[0]
   shows HornerDivides(A, add, zero, neg, mul, one, zero,
     squarefreePartList{A}(add, zero, neg, mul, one, a, cs), a, cs)
 proof
-  sorry
-
--- A root of the pair is a root of its squarefree part.
-theorem squarefreePartList.root_of_root (x : Set) (cs : List(A))
-  requires element : x ∈ R
-  requires nonzero : a ≠ R[0]
-  requires root : hornerAt{A}(add, mul, a, x, cs) = R[0]
-  shows hornerAt{A}(add, mul, zero, x, squarefreePartList{A}(add, zero, neg,
-    mul, one, a, cs)) = R[0]
-proof
-  sorry
+  have ring := IsField.comm_ring with field
+  have derivativeIn := hornerDerivativeLeading.closed at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeData := hornerDerivativeList.data at A, add, zero, neg, mul,
+    one, a, cs with ring, initial
+  have derivativeList := derivativeData.left
+  have zeroIn : R[0] ∈ R by typecheck
+  have gIn := hornerGcdLeading.mem at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have gsList := hornerGcdLower.list at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have gNonzero := hornerGcd.nonzero_of_left at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList, nonzero
+  have dividesLeft := hornerGcd.divides_left at A, add, zero, neg, mul, one, a,
+    hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+    hornerDerivativeList{A}(add, zero, one, mul, cs)
+    with field, initial, derivativeIn, derivativeList
+  have quotient := HornerDivides.quotient at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), a,
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), cs
+    with field, gIn, gNonzero, gsList, initial, dividesLeft
+  have quotientData := hornerDivQuotient.data at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), a,
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)), cs
+    with field, gIn, gNonzero, gsList, initial
+  have full := hornerPoly.full_list at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs))
+    with ring, gIn, gsList
+  have fullList := hornerFullList.list at A,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs))
+    with gIn, gsList
+  have gPoly := hornerPoly.member at A, add, zero, neg, mul, one,
+    hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs))
+    with ring, gIn, gsList
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    squarefreePartList{A}(add, zero, neg, mul, one, a, cs) with ring, zeroIn
+  unfold HornerDivides
+  refine ⟨hornerFullList{A}(hornerGcdLeading{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs)),
+    hornerGcdLower{A}(add, zero, neg, mul, one, a,
+      hornerDerivativeLeading{A}(add, zero, one, mul, a, cs), cs,
+      hornerDerivativeList{A}(add, zero, one, mul, cs))), fullList, ?_⟩
+  unfold squarefreePartList
+  rw [quotient, full]
+  ring
 
 end Squarefree
