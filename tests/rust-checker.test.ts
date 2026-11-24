@@ -16,7 +16,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
-  forkSurfaceEnvironment, loadModuleGraph,
+  forkSurfaceEnvironment, loadModuleGraph, setSurfaceTraceCapture,
 } from "../src/index.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -109,6 +109,9 @@ function writeCompleteCumulus(directory: string): { bootstrap: string; artifact:
   const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
   forkSurfaceEnvironment(base, completed);
+  // The export needs the proofs, not the tactic traces, and over the
+  // whole library the traces are a large share of the memory.
+  setSurfaceTraceCapture(completed, false);
   const checkpoint = completed.admissionCheckpoint();
   loadModuleGraph(completed, [join(root, "lib/Grace/Cumulus.g17")], [library]);
   const compiled = compileSeparateKernelModule(foundationKernel, base, completed, checkpoint, {

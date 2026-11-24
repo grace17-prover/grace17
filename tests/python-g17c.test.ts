@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   canonical, compileSeparateKernelModule, compileSetTheoryBootstrap, createZfgFoundationKernel, describeFoundation,
   exportKernelEnvironment, forkSurfaceEnvironment, loadModuleGraph,
+  setSurfaceTraceCapture,
   type SeparateCompiledKernelModule,
 } from "../src/index.ts";
 import { sha256Hex } from "../src/hash.ts";
@@ -38,6 +39,9 @@ function files() {
   const { compiled: compiledBootstrap, base } = compileSetTheoryBootstrap(foundationKernel);
   const completed = base.fork();
   forkSurfaceEnvironment(base, completed);
+  // The export needs the proofs, not the tactic traces, and over the
+  // whole library the traces are a large share of the memory.
+  setSurfaceTraceCapture(completed, false);
   const checkpoint = completed.admissionCheckpoint();
   loadModuleGraph(completed, [cumulus], [library]);
   const compiled = compileSeparateKernelModule(foundationKernel, base, completed, checkpoint, {
