@@ -302,8 +302,8 @@ graph TD
 | CAD.StrictlyIncreasingList | 19 | 19 | 0 |
 | CAD.RealRootOrder | 17 | 17 | 0 |
 | CAD.SignVariations | 30 | 30 | 0 |
-| CAD.Sturm | 30 | 3 | 27 |
+| CAD.Sturm | 89 | 89 | 0 |
 | CAD.Subresultant | 11 | 0 | 11 |
-| CAD.Thom | 9 | 3 | 6 |
-| **total** | **788** | **739** | **49** |
+| CAD.Thom | 26 | 26 | 0 |
+| **total** | **864** | **848** | **16** |
 <!-- /blueprint-status -->
