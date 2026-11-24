@@ -287,7 +287,7 @@ graph TD
 | CAD.HornerDivision | 40 | 40 | 0 |
 | CAD.HornerDerivative | 25 | 25 | 0 |
 | CAD.HornerGcd | 42 | 42 | 0 |
-| CAD.ResultantGcd | 4 | 0 | 4 |
+| CAD.ResultantGcd | 39 | 39 | 0 |
 | CAD.ResultantRoots | 76 | 76 | 0 |
 | CAD.HornerMultiplicity | 26 | 26 | 0 |
 | CAD.RealPowerRule | 23 | 23 | 0 |
@@ -303,7 +303,7 @@ graph TD
 | CAD.RealRootOrder | 17 | 17 | 0 |
 | CAD.SignVariations | 30 | 30 | 0 |
 | CAD.Sturm | 89 | 89 | 0 |
-| CAD.Subresultant | 11 | 0 | 11 |
+| CAD.Subresultant | 22 | 22 | 0 |
 | CAD.Thom | 26 | 26 | 0 |
-| **total** | **864** | **848** | **16** |
+| **total** | **910** | **909** | **1** |
 <!-- /blueprint-status -->

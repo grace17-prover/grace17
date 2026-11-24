@@ -10,15 +10,2525 @@
 module CAD.ResultantGcd
 import CAD.Resultant
 import CAD.HornerGcd
+import Grace.Cumulus.Algebra.Ring.DeterminantProduct
+
+-- Natural addition as a named function, for the index arithmetic of bound
+-- variables inside the ring sections, where a bare sum is not placed in ℕ.
+def sylvesterRow.indexSum (a b : Nat) : Nat := a + b
+
+theorem sylvesterRow.indexSum.value (a b : Nat)
+  shows sylvesterRow.indexSum(a, b) = a + b
+proof
+  unfold sylvesterRow.indexSum
+  rfl
+
+def sylvesterRow.indexDifference (a b : Nat) : Nat := a - b
+
+theorem sylvesterRow.indexDifference.value (a b : Nat)
+  shows sylvesterRow.indexDifference(a, b) = a - b
+proof
+  unfold sylvesterRow.indexDifference
+  rfl
+
+-- A nonzero entry lies below the length.
+theorem listCoefficient.below_length (A z : Set) (xs : List(A)) (k : Nat)
+  requires nonzero : listCoefficient{A}(z, xs, k) ≠ z
+  shows k < length{A}(xs)
+proof
+  induction xs generalizing k
+  | List.nil =>
+    intros k kNat nonzero
+    have value := listCoefficient.nil at A, z, k
+    exfalso
+    exact nonzero with value
+  | List.cons(x, tail) using ih =>
+    intros k kNat nonzero
+    have xIn : x ∈ A by assumption
+    have lengthCons := length.cons at A, x, tail with xIn
+    rw lengthCons
+    have shape := natural.zero_or_successor at k with kNat
+    rcases shape with isZero | ⟨r, rNat, isSucc⟩
+    . rw isZero
+      arith
+    . have value := listCoefficient.succ at A, z, x, tail, r with xIn
+      rw isSucc at nonzero
+      rw value at nonzero
+      have previous := ih with r, rNat, nonzero
+      rw isSucc
+      arith
+
+-- Subtraction cancels against addition when the difference is defined.
+theorem sub.cancel_of_le (a b : Nat)
+  requires le : b ≤ a
+  shows (a - b) + b = a
+proof
+  induction b generalizing a
+  | zero =>
+    intros a aNat le
+    have same := sub.zero_right at a
+    rw same
+    exact add.right_unit at a
+  | succ(k) using ih =>
+    intros a aNat le
+    have shape := natural.zero_or_successor at a with aNat
+    rcases shape with isZero | ⟨r, rNat, isSucc⟩
+    . rw isZero at le
+      exfalso
+      arith
+    . rw isSucc
+      rw isSucc at le
+      have smaller : k ≤ r by arith
+      have previous := ih with r, rNat, smaller
+      have step := sub.succ_succ at r, k
+      have shift := add.succ_right at k, r - k
+      rw [step, shift, previous]
+      rfl
+
+-- The row vector of two coefficient lists on the index set size: the
+-- first rowsP entries read us from the top, the rest read vs from the top.
+defgraph sylvesterVector (A zero us vs : Set, rowsP size : Nat) (i ∈ size) :
+    A :=
+  boolChoice(memberTest(rowsP, i),
+    listCoefficient{A}(zero, us, rowsP - succ(i)),
+    listCoefficient{A}(zero, vs, size - succ(i)))
+requires zeroIn : zero ∈ A
+requires usList : List(A, us)
+requires vsList : List(A, vs)
+proof
+  have iNat := natural.member at size with member
+  have upperNat : Nat(rowsP - succ(i)) by typecheck
+  have lowerNat : Nat(size - succ(i)) by typecheck
+  have upperIn := CAD.HornerGcd.listCoefficient.closed at A, zero, us,
+    rowsP - succ(i) with zeroIn, usList
+  have lowerIn := CAD.HornerGcd.listCoefficient.closed at A, zero, vs,
+    size - succ(i) with zeroIn, vsList
+  have alternatives : i ∈ rowsP ∨ ¬(i ∈ rowsP) by tauto
+  rcases alternatives with inside | outside
+  . have test := memberTest.true at rowsP, i with inside
+    rw [test, boolChoice.true]
+    exact upperIn
+  . have test := memberTest.false at rowsP, i with outside
+    rw [test, boolChoice.false]
+    exact lowerIn
+
+theorem sylvesterVector.upper (A zero us vs : Set, rowsP size i r : Nat)
+  requires zeroIn : zero ∈ A
+  requires usList : List(A, us)
+  requires vsList : List(A, vs)
+  requires row : i ∈ size
+  requires inside : i ∈ rowsP
+  requires position : r + succ(i) = rowsP
+  shows sylvesterVector(A, zero, us, vs, rowsP, size)(i) =
+    listCoefficient{A}(zero, us, r)
+proof
+  have value := sylvesterVector.value at A, zero, us, vs, rowsP, size, i
+    with zeroIn, usList, vsList, row
+  have test := memberTest.true at rowsP, i with inside
+  have difference := sub.add_right at r, succ(i)
+  rw [value, test, boolChoice.true, ← position, difference]
+  rfl
+
+theorem sylvesterVector.lower (A zero us vs : Set, rowsP size i r : Nat)
+  requires zeroIn : zero ∈ A
+  requires usList : List(A, us)
+  requires vsList : List(A, vs)
+  requires row : i ∈ size
+  requires outside : ¬(i ∈ rowsP)
+  requires position : r + succ(i) = size
+  shows sylvesterVector(A, zero, us, vs, rowsP, size)(i) =
+    listCoefficient{A}(zero, vs, r)
+proof
+  have value := sylvesterVector.value at A, zero, us, vs, rowsP, size, i
+    with zeroIn, usList, vsList, row
+  have test := memberTest.false at rowsP, i with outside
+  have difference := sub.add_right at r, succ(i)
+  rw [value, test, boolChoice.false, ← position, difference]
+  rfl
+
+-- The enumeration of the lower block of rows: k ↦ rowsP + k.
+defgraph sylvesterShift (rowsP size : Nat) (k ∈ size) : ℕ := rowsP + k
+proof
+  have kNat := natural.member at size with member
+  have sumNat : Nat(rowsP + k) by typecheck
+  exact nat.omega.forward with sumNat
+
+section Coefficients
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+
+-- The constant coefficient of a product with a pair (zero, c :: us).
+theorem hornerPoly.mul_coefficient_zero (c f : Set) (us : List(A))
+  requires coefficient : c ∈ R
+  requires polynomial : f ∈ P
+  shows call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+      hornerPoly{A}(add, zero, neg, mul, one, zero, c :: us),
+      f)(monomialOne(oneVariable)) =
+    R[c * f(monomialOne(oneVariable))]
+proof
+  have index := oneVariable.index
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have unit := monomialOne.member at oneVariable
+  have tailPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have expand := CAD.HornerGcd.hornerPoly.cons at A, add, zero, neg, mul, one,
+    zero, c, us
+    with ring, zeroIn, coefficient
+  have constant := polynomialConstant.member at oneVariable, A, zero, c
+    with zeroIn, coefficient
+  have variable := polynomialVariable.member at oneVariable, A, zero, one,
+    (0 : Nat) with zeroIn, oneIn
+  have target := polynomials.comm_ring at oneVariable, A, add, zero, neg, mul,
+    one with ring
+  have polynomialRing := IsCommRing.ring with target
+  have shifted := IsRing.mul_closed with polynomialRing, tailPoly, polynomial
+  have scaled := IsRing.mul_closed with polynomialRing, constant, polynomial
+  have distribute : P[(polynomialConstant(oneVariable, R, c) +
+      polynomialVariable(oneVariable, R, (0:N)) *
+        hornerPoly{A}(add, zero, neg, mul, one, zero, us)) * f] =
+    P[polynomialConstant(oneVariable, R, c) * f +
+      polynomialVariable(oneVariable, R, (0:N)) *
+        (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    ring
+  have scaledShift := IsRing.mul_closed with polynomialRing, variable, shifted
+  have exponent := monomialOne.value at oneVariable, (0 : Nat) with index
+  have sumValue := polynomialAdd.apply at oneVariable, A, add, zero, neg, mul,
+    one, P[polynomialConstant(oneVariable, R, c) * f],
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    with ring, scaled, scaledShift
+  have scaledValue := polynomialMul.apply at oneVariable, A, add, zero, neg,
+    mul, one, polynomialConstant(oneVariable, R, c), f with ring, constant,
+    polynomial
+  have shiftValue := polynomialMul.apply at oneVariable, A, add, zero, neg,
+    mul, one, polynomialVariable(oneVariable, R, (0:N)),
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f]
+    with ring, variable, shifted
+  have scaledFunction := polynomials.function at oneVariable, A, zero,
+    P[polynomialConstant(oneVariable, R, c) * f] with scaled
+  have shiftFunction := polynomials.function at oneVariable, A, zero,
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    with scaledShift
+  have entry := coefficientAdd.value at monomials(oneVariable), A, add, zero,
+    neg, mul, one, P[polynomialConstant(oneVariable, R, c) * f],
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)],
+    monomialOne(oneVariable) with scaledFunction, shiftFunction, unit
+  have scaledEntry := polynomialProduct.constant_scale at oneVariable, A, add,
+    zero, neg, mul, one, c, f, monomialOne(oneVariable)
+    with ring, coefficient, polynomial, unit
+  have shiftEntry := polynomialProduct.variable_zero at oneVariable, A, add,
+    zero, neg, mul, one, (0 : Nat), monomialOne(oneVariable),
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f]
+    with ring, index, unit, shifted, exponent
+  have fFunction := polynomials.function at oneVariable, A, zero, f
+    with polynomial
+  have valueIn := FunctionBetween.apply_closed at f, monomials(oneVariable), A,
+    monomialOne(oneVariable) with fFunction, unit
+  rw [expand, distribute, sumValue, entry, scaledValue, shiftValue]
+  rw [scaledEntry, shiftEntry]
+  ring
+
+-- The coefficient one degree up: c times the coefficient of f there, plus
+-- the coefficient of the product with the tail one degree down.
+theorem hornerPoly.mul_coefficient_succ (c f : Set) (us : List(A)) (k : Nat)
+  requires coefficient : c ∈ R
+  requires polynomial : f ∈ P
+  shows call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+      hornerPoly{A}(add, zero, neg, mul, one, zero, c :: us),
+      f)(monomialShift(oneVariable, (0:N), monomialOne(oneVariable), succ(k))) =
+    R[c * f(monomialShift(oneVariable, (0:N), monomialOne(oneVariable),
+        succ(k))) +
+      call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+        hornerPoly{A}(add, zero, neg, mul, one, zero, us),
+        f)(monomialShift(oneVariable, (0:N), monomialOne(oneVariable), k))]
+proof
+  have index := oneVariable.index
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have unit := monomialOne.member at oneVariable
+  have lower := monomialShift.member at oneVariable, (0 : Nat),
+    monomialOne(oneVariable), k with unit
+  have upper := monomialShift.member at oneVariable, (0 : Nat),
+    monomialOne(oneVariable), succ(k) with unit
+  have step := monomialShift.succ at oneVariable, (0 : Nat),
+    monomialOne(oneVariable), k with unit, index
+  have tailPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have expand := CAD.HornerGcd.hornerPoly.cons at A, add, zero, neg, mul, one,
+    zero, c, us
+    with ring, zeroIn, coefficient
+  have constant := polynomialConstant.member at oneVariable, A, zero, c
+    with zeroIn, coefficient
+  have variable := polynomialVariable.member at oneVariable, A, zero, one,
+    (0 : Nat) with zeroIn, oneIn
+  have target := polynomials.comm_ring at oneVariable, A, add, zero, neg, mul,
+    one with ring
+  have polynomialRing := IsCommRing.ring with target
+  have shifted := IsRing.mul_closed with polynomialRing, tailPoly, polynomial
+  have scaled := IsRing.mul_closed with polynomialRing, constant, polynomial
+  have distribute : P[(polynomialConstant(oneVariable, R, c) +
+      polynomialVariable(oneVariable, R, (0:N)) *
+        hornerPoly{A}(add, zero, neg, mul, one, zero, us)) * f] =
+    P[polynomialConstant(oneVariable, R, c) * f +
+      polynomialVariable(oneVariable, R, (0:N)) *
+        (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    ring
+  have scaledShift := IsRing.mul_closed with polynomialRing, variable, shifted
+  have sumValue := polynomialAdd.apply at oneVariable, A, add, zero, neg, mul,
+    one, P[polynomialConstant(oneVariable, R, c) * f],
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    with ring, scaled, scaledShift
+  have scaledValue := polynomialMul.apply at oneVariable, A, add, zero, neg,
+    mul, one, polynomialConstant(oneVariable, R, c), f with ring, constant,
+    polynomial
+  have shiftValue := polynomialMul.apply at oneVariable, A, add, zero, neg,
+    mul, one, polynomialVariable(oneVariable, R, (0:N)),
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f]
+    with ring, variable, shifted
+  have scaledFunction := polynomials.function at oneVariable, A, zero,
+    P[polynomialConstant(oneVariable, R, c) * f] with scaled
+  have shiftFunction := polynomials.function at oneVariable, A, zero,
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)]
+    with scaledShift
+  have entry := coefficientAdd.value at monomials(oneVariable), A, add, zero,
+    neg, mul, one, P[polynomialConstant(oneVariable, R, c) * f],
+    P[polynomialVariable(oneVariable, R, (0:N)) *
+      (hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f)],
+    monomialShift(oneVariable, (0:N), monomialOne(oneVariable), succ(k))
+    with scaledFunction, shiftFunction, upper
+  have scaledEntry := polynomialProduct.constant_scale at oneVariable, A, add,
+    zero, neg, mul, one, c, f,
+    monomialShift(oneVariable, (0:N), monomialOne(oneVariable), succ(k))
+    with ring, coefficient, polynomial, upper
+  have variableMonomial := monomialVariable.member at oneVariable, (0 : Nat)
+  have shiftEntry := polynomialProduct.monomial_shift at oneVariable, A, add,
+    zero, neg, mul, one, monomialVariable(oneVariable, (0:N)),
+    monomialShift(oneVariable, (0:N), monomialOne(oneVariable), k),
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) * f]
+    with ring, variableMonomial, lower, shifted
+  have variableTerm : polynomialVariable(oneVariable, R, (0:N)) =
+      polynomialTerm(oneVariable, A, zero, one, monomialVariable(oneVariable,
+        (0:N)))
+    unfold polynomialVariable
+    rfl
+  rw [expand, distribute, sumValue, entry, scaledValue, shiftValue]
+  rw [scaledEntry, variableTerm, step, shiftEntry]
+  rfl
+
+-- A block of shifted rows weighted by the coefficients of us read from the
+-- top: over the N = length(us) rows k, the sum of us[N − 1 − k]·row_k[l]
+-- is the coefficient of U·(c, cs) at degree length(cs) + N − 1 − l, and
+-- zero past the last column of the block.
+theorem sylvesterRow.block_sum (c w f : Set) (us cs : List(A)) (l : Nat)
+  requires initial : c ∈ R
+  requires weights : ∀ k ∈ length{A}(us), ∀ r ∈ ℕ,
+    sylvesterRow.indexSum(r, succ(k)) = length{A}(us) →
+    w(f(k)) = R[listCoefficient{A}(zero, us, r) *
+      listCoefficient{A}(zero, sylvesterRow{A}(zero, c, cs, k), l)]
+  shows (∀ t ∈ ℕ, sylvesterRow.indexSum(l, succ(t)) =
+      length{A}(cs) + length{A}(us) →
+      indexedRingSum(w, f, add, zero, length{A}(us)) =
+        call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+          hornerPoly{A}(add, zero, neg, mul, one, zero, us),
+          hornerPoly{A}(add, zero, neg, mul, one, c, cs))(monomialShift(
+            oneVariable, (0:N), monomialOne(oneVariable), t))) ∧
+    (length{A}(cs) + length{A}(us) ≤ l →
+      indexedRingSum(w, f, add, zero, length{A}(us)) = zero)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have unit := monomialOne.member at oneVariable
+  have lengthNat : Nat(length{A}(cs)) by typecheck
+  have member := hornerPoly.member at A, add, zero, neg, mul, one, c, cs
+    with ring, initial
+  have memberFunction := polynomials.function at oneVariable, A, zero,
+    hornerPoly{A}(add, zero, neg, mul, one, c, cs) with member
+  induction us generalizing l
+  | List.nil =>
+    intros l lNat weights
+    have nilLength : length{A}([]) = (0:N)
+      rw length.nil
+      rfl
+    have zeroSum : indexedRingSum(w, f, add, zero, length{A}([])) = zero
+      rw [nilLength, indexedRingSum]
+      rfl
+    constructor
+    . intros t tMember equation
+      have tNat := nat.omega.backward with tMember
+      rw sylvesterRow.indexSum.value at equation
+      have zeroPoly := hornerPoly.zero_list at A, add, zero, neg, mul, one
+        with ring
+      have product : P[hornerPoly{A}(add, zero, neg, mul, one, zero, []) *
+          hornerPoly{A}(add, zero, neg, mul, one, c, cs)] = P[0]
+        rw zeroPoly
+        ring
+      have monomial := monomialShift.member at oneVariable, (0 : Nat),
+        monomialOne(oneVariable), t with unit
+      have value := constantFunction.apply at monomials(oneVariable), A,
+        monomialShift(oneVariable, (0:N), monomialOne(oneVariable), t), zero
+        with monomial, zeroIn
+      rw [zeroSum, product, value]
+      rfl
+    . intro bound
+      exact zeroSum
+  | List.cons(c0, tail) using ih =>
+    intros l lNat weights
+    have c0In : c0 ∈ R by assumption
+    have tailNat : Nat(length{A}(tail)) by typecheck
+    have lengthCons := length.cons at A, c0, tail with c0In
+    rw lengthCons
+    rw lengthCons at weights
+    have sumStep : indexedRingSum(w, f, add, zero, succ(length{A}(tail))) =
+        R[indexedRingSum(w, f, add, zero, length{A}(tail)) +
+          w(f(length{A}(tail)))]
+      rw indexedRingSum
+      rfl
+    have tailWeights : ∀ k ∈ length{A}(tail), ∀ r ∈ ℕ,
+        sylvesterRow.indexSum(r, succ(k)) = length{A}(tail) →
+        w(f(k)) = R[listCoefficient{A}(zero, tail, r) *
+          listCoefficient{A}(zero, sylvesterRow{A}(zero, c, cs, k), l)]
+      intros k hk r rMember equation
+      have rNat := nat.omega.backward with rMember
+      rw sylvesterRow.indexSum.value at equation
+      have kNat := natural.member at length{A}(tail) with hk
+      have kLess := Less.of_membership at k, length{A}(tail) with hk
+      have kBelow : k < succ(length{A}(tail)) by arith
+      have succTailNat : Nat(succ(length{A}(tail))) by typecheck
+      have kMember := membership.of_Less at k, succ(length{A}(tail))
+        with kNat, succTailNat, kBelow
+      have shifted : sylvesterRow.indexSum(succ(r), succ(k)) =
+          succ(length{A}(tail))
+        rw sylvesterRow.indexSum.value
+        arith
+      have succNat : Nat(succ(r)) by typecheck
+      have succMember := nat.omega.forward with succNat
+      have value := weights with k, kMember, succ(r), succMember, shifted
+      have coefficient := listCoefficient.succ at A, zero, c0, tail, r
+        with c0In
+      rw coefficient at value
+      exact value
+    have previous := ih with l, lNat, tailWeights
+    have first := previous.left
+    have second := previous.right
+    have topMember : length{A}(tail) ∈ succ(length{A}(tail))
+      have below : length{A}(tail) < succ(length{A}(tail)) by arith
+      have succTailNat : Nat(succ(length{A}(tail))) by typecheck
+      exact membership.of_Less at length{A}(tail), succ(length{A}(tail))
+        with tailNat, succTailNat, below
+    have topEquation : sylvesterRow.indexSum((0:N), succ(length{A}(tail))) =
+        succ(length{A}(tail))
+      rw sylvesterRow.indexSum.value
+      arith
+    have zeroNat : Nat((0:N)) by typecheck
+    have zeroMember := nat.omega.forward with zeroNat
+    have topWeight := weights with length{A}(tail), topMember, (0:N),
+      zeroMember, topEquation
+    have head := listCoefficient.zero at A, zero, c0, tail with c0In
+    rw head at topWeight
+    have rowList := sylvesterRow.list at A, zero, c, cs, length{A}(tail)
+      with zeroIn, initial
+    have rowIn := CAD.HornerGcd.listCoefficient.closed at A, zero,
+      sylvesterRow{A}(zero, c, cs, length{A}(tail)), l with zeroIn, rowList
+    have tailPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+      tail with ring, zeroIn
+    have target := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with ring
+    have polynomialRing := IsCommRing.ring with target
+    have tailProduct := IsRing.mul_closed with polynomialRing, tailPoly, member
+    have tailFunction := polynomials.function at oneVariable, A, zero,
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero, tail) *
+        hornerPoly{A}(add, zero, neg, mul, one, c, cs)] with tailProduct
+    have boundNat : Nat(length{A}(cs) + length{A}(tail)) by typecheck
+    have comparison := Less.trichotomy at l, length{A}(cs) + length{A}(tail)
+      with lNat, boundNat
+    rcases comparison with below | rest
+    . -- The column lies inside the block: the step by one degree.
+      have gap : succ(l) ≤ length{A}(cs) + length{A}(tail)
+        unfold Less at below
+        exact below
+      unfold LessEqual at gap
+      obtain ⟨t0, t0Nat, t0Equation⟩ := gap
+      have innerEquation : sylvesterRow.indexSum(l, succ(t0)) =
+          length{A}(cs) + length{A}(tail)
+        rw sylvesterRow.indexSum.value
+        arith
+      have t0Member := nat.omega.forward with t0Nat
+      have inner := first with t0, t0Member, innerEquation
+      have step := hornerPoly.mul_coefficient_succ at A, add, zero, neg, mul,
+        one, c0, hornerPoly{A}(add, zero, neg, mul, one, c, cs), tail, t0
+        with ring, c0In, member
+      have upper := monomialShift.member at oneVariable, (0 : Nat),
+        monomialOne(oneVariable), succ(t0) with unit
+      have lower := monomialShift.member at oneVariable, (0 : Nat),
+        monomialOne(oneVariable), t0 with unit
+      have upperIn := FunctionBetween.apply_closed at
+        hornerPoly{A}(add, zero, neg, mul, one, c, cs), monomials(oneVariable),
+        A, monomialShift(oneVariable, (0:N), monomialOne(oneVariable), succ(t0))
+        with memberFunction, upper
+      have lowerIn := FunctionBetween.apply_closed at
+        P[hornerPoly{A}(add, zero, neg, mul, one, zero, tail) *
+          hornerPoly{A}(add, zero, neg, mul, one, c, cs)],
+        monomials(oneVariable), A,
+        monomialShift(oneVariable, (0:N), monomialOne(oneVariable), t0)
+        with tailFunction, lower
+      have coefficient := hornerPoly.coefficient at A, add, zero, neg, mul,
+        one, c, cs, succ(t0) with ring, initial
+      have coefficientIn : hornerCoefficient{A}(zero, c, cs, succ(t0)) ∈ A
+        rw ← coefficient
+        exact upperIn
+      have rowValue : listCoefficient{A}(zero,
+          sylvesterRow{A}(zero, c, cs, length{A}(tail)), l) =
+          hornerCoefficient{A}(zero, c, cs, succ(t0))
+        have sides := Less.trichotomy at l, length{A}(tail) with lNat, tailNat
+        rcases sides with left | notLeft
+        . have outside : l < length{A}(tail) ∨
+              length{A}(tail) + length{A}(cs) < l
+            left
+            exact left
+          have vanish := sylvesterRow.coefficient_outside at A, zero, c, cs,
+            length{A}(tail), l with zeroIn, initial, outside
+          have above : length{A}(cs) < succ(t0) by arith
+          have aboveValue := hornerCoefficient.above at A, zero, c, cs,
+            succ(t0) with above
+          rw [vanish, aboveValue]
+          rfl
+        . have lowerBound : length{A}(tail) ≤ l
+            rcases notLeft with same | right
+            . rw same
+              arith
+            . unfold Less at right
+              arith
+          have upperBound : l ≤ length{A}(tail) + length{A}(cs) by arith
+          have entry := sylvesterRow.coefficient at A, zero, c, cs,
+            length{A}(tail), l with zeroIn, initial, lowerBound, upperBound
+          have swap : length{A}(cs) + length{A}(tail) =
+              sylvesterRow.indexSum(succ(t0), l)
+            rw sylvesterRow.indexSum.value
+            arith
+          have difference := sub.add_right at succ(t0), l
+          rw [entry, swap, sylvesterRow.indexSum.value, difference]
+          rfl
+      constructor
+      . intros t tMember equation
+        have tNat := nat.omega.backward with tMember
+        rw [sylvesterRow.indexSum.value, lengthCons] at equation
+        have same : t = succ(t0) by arith
+        rw [lengthCons, same, sumStep, inner, topWeight, rowValue, step,
+          coefficient]
+        ring
+      . intro bound
+        exfalso
+        arith
+    . rcases rest with same | above
+      . -- The last column of the block: the constant coefficient.
+        constructor
+        . intros t tMember equation
+          have tNat := nat.omega.backward with tMember
+          rw [sylvesterRow.indexSum.value, lengthCons] at equation
+          rw lengthCons
+          have tZero : t = (0:N) by arith
+          have unshift := monomialShift.zero at oneVariable, (0 : Nat),
+            monomialOne(oneVariable) with unit
+          have constant := hornerPoly.mul_coefficient_zero at A, add, zero,
+            neg, mul, one, c0, hornerPoly{A}(add, zero, neg, mul, one, c, cs),
+            tail with ring, c0In, member
+          have coefficient := hornerPoly.coefficient at A, add, zero, neg,
+            mul, one, c, cs, (0:N) with ring, initial
+          rw unshift at coefficient
+          have atBound : length{A}(cs) + length{A}(tail) ≤ l
+            rw same
+            arith
+          have vanish := second with atBound
+          have lowerBound : length{A}(tail) ≤ l by arith
+          have upperBound : l ≤ length{A}(tail) + length{A}(cs) by arith
+          have entry := sylvesterRow.coefficient at A, zero, c, cs,
+            length{A}(tail), l with zeroIn, initial, lowerBound, upperBound
+          have difference := sub.add_right at (0:N),
+            length{A}(cs) + length{A}(tail)
+          have shift : (0:N) + (length{A}(cs) + length{A}(tail)) =
+              length{A}(cs) + length{A}(tail)
+            arith
+          rw shift at difference
+          rw same at entry
+          rw difference at entry
+          rw [tZero, unshift, sumStep, vanish, topWeight, same, entry,
+            constant, coefficient]
+          ring
+        . intro bound
+          exfalso
+          arith
+      . -- Past the block: every row entry is zero.
+        constructor
+        . intros t tMember equation
+          have tNat := nat.omega.backward with tMember
+          rw [sylvesterRow.indexSum.value, lengthCons] at equation
+          exfalso
+          arith
+        . intro bound
+          have belowBound : length{A}(cs) + length{A}(tail) ≤ l by arith
+          have vanish := second with belowBound
+          have outside : l < length{A}(tail) ∨
+              length{A}(tail) + length{A}(cs) < l
+            right
+            arith
+          have rowZero := sylvesterRow.coefficient_outside at A, zero, c, cs,
+            length{A}(tail), l with zeroIn, initial, outside
+          rw [sumStep, vanish, topWeight, rowZero]
+          ring
+
+-- An indexed sum over first + second indices splits at first, the second
+-- part enumerated by any g with the same weights as f shifted by first.
+theorem indexedRingSum.split (w f g : Set) (first second : Nat)
+  requires valuesFirst : WeightedValues(w, f, A, first)
+  requires valuesAll : WeightedValues(w, f, A, first + second)
+  requires agree : ∀ k ∈ second, w(g(k)) = w(f(sylvesterRow.indexSum(first, k)))
+  shows indexedRingSum(w, f, add, zero, first + second) =
+    R[indexedRingSum(w, f, add, zero, first) +
+      indexedRingSum(w, g, add, zero, second)]
+proof
+  induction second
+  | zero =>
+    intros valuesAll agree
+    have firstIn := indexedRingSum.closed at A, add, zero, neg, mul, one, w,
+      f, first with ring, valuesFirst
+    have unit := add.right_unit at first
+    have zeroSum : indexedRingSum(w, g, add, zero, (0:N)) = zero
+      rw indexedRingSum
+      rfl
+    rw [unit, zeroSum]
+    ring
+  | succ(k) using ih =>
+    intros valuesAll agree
+    have firstIn := indexedRingSum.closed at A, add, zero, neg, mul, one, w,
+      f, first with ring, valuesFirst
+    have shift := add.succ_right at k, first
+    rw shift at valuesAll
+    have previousValues := WeightedValues.prefix at w, f, A, first + k
+      with valuesAll
+    have lastValue := WeightedValues.last at w, f, A, first + k with valuesAll
+    have previousAgree : ∀ k0 ∈ k,
+        w(g(k0)) = w(f(sylvesterRow.indexSum(first, k0)))
+      intros k0 hk0
+      have k0Nat := natural.member at k with hk0
+      have k0Less := Less.of_membership at k0, k with hk0
+      have k0Below : k0 < succ(k) by arith
+      have succNat : Nat(succ(k)) by typecheck
+      have k0Member := membership.of_Less at k0, succ(k) with k0Nat, succNat,
+        k0Below
+      exact agree with k0, k0Member
+    have previous := ih with previousValues, previousAgree
+    have kNat : Nat(k) by typecheck
+    have kBelow : k < succ(k) by arith
+    have succNat : Nat(succ(k)) by typecheck
+    have kMember := membership.of_Less at k, succ(k) with kNat, succNat, kBelow
+    have top := agree with k, kMember
+    rw sylvesterRow.indexSum.value at top
+    have valuesG : WeightedValues(w, g, A, k)
+      unfold WeightedValues
+      intros k0 hk0
+      have value := previousAgree with k0, hk0
+      rw [value, sylvesterRow.indexSum.value]
+      have k0Nat := natural.member at k with hk0
+      have k0Less := Less.of_membership at k0, k with hk0
+      have sumNat : Nat(first + k0) by typecheck
+      have sumMember : first + k0 ∈ first + k
+        have below : first + k0 < first + k by arith
+        have boundNat : Nat(first + k) by typecheck
+        exact membership.of_Less at first + k0, first + k with sumNat,
+          boundNat, below
+      exact previousValues with first + k0, sumMember
+    have secondIn := indexedRingSum.closed at A, add, zero, neg, mul, one, w,
+      g, k with ring, valuesG
+    have stepAll : indexedRingSum(w, f, add, zero, succ(first + k)) =
+        R[indexedRingSum(w, f, add, zero, first + k) + w(f(first + k))]
+      rw indexedRingSum
+      rfl
+    have stepG : indexedRingSum(w, g, add, zero, succ(k)) =
+        R[indexedRingSum(w, g, add, zero, k) + w(g(k))]
+      rw indexedRingSum
+      rfl
+    rw [shift, stepAll, stepG, previous, top]
+    ring
+
+-- A pair with a nonzero leading coefficient equal to a pair with leading
+-- zero has the shorter list.
+theorem hornerPoly.length_lt_of_eq (l : Set) (ls ws : List(A))
+  requires initial : l ∈ R
+  requires nonzero : l ≠ R[0]
+  requires equal : hornerPoly{A}(add, zero, neg, mul, one, l, ls) =
+    hornerPoly{A}(add, zero, neg, mul, one, zero, ws)
+  shows length{A}(ls) < length{A}(ws)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have rule := hornerPoly.eq_iff at A, add, zero, neg, mul, one, l, zero, ls,
+    ws with ring, initial, zeroIn
+  have lengthNat : Nat(length{A}(ls)) by typecheck
+  have agree := rule.forward with equal, length{A}(ls), lengthNat
+  have leading := hornerCoefficient.leading at A, zero, l, ls with initial
+  rw leading at agree
+  have wsNat : Nat(length{A}(ws)) by typecheck
+  have comparison := Less.trichotomy at length{A}(ls), length{A}(ws)
+    with lengthNat, wsNat
+  rcases comparison with below | rest
+  . exact below
+  . exfalso
+    rcases rest with same | above
+    . have top := hornerCoefficient.leading at A, zero, zero, ws with zeroIn
+      rw [same, top] at agree
+      exact nonzero with agree
+    . have top := hornerCoefficient.above at A, zero, zero, ws, length{A}(ls)
+        with above
+      rw top at agree
+      exact nonzero with agree
+
+end Coefficients
+
+section Rings
+variable (A add zero neg mul one a b : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+hypothesis left : a ∈ R
+hypothesis right : b ∈ R
+
+-- The row vector of (us, vs) times the block matrix with length(us) rows
+-- of p and length(vs) rows of q, at column l: the coefficient of
+-- U·p + V·q at degree length(cs) + length(us) − 1 − l.
+theorem sylvesterBlockMatrix.vector_entry (us vs cs ds : List(A)) (l t : Nat)
+  requires balance : length{A}(cs) + length{A}(us) =
+    length{A}(ds) + length{A}(vs)
+  requires column : l < length{A}(us) + length{A}(vs)
+  requires degree : sylvesterRow.indexSum(l, succ(t)) =
+    length{A}(cs) + length{A}(us)
+  shows rowVectorEntry(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l) =
+    call2(polynomialAdd(oneVariable, A, add, zero, neg, mul, one),
+      call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+        hornerPoly{A}(add, zero, neg, mul, one, zero, us),
+        hornerPoly{A}(add, zero, neg, mul, one, a, cs)),
+      call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+        hornerPoly{A}(add, zero, neg, mul, one, zero, vs),
+        hornerPoly{A}(add, zero, neg, mul, one, b, ds)))(monomialShift(
+          oneVariable, (0:N), monomialOne(oneVariable), t))
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have unit := monomialOne.member at oneVariable
+  have usNat : Nat(length{A}(us)) by typecheck
+  have vsNat : Nat(length{A}(vs)) by typecheck
+  have sizeNat : Nat(length{A}(us) + length{A}(vs)) by typecheck
+  have lNat : Nat(l) by typecheck
+  have columnMember := membership.of_Less at l, length{A}(us) + length{A}(vs)
+    with lNat, sizeNat, column
+  have vector := sylvesterVector.function at A, zero, us, vs, length{A}(us),
+    length{A}(us) + length{A}(vs) with zeroIn
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    a, b, cs, ds, length{A}(us), length{A}(us) + length{A}(vs)
+    with ring, left, right
+  have weights := rowVectorWeights.function at length{A}(us) + length{A}(vs),
+    A, add, zero, neg, mul, one,
+    sylvesterVector(A, zero, us, vs, length{A}(us),
+      length{A}(us) + length{A}(vs)),
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+      length{A}(us) + length{A}(vs)), l with *
+  have identityFunction := identity.function at length{A}(us) + length{A}(vs)
+  have enumeration := finiteRingSum.enumeration at
+    length{A}(us) + length{A}(vs), A, add, zero, neg, mul, one,
+    rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l),
+    identity(length{A}(us) + length{A}(vs)), length{A}(us) + length{A}(vs)
+    with ring, weights, (identity.bijective at length{A}(us) + length{A}(vs))
+  have valuesAll := WeightedValues.of_functions at
+    rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l),
+    identity(length{A}(us) + length{A}(vs)), length{A}(us) + length{A}(vs), A,
+    length{A}(us) + length{A}(vs)
+    with weights, identityFunction
+  have valuesFirst : WeightedValues(
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l),
+      identity(length{A}(us) + length{A}(vs)), A, length{A}(us))
+    unfold WeightedValues
+    intros i hi
+    have iNat := natural.member at length{A}(us) with hi
+    have iLess := Less.of_membership at i, length{A}(us) with hi
+    have iBelow : i < length{A}(us) + length{A}(vs) by arith
+    have iMember := membership.of_Less at i, length{A}(us) + length{A}(vs)
+      with iNat, sizeNat, iBelow
+    have fixed := identity.apply at i, length{A}(us) + length{A}(vs)
+      with iMember
+    rw fixed
+    exact FunctionBetween.apply_closed at
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l),
+      length{A}(us) + length{A}(vs), A, i with weights, iMember
+  have agree : ∀ k ∈ length{A}(vs),
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l)(
+        sylvesterShift(length{A}(us), length{A}(vs))(k)) =
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l)(
+        identity(length{A}(us) + length{A}(vs))(
+          sylvesterRow.indexSum(length{A}(us), k)))
+    intros k hk
+    have kNat := natural.member at length{A}(vs) with hk
+    have kLess := Less.of_membership at k, length{A}(vs) with hk
+    have shiftValue := sylvesterShift.value at length{A}(us), length{A}(vs), k
+      with hk
+    have sumNat : Nat(length{A}(us) + k) by typecheck
+    have sumBelow : length{A}(us) + k < length{A}(us) + length{A}(vs) by arith
+    have sumMember := membership.of_Less at length{A}(us) + k,
+      length{A}(us) + length{A}(vs) with sumNat, sizeNat, sumBelow
+    have fixed := identity.apply at length{A}(us) + k,
+      length{A}(us) + length{A}(vs) with sumMember
+    rw [shiftValue, sylvesterRow.indexSum.value, fixed]
+    rfl
+  have split := indexedRingSum.split at A, add, zero, neg, mul, one,
+    rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l),
+    identity(length{A}(us) + length{A}(vs)),
+    sylvesterShift(length{A}(us), length{A}(vs)),
+    length{A}(us), length{A}(vs) with ring, valuesFirst, valuesAll, agree
+  have tNat : Nat(t) by typecheck
+  have tMember := nat.omega.forward with tNat
+  -- The block of p.
+  have weightsP : ∀ k ∈ length{A}(us), ∀ r ∈ ℕ,
+      sylvesterRow.indexSum(r, succ(k)) = length{A}(us) →
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l)(
+        identity(length{A}(us) + length{A}(vs))(k)) =
+      R[listCoefficient{A}(zero, us, r) *
+        listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, k), l)]
+    intros k hk r rMember equation
+    have rNat := nat.omega.backward with rMember
+    rw sylvesterRow.indexSum.value at equation
+    have kNat := natural.member at length{A}(us) with hk
+    have kLess := Less.of_membership at k, length{A}(us) with hk
+    have kBelow : k < length{A}(us) + length{A}(vs) by arith
+    have kMember := membership.of_Less at k, length{A}(us) + length{A}(vs)
+      with kNat, sizeNat, kBelow
+    have fixed := identity.apply at k, length{A}(us) + length{A}(vs)
+      with kMember
+    have weightValue := rowVectorWeights.value at
+      length{A}(us) + length{A}(vs), A, add, zero, neg, mul, one,
+      sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l, k
+      with *
+    have vectorValue := sylvesterVector.upper at A, zero, us, vs,
+      length{A}(us), length{A}(us) + length{A}(vs), k, r
+      with zeroIn, kMember, hk, equation
+    have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one, a, b, cs, ds, length{A}(us), length{A}(us) + length{A}(vs), k, l
+      with ring, left, right, kLess, kBelow, column
+    rw [fixed, weightValue, vectorValue, entry]
+    rfl
+  have blockP := sylvesterRow.block_sum at A, add, zero, neg, mul, one, a,
+    rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l),
+    identity(length{A}(us) + length{A}(vs)), us, cs, l with ring, left, weightsP
+  have sumP := blockP.left with t, tMember, degree
+  -- The block of q.
+  have weightsQ : ∀ k ∈ length{A}(vs), ∀ r ∈ ℕ,
+      sylvesterRow.indexSum(r, succ(k)) = length{A}(vs) →
+      rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+        one, sylvesterVector(A, zero, us, vs, length{A}(us),
+          length{A}(us) + length{A}(vs)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+          length{A}(us) + length{A}(vs)), l)(
+        sylvesterShift(length{A}(us), length{A}(vs))(k)) =
+      R[listCoefficient{A}(zero, vs, r) *
+        listCoefficient{A}(zero, sylvesterRow{A}(zero, b, ds, k), l)]
+    intros k hk r rMember equation
+    have rNat := nat.omega.backward with rMember
+    rw sylvesterRow.indexSum.value at equation
+    have kNat := natural.member at length{A}(vs) with hk
+    have kLess := Less.of_membership at k, length{A}(vs) with hk
+    have shiftValue := sylvesterShift.value at length{A}(us), length{A}(vs), k
+      with hk
+    have sumNat : Nat(length{A}(us) + k) by typecheck
+    have sumBelow : length{A}(us) + k < length{A}(us) + length{A}(vs) by arith
+    have sumMember := membership.of_Less at length{A}(us) + k,
+      length{A}(us) + length{A}(vs) with sumNat, sizeNat, sumBelow
+    have outside : ¬(length{A}(us) + k ∈ length{A}(us))
+      intro inside
+      have less := Less.of_membership at length{A}(us) + k, length{A}(us)
+        with inside
+      arith
+    have position : sylvesterRow.indexSum(r, succ(length{A}(us) + k)) =
+        length{A}(us) + length{A}(vs)
+      rw sylvesterRow.indexSum.value
+      arith
+    rw sylvesterRow.indexSum.value at position
+    have weightValue := rowVectorWeights.value at
+      length{A}(us) + length{A}(vs), A, add, zero, neg, mul, one,
+      sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l, length{A}(us) + k
+      with *
+    have vectorValue := sylvesterVector.lower at A, zero, us, vs,
+      length{A}(us), length{A}(us) + length{A}(vs), length{A}(us) + k, r
+      with zeroIn, sumMember, outside, position
+    have lowerBound : length{A}(us) ≤ length{A}(us) + k by arith
+    have entry := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one, a, b, cs, ds, length{A}(us), length{A}(us) + length{A}(vs),
+      length{A}(us) + k, l with ring, left, right, lowerBound, sumBelow, column
+    have commute := add.commutative at k, length{A}(us)
+    have difference := sub.add_right at k, length{A}(us)
+    rw [shiftValue, weightValue, vectorValue, entry, commute, difference]
+    rfl
+  have blockQ := sylvesterRow.block_sum at A, add, zero, neg, mul, one, b,
+    rowVectorWeights(length{A}(us) + length{A}(vs), A, add, zero, neg, mul,
+      one, sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)), l),
+    sylvesterShift(length{A}(us), length{A}(vs)), vs, ds, l
+    with ring, right, weightsQ
+  have degreeQ : sylvesterRow.indexSum(l, succ(t)) =
+      length{A}(ds) + length{A}(vs)
+    rw degree
+    exact balance
+  have sumQ := blockQ.left with t, tMember, degreeQ
+  -- The two coefficients add.
+  have usPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn
+  have vsPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn
+  have pPoly := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have qPoly := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have target := polynomials.comm_ring at oneVariable, A, add, zero, neg, mul,
+    one with ring
+  have polynomialRing := IsCommRing.ring with target
+  have productP := IsRing.mul_closed with polynomialRing, usPoly, pPoly
+  have productQ := IsRing.mul_closed with polynomialRing, vsPoly, qPoly
+  have functionP := polynomials.function at oneVariable, A, zero,
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+      hornerPoly{A}(add, zero, neg, mul, one, a, cs)] with productP
+  have functionQ := polynomials.function at oneVariable, A, zero,
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+      hornerPoly{A}(add, zero, neg, mul, one, b, ds)] with productQ
+  have sumValue := polynomialAdd.apply at oneVariable, A, add, zero, neg, mul,
+    one, P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+      hornerPoly{A}(add, zero, neg, mul, one, a, cs)],
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+      hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+    with ring, productP, productQ
+  have monomial := monomialShift.member at oneVariable, (0 : Nat),
+    monomialOne(oneVariable), t with unit
+  have entrySum := coefficientAdd.value at monomials(oneVariable), A, add,
+    zero, neg, mul, one,
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+      hornerPoly{A}(add, zero, neg, mul, one, a, cs)],
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+      hornerPoly{A}(add, zero, neg, mul, one, b, ds)],
+    monomialShift(oneVariable, (0:N), monomialOne(oneVariable), t)
+    with functionP, functionQ, monomial
+  unfold rowVectorEntry
+  rw [enumeration, split, sumP, sumQ, sumValue, entrySum]
+  rfl
+
+end Rings
+
+section Criteria
+variable (A add zero neg mul one a b : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis field : IsField(R)
+hypothesis left : a ∈ R
+hypothesis right : b ∈ R
+
+-- A combination U·p + V·q with coefficients vanishing on the columns of
+-- the block matrix, with U or V nonzero, is a left kernel vector: the
+-- determinant vanishes.
+theorem sylvesterBlockMatrix.det_zero_of_combination (us vs cs ds : List(A))
+  requires balance : length{A}(cs) + length{A}(us) =
+    length{A}(ds) + length{A}(vs)
+  requires bound : length{A}(vs) ≤ length{A}(cs)
+  requires vanishing : ∀ t ∈ ℕ, ∀ l ∈ length{A}(us) + length{A}(vs),
+    sylvesterRow.indexSum(l, succ(t)) = length{A}(cs) + length{A}(us) →
+    call2(polynomialAdd(oneVariable, A, add, zero, neg, mul, one),
+      call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+        hornerPoly{A}(add, zero, neg, mul, one, zero, us),
+        hornerPoly{A}(add, zero, neg, mul, one, a, cs)),
+      call2(polynomialMul(oneVariable, A, add, zero, neg, mul, one),
+        hornerPoly{A}(add, zero, neg, mul, one, zero, vs),
+        hornerPoly{A}(add, zero, neg, mul, one, b, ds)))(monomialShift(
+          oneVariable, (0:N), monomialOne(oneVariable), t)) = zero
+  requires nontrivial : ∃ k ∈ ℕ, listCoefficient{A}(zero, us, k) ≠ zero ∨
+    listCoefficient{A}(zero, vs, k) ≠ zero
+  shows determinant(length{A}(us) + length{A}(vs), R,
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+      length{A}(us) + length{A}(vs))) = R[0]
+proof
+  have ring := IsField.comm_ring with field
+  have domain := IsField.integral_domain with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have usNat : Nat(length{A}(us)) by typecheck
+  have vsNat : Nat(length{A}(vs)) by typecheck
+  have sizeNat : Nat(length{A}(us) + length{A}(vs)) by typecheck
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    a, b, cs, ds, length{A}(us), length{A}(us) + length{A}(vs)
+    with ring, left, right
+  have kernel : LeftKernelVector(length{A}(us) + length{A}(vs), A, add, zero,
+      neg, mul, one, sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)))
+    unfold LeftKernelVector
+    constructor
+    . exact sylvesterVector.function at A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs) with *
+    . intros l hl
+      have lNat := natural.member at length{A}(us) + length{A}(vs) with hl
+      have lLess := Less.of_membership at l, length{A}(us) + length{A}(vs)
+        with hl
+      have gap : succ(l) ≤ length{A}(cs) + length{A}(us) by arith
+      unfold LessEqual at gap
+      obtain ⟨t, tNat, tEquation⟩ := gap
+      have tMember := nat.omega.forward with tNat
+      have degree : sylvesterRow.indexSum(l, succ(t)) =
+          length{A}(cs) + length{A}(us)
+        rw sylvesterRow.indexSum.value
+        arith
+      have entry := sylvesterBlockMatrix.vector_entry at A, add, zero, neg,
+        mul, one, a, b, us, vs, cs, ds, l, t
+        with ring, left, right, balance, lLess, degree
+      have vanish := vanishing with t, tMember, l, hl, degree
+      rw [entry, vanish]
+      rfl
+  obtain ⟨k, kMember, alternatives⟩ := nontrivial
+  have kNat := nat.omega.backward with kMember
+  rcases alternatives with inUs | inVs
+  . have below := listCoefficient.below_length at A, zero, us, k with inUs
+    have gap : succ(k) ≤ length{A}(us)
+      unfold Less at below
+      exact below
+    unfold LessEqual at gap
+    obtain ⟨i, iNat, iEquation⟩ := gap
+    have iLess : i < length{A}(us) by arith
+    have inside := membership.of_Less at i, length{A}(us)
+      with iNat, usNat, iLess
+    have iBelow : i < length{A}(us) + length{A}(vs) by arith
+    have row := membership.of_Less at i, length{A}(us) + length{A}(vs)
+      with iNat, sizeNat, iBelow
+    have position : sylvesterRow.indexSum(k, succ(i)) = length{A}(us)
+      rw sylvesterRow.indexSum.value
+      arith
+    rw sylvesterRow.indexSum.value at position
+    have value := sylvesterVector.upper at A, zero, us, vs, length{A}(us),
+      length{A}(us) + length{A}(vs), i, k with zeroIn, row, inside, position
+    have nonzero : sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs))(i) ≠ R[0]
+      rw value
+      exact inUs
+    exact determinant.zero_of_nonzero_left_kernel at A, add, zero, neg, mul,
+      one, length{A}(us) + length{A}(vs),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)), i
+      with domain, matrix, kernel, row, nonzero
+  . have below := listCoefficient.below_length at A, zero, vs, k with inVs
+    have gap : succ(k) ≤ length{A}(vs)
+      unfold Less at below
+      exact below
+    unfold LessEqual at gap
+    obtain ⟨d, dNat, dEquation⟩ := gap
+    have sumNat : Nat(length{A}(us) + d) by typecheck
+    have iBelow : length{A}(us) + d < length{A}(us) + length{A}(vs) by arith
+    have row := membership.of_Less at length{A}(us) + d,
+      length{A}(us) + length{A}(vs) with sumNat, sizeNat, iBelow
+    have outside : ¬(length{A}(us) + d ∈ length{A}(us))
+      intro inside
+      have less := Less.of_membership at length{A}(us) + d, length{A}(us)
+        with inside
+      arith
+    have position : sylvesterRow.indexSum(k, succ(length{A}(us) + d)) =
+        length{A}(us) + length{A}(vs)
+      rw sylvesterRow.indexSum.value
+      arith
+    rw sylvesterRow.indexSum.value at position
+    have value := sylvesterVector.lower at A, zero, us, vs, length{A}(us),
+      length{A}(us) + length{A}(vs), length{A}(us) + d, k
+      with zeroIn, row, outside, position
+    have nonzero : sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs))(length{A}(us) + d) ≠ R[0]
+      rw value
+      exact inVs
+    exact determinant.zero_of_nonzero_left_kernel at A, add, zero, neg, mul,
+      one, length{A}(us) + length{A}(vs),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(us),
+        length{A}(us) + length{A}(vs)),
+      sylvesterVector(A, zero, us, vs, length{A}(us),
+        length{A}(us) + length{A}(vs)), length{A}(us) + d
+      with domain, matrix, kernel, row, nonzero
+
+-- A left inverse of the block matrix shows its determinant nonzero.
+theorem sylvesterBlockMatrix.det_nonzero_of_inverse (cs ds : List(A))
+  (rowsP size : Nat) (W : Set)
+  requires matrixW : RingMatrix(size, R, W)
+  requires inverse : ∀ l ∈ size, ∀ k ∈ size,
+    matrixProductEntry(size, A, add, zero, neg, mul, one, W,
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP, size), l, k) =
+    singleValue(A, zero, one, k, l)
+  shows determinant(size, R, sylvesterBlockMatrix(A, zero, a, b, cs, ds,
+    rowsP, size)) ≠ R[0]
+proof
+  have ring := IsField.comm_ring with field
+  have nontrivial := IsField.nontrivial with field
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    a, b, cs, ds, rowsP, size with ring, left, right
+  have identityMatrix := identityMatrix.matrix at A, add, zero, neg, mul, one,
+    size with ring
+  have entries : ∀ i ∈ size, ∀ j ∈ size,
+      identityMatrix(size, R)[i, j] =
+      matrixProductEntry(size, A, add, zero, neg, mul, one, W,
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP, size), i, j)
+    intros i hi j hj
+    have entry := identityMatrix.entry at A, add, zero, neg, mul, one, size,
+      i, j with ring, hi, hj
+    have product := inverse with i, hi, j, hj
+    rw [entry, product]
+    rfl
+  have product := determinant.product at A, add, zero, neg, mul, one, size, W,
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP, size),
+    identityMatrix(size, R) with ring, matrixW, matrix, identityMatrix, entries
+  have unit := determinant.identity at A, add, zero, neg, mul, one, size
+    with ring
+  have detW := determinant.closed at A, add, zero, neg, mul, one, W, size
+    with ring, matrixW
+  intro vanishes
+  rw [unit, vanishes] at product
+  have collapse : R[determinant(size, R, W) * 0] = R[0] by ring
+  rw collapse at product
+  have flipped : R[0] = R[1]
+    rw product
+    rfl
+  exact nontrivial.right.right with flipped
+
+end Criteria
+
+-- The explicit combination lists of a target list ts for a pair with
+-- Bézout lists u0, v0 (1 = U0·p + V0·q): the remainder of T·U0 by q, the
+-- padded list of T·V0 + S·p where S is the quotient, and the remainder of
+-- that list by p.
+def resultant.combinationLeft {A : Set} (add zero neg mul one b : Set)
+  (u0 ds ts : List(A)) : Set :=
+  hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+    hornerMulList{A}(add, zero, mul, zero, zero, ts, u0))
+
+def resultant.combinationMiddle {A : Set} (add zero neg mul one a b : Set)
+  (u0 v0 cs ds ts : List(A)) : Set :=
+  hornerAdd{A}(add, zero,
+    hornerAdd{A}(add, zero,
+      listReplicate(
+        length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)) +
+          length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+            hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+              hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+            hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+    hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+        hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))
+
+def resultant.combinationRight {A : Set} (add zero neg mul one a b : Set)
+  (u0 v0 cs ds ts : List(A)) : Set :=
+  hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+    resultant.combinationMiddle{A}(add, zero, neg, mul, one, a, b, u0, v0, cs,
+      ds, ts))
+
+-- The coefficient list of X^t: t zeros below the leading one.
+def resultant.power {A : Set} (zero one : Set, t : Nat) : Set :=
+  hornerFullList{A}(one, listReplicate(t, zero))
+
+theorem resultant.power.list (A zero one : Set, t : Nat)
+  requires zeroIn : zero ∈ A
+  requires oneIn : one ∈ A
+  shows List(A, resultant.power{A}(zero, one, t))
+proof
+  have replicate := listReplicate.closed at A, zero, t with zeroIn
+  unfold resultant.power
+  exact hornerFullList.list at A, one, listReplicate(t, zero) with oneIn,
+    replicate
+
+theorem resultant.power.length (A zero one : Set, t : Nat)
+  requires zeroIn : zero ∈ A
+  shows length{A}(resultant.power{A}(zero, one, t)) = succ(t)
+proof
+  have replicate := listReplicate.closed at A, zero, t with zeroIn
+  have same := listReplicate.length at A, zero, t with zeroIn
+  unfold resultant.power
+  rw hornerFullList.length at A, one, listReplicate(t, zero) with replicate
+  rw same
+  rfl
+
+-- The explicit combination lists are lists of the right lengths.
+theorem resultant.combination_lists (A add zero neg mul one a b : Set)
+  (cs ds u0 v0 ts : List(A))
+  requires field : IsField(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  requires leftNonzero : a ≠ zero
+  requires rightNonzero : b ≠ zero
+  shows List(A, resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0,
+      ds, ts)) ∧
+    length{A}(resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0,
+      ds, ts)) = length{A}(ds) ∧
+    List(A, resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0,
+      v0, cs, ds, ts)) ∧
+    length{A}(resultant.combinationRight{A}(add, zero, neg, mul, one, a, b,
+      u0, v0, cs, ds, ts)) = length{A}(cs)
+proof
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have tuData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    ts, u0 with ring, zeroIn, zeroIn
+  have clData := hornerDivRemainder.data at A, add, zero, neg, mul, one, b,
+    zero, ds, hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)
+    with field, right, rightNonzero, zeroIn, tuData.left
+  have sData := hornerDivQuotient.data at A, add, zero, neg, mul, one, b,
+    zero, ds, hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)
+    with field, right, rightNonzero, zeroIn, tuData.left
+  have tvData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    ts, v0 with ring, zeroIn, zeroIn
+  have fullList := hornerFullList.list at A, a, cs with left
+  have spData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+          hornerFullList{A}(a, cs)
+    with ring, zeroIn, zeroIn, sData.left, fullList
+  have padList := listReplicate.closed at A, zero,
+    length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))) with zeroIn
+  have innerData := hornerAdd.data at A, add, zero, neg, mul, one,
+    listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts,
+        v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+    hornerMulList{A}(add, zero, mul, zero, zero, ts, v0) with ring, padList,
+        tvData.left
+  have lData := hornerAdd.data at A, add, zero, neg, mul, one,
+    hornerAdd{A}(add, zero, listReplicate(length{A}(hornerMulList{A}(add, zero,
+        mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+    hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)) with ring, innerData.left, spData.left
+  have crData := hornerDivRemainder.data at A, add, zero, neg, mul, one, a,
+    zero, cs, hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+        ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))
+    with field, left, leftNonzero, zeroIn, lData.left
+  unfold resultant.combinationRight
+  unfold resultant.combinationMiddle
+  unfold resultant.combinationLeft
+  exact ⟨clData.left, clData.right, crData.left, crData.right⟩
+
+-- The left inverse of the Sylvester matrix of a coprime pair with Bézout
+-- lists u0, v0: row l holds the combination lists of X^(m + n − 1 − l).
+defgraph resultant.inverseMatrix (A add zero neg mul one a b u0 v0 cs ds : Set)
+    (p ∈ (length{A}(cs) + length{A}(ds)) × (length{A}(cs) + length{A}(ds))) : A
+        :=
+  sylvesterVector(A, zero,
+    resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+        succ(fst(p))))),
+    resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0, cs,
+      ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+        succ(fst(p))))),
+    length{A}(ds), length{A}(cs) + length{A}(ds))(snd(p))
+requires field : IsField(A, add, zero, neg, mul, one)
+requires left : a ∈ A
+requires right : b ∈ A
+requires leftNonzero : a ≠ zero
+requires rightNonzero : b ≠ zero
+requires csList : List(A, cs)
+requires dsList : List(A, ds)
+requires u0List : List(A, u0)
+requires v0List : List(A, v0)
+proof
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  obtain ⟨bound, l, hl, i, hi, shape⟩ := product.membership.forward with member
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have lNat := natural.member at length{A}(cs) + length{A}(ds) with hl
+  have powerList := resultant.power.list at A, zero, one,
+    sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+        succ(l)) with zeroIn, oneIn
+  have lists := resultant.combination_lists at A, add, zero, neg, mul, one, a,
+    b, cs, ds, u0, v0, resultant.power{A}(zero, one,
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l)))
+    with field, left, right, leftNonzero, rightNonzero, csList, dsList, u0List,
+      v0List, powerList
+  have vector := sylvesterVector.function at A, zero,
+    resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+    resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0, cs,
+      ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+    length{A}(ds), length{A}(cs) + length{A}(ds)
+    with zeroIn, lists.left, lists.right.right.left
+  rw [shape, fst.pair, snd.pair]
+  exact FunctionBetween.apply_closed with vector, hi
+
+section Powers
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+
+-- The coefficients of X^t: one at t and zero elsewhere.
+theorem resultant.power.coefficient (t k : Nat)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      resultant.power{A}(zero, one, t))(monomialShift(oneVariable, (0:N),
+        monomialOne(oneVariable), k)) =
+    singleValue(A, zero, one, t, k)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have replicate := listReplicate.closed at A, zero, t with zeroIn
+  have replicateLength := listReplicate.length at A, zero, t with zeroIn
+  have fullEq := hornerPoly.full_list at A, add, zero, neg, mul, one, one,
+    listReplicate(t, zero) with ring, oneIn, replicate
+  have coefficient := hornerPoly.coefficient at A, add, zero, neg, mul, one,
+    one, listReplicate(t, zero), k with ring, oneIn, replicate
+  unfold resultant.power
+  rw [fullEq, coefficient]
+  have kNat : Nat(k) by typecheck
+  have tNat : Nat(t) by typecheck
+  have comparison := Less.trichotomy at k, t with kNat, tNat
+  rcases comparison with below | rest
+  . have bound : k < length{A}(listReplicate(t, zero))
+      rw replicateLength
+      exact below
+    have value := hornerCoefficient.below at A, zero, one,
+      listReplicate(t, zero), k with replicate, bound
+    have entry := listReplicate.coefficient at A, zero, zero, t, k
+      with zeroIn, below
+    have different : k ≠ t
+      intro same
+      rw same at below
+      exact Less.irreflexive at t with below
+    have selected := singleValue.other at A, zero, one, t, k
+      with zeroIn, oneIn, different
+    rw [value, entry, selected]
+    rfl
+  . rcases rest with same | above
+    . have value := hornerCoefficient.leading at A, zero, one,
+        listReplicate(t, zero) with replicate, oneIn
+      rw replicateLength at value
+      have reflexive : t = t by rfl
+      have selected := singleValue.same at A, zero, one, t, t
+        with zeroIn, oneIn, reflexive
+      rw [same, value, selected]
+      rfl
+    . have bound : length{A}(listReplicate(t, zero)) < k
+        rw replicateLength
+        exact above
+      have value := hornerCoefficient.above at A, zero, one,
+        listReplicate(t, zero), k with replicate, bound
+      have different : k ≠ t
+        intro same
+        rw same at above
+        exact Less.irreflexive at t with above
+      have selected := singleValue.other at A, zero, one, t, k
+        with zeroIn, oneIn, different
+      rw [value, selected]
+      rfl
+
+end Powers
 
 section Fields
 variable (A add zero neg mul one a b : Set)
 notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
 hypothesis field : IsField(R)
 hypothesis left : a ∈ R
 hypothesis right : b ∈ R
 hypothesis leftNonzero : a ≠ R[0]
 hypothesis rightNonzero : b ≠ R[0]
+
+-- For a pair with a Bézout identity, every target of length at most m + n
+-- is a combination with the explicit lists, of lengths n and m.
+theorem resultant.combination_of_bezout (cs ds u0 v0 ts : List(A))
+  requires identity : hornerPoly{A}(add, zero, neg, mul, one, one, []) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, u0) * hornerPoly{A}(add,
+        zero, neg, mul, one, a, cs) +
+      hornerPoly{A}(add, zero, neg, mul, one, zero, v0) * hornerPoly{A}(add,
+          zero, neg, mul, one, b, ds)]
+  requires short : length{A}(ts) ≤ length{A}(cs) + length{A}(ds)
+  shows List(A, resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0,
+      ds, ts)) ∧
+    length{A}(resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0,
+      ds, ts)) = length{A}(ds) ∧
+    List(A, resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0,
+      v0, cs, ds, ts)) ∧
+    length{A}(resultant.combinationRight{A}(add, zero, neg, mul, one, a, b,
+      u0, v0, cs, ds, ts)) = length{A}(cs) ∧
+    hornerPoly{A}(add, zero, neg, mul, one, zero, ts) =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+          resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+            ts)) * hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+        hornerPoly{A}(add, zero, neg, mul, one, zero,
+          resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+            cs, ds, ts)) * hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+proof
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have target := polynomials.comm_ring at oneVariable, A, add, zero, neg, mul,
+    one with ring
+  have polynomialRing := IsCommRing.ring with target
+  have pIn := hornerPoly.member at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have qIn := hornerPoly.member at A, add, zero, neg, mul, one, b, ds
+    with ring, right
+  have tIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, ts
+    with ring, zeroIn
+  have u0In := hornerPoly.member at A, add, zero, neg, mul, one, zero, u0
+    with ring, zeroIn
+  have v0In := hornerPoly.member at A, add, zero, neg, mul, one, zero, v0
+    with ring, zeroIn
+  have onePoly := hornerPoly.one_list at A, add, zero, neg, mul, one with ring
+  rw onePoly at identity
+  -- T·U0 and its division by q.
+  have tuData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    ts, u0 with ring, zeroIn, zeroIn
+  have tuEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, ts, u0
+    with ring
+  have divisionQ := hornerDivision.poly at A, add, zero, neg, mul, one, b,
+    zero, ds, hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)
+    with field, right, rightNonzero, zeroIn, tuData.left
+  have clData := hornerDivRemainder.data at A, add, zero, neg, mul, one, b,
+    zero, ds, hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)
+    with field, right, rightNonzero, zeroIn, tuData.left
+  have sData := hornerDivQuotient.data at A, add, zero, neg, mul, one, b,
+    zero, ds, hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)
+    with field, right, rightNonzero, zeroIn, tuData.left
+  have sIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)) with ring, zeroIn,
+          sData.left
+  have clIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)) with ring, zeroIn,
+          clData.left
+  have tuSplit : P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+      ts) * hornerPoly{A}(add, zero, neg, mul, one, zero, u0)] =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero, hornerDivQuotient{A}(add,
+          zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, b,
+          ds) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)))]
+    rw ← tuEq
+    exact divisionQ
+  -- T·V0, S·p, and the padded sum L.
+  have tvData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    ts, v0 with ring, zeroIn, zeroIn
+  have tvEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, ts, v0
+    with ring
+  have fullList := hornerFullList.list at A, a, cs with left
+  have fullEq := hornerPoly.full_list at A, add, zero, neg, mul, one, a, cs
+    with ring, left
+  have spData := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+          hornerFullList{A}(a, cs)
+    with ring, zeroIn, zeroIn, sData.left, fullList
+  have spEq := hornerPoly.mul_lists at A, add, zero, neg, mul, one,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+          hornerFullList{A}(a, cs)
+    with ring, sData.left, fullList
+  have padList := listReplicate.closed at A, zero,
+    length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))) with zeroIn
+  have padLength := listReplicate.length at A, zero,
+    length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))) with zeroIn
+  have padPoly := CAD.HornerDivision.hornerPoly.replicate_zero at A, add, zero,
+      neg, mul, one,
+    length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))) with ring
+  have innerShort : length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts,
+      v0)) ≤
+      length{A}(listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero,
+          zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero))
+    rw padLength
+    arith
+  have innerData := hornerAdd.data at A, add, zero, neg, mul, one,
+    listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts,
+        v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+    hornerMulList{A}(add, zero, mul, zero, zero, ts, v0) with ring, padList,
+        tvData.left
+  have innerEq := hornerPoly.add_short at A, add, zero, neg, mul, one,
+    listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero, ts,
+        v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+    hornerMulList{A}(add, zero, mul, zero, zero, ts, v0) with ring, padList,
+        tvData.left, innerShort
+  have outerShort : length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))) ≤
+      length{A}(hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)))
+    rw [innerData.right, padLength]
+    arith
+  have lData := hornerAdd.data at A, add, zero, neg, mul, one,
+    hornerAdd{A}(add, zero, listReplicate(length{A}(hornerMulList{A}(add, zero,
+        mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+    hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)) with ring, innerData.left, spData.left
+  have lEq := hornerPoly.add_short at A, add, zero, neg, mul, one,
+    hornerAdd{A}(add, zero, listReplicate(length{A}(hornerMulList{A}(add, zero,
+        mul, zero, zero, ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+    hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)) with ring, innerData.left, spData.left,
+          outerShort
+  have lValue : hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))) =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero, ts) * hornerPoly{A}(add,
+          zero, neg, mul, one, zero, v0) + hornerPoly{A}(add, zero, neg, mul,
+          one, zero, hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, a, cs)]
+    rw [lEq, innerEq, padPoly, tvEq, spEq, fullEq]
+    ring
+  -- The division of L by p.
+  have divisionP := hornerDivision.poly at A, add, zero, neg, mul, one, a,
+    zero, cs, hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+        ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))
+    with field, left, leftNonzero, zeroIn, lData.left
+  have crData := hornerDivRemainder.data at A, add, zero, neg, mul, one, a,
+    zero, cs, hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+        ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))
+    with field, left, leftNonzero, zeroIn, lData.left
+  have s2Data := hornerDivQuotient.data at A, add, zero, neg, mul, one, a,
+    zero, cs, hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+        ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))
+    with field, left, leftNonzero, zeroIn, lData.left
+  have s2In := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivQuotient{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))) with ring, zeroIn, s2Data.left
+  have crIn := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))) with ring, zeroIn, crData.left
+  have lSplit : P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+      ts) * hornerPoly{A}(add, zero, neg, mul, one, zero,
+      v0) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, a, cs)] =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero, hornerDivQuotient{A}(add,
+          zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))))) * hornerPoly{A}(add, zero, neg, mul, one, a,
+          cs) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))))]
+    rw ← lValue
+    exact divisionP
+  -- T = CL·p + CR·q + S'·(p·q).
+  have chain : P[hornerPoly{A}(add, zero, neg, mul, one, zero, ts) * 1] =
+      P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, a,
+          cs) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))))) * hornerPoly{A}(add, zero, neg, mul, one, b,
+          ds) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivQuotient{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))))) * (hornerPoly{A}(add, zero, neg, mul, one,
+          a, cs) * hornerPoly{A}(add, zero, neg, mul, one, b, ds))]
+    rw identity
+    have e2 : P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+        ts) * (hornerPoly{A}(add, zero, neg, mul, one, zero,
+        u0) * hornerPoly{A}(add, zero, neg, mul, one, a,
+        cs) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+        v0) * hornerPoly{A}(add, zero, neg, mul, one, b, ds))] =
+        P[(hornerPoly{A}(add, zero, neg, mul, one, zero,
+            ts) * hornerPoly{A}(add, zero, neg, mul, one, zero,
+            u0)) * hornerPoly{A}(add, zero, neg, mul, one, a,
+            cs) + (hornerPoly{A}(add, zero, neg, mul, one, zero,
+            ts) * hornerPoly{A}(add, zero, neg, mul, one, zero,
+            v0)) * hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+      ring
+    rw [e2, tuSplit]
+    have e3 : P[(hornerPoly{A}(add, zero, neg, mul, one, zero,
+        hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, b,
+          ds) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0)))) * hornerPoly{A}(add, zero, neg, mul, one, a,
+          cs) + (hornerPoly{A}(add, zero, neg, mul, one, zero,
+          ts) * hornerPoly{A}(add, zero, neg, mul, one, zero,
+          v0)) * hornerPoly{A}(add, zero, neg, mul, one, b, ds)] =
+        P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+            hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, a,
+          cs) + (hornerPoly{A}(add, zero, neg, mul, one, zero,
+          ts) * hornerPoly{A}(add, zero, neg, mul, one, zero,
+          v0) + hornerPoly{A}(add, zero, neg, mul, one, zero,
+          hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts,
+          u0))) * hornerPoly{A}(add, zero, neg, mul, one, a,
+          cs)) * hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+      ring
+    rw [e3, lSplit]
+    ring
+  have unitT : P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+      ts) * 1] = hornerPoly{A}(add, zero, neg, mul, one, zero, ts) by ring
+  rw unitT at chain
+  -- The quotient S' vanishes: the degree of T − CL·p − CR·q is below m + n.
+  have abIn := IsRing.mul_closed with ordinary, left, right
+  have abNonzero : R[a * b] ≠ R[0]
+    have noDivisors := IsField.no_zero_divisors with field
+    unfold NoZeroDivisors at noDivisors
+    intro vanishes
+    have alternatives := noDivisors with a, left, b, right, vanishes
+    rcases alternatives with aZero | bZero
+    . exact leftNonzero with aZero
+    . exact rightNonzero with bZero
+  have pqData := hornerMulList.data at A, add, zero, neg, mul, one, a, b, cs,
+    ds with ring, left, right
+  have pqEq := hornerPoly.mul at A, add, zero, neg, mul, one, a, b, cs, ds
+    with ring, left, right
+  have padList2 := listReplicate.closed at A, zero,
+    (length{A}(cs) + length{A}(ds)) - length{A}(ts) with zeroIn
+  have padLength2 := listReplicate.length at A, zero,
+    (length{A}(cs) + length{A}(ds)) - length{A}(ts) with zeroIn
+  have tpadList := append.closed at A, ts,
+    listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts), zero)
+    with padList2
+  have tpadLength := length.append at A,
+    listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts), zero), ts
+    with padList2
+  rw padLength2 at tpadLength
+  have cancel := sub.cancel_of_le at length{A}(cs) + length{A}(ds),
+    length{A}(ts) with short
+  have tpadSize : length{A}(append{A}(listReplicate((length{A}(cs) +
+      length{A}(ds)) - length{A}(ts), zero), ts)) =
+      length{A}(cs) + length{A}(ds)
+    rw tpadLength
+    arith
+  have tpadEq := hornerPoly.pad at A, add, zero, neg, mul, one, ts,
+    (length{A}(cs) + length{A}(ds)) - length{A}(ts) with ring
+  have clpData := hornerMulList.data at A, add, zero, neg, mul, one, zero, a,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs
+    with ring, zeroIn, left, clData.left
+  have clpEq := hornerPoly.mul at A, add, zero, neg, mul, one, zero, a,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs
+    with ring, zeroIn, left, clData.left
+  have zeroA : R[zero * a] = zero by ring
+  rw zeroA at clpEq
+  have crqData := hornerMulList.data at A, add, zero, neg, mul, one, zero, b,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds
+    with ring, zeroIn, right, crData.left
+  have crqEq := hornerPoly.mul at A, add, zero, neg, mul, one, zero, b,
+    hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds
+    with ring, zeroIn, right, crData.left
+  have zeroB : R[zero * b] = zero by ring
+  rw zeroB at crqEq
+  have neg1Data := hornerNeg.data at A, add, zero, neg, mul, one,
+    hornerMulList{A}(add, zero, mul, zero, a, hornerDivRemainder{A}(add, zero,
+        neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs) with ring,
+          clpData.left
+  have neg1Eq := hornerPoly.neg_list at A, add, zero, neg, mul, one,
+    hornerMulList{A}(add, zero, mul, zero, a, hornerDivRemainder{A}(add, zero,
+        neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs) with ring,
+          clpData.left
+  have f1Short : length{A}(hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul,
+      zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))) ≤
+      length{A}(append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+          length{A}(ts), zero), ts))
+    rw [neg1Data.right, clpData.right, clData.right, tpadSize]
+    arith
+  have f1Data := hornerAdd.data at A, add, zero, neg, mul, one,
+      append{A}(listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts),
+      zero), ts),
+    hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, a,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))
+    with ring, tpadList, neg1Data.left
+  have f1Eq := hornerPoly.add_short at A, add, zero, neg, mul, one,
+      append{A}(listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts),
+      zero), ts),
+    hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, a,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))
+    with ring, tpadList, neg1Data.left, f1Short
+  have neg2Data := hornerNeg.data at A, add, zero, neg, mul, one,
+    hornerMulList{A}(add, zero, mul, zero, b, hornerDivRemainder{A}(add, zero,
+        neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds) with ring, crqData.left
+  have neg2Eq := hornerPoly.neg_list at A, add, zero, neg, mul, one,
+    hornerMulList{A}(add, zero, mul, zero, b, hornerDivRemainder{A}(add, zero,
+        neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds) with ring, crqData.left
+  have fShort : length{A}(hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul,
+      zero, b, hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))) ≤
+      length{A}(hornerAdd{A}(add, zero,
+          append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+          length{A}(ts), zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add,
+          zero, mul, zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one,
+          b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))))
+    rw [neg2Data.right, crqData.right, crData.right, f1Data.right, tpadSize]
+    arith
+  have fData := hornerAdd.data at A, add, zero, neg, mul, one,
+      hornerAdd{A}(add, zero,
+      append{A}(listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts),
+      zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, a,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+    hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))
+    with ring, f1Data.left, neg2Data.left
+  have fEq := hornerPoly.add_short at A, add, zero, neg, mul, one,
+      hornerAdd{A}(add, zero,
+      append{A}(listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts),
+      zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, a,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+    hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+        hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))
+    with ring, f1Data.left, neg2Data.left, fShort
+  have nfData := hornerNeg.data at A, add, zero, neg, mul, one,
+    hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+        length{A}(ts), zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add,
+        zero, mul, zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one, b,
+        zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+          hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))) with ring, fData.left
+  have nfEq := hornerPoly.neg_list at A, add, zero, neg, mul, one,
+    hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+        length{A}(ts), zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add,
+        zero, mul, zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one, b,
+        zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+          hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))) with ring, fData.left
+  have nfLength : length{A}(hornerNeg{A}(neg, hornerAdd{A}(add, zero,
+      hornerAdd{A}(add, zero,
+      append{A}(listReplicate((length{A}(cs) + length{A}(ds)) - length{A}(ts),
+      zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, a,
+      hornerDivRemainder{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+          hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))))) =
+      length{A}(hornerMulList{A}(add, zero, mul, a, b, cs, ds))
+    rw [nfData.right, fData.right, f1Data.right, tpadSize, pqData.right]
+    rfl
+  have vanishes : P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))))) * hornerPoly{A}(add, zero, neg, mul, one,
+          R[a * b],
+        hornerMulList{A}(add, zero, mul, a, b, cs, ds)) +
+      hornerPoly{A}(add, zero, neg, mul, one, zero, hornerNeg{A}(neg,
+          hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+          length{A}(ts), zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add,
+          zero, mul, zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one,
+          b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+          hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds)))))] = P[0]
+    rw [pqEq, nfEq, fEq, f1Eq, tpadEq, neg1Eq, neg2Eq, clpEq, crqEq, chain]
+    ring
+  have result := hornerDivision.zero_of_combination at A, add, zero, neg, mul,
+    one, R[a * b], hornerMulList{A}(add, zero, mul, a, b, cs, ds),
+    hornerDivQuotient{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))),
+    hornerNeg{A}(neg, hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+        append{A}(listReplicate((length{A}(cs) + length{A}(ds)) -
+        length{A}(ts), zero), ts), hornerNeg{A}(neg, hornerMulList{A}(add,
+        zero, mul, zero, a, hornerDivRemainder{A}(add, zero, neg, mul, one, b,
+        zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)), cs))),
+          hornerNeg{A}(neg, hornerMulList{A}(add, zero, mul, zero, b,
+          hornerDivRemainder{A}(add, zero, neg, mul, one, a, zero, cs,
+      hornerAdd{A}(add, zero, hornerAdd{A}(add, zero,
+          listReplicate(length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+          ts, v0)) +
+      length{A}(hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs))), zero),
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, v0)),
+      hornerMulList{A}(add, zero, mul, zero, zero,
+      hornerDivQuotient{A}(add, zero, neg, mul, one, b, zero, ds,
+      hornerMulList{A}(add, zero, mul, zero, zero, ts, u0)),
+      hornerFullList{A}(a, cs)))), ds))))
+    with field, abIn, abNonzero, pqData.left, s2Data.left, nfData.left,
+      nfLength, vanishes
+  have sZero := result.left
+  unfold resultant.combinationRight
+  unfold resultant.combinationMiddle
+  unfold resultant.combinationLeft
+  refine ⟨clData.left, clData.right, crData.left, crData.right, ?_⟩
+  rw [chain, sZero]
+  ring
+
+-- A common factor of positive degree divides the constant resultant, so
+-- the resultant vanishes.
+theorem resultant.eq_zero_of_common_factor (g : Set) (cs ds gs : List(A))
+  requires divisor : g ∈ R
+  requires nonzero : g ≠ R[0]
+  requires nonempty : gs ≠ []
+  requires dividesLeft : HornerDivides(A, add, zero, neg, mul, one, g, gs, a,
+      cs)
+  requires dividesRight : HornerDivides(A, add, zero, neg, mul, one, g, gs, b,
+    ds)
+  shows resultant(R, a, cs, b, ds) = R[0]
+proof
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have shape := natural.zero_or_successor at length{A}(cs) + length{A}(ds)
+    with sizeNat
+  rcases shape with isZero | ⟨k, kNat, isSucc⟩
+  . -- Both pairs are constants: no divisor of positive degree.
+    exfalso
+    have bound := HornerDivides.length_le at A, add, zero, neg, mul, one, g, a,
+      gs, cs with field, divisor, nonzero, left, leftNonzero, dividesLeft
+    have zeroLength : length{A}(gs) = (0:N) by arith
+    have gsNil := length.eq_zero at A, gs with zeroLength
+    exact nonempty with gsNil
+  have positive : (0:N) < length{A}(cs) + length{A}(ds) by arith
+  have combination := resultant.combination at A, add, zero, neg, mul, one, a,
+    b, cs, ds with ring, left, right, positive
+  obtain ⟨us, usList, vs, vsList, usLength, vsLength, identity⟩ := combination
+  unfold HornerDivides at dividesLeft
+  obtain ⟨qs1, qs1List, pEq⟩ := dividesLeft
+  unfold HornerDivides at dividesRight
+  obtain ⟨qs2, qs2List, qEq⟩ := dividesRight
+  by_contra nonzeroRes
+  have resIn := resultant.closed at A, add, zero, neg, mul, one, a, b, cs, ds
+    with ring, left, right
+  have constEq := hornerPoly.constant at A, add, zero, neg, mul, one,
+    resultant(R, a, cs, b, ds) with ring, resIn
+  have w1Data := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    us, qs1 with ring, zeroIn, zeroIn, usList, qs1List
+  have w1Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, us, qs1
+    with ring, usList, qs1List
+  have w2Data := hornerMulList.data at A, add, zero, neg, mul, one, zero, zero,
+    vs, qs2 with ring, zeroIn, zeroIn, vsList, qs2List
+  have w2Eq := hornerPoly.mul_lists at A, add, zero, neg, mul, one, vs, qs2
+    with ring, vsList, qs2List
+  obtain ⟨ws, wsList, sumEq⟩ := hornerPoly.exists_sum at A, add, zero, neg,
+    mul, one, hornerMulList{A}(add, zero, mul, zero, zero, us, qs1),
+    hornerMulList{A}(add, zero, mul, zero, zero, vs, qs2)
+    with ring, w1Data.left, w2Data.left
+  have gIn := hornerPoly.member at A, add, zero, neg, mul, one, g, gs
+    with ring, divisor
+  have usIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, us
+    with ring, zeroIn, usList
+  have vsIn := hornerPoly.member at A, add, zero, neg, mul, one, zero, vs
+    with ring, zeroIn, vsList
+  have qs1In := hornerPoly.member at A, add, zero, neg, mul, one, zero, qs1
+    with ring, zeroIn, qs1List
+  have qs2In := hornerPoly.member at A, add, zero, neg, mul, one, zero, qs2
+    with ring, zeroIn, qs2List
+  have divides : HornerDivides(A, add, zero, neg, mul, one, g, gs,
+      resultant(R, a, cs, b, ds), [])
+    unfold HornerDivides
+    refine ⟨ws, wsList, ?_⟩
+    rw [constEq, ← identity, pEq, qEq, sumEq, w1Eq, w2Eq]
+    ring
+  have bound := HornerDivides.length_le at A, add, zero, neg, mul, one, g,
+    resultant(R, a, cs, b, ds), gs, [] with field, divisor, nonzero, resIn,
+    nonzeroRes, divides
+  rw length.nil at bound
+  have zeroLength : length{A}(gs) = (0:N) by arith
+  have gsNil := length.eq_zero at A, gs with zeroLength
+  exact nonempty with gsNil
+
+-- A coprime pair has a nonzero resultant: the explicit left inverse of the
+-- Sylvester matrix built from a Bézout identity.
+theorem resultant.nonzero_of_coprime (cs ds : List(A))
+  requires coprime : HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds)
+  shows resultant(R, a, cs, b, ds) ≠ R[0]
+proof
+  have ring := IsField.comm_ring with field
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have finite := Finite.natural at length{A}(cs) + length{A}(ds)
+  unfold HornerCoprime at coprime
+  obtain ⟨u0, u0List, v0, v0List, identity⟩ := coprime
+  have wFunction := resultant.inverseMatrix.function at A, add, zero, neg, mul,
+    one, a, b, u0, v0, cs, ds with *
+  have matrixW : RingMatrix(length{A}(cs) + length{A}(ds), R,
+      resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0, cs,
+          ds))
+    unfold RingMatrix
+    exact wFunction
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with ring, left,
+        right
+  have inverse : ∀ l ∈ length{A}(cs) + length{A}(ds),
+      ∀ k ∈ length{A}(cs) + length{A}(ds),
+      matrixProductEntry(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul,
+        one, resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0,
+            cs, ds),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), l, k) =
+      singleValue(A, zero, one, k, l)
+    intros l hl k hk
+    have lNat := natural.member at length{A}(cs) + length{A}(ds) with hl
+    have kNat := natural.member at length{A}(cs) + length{A}(ds) with hk
+    have lLess := Less.of_membership at l, length{A}(cs) + length{A}(ds) with hl
+    have kLess := Less.of_membership at k, length{A}(cs) + length{A}(ds) with hk
+    have lGap : succ(l) ≤ length{A}(cs) + length{A}(ds)
+      unfold Less at lLess
+      exact lLess
+    have kGap : succ(k) ≤ length{A}(cs) + length{A}(ds)
+      unfold Less at kLess
+      exact kLess
+    have lCancel : sylvesterRow.indexSum(sylvesterRow.indexDifference(
+        length{A}(cs) + length{A}(ds), succ(l)), succ(l)) =
+        length{A}(cs) + length{A}(ds)
+      rw [sylvesterRow.indexSum.value, sylvesterRow.indexDifference.value]
+      exact sub.cancel_of_le at length{A}(cs) + length{A}(ds), succ(l)
+        with lGap
+    rw sylvesterRow.indexSum.value at lCancel
+    have kCancel : sylvesterRow.indexSum(sylvesterRow.indexDifference(
+        length{A}(cs) + length{A}(ds), succ(k)), succ(k)) =
+        length{A}(cs) + length{A}(ds)
+      rw [sylvesterRow.indexSum.value, sylvesterRow.indexDifference.value]
+      exact sub.cancel_of_le at length{A}(cs) + length{A}(ds), succ(k)
+        with kGap
+    rw sylvesterRow.indexSum.value at kCancel
+    have powerList := resultant.power.list at A, zero, one,
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l))
+      with zeroIn, oneIn
+    have powerLength := resultant.power.length at A, zero, one,
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l))
+      with zeroIn
+    have powerShort : length{A}(resultant.power{A}(zero, one,
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l)))) ≤
+        length{A}(cs) + length{A}(ds)
+      rw powerLength
+      arith
+    have combination := resultant.combination_of_bezout at A, add, zero, neg,
+      mul, one, a, b, cs, ds, u0, v0, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l)))
+      with field, left, right, leftNonzero, rightNonzero, u0List, v0List,
+        powerList, identity, powerShort
+    obtain ⟨clList, clLength, crList, crLength, combEq⟩ := combination
+    have rowEntries : ∀ i ∈ length{A}(cs) + length{A}(ds),
+        resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0, cs,
+            ds)[l, i] =
+        sylvesterVector(A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds))(i)
+      intros i hi
+      have pair := product.pair at l, i, length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds) with hl, hi
+      have value := resultant.inverseMatrix.value at A, add, zero, neg, mul,
+        one, a, b, u0, v0, cs, ds, (l, i) with *
+      rw [value, fst.pair, snd.pair]
+      rfl
+    unfold matrixProductEntry
+    have weightsW := matrixProductWeights.function at length{A}(cs) +
+        length{A}(ds), A,
+      add, zero, neg, mul, one,
+      resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0, cs,
+          ds),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), l, k with *
+    have vectorFunction := sylvesterVector.function at A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds) with zeroIn, clList, crList
+    have weightsV := rowVectorWeights.function at length{A}(cs) +
+        length{A}(ds), A, add,
+      zero, neg, mul, one,
+      sylvesterVector(A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), k with *
+    have agree : ∀ i ∈ length{A}(cs) + length{A}(ds),
+        matrixProductWeights(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+            mul,
+      one, resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0,
+          cs, ds),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), l, k)(i) =
+        rowVectorWeights(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul,
+            one,
+      sylvesterVector(A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), k)(i)
+      intros i hi
+      have first := matrixProductWeights.value at length{A}(cs) +
+          length{A}(ds), A, add,
+        zero, neg, mul, one,
+        resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0, cs,
+            ds),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), l, k, i with *
+      have second := rowVectorWeights.value at length{A}(cs) + length{A}(ds),
+          A, add,
+        zero, neg, mul, one,
+        sylvesterVector(A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), k, i with *
+      have entry := rowEntries with i, hi
+      rw [first, second, entry]
+      rfl
+    have congr := finiteRingSum.congr at length{A}(cs) + length{A}(ds), A, add,
+        zero,
+      neg, mul, one,
+      matrixProductWeights(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+          mul,
+      one, resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0,
+          cs, ds),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), l, k),
+      rowVectorWeights(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul,
+          one,
+      sylvesterVector(A, zero,
+      resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      length{A}(ds), length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)), k)
+      with ring, finite, weightsW, weightsV, agree
+    rw congr
+    have balance : length{A}(cs) + length{A}(resultant.combinationLeft{A}(add,
+        zero, neg, mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l))))) =
+        length{A}(ds) + length{A}(resultant.combinationRight{A}(add, zero, neg,
+            mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))))
+      rw [clLength, crLength]
+      arith
+    have column : k < length{A}(resultant.combinationLeft{A}(add, zero, neg,
+        mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l))))) +
+        length{A}(resultant.combinationRight{A}(add, zero, neg, mul, one, a, b,
+            u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))))
+      rw [clLength, crLength]
+      arith
+    have degree : sylvesterRow.indexSum(k,
+        succ(sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+        succ(k)))) =
+        length{A}(cs) + length{A}(resultant.combinationLeft{A}(add, zero, neg,
+            mul, one, b, u0, ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))))
+      rw [sylvesterRow.indexSum.value, clLength]
+      arith
+    have entry := sylvesterBlockMatrix.vector_entry at A, add, zero, neg, mul,
+      one, a, b, resultant.combinationLeft{A}(add, zero, neg, mul, one, b, u0,
+          ds,
+      resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))),
+      resultant.combinationRight{A}(add, zero, neg, mul, one, a, b, u0, v0,
+      cs, ds, resultant.power{A}(zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(l)))), cs, ds, k,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(k))
+      with ring, left, right, balance, column, degree
+    unfold rowVectorEntry at entry
+    rw [clLength, crLength] at entry
+    have commute : length{A}(ds) + length{A}(cs) = length{A}(cs) + length{A}(ds)
+      arith
+    rw commute at entry
+    rw [entry, ← combEq]
+    have power := resultant.power.coefficient at A, add, zero, neg, mul, one,
+      sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l)),
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+          succ(k)) with ring
+    rw power
+    have alternatives : l = k ∨ l ≠ k by tauto
+    rcases alternatives with same | different
+    . rw same
+      have reflexiveT : sylvesterRow.indexDifference(length{A}(cs) +
+          length{A}(ds),
+          succ(k)) = sylvesterRow.indexDifference(length{A}(cs) +
+          length{A}(ds), succ(k)) by rfl
+      have reflexiveK : k = k by rfl
+      have leftValue := singleValue.same at A, zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(k)),
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+            succ(k)) with zeroIn, oneIn, reflexiveT
+      have rightValue := singleValue.same at A, zero, one, k, k
+        with zeroIn, oneIn, reflexiveK
+      rw [leftValue, rightValue]
+      rfl
+    . have differentT : sylvesterRow.indexDifference(length{A}(cs) +
+        length{A}(ds),
+        succ(k)) ≠ sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+        succ(l))
+        intro sameT
+        apply different
+        rw sameT at kCancel
+        arith
+      have leftValue := singleValue.other at A, zero, one,
+          sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds), succ(l)),
+        sylvesterRow.indexDifference(length{A}(cs) + length{A}(ds),
+            succ(k)) with zeroIn, oneIn, differentT
+      have rightValue := singleValue.other at A, zero, one, k, l
+        with zeroIn, oneIn, different
+      rw [leftValue, rightValue]
+      rfl
+  have nonzero := sylvesterBlockMatrix.det_nonzero_of_inverse at A, add, zero,
+    neg, mul, one, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds),
+    resultant.inverseMatrix(A, add, zero, neg, mul, one, a, b, u0, v0, cs, ds)
+    with field, left, right, matrixW, inverse
+  unfold resultant
+  unfold sylvesterMatrix
+  exact nonzero
 
 theorem resultant.zero_iff_common_factor (cs ds : List(A))
   shows resultant(R, a, cs, b, ds) = R[0] ↔
@@ -26,24 +2536,84 @@ theorem resultant.zero_iff_common_factor (cs ds : List(A))
       HornerDivides(A, add, zero, neg, mul, one, g, gs, a, cs) ∧
       HornerDivides(A, add, zero, neg, mul, one, g, gs, b, ds)
 proof
-  sorry
+  constructor
+  . intro vanishes
+    by_contra absent
+    have noFactor : ∀ g ∈ R, g ≠ R[0] → ∀ gs, List(A, gs) → gs ≠ [] →
+        ¬(HornerDivides(A, add, zero, neg, mul, one, g, gs, a, cs) ∧
+          HornerDivides(A, add, zero, neg, mul, one, g, gs, b, ds))
+      intros g gIn gNonzero gs gsList gsNonempty both
+      apply absent
+      refine ⟨g, gIn, gNonzero, gs, gsList, gsNonempty, both.left, both.right⟩
+    have coprime := HornerCoprime.of_no_common_factor at A, add, zero, neg,
+      mul, one, a, b, cs, ds with field, left, right, leftNonzero, noFactor
+    have nonzero := resultant.nonzero_of_coprime at A, add, zero, neg, mul,
+      one, a, b, cs, ds with field, left, right, leftNonzero, rightNonzero,
+      coprime
+    exact nonzero with vanishes
+  . intro factor
+    obtain ⟨g, gIn, gNonzero, gs, gsList, gsNonempty, dividesLeft,
+      dividesRight⟩ := factor
+    exact resultant.eq_zero_of_common_factor at A, add, zero, neg, mul, one,
+      a, b, g, cs, ds, gs with field, left, right, leftNonzero, rightNonzero,
+      gIn, gNonzero, gsList, gsNonempty, dividesLeft, dividesRight
 
 theorem resultant.zero_iff_not_coprime (cs ds : List(A))
   shows resultant(R, a, cs, b, ds) = R[0] ↔
     ¬HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds)
 proof
-  sorry
+  constructor
+  . intro vanishes
+    intro coprime
+    have nonzero := resultant.nonzero_of_coprime at A, add, zero, neg, mul,
+      one, a, b, cs, ds with field, left, right, leftNonzero, rightNonzero,
+      coprime
+    exact nonzero with vanishes
+  . intro notCoprime
+    have factor := HornerCoprime.common_factor_of_not at A, add, zero, neg,
+      mul, one, a, b, cs, ds with field, left, right, leftNonzero, notCoprime
+    obtain ⟨g, gIn, gNonzero, gs, gsList, gsNonempty, dividesLeft,
+      dividesRight⟩ := factor
+    exact resultant.eq_zero_of_common_factor at A, add, zero, neg, mul, one,
+      a, b, g, cs, ds, gs with field, left, right, leftNonzero, rightNonzero,
+      gIn, gNonzero, gsList, gsNonempty, dividesLeft, dividesRight
 
 theorem resultant.nonzero_iff_coprime (cs ds : List(A))
   shows resultant(R, a, cs, b, ds) ≠ R[0] ↔
     HornerCoprime(A, add, zero, neg, mul, one, a, cs, b, ds)
 proof
-  sorry
+  have rule := resultant.zero_iff_not_coprime at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right, leftNonzero, rightNonzero
+  constructor
+  . intro nonzero
+    by_contra notCoprime
+    have vanishes := rule.backward with notCoprime
+    exact nonzero with vanishes
+  . intro coprime
+    intro vanishes
+    have notCoprime := rule.forward with vanishes
+    exact notCoprime with coprime
 
 theorem resultant.zero_iff_gcd_degree (cs ds : List(A))
   shows resultant(R, a, cs, b, ds) = R[0] ↔
     hornerGcdLower{A}(add, zero, neg, mul, one, a, b, cs, ds) ≠ []
 proof
-  sorry
+  have rule := resultant.zero_iff_not_coprime at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right, leftNonzero, rightNonzero
+  have constant := HornerCoprime.iff_gcd_constant at A, add, zero, neg, mul,
+    one, a, b, cs, ds with field, left, right
+  have gNonzero := hornerGcd.nonzero_of_left at A, add, zero, neg, mul, one,
+    a, b, cs, ds with field, left, right, leftNonzero
+  constructor
+  . intro vanishes
+    have notCoprime := rule.forward with vanishes
+    intro isNil
+    have coprime := constant.backward with ⟨gNonzero, isNil⟩
+    exact notCoprime with coprime
+  . intro nonempty
+    apply rule.backward
+    intro coprime
+    have pair := constant.forward with coprime
+    exact nonempty with pair.right
 
 end Fields
