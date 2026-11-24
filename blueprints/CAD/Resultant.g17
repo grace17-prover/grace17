@@ -7,6 +7,9 @@
 -- values on constants and linear factors, multiplicativity, the Bézout
 -- combination res = A·p + B·q with deg A < n and deg B < m, and the
 -- vanishing at a common root.
+-- Statement changes of round 1: the row count and the size of the block
+-- matrix are naturals; the Bézout combination and the vanishing at a
+-- common root assume m + n > 0 (two constants have resultant 1).
 -- Part of the CAD blueprint.
 -- Planned home: Algebra/Polynomial/Resultant.
 -- Copyright (c) 2026 Grant Passmore.
@@ -20,6 +23,7 @@ import Grace.Cumulus.Algebra.Ring.DeterminantHom
 import Grace.Cumulus.Algebra.Polynomial.Determinant
 import Grace.Cumulus.List.Replicate
 import Grace.Cumulus.Nat.Subtraction
+import Grace.Cumulus.List.Index
 
 -- Row i of the block of (a, cs): i zeros, then a, c_{m−1}, …, c₀; later
 -- entries are read as zero by listCoefficient.
@@ -34,7 +38,126 @@ def sylvesterEntry {A : Set} (zero a b : Set) (cs ds : List(A),
     listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j),
     listCoefficient{A}(zero, sylvesterRow{A}(zero, b, ds, i - rowsP), j))
 
-defgraph sylvesterBlockMatrix (A zero a b cs ds rowsP size : Set)
+-- The reverse of the full list puts the leading coefficient first.
+theorem hornerFullList.reverse (A a : Set) (cs : List(A))
+  shows reverse{A}(hornerFullList{A}(a, cs)) = a :: reverse{A}(cs)
+proof
+  induction cs
+  | List.nil =>
+    unfold hornerFullList
+    simp [append, reverse]
+  | List.cons(c, tail) using ih =>
+    unfold hornerFullList at ih
+    unfold hornerFullList
+    simp [append, reverse, ih]
+
+-- Appending i copies of an element adds i to the length, whatever the
+-- element.
+theorem listReplicate.append_length (A zero ys : Set) (i : Nat)
+  shows length{A}(append{A}(ys, listReplicate(i, zero))) = i + length{A}(ys)
+proof
+  induction i
+  | zero =>
+    rw listReplicate.zero
+    simp [append, add]
+  | succ(k) using ih =>
+    rw listReplicate.succ
+    simp [append, length, ih, add]
+
+theorem sylvesterRow.list (A zero a : Set) (cs : List(A), i : Nat)
+  requires zeroIn : zero ∈ A
+  requires initial : a ∈ A
+  shows List(A, sylvesterRow{A}(zero, a, cs, i))
+proof
+  have full := hornerFullList.list at A, a, cs with initial
+  have reversed : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zeros := listReplicate.closed at A, zero, i with zeroIn
+  unfold sylvesterRow
+  typecheck
+
+theorem sylvesterRow.length (A zero a : Set) (cs : List(A), i : Nat)
+  shows length{A}(sylvesterRow{A}(zero, a, cs, i)) = i + succ(length{A}(cs))
+proof
+  have reversed := hornerFullList.reverse at A, a, cs
+  have reversedLength := reverse.length at A, cs
+  have lengths := listReplicate.append_length at A, zero,
+    reverse{A}(hornerFullList{A}(a, cs)), i
+  unfold sylvesterRow
+  rw [lengths, reversed]
+  simp [length, reversedLength]
+
+-- The entry at column j of row i is the coefficient of degree m + i − j.
+theorem sylvesterRow.coefficient (A zero a : Set) (cs : List(A), i j : Nat)
+  requires zeroIn : zero ∈ A
+  requires initial : a ∈ A
+  requires lower : i ≤ j
+  requires upper : j ≤ i + length{A}(cs)
+  shows listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j) =
+    hornerCoefficient{A}(zero, a, cs, (length{A}(cs) + i) - j)
+proof
+  have full := hornerFullList.list at A, a, cs with initial
+  have fullLength := hornerFullList.length at A, a, cs
+  have reversed : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zeros := listReplicate.closed at A, zero, i with zeroIn
+  have zerosLength := listReplicate.length at A, zero, i with zeroIn
+  obtain ⟨k, kNat, split⟩ := LessEqual.exists_add with lower
+  have below : k ≤ length{A}(cs) by arith
+  obtain ⟨d, dNat, rest⟩ := LessEqual.exists_add with below
+  have shifted : j = k + length{A}(listReplicate(i, zero))
+    rw zerosLength
+    arith
+  have index : (length{A}(cs) + i) - j = d
+    have shape : length{A}(cs) + i = d + j by arith
+    rw shape
+    exact sub.add_right at d, j
+  have position : k + d + 1 = length{A}(hornerFullList{A}(a, cs))
+    rw fullLength
+    arith
+  have back := listCoefficient.append_right at A, zero, listReplicate(i, zero),
+    reverse{A}(hornerFullList{A}(a, cs)), k with *
+  have front := listCoefficient.reverse at A, zero, hornerFullList{A}(a, cs),
+    k, d with position
+  unfold sylvesterRow
+  unfold hornerCoefficient
+  rw [index, shifted, back]
+  exact front
+
+theorem sylvesterRow.coefficient_outside (A zero a : Set)
+  (cs : List(A), i j : Nat)
+  requires zeroIn : zero ∈ A
+  requires initial : a ∈ A
+  requires outside : j < i ∨ i + length{A}(cs) < j
+  shows listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j) = zero
+proof
+  have full := hornerFullList.list at A, a, cs with initial
+  have reversed : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zeros := listReplicate.closed at A, zero, i with zeroIn
+  have zerosLength := listReplicate.length at A, zero, i with zeroIn
+  unfold sylvesterRow
+  cases outside with before | after
+  . have bound : j < length{A}(listReplicate(i, zero))
+      rw zerosLength
+      exact before
+    have front := listCoefficient.append_left at A, zero, listReplicate(i,
+      zero),
+      reverse{A}(hornerFullList{A}(a, cs)), j with bound
+    rw front
+    exact listReplicate.coefficient at A, zero, zero, i, j with zeroIn, before
+  . have lengths := listReplicate.append_length at A, zero,
+      reverse{A}(hornerFullList{A}(a, cs)), i
+    have reversedLength := reverse.length at A, hornerFullList{A}(a, cs)
+    have fullLength := hornerFullList.length at A, a, cs
+    have appended : List(A, append{A}(reverse{A}(hornerFullList{A}(a, cs)),
+      listReplicate(i, zero))) by typecheck
+    have bound : length{A}(append{A}(reverse{A}(hornerFullList{A}(a, cs)),
+        listReplicate(i, zero))) ≤ j
+      rw [lengths, reversedLength, fullLength]
+      arith
+    exact listCoefficient.outside with bound
+
+-- The row count and the size are naturals (a change of round 1), so that
+-- every index of the square is a natural and the entries are closed.
+defgraph sylvesterBlockMatrix (A zero a b cs ds : Set, rowsP size : Nat)
   (p ∈ size × size) : A :=
   sylvesterEntry{A}(zero, a, b, cs, ds, rowsP, fst(p), snd(p))
 requires zeroIn : zero ∈ A
@@ -43,7 +166,26 @@ requires right : b ∈ A
 requires leftList : List(A, cs)
 requires rightList : List(A, ds)
 proof
-  sorry
+  obtain ⟨bound, i, hi, j, hj, shape⟩ := product.membership.forward
+    at size, size, p with *
+  have positions := natural.member at size
+  have iNat := positions with i, hi
+  have jNat := positions with j, hj
+  rw [shape, fst.pair, snd.pair]
+  unfold sylvesterEntry
+  have alternatives : i ∈ rowsP ∨ ¬(i ∈ rowsP) by tauto
+  cases alternatives with member | absent
+  . have test := memberTest.true with member
+    have row := sylvesterRow.list at A, zero, a, cs, i with *
+    rw [test, boolChoice.true]
+    exact listCoefficient.closed at A, zero, sylvesterRow{A}(zero, a, cs, i), j
+      with zeroIn
+  . have test := memberTest.false with absent
+    have shifted : Nat(i - rowsP) by typecheck
+    have row := sylvesterRow.list at A, zero, b, ds, i - rowsP with *
+    rw [test, boolChoice.false]
+    exact listCoefficient.closed at A, zero,
+      sylvesterRow{A}(zero, b, ds, i - rowsP), j with zeroIn
 
 def sylvesterMatrix {A : Set} (zero a b : Set) (cs ds : List(A)) : Set :=
   sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
@@ -56,37 +198,993 @@ def resultant {A : Set} (add zero neg mul one a b : Set)
 notation scoped resultant(R, a, cs, b, ds) =>
   resultant(R.carrier, R.add, R.zero, R.neg, R.mul, R.one, a, b, cs, ds)
 
-theorem sylvesterRow.list (A zero a : Set) (cs : List(A), i : Nat)
+-- Scaling a coefficient list commutes with concatenation, reversal,
+-- constant lists, and reading an entry; the full list and the Sylvester
+-- row of a scaled pair are the scaled lists.
+theorem hornerScale.append (A mul c : Set) (xs ys : List(A))
+  shows hornerScale{A}(mul, c, append{A}(ys, xs)) =
+    append{A}(hornerScale{A}(mul, c, ys), hornerScale{A}(mul, c, xs))
+proof
+  induction xs
+  | List.nil =>
+    simp [append, hornerScale]
+  | List.cons(x, tail) using ih =>
+    simp [append, hornerScale, ih]
+
+theorem hornerScale.reverse (A mul c : Set) (xs : List(A))
+  shows hornerScale{A}(mul, c, reverse{A}(xs)) =
+    reverse{A}(hornerScale{A}(mul, c, xs))
+proof
+  induction xs
+  | List.nil =>
+    simp [reverse, hornerScale]
+  | List.cons(x, tail) using ih =>
+    have reversed : List(A, reverse{A}(tail)) by typecheck
+    have single : List(A, x :: []) by typecheck
+    have appended := hornerScale.append at A, mul, c, reverse{A}(tail), x :: []
+    simp [reverse, hornerScale, appended, ih]
+
+theorem hornerScale.replicate (A mul c zero : Set) (i : Nat)
+  shows hornerScale{A}(mul, c, listReplicate(i, zero)) =
+    listReplicate(i, call2(mul, c, zero))
+proof
+  induction i
+  | zero =>
+    simp [listReplicate, hornerScale]
+  | succ(k) using ih =>
+    simp [listReplicate, hornerScale, ih]
+
+theorem hornerScale.coefficient (A mul c zero : Set) (xs : List(A)) (j : Nat)
+  requires annihilates : call2(mul, c, zero) = zero
+  shows listCoefficient{A}(zero, hornerScale{A}(mul, c, xs), j) =
+    call2(mul, c, listCoefficient{A}(zero, xs, j))
+proof
+  induction xs generalizing j
+  | List.nil =>
+    intros j jNat
+    rw [hornerScale, listCoefficient.nil, annihilates]
+    rfl
+  | List.cons(x, tail) using ih =>
+    intros j jNat
+    have shape := natural.zero_or_successor at j with jNat
+    cases shape with isZero | successor
+    . rw isZero
+      simp [hornerScale, listCoefficient, listHeadOr]
+    . obtain ⟨k, kNat, equal⟩ := successor
+      rw equal
+      simp [hornerScale, listCoefficient, listTail]
+      exact ih with k, kNat
+
+theorem hornerFullList.scale (A mul c a : Set) (cs : List(A))
+  requires initial : a ∈ A
+  shows hornerScale{A}(mul, c, hornerFullList{A}(a, cs)) =
+    hornerFullList{A}(call2(mul, c, a), hornerScale{A}(mul, c, cs))
+proof
+  have single : List(A, a :: []) by typecheck
+  have appended := hornerScale.append at A, mul, c, cs, a :: []
+  unfold hornerFullList
+  rw appended
+  simp [hornerScale]
+
+theorem sylvesterRow.scale (A mul c zero a : Set) (cs : List(A)) (i : Nat)
   requires zeroIn : zero ∈ A
   requires initial : a ∈ A
-  shows List(A, sylvesterRow{A}(zero, a, cs, i))
+  requires annihilates : call2(mul, c, zero) = zero
+  shows sylvesterRow{A}(zero, call2(mul, c, a), hornerScale{A}(mul, c, cs), i) =
+    hornerScale{A}(mul, c, sylvesterRow{A}(zero, a, cs, i))
 proof
-  sorry
+  have full := hornerFullList.list at A, a, cs with initial
+  have reversed : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zeros := listReplicate.closed at A, zero, i with zeroIn
+  have appended := hornerScale.append at A, mul, c, listReplicate(i, zero),
+    reverse{A}(hornerFullList{A}(a, cs))
+  have reversedScale := hornerScale.reverse at A, mul, c, hornerFullList{A}(a,
+    cs)
+  have fullScale := hornerFullList.scale at A, mul, c, a, cs
+  have zerosScale := hornerScale.replicate at A, mul, c, zero, i
+  unfold sylvesterRow
+  rw [appended, reversedScale, fullScale, zerosScale, annihilates]
+  rfl
 
-theorem sylvesterRow.length (A zero a : Set) (cs : List(A), i : Nat)
-  shows length{A}(sylvesterRow{A}(zero, a, cs, i)) = i + succ(length{A}(cs))
+-- The matrix M with its first k rows multiplied by c.
+defgraph scaledTopRows (n A add zero neg mul one c k M : Set)
+  (p ∈ n × n) : A :=
+  boolChoice(memberTest(k, fst(p)), call2(mul, c, M(p)), M(p))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires scalar : c ∈ A
+requires matrix : RingMatrix(n, A, M)
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  unfold RingMatrix at matrix
+  have entry := FunctionBetween.apply_closed at M, n × n, A, p with *
+  have scaled := IsRing.mul_closed with ordinary, scalar, entry
+  have alternatives : fst(p) ∈ k ∨ ¬(fst(p) ∈ k) by tauto
+  cases alternatives with member | absent
+  . have test := memberTest.true with member
+    rw [test, boolChoice.true]
+    exact scaled
+  . have test := memberTest.false with absent
+    rw [test, boolChoice.false]
+    exact entry
 
--- The entry at column j of row i is the coefficient of degree m + i − j.
-theorem sylvesterRow.coefficient (A zero a : Set) (cs : List(A), i j : Nat)
+section Scaling
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem scaledTopRows.matrix (n c k M : Set)
+  requires scalar : c ∈ R
+  requires matrix : RingMatrix(n, R, M)
+  shows RingMatrix(n, R, scaledTopRows(n, A, add, zero, neg, mul, one, c, k, M))
+proof
+  unfold RingMatrix
+  exact scaledTopRows.function with *
+
+theorem scaledTopRows.entry_scaled (n c k M i j : Set)
+  requires scalar : c ∈ R
+  requires matrix : RingMatrix(n, R, M)
+  requires row : i ∈ n
+  requires column : j ∈ n
+  requires scaledRow : i ∈ k
+  shows scaledTopRows(n, A, add, zero, neg, mul, one, c, k, M)[i, j] =
+    c * M[i, j]
+proof
+  have pair := product.pair at i, j, n, n with row, column
+  have value := scaledTopRows.value at n, A, add, zero, neg, mul, one, c, k, M,
+    (i, j) with *
+  have test := memberTest.true at k, i with scaledRow
+  rw value
+  rw [fst.pair, test, boolChoice.true]
+  rfl
+
+theorem scaledTopRows.entry_other (n c k M i j : Set)
+  requires scalar : c ∈ R
+  requires matrix : RingMatrix(n, R, M)
+  requires row : i ∈ n
+  requires column : j ∈ n
+  requires otherRow : ¬(i ∈ k)
+  shows scaledTopRows(n, A, add, zero, neg, mul, one, c, k, M)[i, j] = M[i, j]
+proof
+  have pair := product.pair at i, j, n, n with row, column
+  have value := scaledTopRows.value at n, A, add, zero, neg, mul, one, c, k, M,
+    (i, j) with *
+  have test := memberTest.false at k, i with otherRow
+  rw value
+  rw [fst.pair, test, boolChoice.false]
+  rfl
+
+-- Scaling k rows multiplies the determinant by c^k.
+theorem determinant.scaled_top_rows (n : Nat) (c M : Set) (k : Nat)
+  requires scalar : c ∈ R
+  requires matrix : RingMatrix(n, R, M)
+  shows k ≤ n →
+    determinant(n, R, scaledTopRows(n, A, add, zero, neg, mul, one, c, k, M)) =
+    monoidPow(R, c, k) * determinant(n, R, M)
+proof
+  have positions := natural.member at n
+  induction k
+  | zero =>
+    intro bound
+    have scaled := scaledTopRows.matrix at A, add, zero, neg, mul, one, n, c,
+      (0 : Nat), M with *
+    have entries : ∀ i ∈ n, ∀ j ∈ n,
+        scaledTopRows(n, A, add, zero, neg, mul, one, c, (0 : Nat), M)[i, j] =
+        M[i, j]
+      intros i hi j hj
+      have iNat := positions with i, hi
+      have absent : ¬(i ∈ (0 : Nat))
+        intro member
+        have belowRule := Less.of_membership at i, (0 : Nat) with *
+        have strict := belowRule with member
+        have impossible : (0 : Nat) < (0 : Nat) by arith
+        exact Less.irreflexive with Naturals.constructor.zero, impossible
+      exact scaledTopRows.entry_other with *
+    have same := determinant.congr at A, add, zero, neg, mul, one,
+      scaledTopRows(n, A, add, zero, neg, mul, one, c, (0 : Nat), M), n,
+      M with *
+    have closed := determinant.closed at A, add, zero, neg, mul, one, M,
+      n with *
+    rw [same, monoidPow.zero]
+    ring
+  | succ(m) using ih =>
+    intro bound
+    have smaller : m ≤ n by arith
+    have previous := ih with smaller
+    have below : m < n by arith
+    have kIn := membership.of_Less at m, n with *
+    have kMember := kIn with below
+    have scaledK := scaledTopRows.matrix at A, add, zero, neg, mul, one, n, c,
+      m,
+      M with *
+    have scaledS := scaledTopRows.matrix at A, add, zero, neg, mul, one, n, c,
+      succ(m), M with *
+    have outside : ∀ r ∈ n, ¬(r = m) → ∀ j ∈ n,
+        scaledTopRows(n, A, add, zero, neg, mul, one, c, succ(m), M)[r, j] =
+        scaledTopRows(n, A, add, zero, neg, mul, one, c, m, M)[r, j]
+      intros r hr different j hj
+      have rNat := positions with r, hr
+      have alternatives : r ∈ m ∨ ¬(r ∈ m) by tauto
+      cases alternatives with inner | outer
+      . have belowRule := Less.of_membership at r, m with *
+        have strict := belowRule with inner
+        have weak : r ≤ m by arith
+        have inSucc := membership.successor_of_LessEqual at r, m with weak
+        have first := scaledTopRows.entry_scaled at A, add, zero, neg, mul, one,
+          n, c, succ(m), M, r, j with *
+        have second := scaledTopRows.entry_scaled at A, add, zero, neg, mul,
+          one,
+          n, c, m, M, r, j with *
+        rw [first, second]
+        rfl
+      . have notSucc : ¬(r ∈ succ(m))
+          intro member
+          have weak := LessEqual.of_membership_successor at r, m with member
+          have strict : r < m
+            by_contra notStrict
+            have reverse := LessEqual.of_not_Less with notStrict
+            have equal : r = m by arith
+            exact different with equal
+          have memberRule := membership.of_Less at r, m with *
+          exact outer with (memberRule with strict)
+        have first := scaledTopRows.entry_other at A, add, zero, neg, mul, one,
+          n, c, succ(m), M, r, j with *
+        have second := scaledTopRows.entry_other at A, add, zero, neg, mul, one,
+          n, c, m, M, r, j with *
+        rw [first, second]
+        rfl
+    have entries : ∀ j ∈ n,
+        scaledTopRows(n, A, add, zero, neg, mul, one, c, succ(m), M)[m, j] =
+        c * scaledTopRows(n, A, add, zero, neg, mul, one, c, m, M)[m, j]
+      intros j hj
+      have reflexive : m ≤ m by arith
+      have selfIn := membership.successor_of_LessEqual at m, m with reflexive
+      have notSelf : ¬(m ∈ m)
+        intro member
+        have belowRule := Less.of_membership at m, m with *
+        have strict := belowRule with member
+        exact Less.irreflexive at m with strict
+      have first := scaledTopRows.entry_scaled at A, add, zero, neg, mul, one,
+        n,
+        c, succ(m), M, m, j with *
+      have second := scaledTopRows.entry_other at A, add, zero, neg, mul, one,
+        n,
+        c, m, M, m, j with *
+      rw [first, second]
+      rfl
+    have step := determinant.row_scale at A, add, zero, neg, mul, one, n,
+      scaledTopRows(n, A, add, zero, neg, mul, one, c, m, M),
+      scaledTopRows(n, A, add, zero, neg, mul, one, c, succ(m), M), m, c with *
+    have ordinary := IsCommRing.ring with ring
+    have multiplicative := IsRing.multiplicative with ordinary
+    have closed := determinant.closed at A, add, zero, neg, mul, one, M,
+      n with *
+    have power := monoidPow.closed at A, mul, one, c, m with *
+    rw [step, previous, monoidPow.succ]
+    ring
+
+-- A matrix with c on the diagonal and zero elsewhere has determinant c^n.
+theorem determinant.scalar_entries (n : Nat) (M c : Set)
+  requires matrix : RingMatrix(n, R, M)
+  requires scalar : c ∈ R
+  requires diagonal : ∀ i ∈ n, M[i, i] = c
+  requires offDiagonal : ∀ i ∈ n, ∀ j ∈ n, i ≠ j → M[i, j] = R[0]
+  shows determinant(n, R, M) = monoidPow(R, c, n)
+proof
+  have zeroIn : R[0] ∈ R by typecheck
+  have oneIn : R[1] ∈ R by typecheck
+  have ordinary := IsCommRing.ring with ring
+  have multiplicative := IsRing.multiplicative with ordinary
+  have identity := identityMatrix.matrix at A, add, zero, neg, mul, one,
+    n with *
+  have scaled := scaledTopRows.matrix at A, add, zero, neg, mul, one, n, c, n,
+    identityMatrix(n, R) with *
+  have entries : ∀ i ∈ n, ∀ j ∈ n, M[i, j] =
+      scaledTopRows(n, A, add, zero, neg, mul, one, c, n, identityMatrix(n,
+      R))[i, j]
+    intros i hi j hj
+    have entry := scaledTopRows.entry_scaled at A, add, zero, neg, mul, one,
+      n, c,
+      n, identityMatrix(n, R), i, j with *
+    have delta := identityMatrix.entry at A, add, zero, neg, mul, one, n, i, j
+      with *
+    have alternatives : i = j ∨ i ≠ j by tauto
+    cases alternatives with same | different
+    . have value := singleValue.same at A, zero, one, j, i with *
+      have given := diagonal with i, hi
+      have unit : c * R[1] = c by ring
+      cc
+    . have value := singleValue.other at A, zero, one, j, i with *
+      have given := offDiagonal with i, hi, j, hj, different
+      have annihilate : c * R[0] = R[0] by ring
+      cc
+  have same := determinant.congr at A, add, zero, neg, mul, one, M, n,
+    scaledTopRows(n, A, add, zero, neg, mul, one, c, n, identityMatrix(n, R))
+    with *
+  have scaling := determinant.scaled_top_rows at A, add, zero, neg, mul, one, n,
+    c, identityMatrix(n, R), n with *
+  have reflexive : n ≤ n by arith
+  have value := scaling with reflexive
+  have identityValue := determinant.identity at A, add, zero, neg, mul, one, n
+    with *
+  have power := monoidPow.closed at A, mul, one, c, n with *
+  rw [same, value, identityValue]
+  ring
+
+end Scaling
+
+-- List lemmas for the Bézout combination: entries of a sum of lists, a
+-- window grown at its end, and zeros moved across a concatenation.
+theorem hornerAdd.entry_below (A add zero : Set) (xs ys : List(A)) (k : Nat)
+  requires bound : k < length{A}(xs)
+  shows listCoefficient{A}(zero, hornerAdd{A}(add, zero, xs, ys), k) =
+    call2(add, listCoefficient{A}(zero, xs, k), listCoefficient{A}(zero, ys, k))
+proof
+  induction xs generalizing ys k
+  | List.nil =>
+    intros ys k ysList kNat bound
+    rw length.nil at bound
+    have impossible : (0 : Nat) < (0 : Nat) by arith
+    exfalso
+    exact Less.irreflexive with Naturals.constructor.zero, impossible
+  | List.cons(x, tail) using ih =>
+    intros ys k ysList kNat bound
+    have rest := listTail.closed at A, ys
+    have shape := natural.zero_or_successor at k with kNat
+    cases shape with isZero | successor
+    . rw isZero
+      simp [hornerAdd, listCoefficient, listHeadOr]
+    . obtain ⟨r, rNat, equal⟩ := successor
+      rw [equal, length.cons] at bound
+      have smaller : r < length{A}(tail) by arith
+      rw equal
+      simp [hornerAdd, listCoefficient, listTail]
+      exact ih with listTail{A}(ys), r, rNat, smaller
+
+theorem coefficientWindow.snoc (A f : Set, start k : Nat)
+  shows coefficientWindow(f, start, succ(k)) =
+    append{A}(f(start + k) :: [], coefficientWindow(f, start, k))
+proof
+  induction k generalizing start
+  | zero =>
+    intros start startNat
+    have shape : start + 0 = start by arith
+    rw shape
+    simp [coefficientWindow, append]
+  | succ(r) using ih =>
+    intros start startNat
+    have next : Nat(succ(start)) by typecheck
+    have previous := ih with succ(start), next
+    have shape : succ(start) + r = start + succ(r) by arith
+    rw shape at previous
+    simp [coefficientWindow, append]
+    rw ← previous
+    simp [coefficientWindow]
+
+theorem listReplicate.append_nil (A zero : Set) (i : Nat)
+  shows append{A}([], listReplicate(i, zero)) = listReplicate(i, zero)
+proof
+  induction i
+  | zero =>
+    simp [listReplicate, append]
+  | succ(k) using ih =>
+    simp [listReplicate, append, ih]
+
+theorem listReplicate.append_succ (A zero xs : Set) (i : Nat)
+  shows append{A}(xs, listReplicate(succ(i), zero)) =
+    append{A}(zero :: xs, listReplicate(i, zero))
+proof
+  induction i
+  | zero =>
+    simp [listReplicate, append]
+  | succ(k) using ih =>
+    rw listReplicate.succ at ih
+    simp [listReplicate, append]
+    rw ← ih
+    simp [append]
+
+-- Reading an entry of a list padded by zeros in front.
+theorem listReplicate.pad_coefficient (A zero : Set) (row : List(A)) (d j : Nat)
   requires zeroIn : zero ∈ A
-  requires initial : a ∈ A
-  requires lower : i ≤ j
-  requires upper : j ≤ i + length{A}(cs)
-  shows listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j) =
-    hornerCoefficient{A}(zero, a, cs, (length{A}(cs) + i) - j)
+  requires bound : j < length{A}(row) + d
+  shows listCoefficient{A}(zero, append{A}(listReplicate(d, zero), row), j) =
+    listCoefficient{A}(zero, row, j)
 proof
-  sorry
+  have zeros := listReplicate.closed at A, zero, d with zeroIn
+  have alternatives : j < length{A}(row) ∨ ¬(j < length{A}(row)) by tauto
+  cases alternatives with inside | outside
+  . exact listCoefficient.append_left at A, zero, row, listReplicate(d, zero), j
+      with inside
+  . have below := LessEqual.of_not_Less with outside
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with below
+    have shape : j = e + length{A}(row) by arith
+    have small : e < d by arith
+    have back := listCoefficient.append_right at A, zero, row,
+      listReplicate(d, zero), e with *
+    have vanishes := listCoefficient.outside at A, zero, row, j with below
+    have padding := listReplicate.coefficient at A, zero, zero, d, e with *
+    rw [vanishes, shape, back, padding]
+    rfl
 
-theorem sylvesterRow.coefficient_outside (A zero a : Set)
-  (cs : List(A), i j : Nat)
-  requires zeroIn : zero ∈ A
-  requires initial : a ∈ A
-  requires outside : j < i ∨ i + length{A}(cs) < j
-  shows listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j) = zero
+section Polynomials
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+
+-- Horner polynomials of lists with a zero in front, of constant zero
+-- lists, and of lists padded by zeros in front or behind.
+theorem hornerPoly.zero_cons (xs : List(A))
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero, zero :: xs) =
+    P[polynomialVariable(oneVariable, R, (0 : Nat)) *
+      hornerPoly{A}(add, zero, neg, mul, one, zero, xs)]
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+    mul, one with *
+  have oneIn : R[1] ∈ R by typecheck
+  have rest := hornerPoly.member at A, add, zero, neg, mul, one, zero, xs with *
+  have variable := polynomialVariable.member at oneVariable, A, zero, one,
+    (0 : Nat) with *
+  have constantZero := polynomialConstant.zero at oneVariable, A,
+    zero with zeroIn
+  unfold hornerPoly
+  rw [polynomialFromHorner.cons, constantZero]
+  ring
+
+theorem hornerPoly.replicate_zero (i : Nat)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero, listReplicate(i, zero)) =
+    P[0]
+proof
+  induction i
+  | zero =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have constantZero := polynomialConstant.zero at oneVariable, A, zero
+      with zeroIn
+    rw [listReplicate.zero, hornerPoly.constant, constantZero]
+    rfl
+  | succ(k) using ih =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with *
+    have oneIn : R[1] ∈ R by typecheck
+    have variable := polynomialVariable.member at oneVariable, A, zero, one,
+      (0 : Nat) with *
+    have zeros := listReplicate.closed at A, zero, k with zeroIn
+    rw [listReplicate.succ, hornerPoly.zero_cons, ih]
+    ring
+
+theorem hornerPoly.leading_zeros (xs : List(A)) (i : Nat)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      append{A}(xs, listReplicate(i, zero))) =
+    P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), i) *
+      hornerPoly{A}(add, zero, neg, mul, one, zero, xs)]
+proof
+  induction i
+  | zero =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with *
+    have inner := hornerPoly.member at A, add, zero, neg, mul, one, zero, xs
+      with *
+    rw [listReplicate.zero, monoidPow.zero]
+    simp [append]
+    ring
+  | succ(k) using ih =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with *
+    have polynomialRing := IsCommRing.ring with polynomials
+    have multiplicative := IsRing.multiplicative with polynomialRing
+    have oneIn : R[1] ∈ R by typecheck
+    have variable := polynomialVariable.member at oneVariable, A, zero, one,
+      (0 : Nat) with *
+    have inner := hornerPoly.member at A, add, zero, neg, mul, one, zero, xs
+      with *
+    have zeros := listReplicate.closed at A, zero, k with zeroIn
+    have appended : List(A, append{A}(xs, listReplicate(k, zero))) by typecheck
+    have power := monoidPow.closed at polynomials(oneVariable, A, zero),
+      polynomialMul(oneVariable, R), polynomialConstant(oneVariable, R, one),
+      polynomialVariable(oneVariable, R, (0 : Nat)), k with *
+    rw listReplicate.succ
+    simp [append]
+    rw [hornerPoly.zero_cons, ih, monoidPow.succ]
+    ring
+
+theorem hornerPoly.trailing_zeros (xs : List(A)) (i : Nat)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      append{A}(listReplicate(i, zero), xs)) =
+    hornerPoly{A}(add, zero, neg, mul, one, zero, xs)
+proof
+  induction xs
+  | List.nil =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have constantZero := polynomialConstant.zero at oneVariable, A, zero
+      with zeroIn
+    have padded := hornerPoly.replicate_zero at A, add, zero, neg, mul, one, i
+      with *
+    simp [append, padded]
+    rw [hornerPoly.constant, constantZero]
+    rfl
+  | List.cons(x, tail) using ih =>
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have zeros := listReplicate.closed at A, zero, i with zeroIn
+    have element : x ∈ R by assumption
+    have appended : List(A, append{A}(listReplicate(i, zero),
+      tail)) by typecheck
+    simp [append]
+    unfold hornerPoly at ih
+    unfold hornerPoly
+    rw [polynomialFromHorner.cons, polynomialFromHorner.cons, ih]
+    rfl
+
+-- The polynomial of a list plus a scaled list of the same length.
+theorem hornerPoly.add_scale (c : Set) (xs ys : List(A))
+  requires scalar : c ∈ R
+  requires sameLength : length{A}(xs) = length{A}(ys)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      hornerAdd{A}(add, zero, xs, hornerScale{A}(mul, c, ys))) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero, xs) +
+      polynomialConstant(oneVariable, R, c) *
+        hornerPoly{A}(add, zero, neg, mul, one, zero, ys)]
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have scaledData := hornerScale.data at A, add, zero, neg, mul, one, c, ys
+    with *
+  have scaledList := scaledData.left
+  have lengths : length{A}(xs) = length{A}(hornerScale{A}(mul, c, ys))
+    rw scaledData.right
+    exact sameLength
+  have added := hornerPoly.add at A, add, zero, neg, mul, one, zero, zero, xs,
+    hornerScale{A}(mul, c, ys) with *
+  have scaled := hornerPoly.scale at A, add, zero, neg, mul, one, c, zero, ys
+    with *
+  have zeroSum : R[zero + zero] = zero by ring
+  have zeroProduct : R[c * zero] = zero by ring
+  rw zeroSum at added
+  rw zeroProduct at scaled
+  rw [added, scaled]
+  rfl
+
+end Polynomials
+
+-- Row t of the Sylvester matrix as a list of length m + n in descending
+-- powers: the Sylvester row padded by zeros behind.
+def sylvesterRowPadded {A : Set} (zero a b : Set) (cs ds : List(A)) (t : Nat)
+    : Set :=
+  boolChoice(memberTest(length{A}(ds), t),
+    append{A}(listReplicate(length{A}(ds) - succ(t), zero),
+      sylvesterRow{A}(zero, a, cs, t)),
+    append{A}(listReplicate(length{A}(cs) - succ(t - length{A}(ds)), zero),
+      sylvesterRow{A}(zero, b, ds, t - length{A}(ds))))
+
+-- The combination of the first t rows with the weights w(0), …, w(t−1),
+-- read in ascending powers.
+def sylvesterCombination {A : Set} (add zero mul a b w : Set) (cs ds : List(A))
+    (t : Nat) → Set
+  | add, zero, mul, a, b, w, cs, ds, 0 =>
+      listReplicate(length{A}(cs) + length{A}(ds), zero)
+  | add, zero, mul, a, b, w, cs, ds, succ(t) =>
+      hornerAdd{A}(add, zero,
+        sylvesterCombination(add, zero, mul, a, b, w, cs, ds, t),
+        hornerScale{A}(mul, w(t),
+          reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, t))))
+  descends t
+
+-- Column j of the adjugate of M, as a function on ℕ that is zero outside
+-- the index set.
+defgraph adjugateColumn (n A add zero neg mul one M j : Set) (k ∈ ℕ) : A :=
+  boolChoice(memberTest(n, k),
+    adjugate(n, A, add, zero, neg, mul, one, M)[k, j], zero)
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires finite : Finite(n)
+requires matrix : RingMatrix(n, A, M)
+requires column : j ∈ n
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have adj := adjugate.matrix at n, A, add, zero, neg, mul, one, M with *
+  have alternatives : k ∈ n ∨ ¬(k ∈ n) by tauto
+  cases alternatives with member | absent
+  . have test := memberTest.true with member
+    have entry := RingMatrix.entry at n, A,
+      adjugate(n, A, add, zero, neg, mul, one, M), k, j with *
+    rw [test, boolChoice.true]
+    exact entry
+  . have test := memberTest.false with absent
+    rw [test, boolChoice.false]
+    exact zeroIn
+
+theorem adjugateColumn.entry (n A add zero neg mul one M j k : Set)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires size : Nat(n)
+  requires finite : Finite(n)
+  requires matrix : RingMatrix(n, A, M)
+  requires column : j ∈ n
+  requires row : k ∈ n
+  shows adjugateColumn(n, A, add, zero, neg, mul, one, M, j)(k) =
+    adjugate(n, A, add, zero, neg, mul, one, M)[k, j]
+proof
+  have positions := natural.member_natural at n with size
+  have kNat := positions with k, row
+  have value := adjugateColumn.value at n, A, add, zero, neg, mul, one, M, j, k
+    with *
+  have test := memberTest.true with row
+  rw [value, test, boolChoice.true]
+  rfl
+
+-- Truncated subtraction of a summand.
+theorem sub.of_add (m n d : Nat)
+  requires split : m = n + d
+  shows sub(m, n) = d
+proof
+  have commuted := add.commutative at d, n
+  rw [split, commuted]
+  exact sub.add_right at d, n
+
+-- The block swap of m + n rows: the last n rows move to the front.
+defgraph blockSwap (m n : Nat) (i ∈ m + n) : m + n :=
+  boolChoice(memberTest(m, i), i + n, i - m)
+proof
+  have sumNat : Nat(m + n) by typecheck
+  have positions := natural.member at m + n
+  have iNat := positions with i, assumption
+  have alternatives : i ∈ m ∨ ¬(i ∈ m) by tauto
+  cases alternatives with member | absent
+  . have test := memberTest.true with member
+    have belowRule := Less.of_membership at i, m with *
+    have below := belowRule with member
+    have bound : i + n < m + n by arith
+    have memberRule := membership.of_Less at i + n, m + n with *
+    rw [test, boolChoice.true]
+    exact memberRule with bound
+  . have test := memberTest.false with absent
+    have inSum : i ∈ m + n by assumption
+    have belowRule := Less.of_membership at i, m + n with *
+    have below := belowRule with inSum
+    have atLeast : m ≤ i
+      by_contra notAtLeast
+      have strict := Less.of_not_LessEqual with notAtLeast
+      have memberRule := membership.of_Less at i, m with *
+      exact absent with (memberRule with strict)
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at i, m, e with split
+    have bound : e < m + n by arith
+    have memberRule := membership.of_Less at e, m + n with *
+    rw [test, boolChoice.false, index]
+    exact memberRule with bound
+
+theorem blockSwap.low (m n : Nat) (i : Set)
+  requires member : i ∈ m
+  shows blockSwap(m, n)(i) = i + n
+proof
+  have subset := natural.subset_add at m, n
+  have inSum := subset with i, member
+  have value := blockSwap.value at m, n, i with inSum
+  have test := memberTest.true with member
+  rw [value, test, boolChoice.true]
+  rfl
+
+theorem blockSwap.high (m n : Nat) (i : Set)
+  requires inSum : i ∈ m + n
+  requires absent : ¬(i ∈ m)
+  shows blockSwap(m, n)(i) = sub(i, m)
+proof
+  have value := blockSwap.value at m, n, i with inSum
+  have test := memberTest.false with absent
+  rw [value, test, boolChoice.false]
+  rfl
+
+theorem blockSwap.cancel (m n : Nat)
+  shows ∀ i ∈ m + n, blockSwap(n, m)(blockSwap(m, n)(i)) = i
+proof
+  intros i inSum
+  have sumNat : Nat(m + n) by typecheck
+  have positions := natural.member at m + n
+  have iNat := positions with i, inSum
+  have alternatives : i ∈ m ∨ ¬(i ∈ m) by tauto
+  cases alternatives with member | absent
+  . have low := blockSwap.low at m, n, i with member
+    have belowRule := Less.of_membership at i, m with *
+    have below := belowRule with member
+    have bound : i + n < n + m by arith
+    have memberRule := membership.of_Less at i + n, n + m with *
+    have shiftedIn := memberRule with bound
+    have shiftedAbsent : ¬(i + n ∈ n)
+      intro inner
+      have innerRule := Less.of_membership at i + n, n with *
+      have inner2 := innerRule with inner
+      arith
+    have high := blockSwap.high at n, m, i + n with shiftedIn, shiftedAbsent
+    rw [low, high]
+    exact sub.add_right at i, n
+  . have belowRule := Less.of_membership at i, m + n with *
+    have below := belowRule with inSum
+    have atLeast : m ≤ i
+      by_contra notAtLeast
+      have strict := Less.of_not_LessEqual with notAtLeast
+      have memberRule := membership.of_Less at i, m with *
+      exact absent with (memberRule with strict)
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at i, m, e with split
+    have high := blockSwap.high at m, n, i with inSum, absent
+    have small : e < n by arith
+    have memberRule := membership.of_Less at e, n with *
+    have eIn := memberRule with small
+    have low := blockSwap.low at n, m, e with eIn
+    rw [high, index, low]
+    have commuted := add.commutative at e, m
+    rw ← commuted
+    symm
+    exact split
+
+theorem blockSwap.bijective (m n : Nat)
+  shows BijectiveBetween(blockSwap(m, n), m + n, m + n)
+proof
+  have function := blockSwap.function at m, n
+  have inverse := blockSwap.function at n, m
+  have commuted := add.commutative at m, n
+  rw commuted at inverse
+  have leftLaw := blockSwap.cancel at m, n
+  have rightLaw := blockSwap.cancel at n, m
+  rw commuted at rightLaw
+  exact Bijective.of_two_sided_inverse with *
+
+theorem blockSwap.permutation (m n : Nat)
+  shows blockSwap(m, n) ∈ permutations(m + n)
+proof
+  have bijective := blockSwap.bijective at m, n
+  exact permutations.mem_iff.backward with bijective
+
+-- The inversions of the block swap are the pairs of a front row and a
+-- back row: m·n of them.
+theorem blockSwap.inversions (m n : Nat)
+  shows inversions(m + n, blockSwap(m, n)) = m × ((m + n) ∖ m)
+proof
+  have sumNat : Nat(m + n) by typecheck
+  have positions := natural.member at m + n
+  have subset := natural.subset_add at m, n
+  ext q
+  constructor
+  . intro member
+    obtain ⟨bound, i, hi, j, hj, shape, before, reversed⟩ :=
+      inversions.membership.forward with member
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have orderRule := Less.of_membership at i, j with *
+    have order := orderRule with before
+    have iBelow := Less.of_membership at i, m + n with *
+    have iLess := iBelow with hi
+    have jBelow := Less.of_membership at j, m + n with *
+    have jLess := jBelow with hj
+    have jAbsent : ¬(j ∈ m)
+      intro jMember
+      have jRule := Less.of_membership at j, m with *
+      have jSmall := jRule with jMember
+      have iSmall : i < m by arith
+      have iRule := membership.of_Less at i, m with *
+      have iMember := iRule with iSmall
+      have lowI := blockSwap.low at m, n, i with iMember
+      have lowJ := blockSwap.low at m, n, j with jMember
+      rw [lowI, lowJ] at reversed
+      have sumNatI : Nat(i + n) by typecheck
+      have sumNatJ : Nat(j + n) by typecheck
+      have reversedRule := Less.of_membership at j + n, i + n with *
+      have reversedLess := reversedRule with reversed
+      arith
+    have iMember : i ∈ m
+      by_contra iAbsent
+      have atLeastI : m ≤ i
+        by_contra notAtLeast
+        have strict := Less.of_not_LessEqual with notAtLeast
+        have memberRule := membership.of_Less at i, m with *
+        exact iAbsent with (memberRule with strict)
+      have atLeastJ : m ≤ j by arith
+      obtain ⟨e, eNat, splitI⟩ := LessEqual.exists_add with atLeastI
+      obtain ⟨f, fNat, splitJ⟩ := LessEqual.exists_add with atLeastJ
+      have indexI := sub.of_add at i, m, e with splitI
+      have indexJ := sub.of_add at j, m, f with splitJ
+      have highI := blockSwap.high at m, n, i with hi, iAbsent
+      have highJ := blockSwap.high at m, n, j with hj, jAbsent
+      rw [highI, highJ, indexI, indexJ] at reversed
+      have reversedRule := Less.of_membership at f, e with *
+      have reversedLess := reversedRule with reversed
+      arith
+    have jDifference : j ∈ (m + n) ∖ m
+      exact difference.membership.backward with ⟨hj, jAbsent⟩
+    rw shape
+    exact product.pair at i, j, m, (m + n) ∖ m with iMember, jDifference
+  . intro member
+    obtain ⟨bound, i, hi, j, hj,
+      shape⟩ := product.membership.forward with member
+    have both := difference.membership.forward with hj
+    have jIn := both.left
+    have jAbsent := both.right
+    have iIn := subset with i, hi
+    have iNat := positions with i, iIn
+    have jNat := positions with j, jIn
+    have iRule := Less.of_membership at i, m with *
+    have iLess := iRule with hi
+    have jRule := Less.of_membership at j, m + n with *
+    have jLess := jRule with jIn
+    have atLeast : m ≤ j
+      by_contra notAtLeast
+      have strict := Less.of_not_LessEqual with notAtLeast
+      have memberRule := membership.of_Less at j, m with *
+      exact jAbsent with (memberRule with strict)
+    have order : i < j by arith
+    have orderRule := membership.of_Less at i, j with *
+    have before := orderRule with order
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at j, m, e with split
+    have low := blockSwap.low at m, n, i with hi
+    have high := blockSwap.high at m, n, j with jIn, jAbsent
+    have small : e < i + n by arith
+    have shiftNat : Nat(i + n) by typecheck
+    have reversedRule := membership.of_Less at e, i + n with *
+    have reversed := reversedRule with small
+    rw ← index at reversed
+    rw ← high at reversed
+    rw ← low at reversed
+    have pair := product.pair at i, j, m + n, m + n with iIn, jIn
+    rw shape
+    exact inversions.membership.backward with
+      ⟨pair, i, iIn, j, jIn, rfl, before, reversed⟩
+
+theorem blockSwap.inversion_count (m n : Nat)
+  shows cardinality(inversions(m + n, blockSwap(m, n))) = m * n
+proof
+  have finiteM := Finite.natural at m
+  have finiteS := Finite.natural at m + n
+  have finiteD := Finite.difference at m + n, m with finiteS
+  have product := cardinality.product_count at m, (m + n) ∖ m with *
+  have countM := cardinality.natural at m
+  have countS := cardinality.natural at m + n
+  have difference := cardinality.difference_count at m + n, m with finiteS
+  have subset := natural.subset_add at m, n
+  have meet := intersection.eq_right_of_subset at m + n, m with subset
+  have commuted := add.commutative at m, n
+  have cancel := sub.add_right at n, m
+  rw [blockSwap.inversions, product, difference, meet, countM, countS]
+  rw ← commuted
+  rw cancel
+  rfl
+
+section Identity
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+-- A matrix whose rows other than row i are the rows of the identity has
+-- determinant M[i, i].
+theorem determinant.identity_off_row (n : Nat) (M i : Set)
+  requires matrix : RingMatrix(n, R, M)
+  requires row : i ∈ n
+  requires offRow : ∀ k ∈ n, k ≠ i → ∀ j ∈ n,
+    M[k, j] = singleValue(A, zero, one, j, k)
+  shows determinant(n, R, M) = M[i, i]
+proof
+  have finite := Finite.natural at n with *
+  have permutationsFinite := permutations.finite with finite
+  have identityBijective := identity.bijective at n
+  have identityInjective := Bijective.injective with identityBijective
+  have identityFunction := Injective.function with identityInjective
+  have identityMember := permutations.mem_iff.backward at n, identity(n) with *
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have diagonalIn := RingMatrix.entry at n, A, M, i, i with *
+  have terms := determinantTerms.function at n, A, add, zero, neg, mul, one, M
+    with *
+  have selected := coefficientSingle.function at permutations(n), A, zero,
+    M[i, i], identity(n) with *
+  have entries : ∀ p ∈ permutations(n), determinantTerms(n, R, M)(p) =
+      coefficientSingle(permutations(n), A, zero, M[i, i], identity(n))(p)
+    intros p hp
+    have permutation := permutations.mem_iff.forward with hp
+    have injective := Bijective.injective with permutation
+    have function := Injective.function with injective
+    have weights := permutationEntries.function at n, A, M, p with *
+    have term := determinantTerms.value at n, A, add, zero, neg, mul, one, M, p
+      with *
+    have signIn := permutationSign.closed at A, add, zero, neg, mul, one, n, p
+      with *
+    have alternatives : p = identity(n) ∨ p ≠ identity(n) by tauto
+    cases alternatives with same | different
+    . have subset : n ∖ {i} ⊆ n by simp [Subset, difference.membership]
+      have smaller := Finite.subset with finite, subset
+      have restricted := restrict.domain_function at
+        permutationEntries(n, A, M, p), n, A, n ∖ {i} with *
+      have ones : ∀ k ∈ n ∖ {i},
+          restrict(permutationEntries(n, A, M, p), n ∖ {i})(k) = R[1]
+        intros k hk
+        have inN : k ∈ n by simp [difference.membership]
+        have distinct : k ≠ i by simp [difference.membership,
+          singleton.membership]
+        have restrictValue := restrict.domain_apply at
+          permutationEntries(n, A, M, p), n, A, n ∖ {i}, k with *
+        have value := permutationEntries.value at n, A, M, p, k with *
+        have fixed := identity.apply at k, n with *
+        have entry := offRow with k, inN, distinct, k, inN
+        have same2 : k = k by rfl
+        have delta := singleValue.same at A, zero, one, k, k with *
+        rw [restrictValue, value, same, fixed, entry, delta]
+        rfl
+      have rest := finiteRingProduct.one at n ∖ {i}, A, add, zero, neg, mul,
+        one,
+        restrict(permutationEntries(n, A, M, p), n ∖ {i}) with *
+      have removal := finiteRingProduct.remove at n, A, add, zero, neg, mul,
+        one,
+        permutationEntries(n, A, M, p), i with *
+      have value := permutationEntries.value at n, A, M, p, i with *
+      have fixed := identity.apply at i, n with *
+      have sign := permutationSign.identity at A, add, zero, neg, mul, one, n
+        with *
+      have selectedValue := coefficientSingle.same at permutations(n), A, zero,
+        M[i, i], identity(n) with *
+      rw [term, removal, rest, value, same, fixed, sign, selectedValue]
+      ring
+    . have moved : ∃ k ∈ n, p(k) ≠ k
+        by_contra absent
+        apply different
+        apply FunctionBetween.ext with function, identityFunction
+        intros k hk
+        have fixed : p(k) = k
+          by_contra notFixed
+          apply absent
+          refine ⟨k, hk, notFixed⟩
+        have value := identity.apply at k, n with *
+        cc
+      obtain ⟨k, hk, notFixed⟩ := moved
+      have movedOff : ∃ k2 ∈ n, k2 ≠ i ∧ p(k2) ≠ k2
+        have alternatives2 : k = i ∨ k ≠ i by tauto
+        cases alternatives2 with same2 | different2
+        . have image := FunctionBetween.apply_closed at p, n, n, i with *
+          rw same2 at notFixed
+          have imageNotFixed : p(p(i)) ≠ p(i)
+            intro fixedImage
+            have relatesImage := FunctionBetween.relates_apply at p, n, n, p(i)
+              with *
+            have relatesI := FunctionBetween.relates_apply at p, n, n, i with *
+            rw fixedImage at relatesImage
+            have equal := Injective.cancel at p, n, n, p(i), i, p(i) with *
+            exact notFixed with equal
+          refine ⟨p(i), image, notFixed, imageNotFixed⟩
+        . refine ⟨k, hk, different2, notFixed⟩
+      obtain ⟨k2, hk2, different2, notFixed2⟩ := movedOff
+      have column := FunctionBetween.apply_closed at p, n, n, k2 with *
+      have distinct2 : k2 ≠ p(k2)
+        intro equal
+        apply notFixed2
+        cc
+      have off := offRow with k2, hk2, different2, p(k2), column
+      have delta := singleValue.other at A, zero, one, p(k2), k2 with *
+      have value := permutationEntries.value at n, A, M, p, k2 with *
+      have vanishes : permutationEntries(n, R, M, p)(k2) = R[0] by cc
+      have product := finiteRingProduct.zero_of_factor at n, A, add, zero, neg,
+        mul, one, permutationEntries(n, R, M, p), k2 with *
+      have selectedValue := coefficientSingle.other at permutations(n), A, zero,
+        M[i, i], identity(n), p with *
+      rw [term, product, selectedValue]
+      ring
+  have sum := finiteRingSum.congr at permutations(n), A, add, zero, neg, mul,
+    one,
+    determinantTerms(n, R, M),
+    coefficientSingle(permutations(n), A, zero, M[i, i], identity(n)) with *
+  have single := finiteRingSum.single at permutations(n), A, add, zero, neg,
+    mul,
+    one, M[i, i], identity(n) with *
+  unfold determinant
+  cc
+
+end Identity
 
 section Rings
 variable (A add zero neg mul one a b : Set)
@@ -100,7 +1198,10 @@ theorem sylvesterBlockMatrix.matrix (cs ds : List(A)) (rowsP size : Nat)
   shows RingMatrix(size, R, sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP,
     size))
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  unfold RingMatrix
+  exact sylvesterBlockMatrix.function with *
 
 theorem sylvesterBlockMatrix.entry_upper (cs ds : List(A))
   (rowsP size i j : Nat)
@@ -110,7 +1211,22 @@ theorem sylvesterBlockMatrix.entry_upper (cs ds : List(A))
   shows sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP, size)[i, j] =
     listCoefficient{A}(zero, sylvesterRow{A}(zero, a, cs, i), j)
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have rowIn := membership.of_Less at i, size with *
+  have rowMember := rowIn with row
+  have columnIn := membership.of_Less at j, size with *
+  have columnMember := columnIn with column
+  have pair := product.pair at i, j, size, size with rowMember, columnMember
+  have value := sylvesterBlockMatrix.value at A, zero, a, b, cs, ds, rowsP,
+    size, (i, j) with *
+  have upperIn := membership.of_Less at i, rowsP with *
+  have upperMember := upperIn with upper
+  have test := memberTest.true at rowsP, i with upperMember
+  rw value
+  unfold sylvesterEntry
+  rw [fst.pair, snd.pair, test, boolChoice.true]
+  rfl
 
 theorem sylvesterBlockMatrix.entry_lower (cs ds : List(A))
   (rowsP size i j : Nat)
@@ -120,36 +1236,1316 @@ theorem sylvesterBlockMatrix.entry_lower (cs ds : List(A))
   shows sylvesterBlockMatrix(A, zero, a, b, cs, ds, rowsP, size)[i, j] =
     listCoefficient{A}(zero, sylvesterRow{A}(zero, b, ds, i - rowsP), j)
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have rowIn := membership.of_Less at i, size with *
+  have rowMember := rowIn with row
+  have columnIn := membership.of_Less at j, size with *
+  have columnMember := columnIn with column
+  have pair := product.pair at i, j, size, size with rowMember, columnMember
+  have value := sylvesterBlockMatrix.value at A, zero, a, b, cs, ds, rowsP,
+    size, (i, j) with *
+  have absent : ¬(i ∈ rowsP)
+    intro member
+    have belowRule := Less.of_membership at i, rowsP with *
+    have below := belowRule with member
+    arith
+  have test := memberTest.false at rowsP, i with absent
+  rw value
+  unfold sylvesterEntry
+  rw [fst.pair, snd.pair, test, boolChoice.false]
+  rfl
 
 theorem sylvesterMatrix.matrix (cs ds : List(A))
   shows RingMatrix(length{A}(cs) + length{A}(ds), R, sylvesterMatrix{A}(zero,
     a, b, cs, ds))
 proof
-  sorry
+  unfold sylvesterMatrix
+  exact sylvesterBlockMatrix.matrix with *
 
 theorem resultant.closed (cs ds : List(A))
   shows resultant(R, a, cs, b, ds) ∈ R
 proof
-  sorry
+  have matrix := sylvesterMatrix.matrix at A, add, zero, neg, mul, one, a, b,
+    cs, ds with *
+  unfold resultant
+  exact determinant.closed with *
 
 -- A constant p has resultant aⁿ with every q of declared degree n.
 theorem resultant.constant_left (ds : List(A))
   shows resultant(R, a, [], b, ds) = monoidPow(R, a, length{A}(ds))
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have empty : List(A, []) by typecheck
+  have emptyLength := length.nil at A
+  have size : length{A}([]) + length{A}(ds) = length{A}(ds)
+    rw emptyLength
+    exact add.left_unit at length{A}(ds)
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, [], ds, length{A}(ds), length{A}(ds) with *
+  have positions := natural.member at length{A}(ds)
+  have diagonal : ∀ i ∈ length{A}(ds),
+      sylvesterBlockMatrix(A, zero, a, b, [], ds, length{A}(ds),
+        length{A}(ds))[i, i] = a
+    intros i hi
+    have iNat := positions with i, hi
+    have belowRule := Less.of_membership at i, length{A}(ds) with *
+    have below := belowRule with hi
+    have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one,
+      a, b, [], ds, length{A}(ds), length{A}(ds), i, i with *
+    have lower : i ≤ i by arith
+    have upper : i ≤ i + length{A}([])
+      rw emptyLength
+      arith
+    have coefficient := sylvesterRow.coefficient at A, zero, a, [], i, i with *
+    have index := sub.add_right at length{A}([]), i
+    have leading := hornerCoefficient.leading at A, zero, a, [] with left
+    rw [entry, coefficient, index, leading]
+    rfl
+  have offDiagonal : ∀ i ∈ length{A}(ds), ∀ j ∈ length{A}(ds), i ≠ j →
+      sylvesterBlockMatrix(A, zero, a, b, [], ds, length{A}(ds),
+        length{A}(ds))[i, j] = R[0]
+    intros i hi j hj different
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have rowRule := Less.of_membership at i, length{A}(ds) with *
+    have row := rowRule with hi
+    have columnRule := Less.of_membership at j, length{A}(ds) with *
+    have column := columnRule with hj
+    have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one,
+      a, b, [], ds, length{A}(ds), length{A}(ds), i, j with *
+    have outside : j < i ∨ i + length{A}([]) < j
+      rw emptyLength
+      have alternatives : j < i ∨ ¬(j < i) by tauto
+      cases alternatives with before | after
+      . left
+        exact before
+      . right
+        have weak := LessEqual.of_not_Less with after
+        by_contra notAfter
+        have reverse := LessEqual.of_not_Less with notAfter
+        have equal : i = j by arith
+        exact different with equal
+    have vanishes := sylvesterRow.coefficient_outside at A, zero, a, [], i, j
+      with *
+    rw [entry, vanishes]
+    rfl
+  have value := determinant.scalar_entries at A, add, zero, neg, mul, one,
+    length{A}(ds), sylvesterBlockMatrix(A, zero, a, b, [], ds, length{A}(ds),
+    length{A}(ds)), a with *
+  unfold resultant
+  unfold sylvesterMatrix
+  rw size
+  exact value
 
 theorem resultant.constant_right (cs : List(A))
   shows resultant(R, a, cs, b, []) = monoidPow(R, b, length{A}(cs))
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have empty : List(A, []) by typecheck
+  have emptyLength := length.nil at A
+  have size : length{A}(cs) + length{A}([]) = length{A}(cs)
+    rw emptyLength
+    exact add.right_unit at length{A}(cs)
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, cs, [], (0 : Nat), length{A}(cs) with *
+  have positions := natural.member at length{A}(cs)
+  have diagonal : ∀ i ∈ length{A}(cs),
+      sylvesterBlockMatrix(A, zero, a, b, cs, [], (0 : Nat),
+        length{A}(cs))[i, i] = b
+    intros i hi
+    have iNat := positions with i, hi
+    have belowRule := Less.of_membership at i, length{A}(cs) with *
+    have below := belowRule with hi
+    have lowerBound : (0 : Nat) ≤ i by arith
+    have entry := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one,
+      a, b, cs, [], (0 : Nat), length{A}(cs), i, i with *
+    have shift := sub.zero_right at i
+    have lower : i ≤ i by arith
+    have upper : i ≤ i + length{A}([])
+      rw emptyLength
+      arith
+    have coefficient := sylvesterRow.coefficient at A, zero, b, [], i, i with *
+    have index := sub.add_right at length{A}([]), i
+    have leading := hornerCoefficient.leading at A, zero, b, [] with right
+    rw [entry, shift, coefficient, index, leading]
+    rfl
+  have offDiagonal : ∀ i ∈ length{A}(cs), ∀ j ∈ length{A}(cs), i ≠ j →
+      sylvesterBlockMatrix(A, zero, a, b, cs, [], (0 : Nat),
+        length{A}(cs))[i, j] = R[0]
+    intros i hi j hj different
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have rowRule := Less.of_membership at i, length{A}(cs) with *
+    have row := rowRule with hi
+    have columnRule := Less.of_membership at j, length{A}(cs) with *
+    have column := columnRule with hj
+    have lowerBound : (0 : Nat) ≤ i by arith
+    have entry := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one,
+      a, b, cs, [], (0 : Nat), length{A}(cs), i, j with *
+    have shift := sub.zero_right at i
+    have outside : j < i ∨ i + length{A}([]) < j
+      rw emptyLength
+      have alternatives : j < i ∨ ¬(j < i) by tauto
+      cases alternatives with before | after
+      . left
+        exact before
+      . right
+        have weak := LessEqual.of_not_Less with after
+        by_contra notAfter
+        have reverse := LessEqual.of_not_Less with notAfter
+        have equal : i = j by arith
+        exact different with equal
+    have vanishes := sylvesterRow.coefficient_outside at A, zero, b, [], i, j
+      with *
+    rw [entry, shift, vanishes]
+    rfl
+  have value := determinant.scalar_entries at A, add, zero, neg, mul, one,
+    length{A}(cs), sylvesterBlockMatrix(A, zero, a, b, cs, [], (0 : Nat),
+    length{A}(cs)), b with *
+  unfold resultant
+  unfold sylvesterMatrix
+  rw [size, emptyLength]
+  exact value
 
--- The resultant of X − r with q is q(r).
-theorem resultant.linear_left (r : Set) (ds : List(A))
-  requires center : r ∈ R
-  shows resultant(R, one, neg(r) :: [], b, ds) = hornerAt{A}(add, mul, b, r, ds)
+end Rings
+
+-- The rows of the Sylvester matrix of (q, p) are the rows of that of
+-- (p, q) permuted by the block swap.
+theorem sylvesterBlockMatrix.swap_rows (A add zero neg mul one a b : Set)
+  (cs ds : List(A))
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  shows ∀ i ∈ length{A}(cs) + length{A}(ds),
+    ∀ j ∈ length{A}(cs) + length{A}(ds),
+    sylvesterBlockMatrix(A, zero, b, a, ds, cs, length{A}(cs),
+      length{A}(cs) + length{A}(ds))[i, j] =
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds))[blockSwap(length{A}(cs), length{A}(ds))(i),
+      j]
 proof
-  sorry
+  intros i hi j hj
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have positions := natural.member at length{A}(cs) + length{A}(ds)
+  have iNat := positions with i, hi
+  have jNat := positions with j, hj
+  have rowRule := Less.of_membership at i, length{A}(cs) + length{A}(ds) with *
+  have row := rowRule with hi
+  have columnRule := Less.of_membership at j, length{A}(cs) + length{A}(ds)
+    with *
+  have column := columnRule with hj
+  have alternatives : i ∈ length{A}(cs) ∨ ¬(i ∈ length{A}(cs)) by tauto
+  cases alternatives with member | absent
+  . have belowRule := Less.of_membership at i, length{A}(cs) with *
+    have upper := belowRule with member
+    have low := blockSwap.low at length{A}(cs), length{A}(ds), i with member
+    have entryN := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one,
+      b, a, ds, cs, length{A}(cs), length{A}(cs) + length{A}(ds), i, j with *
+    have shiftedNat : Nat(i + length{A}(ds)) by typecheck
+    have lower : length{A}(ds) ≤ i + length{A}(ds) by arith
+    have shiftedRow : i + length{A}(ds) < length{A}(cs) + length{A}(ds) by arith
+    have entryS := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one,
+      a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds),
+      i + length{A}(ds), j with *
+    have cancel := sub.add_right at i, length{A}(ds)
+    rw [entryN, low, entryS, cancel]
+    rfl
+  . have atLeast : length{A}(cs) ≤ i
+      by_contra notAtLeast
+      have strict := Less.of_not_LessEqual with notAtLeast
+      have memberRule := membership.of_Less at i, length{A}(cs) with *
+      exact absent with (memberRule with strict)
+    have high := blockSwap.high at length{A}(cs), length{A}(ds), i with hi,
+      absent
+    have entryN := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one,
+      b, a, ds, cs, length{A}(cs), length{A}(cs) + length{A}(ds), i, j with *
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at i, length{A}(cs), e with split
+    have upper : e < length{A}(ds) by arith
+    have shiftedRow : e < length{A}(cs) + length{A}(ds) by arith
+    have entryS := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one,
+      a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), e, j with *
+    rw [entryN, high, index, entryS]
+    rfl
+
+-- The Sylvester matrix of X − r and (b, ds) is reduced by the column
+-- operations C_j ← C_j + r·C_{j−1}, j = 1, …, n, in that order: the
+-- reduced column j has the unit vector e_j in the first n rows and, in
+-- the last row, the Horner value of the top j + 1 coefficients at r.
+def linearValue {A : Set} (add mul b r : Set) (ds : List(A)) (n j : Nat)
+    : Set :=
+  hornerAt{A}(add, mul, b, r, listDrop{A}(n - j, ds))
+
+defgraph linearReduced (A add zero neg mul one b r ds : Set, n k : Nat)
+  (p ∈ succ(n) × succ(n)) : A :=
+  boolChoice(memberTest(succ(k), snd(p)),
+    boolChoice(memberTest(n, fst(p)),
+      singleValue(A, zero, one, snd(p), fst(p)),
+      linearValue{A}(add, mul, b, r, ds, n, snd(p))),
+    sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))(p))
+requires ring : IsCommRing(A, add, zero, neg, mul, one)
+requires right : b ∈ A
+requires center : r ∈ A
+requires list : List(A, ds)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have matrix := sylvesterBlockMatrix.function at A, zero, one, b, neg(r) :: [],
+    ds, n, succ(n) with *
+  have original := FunctionBetween.apply_closed at
+    sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n)),
+    succ(n) × succ(n), A, p with *
+  obtain ⟨bound, i, hi, j, hj, shape⟩ := product.membership.forward
+    at succ(n), succ(n), p with *
+  have positions := natural.member at succ(n)
+  have iNat := positions with i, hi
+  have jNat := positions with j, hj
+  have dropped := listDrop.closed at A, ds, n - j
+  have valueIn := hornerAt.closed at A, add, zero, neg, mul, one, b, r,
+    listDrop{A}(n - j, ds) with *
+  have delta := singleValue.closed at A, zero, one, j, i with *
+  rw [shape, fst.pair, snd.pair]
+  have columns : j ∈ succ(k) ∨ ¬(j ∈ succ(k)) by tauto
+  cases columns with reduced | kept
+  . have test := memberTest.true with reduced
+    rw [test, boolChoice.true]
+    have rows : i ∈ n ∨ ¬(i ∈ n) by tauto
+    cases rows with upper | last
+    . have test2 := memberTest.true with upper
+      rw [test2, boolChoice.true]
+      exact delta
+    . have test2 := memberTest.false with last
+      rw [test2, boolChoice.false]
+      unfold linearValue
+      exact valueIn
+  . have test := memberTest.false with kept
+    rw [test, boolChoice.false]
+    rw shape at original
+    exact original
+
+theorem linearReduced.matrix (A add zero neg mul one b r : Set) (ds : List(A))
+  (n k : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  shows RingMatrix(succ(n), A,
+    linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k))
+proof
+  unfold RingMatrix
+  exact linearReduced.function with *
+
+theorem linearReduced.entry (A add zero neg mul one b r : Set) (ds : List(A))
+  (n k i j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < succ(n)
+  requires column : j < succ(n)
+  shows linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[i, j] =
+    boolChoice(memberTest(succ(k), j),
+      boolChoice(memberTest(n, i), singleValue(A, zero, one, j, i),
+        linearValue{A}(add, mul, b, r, ds, n, j)),
+      sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[i, j])
+proof
+  have rowRule := membership.of_Less at i, succ(n) with *
+  have rowMember := rowRule with row
+  have columnRule := membership.of_Less at j, succ(n) with *
+  have columnMember := columnRule with column
+  have pair := product.pair at i, j, succ(n), succ(n) with rowMember,
+    columnMember
+  have value := linearReduced.value at A, add, zero, neg, mul, one, b, r, ds, n,
+    k, (i, j) with *
+  rw [value, fst.pair, snd.pair]
+  rfl
+
+theorem linearReduced.reduced_upper (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n k i j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < n
+  requires column : j < succ(k)
+  requires inside : j < succ(n)
+  shows linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[i, j] =
+    singleValue(A, zero, one, j, i)
+proof
+  have rowBound : i < succ(n) by arith
+  have entry := linearReduced.entry at A, add, zero, neg, mul, one, b, r, ds, n,
+    k, i, j with *
+  have columnRule := membership.of_Less at j, succ(k) with *
+  have columnMember := columnRule with column
+  have rowRule := membership.of_Less at i, n with *
+  have rowMember := rowRule with row
+  have test := memberTest.true with columnMember
+  have test2 := memberTest.true with rowMember
+  rw [entry, test, boolChoice.true, test2, boolChoice.true]
+  rfl
+
+theorem linearReduced.reduced_last (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n k j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires column : j < succ(k)
+  requires inside : j < succ(n)
+  shows linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[n, j] =
+    linearValue{A}(add, mul, b, r, ds, n, j)
+proof
+  have rowBound : n < succ(n) by arith
+  have entry := linearReduced.entry at A, add, zero, neg, mul, one, b, r, ds, n,
+    k, n, j with *
+  have columnRule := membership.of_Less at j, succ(k) with *
+  have columnMember := columnRule with column
+  have absent : ¬(n ∈ n)
+    intro member
+    have belowRule := Less.of_membership at n, n with *
+    have below := belowRule with member
+    exact Less.irreflexive at n with below
+  have test := memberTest.true with columnMember
+  have test2 := memberTest.false with absent
+  rw [entry, test, boolChoice.true, test2, boolChoice.false]
+  rfl
+
+theorem linearReduced.original (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n k i j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < succ(n)
+  requires column : j < succ(n)
+  requires outside : ¬(j < succ(k))
+  shows linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[i, j] =
+    sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[i, j]
+proof
+  have entry := linearReduced.entry at A, add, zero, neg, mul, one, b, r, ds, n,
+    k, i, j with *
+  have absent : ¬(j ∈ succ(k))
+    intro member
+    have belowRule := Less.of_membership at j, succ(k) with *
+    have below := belowRule with member
+    exact outside with below
+  have test := memberTest.false with absent
+  rw [entry, test, boolChoice.false]
+  rfl
+
+-- The entries of the Sylvester matrix of X − r and (b, ds).
+theorem sylvesterLinear.diagonal (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n i : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < n
+  shows sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[i,
+    i] =
+    one
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have inside : i < succ(n) by arith
+  have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul, one,
+    one, b, neg(r) :: [], ds, n, succ(n), i, i with *
+  have lower : i ≤ i by arith
+  have upper : i ≤ i + length{A}(neg(r) :: []) by arith
+  have coefficient := sylvesterRow.coefficient at A, zero, one, neg(r) :: [],
+    i, i
+    with *
+  have index := sub.add_right at length{A}(neg(r) :: []), i
+  have leading := hornerCoefficient.leading at A, zero, one, neg(r) :: []
+    with oneIn
+  rw [entry, coefficient, index, leading]
+  rfl
+
+theorem sylvesterLinear.next (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n i : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < n
+  shows sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n,
+      succ(n))[i, succ(i)] = neg(r)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have inside : i < succ(n) by arith
+  have nextInside : succ(i) < succ(n) by arith
+  have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul, one,
+    one, b, neg(r) :: [], ds, n, succ(n), i, succ(i) with *
+  have empty : List(A, []) by typecheck
+  have singleLength : length{A}(neg(r) :: []) = succ(0)
+    rw [length.cons, length.nil]
+    rfl
+  have lower : i ≤ succ(i) by arith
+  have upper : succ(i) ≤ i + length{A}(neg(r) :: [])
+    rw singleLength
+    arith
+  have coefficient := sylvesterRow.coefficient at A, zero, one, neg(r) :: [], i,
+    succ(i) with *
+  have split : length{A}(neg(r) :: []) + i = succ(i) + 0
+    rw singleLength
+    arith
+  have index := sub.of_add at length{A}(neg(r) :: []) + i, succ(i), 0 with split
+  have positive : 0 < length{A}(neg(r) :: [])
+    rw singleLength
+    arith
+  have below := hornerCoefficient.below at A, zero, one, neg(r) :: [], 0
+    with positive
+  have head := listCoefficient.zero at A, zero, neg(r), [] with negIn
+  rw [entry, coefficient, index, below, head]
+  rfl
+
+theorem sylvesterLinear.other (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n i j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires row : i < n
+  requires column : j < succ(n)
+  requires notDiagonal : j ≠ i
+  requires notNext : j ≠ succ(i)
+  shows sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[i,
+    j] =
+    zero
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have inside : i < succ(n) by arith
+  have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul, one,
+    one, b, neg(r) :: [], ds, n, succ(n), i, j with *
+  have empty : List(A, []) by typecheck
+  have singleLength : length{A}(neg(r) :: []) = succ(0)
+    rw [length.cons, length.nil]
+    rfl
+  have outside : j < i ∨ i + length{A}(neg(r) :: []) < j
+    rw singleLength
+    have alternatives : j < i ∨ ¬(j < i) by tauto
+    cases alternatives with before | after
+    . left
+      exact before
+    . right
+      have atLeast := LessEqual.of_not_Less with after
+      have strict : i < j
+        by_contra notStrict
+        have reverse := LessEqual.of_not_Less with notStrict
+        have equal : j = i by arith
+        exact notDiagonal with equal
+      have beyond : succ(i) < j
+        by_contra notBeyond
+        have reverse := LessEqual.of_not_Less with notBeyond
+        have equal : j = succ(i) by arith
+        exact notNext with equal
+      arith
+  have vanishes := sylvesterRow.coefficient_outside at A, zero, one,
+    neg(r) :: [],
+    i, j with *
+  rw [entry, vanishes]
+  rfl
+
+theorem sylvesterLinear.last (A add zero neg mul one b r : Set)
+  (ds : List(A)) (n j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires size : length{A}(ds) = n
+  requires column : j < succ(n)
+  shows sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[n,
+    j] =
+    hornerCoefficient{A}(zero, b, ds, n - j)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have inside : n < succ(n) by arith
+  have lowerBound : n ≤ n by arith
+  have entry := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul, one,
+    one, b, neg(r) :: [], ds, n, succ(n), n, j with *
+  have selfSplit : n = n + 0 by arith
+  have selfSub := sub.of_add at n, n, 0 with selfSplit
+  have lower : 0 ≤ j by arith
+  have upper : j ≤ 0 + length{A}(ds)
+    rw size
+    arith
+  have coefficient := sylvesterRow.coefficient at A, zero, b, ds, 0, j with *
+  have unit := add.right_unit at length{A}(ds)
+  rw [entry, selfSub, coefficient, unit, size]
+  rfl
+
+-- The Horner values of the top coefficients: b first, then one more
+-- coefficient at each step.
+theorem linearValue.initial (A add mul b r : Set) (ds : List(A)) (n : Nat)
+  requires size : length{A}(ds) = n
+  shows linearValue{A}(add, mul, b, r, ds, n, 0) = b
+proof
+  have zeroSub := sub.zero_right at n
+  have all := listDrop.self at A, ds
+  rw size at all
+  unfold linearValue
+  rw [zeroSub, all]
+  exact hornerAt.nil at A, add, mul, b, r
+
+theorem linearValue.step (A add zero mul b r : Set) (ds : List(A)) (n j : Nat)
+  requires zeroIn : zero ∈ A
+  requires size : length{A}(ds) = n
+  requires bound : j < n
+  shows linearValue{A}(add, mul, b, r, ds, n, succ(j)) =
+    call2(add, hornerCoefficient{A}(zero, b, ds, n - succ(j)),
+      call2(mul, r, linearValue{A}(add, mul, b, r, ds, n, j)))
+proof
+  have eNat : Nat(n - succ(j)) by typecheck
+  have shiftRule := sub.succ_of_Less at j
+  have shift := shiftRule with n, bound
+  have small : n - succ(j) < n
+    have below : succ(j) ≤ n by arith
+    obtain ⟨d, dNat, split⟩ := LessEqual.exists_add with below
+    have index := sub.of_add at n, succ(j), d with split
+    rw index
+    arith
+  have atMost : n - succ(j) ≤ n by arith
+  have lengthRule := listDrop.length at A, ds, n - succ(j)
+  rw size at lengthRule
+  have lengths := lengthRule with atMost
+  have dropped := listDrop.closed at A, ds, n - succ(j) with *
+  have positive : 0 < length{A}(listDrop{A}(n - succ(j), ds)) by arith
+  have nonempty := List.ne_nil_of_length_positive at A,
+    listDrop{A}(n - succ(j), ds) with positive
+  have headTail := List.head_tail at A, zero, listDrop{A}(n - succ(j), ds)
+    with nonempty
+  have headValue : listHeadOr{A}(zero, listDrop{A}(n - succ(j), ds)) =
+      listCoefficient{A}(zero, ds, n - succ(j))
+    have head := listCoefficient.head at A, zero, listDrop{A}(n - succ(j), ds)
+      with *
+    have dropCoefficient := listDrop.coefficient at A, zero, ds, n - succ(j), 0
+      with *
+    have unit := add.right_unit at n - succ(j)
+    rw [← head, dropCoefficient, unit]
+    rfl
+  have tailValue := listDrop.succ at A, ds, n - succ(j) with *
+  have decomposition : listDrop{A}(n - succ(j), ds) =
+      listCoefficient{A}(zero, ds,
+      n - succ(j)) :: listDrop{A}(succ(n - succ(j)), ds)
+    rw [tailValue, ← headValue]
+    exact headTail
+  have coefficientIn := listCoefficient.closed at A, zero, ds, n - succ(j)
+    with zeroIn
+  have cons := hornerAt.cons at A, add, mul, b, r,
+    listCoefficient{A}(zero, ds, n - succ(j)), listDrop{A}(succ(n - succ(j)),
+    ds)
+    with coefficientIn
+  have smallLength : n - succ(j) < length{A}(ds)
+    rw size
+    exact small
+  have below := hornerCoefficient.below at A, zero, b, ds, n - succ(j)
+    with smallLength
+  unfold linearValue
+  rw [shift, decomposition, cons, below]
+  rfl
+
+-- The column operations preserve the determinant, from the Sylvester
+-- matrix to the fully reduced one.
+theorem linearReduced.initial (A add zero neg mul one b r : Set) (ds : List(A))
+  (n : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires size : length{A}(ds) = n
+  shows determinant(succ(n), A, add, zero, neg, mul, one,
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, 0)) =
+    determinant(succ(n), A, add, zero, neg, mul, one,
+      sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n)))
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have single : List(A, neg(r) :: []) by typecheck
+  have reduced := linearReduced.matrix at A, add, zero, neg, mul, one, b, r, ds,
+    n, 0 with *
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    one,
+    b, neg(r) :: [], ds, n, succ(n) with *
+  have positions := natural.member at succ(n)
+  have entries : ∀ i ∈ succ(n), ∀ j ∈ succ(n),
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, 0)[i, j] =
+      sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n))[i, j]
+    intros i hi j hj
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have rowRule := Less.of_membership at i, succ(n) with *
+    have row := rowRule with hi
+    have columnRule := Less.of_membership at j, succ(n) with *
+    have column := columnRule with hj
+    have alternatives : j < succ(0) ∨ ¬(j < succ(0)) by tauto
+    cases alternatives with first | later
+    . have jZero : j = 0 by arith
+      rw jZero
+      have firstColumn : 0 < succ(0) by arith
+      have zeroBound : 0 < succ(n) by arith
+      have rows : i < n ∨ ¬(i < n) by tauto
+      cases rows with upper | last
+      . have entry := linearReduced.reduced_upper at A, add, zero, neg, mul,
+          one,
+          b, r, ds, n, 0, i, 0 with *
+        rw entry
+        have cases2 : i = 0 ∨ i ≠ 0 by tauto
+        cases cases2 with iZero | iPositive
+        . have symmetric : 0 = i by cc
+          have delta := singleValue.same at A, zero, one, 0, i with *
+          have diagonal := sylvesterLinear.diagonal at A, add, zero, neg, mul,
+            one, b, r, ds, n, i with *
+          rw iZero at diagonal
+          rw [delta, iZero, diagonal]
+          rfl
+        . have iPositive2 : 0 ≠ i by cc
+          have delta := singleValue.other at A, zero, one, 0, i with *
+          have notNext : 0 ≠ succ(i)
+            intro equal
+            exact Naturals.disjoint.zero.succ at i with equal
+          have other := sylvesterLinear.other at A, add, zero, neg, mul, one, b,
+            r, ds, n, i, 0 with *
+          rw [delta, other]
+          rfl
+      . have iLast : i = n by arith
+        rw iLast
+        have entry := linearReduced.reduced_last at A, add, zero, neg, mul, one,
+          b, r, ds, n, 0, 0 with *
+        have initial := linearValue.initial at A, add, mul, b, r, ds,
+          n with size
+        have lastEntry := sylvesterLinear.last at A, add, zero, neg, mul, one,
+          b,
+          r, ds, n, 0 with *
+        have zeroSub := sub.zero_right at n
+        have leading := hornerCoefficient.leading at A, zero, b, ds with right
+        rw size at leading
+        rw [entry, initial, lastEntry, zeroSub, leading]
+        rfl
+    . have entry := linearReduced.original at A, add, zero, neg, mul, one, b, r,
+        ds, n, 0, i, j with *
+      exact entry
+  exact determinant.congr with *
+
+theorem linearReduced.step (A add zero neg mul one b r : Set) (ds : List(A))
+  (n k : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires size : length{A}(ds) = n
+  requires bound : k < n
+  shows determinant(succ(n), A, add, zero, neg, mul, one,
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, succ(k))) =
+    determinant(succ(n), A, add, zero, neg, mul, one,
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k))
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have negIn := IsRing.neg_closed with ordinary, center
+  have matrixM := linearReduced.matrix at A, add, zero, neg, mul, one, b, r, ds,
+    n, k with *
+  have matrixN := linearReduced.matrix at A, add, zero, neg, mul, one, b, r, ds,
+    n, succ(k) with *
+  have columnBound : succ(k) < succ(n) by arith
+  have columnRule := membership.of_Less at succ(k), succ(n) with *
+  have column := columnRule with columnBound
+  have sourceBound : k < succ(n) by arith
+  have sourceRule := membership.of_Less at k, succ(n) with *
+  have source := sourceRule with sourceBound
+  have distinct : succ(k) ≠ k
+    intro equal
+    arith
+  have positions := natural.member at succ(n)
+  have outside : ∀ c ∈ succ(n), ¬(c = succ(k)) → ∀ i ∈ succ(n),
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, succ(k))[i, c] =
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[i, c]
+    intros c hc different i hi
+    have cNat := positions with c, hc
+    have iNat := positions with i, hi
+    have cRule := Less.of_membership at c, succ(n) with *
+    have cBound := cRule with hc
+    have iRule := Less.of_membership at i, succ(n) with *
+    have iBound := iRule with hi
+    have alternatives : c < succ(succ(k)) ∨ ¬(c < succ(succ(k))) by tauto
+    cases alternatives with reduced | kept
+    . have earlier : c < succ(k)
+        by_contra notEarlier
+        have atLeast := LessEqual.of_not_Less with notEarlier
+        have equal : c = succ(k) by arith
+        exact different with equal
+      have rows : i < n ∨ ¬(i < n) by tauto
+      cases rows with upper | last
+      . have first := linearReduced.reduced_upper at A, add, zero, neg, mul,
+          one,
+          b, r, ds, n, succ(k), i, c with *
+        have second := linearReduced.reduced_upper at A, add, zero, neg, mul,
+          one, b, r, ds, n, k, i, c with *
+        rw [first, second]
+        rfl
+      . have iLast : i = n by arith
+        rw iLast
+        have first := linearReduced.reduced_last at A, add, zero, neg, mul, one,
+          b, r, ds, n, succ(k), c with *
+        have second := linearReduced.reduced_last at A, add, zero, neg, mul,
+          one,
+          b, r, ds, n, k, c with *
+        rw [first, second]
+        rfl
+    . have later : ¬(c < succ(k)) by arith
+      have first := linearReduced.original at A, add, zero, neg, mul, one, b, r,
+        ds, n, succ(k), i, c with *
+      have second := linearReduced.original at A, add, zero, neg, mul, one, b,
+        r,
+        ds, n, k, i, c with *
+      rw [first, second]
+      rfl
+  have entries : ∀ i ∈ succ(n),
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, succ(k))[i,
+      succ(k)] =
+      call2(add,
+        linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)[i, succ(k)],
+        call2(mul, r, linearReduced(A, add, zero, neg, mul, one, b, r, ds, n,
+        k)[i,
+          k]))
+    intros i hi
+    have iNat := positions with i, hi
+    have iRule := Less.of_membership at i, succ(n) with *
+    have iBound := iRule with hi
+    have newReduced : succ(k) < succ(succ(k)) by arith
+    have oldKept : ¬(succ(k) < succ(k))
+      intro strict
+      exact Less.irreflexive at succ(k) with strict
+    have oldReduced : k < succ(k) by arith
+    have kept := linearReduced.original at A, add, zero, neg, mul, one, b, r,
+      ds,
+      n, k, i, succ(k) with *
+    have rows : i < n ∨ ¬(i < n) by tauto
+    cases rows with upper | last
+    . have newEntry := linearReduced.reduced_upper at A, add, zero, neg, mul,
+        one,
+        b, r, ds, n, succ(k), i, succ(k) with *
+      have oldEntry := linearReduced.reduced_upper at A, add, zero, neg, mul,
+        one,
+        b, r, ds, n, k, i, k with *
+      rw [newEntry, kept, oldEntry]
+      have cases2 : i = succ(k) ∨ i ≠ succ(k) by tauto
+      cases cases2 with same | different
+      . have symmetric : succ(k) = i by cc
+        have deltaNew := singleValue.same at A, zero, one, succ(k), i with *
+        have notOld : i ≠ k
+          intro equal
+          rw equal at same
+          have same2 : succ(k) = k by cc
+          exact distinct with same2
+        have deltaOld := singleValue.other at A, zero, one, k, i with *
+        have diagonal := sylvesterLinear.diagonal at A, add, zero, neg, mul,
+          one,
+          b, r, ds, n, i with *
+        rw [deltaNew, deltaOld]
+        rw ← same
+        rw diagonal
+        ring
+      . have deltaNew := singleValue.other at A, zero, one, succ(k), i with *
+        have cases3 : i = k ∨ i ≠ k by tauto
+        cases cases3 with sameOld | differentOld
+        . have symmetric : k = i by cc
+          have deltaOld := singleValue.same at A, zero, one, k, i with *
+          have next := sylvesterLinear.next at A, add, zero, neg, mul, one, b,
+            r,
+            ds, n, i with *
+          rw sameOld at next
+          rw [deltaNew, deltaOld, sameOld, next]
+          ring
+        . have deltaOld := singleValue.other at A, zero, one, k, i with *
+          have notDiagonal : succ(k) ≠ i by cc
+          have notNext : succ(k) ≠ succ(i)
+            intro equal
+            have same := Naturals.injective.succ with equal
+            have same2 : i = k by cc
+            exact differentOld with same2
+          have other := sylvesterLinear.other at A, add, zero, neg, mul, one, b,
+            r, ds, n, i, succ(k) with *
+          rw [deltaNew, deltaOld, other]
+          ring
+    . have iLast : i = n by arith
+      rw iLast
+      have newEntry := linearReduced.reduced_last at A, add, zero, neg, mul,
+        one,
+        b, r, ds, n, succ(k), succ(k) with *
+      have oldEntry := linearReduced.reduced_last at A, add, zero, neg, mul,
+        one,
+        b, r, ds, n, k, k with *
+      rw iLast at kept
+      have lastEntry := sylvesterLinear.last at A, add, zero, neg, mul, one,
+        b, r,
+        ds, n, succ(k) with *
+      have step := linearValue.step at A, add, zero, mul, b, r, ds, n, k with *
+      rw [newEntry, kept, oldEntry, lastEntry, step]
+      rfl
+  exact determinant.column_add_multiple at A, add, zero, neg, mul, one, succ(n),
+    linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k),
+    linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, succ(k)), succ(k),
+    k,
+    r with *
+
+theorem linearReduced.chain (A add zero neg mul one b r : Set) (ds : List(A))
+  (n k : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires size : length{A}(ds) = n
+  shows k ≤ n →
+    determinant(succ(n), A, add, zero, neg, mul, one,
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, k)) =
+    determinant(succ(n), A, add, zero, neg, mul, one,
+      sylvesterBlockMatrix(A, zero, one, b, neg(r) :: [], ds, n, succ(n)))
+proof
+  induction k
+  | zero =>
+    intro bound
+    exact linearReduced.initial at A, add, zero, neg, mul, one, b, r, ds,
+      n with *
+  | succ(m) using ih =>
+    intro bound
+    have smaller : m ≤ n by arith
+    have previous := ih with smaller
+    have strict : m < n by arith
+    have step := linearReduced.step at A, add, zero, neg, mul, one, b, r, ds,
+      n, m
+      with *
+    rw [step, previous]
+    rfl
+
+theorem linearReduced.final (A add zero neg mul one b r : Set) (ds : List(A))
+  (n : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires right : b ∈ A
+  requires center : r ∈ A
+  requires size : length{A}(ds) = n
+  shows determinant(succ(n), A, add, zero, neg, mul, one,
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, n)) =
+    hornerAt{A}(add, mul, b, r, ds)
+proof
+  have matrix := linearReduced.matrix at A, add, zero, neg, mul, one, b, r, ds,
+    n, n with *
+  have rowBound : n < succ(n) by arith
+  have rowRule := membership.of_Less at n, succ(n) with *
+  have row := rowRule with rowBound
+  have positions := natural.member at succ(n)
+  have offRow : ∀ k ∈ succ(n), k ≠ n → ∀ j ∈ succ(n),
+      linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, n)[k, j] =
+      singleValue(A, zero, one, j, k)
+    intros k hk different j hj
+    have kNat := positions with k, hk
+    have jNat := positions with j, hj
+    have kRule := Less.of_membership at k, succ(n) with *
+    have kBound := kRule with hk
+    have jRule := Less.of_membership at j, succ(n) with *
+    have jBound := jRule with hj
+    have upper : k < n
+      by_contra notUpper
+      have atLeast := LessEqual.of_not_Less with notUpper
+      have equal : k = n by arith
+      exact different with equal
+    exact linearReduced.reduced_upper at A, add, zero, neg, mul, one, b, r, ds,
+      n, n, k, j with *
+  have value := determinant.identity_off_row at A, add, zero, neg, mul, one,
+    succ(n), linearReduced(A, add, zero, neg, mul, one, b, r, ds, n, n),
+    n with *
+  have selfReduced : n < succ(n) by arith
+  have entry := linearReduced.reduced_last at A, add, zero, neg, mul, one, b, r,
+    ds, n, n, n with *
+  have selfSplit : n = n + 0 by arith
+  have selfSub := sub.of_add at n, n, 0 with selfSplit
+  have all := listDrop.zero at A, ds
+  rw [value, entry]
+  unfold linearValue
+  rw [selfSub, all]
+  rfl
+
+-- Arithmetic of the row indices.
+theorem sub.of_succ_add (m t d : Nat)
+  requires split : t + d + 1 = m
+  shows sub(m, succ(t)) = d
+proof
+  have shape : m = succ(t) + d by arith
+  exact sub.of_add at m, succ(t), d with shape
+
+theorem natural.split_succ (m k d : Nat)
+  requires split : m = succ(k) + d
+  shows k + d + 1 = m
+proof
+  arith
+
+theorem sub.succ_of_split (m k d : Nat)
+  requires split : k + d + 1 = m
+  shows sub(m, k) = succ(d) ∧ sub(m, succ(k)) = d
+proof
+  have below : k < m by arith
+  have shiftRule := sub.succ_of_Less at k
+  have shift := shiftRule with m, below
+  have index := sub.of_succ_add at m, k, d with split
+  constructor
+  . rw [shift, index]
+    rfl
+  . exact index
+
+theorem natural.position_of_split (j e last : Nat)
+  requires split : last = j + e
+  shows j + e + 1 = succ(last)
+proof
+  arith
+
+-- The padded rows: lists of length m + n whose entries are the matrix
+-- entries.
+theorem sylvesterRowPadded.data (A add zero neg mul one a b : Set)
+  (cs ds : List(A)) (t : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  requires bound : t < length{A}(cs) + length{A}(ds)
+  shows List(A, sylvesterRowPadded{A}(zero, a, b, cs, ds, t)) ∧
+    length{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, t)) =
+      length{A}(cs) + length{A}(ds)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have alternatives : t < length{A}(ds) ∨ ¬(t < length{A}(ds)) by tauto
+  unfold sylvesterRowPadded
+  cases alternatives with upper | lower
+  . have memberRule := membership.of_Less at t, length{A}(ds) with *
+    have member := memberRule with upper
+    have test := memberTest.true with member
+    have below : succ(t) ≤ length{A}(ds) by arith
+    obtain ⟨d, dNat, split⟩ := LessEqual.exists_add with below
+    have index := sub.of_add at length{A}(ds), succ(t), d with split
+    have row := sylvesterRow.list at A, zero, a, cs, t with *
+    have rowLength := sylvesterRow.length at A, zero, a, cs, t
+    have zeros := listReplicate.closed at A, zero, d with zeroIn
+    have zerosLength := listReplicate.length at A, zero, d with zeroIn
+    rw [test, boolChoice.true, index]
+    constructor
+    . typecheck
+    . rw [length.append, rowLength, zerosLength]
+      arith
+  . have absent : ¬(t ∈ length{A}(ds))
+      intro member
+      have belowRule := Less.of_membership at t, length{A}(ds) with *
+      have below := belowRule with member
+      exact lower with below
+    have test := memberTest.false with absent
+    have atLeast := LessEqual.of_not_Less with lower
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at t, length{A}(ds), e with split
+    have below : succ(e) ≤ length{A}(cs) by arith
+    obtain ⟨d, dNat, split2⟩ := LessEqual.exists_add with below
+    have index2 := sub.of_add at length{A}(cs), succ(e), d with split2
+    have row := sylvesterRow.list at A, zero, b, ds, e with *
+    have rowLength := sylvesterRow.length at A, zero, b, ds, e
+    have zeros := listReplicate.closed at A, zero, d with zeroIn
+    have zerosLength := listReplicate.length at A, zero, d with zeroIn
+    rw [test, boolChoice.false, index, index2]
+    constructor
+    . typecheck
+    . rw [length.append, rowLength, zerosLength]
+      arith
+
+theorem sylvesterRowPadded.coefficient (A add zero neg mul one a b : Set)
+  (cs ds : List(A)) (t j : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  requires row : t < length{A}(cs) + length{A}(ds)
+  requires column : j < length{A}(cs) + length{A}(ds)
+  shows listCoefficient{A}(zero, sylvesterRowPadded{A}(zero, a, b, cs, ds, t),
+      j) =
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds))[t, j]
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have alternatives : t < length{A}(ds) ∨ ¬(t < length{A}(ds)) by tauto
+  unfold sylvesterRowPadded
+  cases alternatives with upper | lower
+  . have memberRule := membership.of_Less at t, length{A}(ds) with *
+    have member := memberRule with upper
+    have test := memberTest.true with member
+    have below : succ(t) ≤ length{A}(ds) by arith
+    obtain ⟨d, dNat, split⟩ := LessEqual.exists_add with below
+    have index := sub.of_add at length{A}(ds), succ(t), d with split
+    have rowList := sylvesterRow.list at A, zero, a, cs, t with *
+    have rowLength := sylvesterRow.length at A, zero, a, cs, t
+    have inside : j < length{A}(sylvesterRow{A}(zero, a, cs, t)) + d
+      rw rowLength
+      arith
+    have padded := listReplicate.pad_coefficient at A, zero,
+      sylvesterRow{A}(zero, a, cs, t), d, j with *
+    have entry := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+      one,
+      a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), t, j with *
+    rw [test, boolChoice.true, index, padded, entry]
+    rfl
+  . have absent : ¬(t ∈ length{A}(ds))
+      intro member
+      have belowRule := Less.of_membership at t, length{A}(ds) with *
+      have below := belowRule with member
+      exact lower with below
+    have test := memberTest.false with absent
+    have atLeast := LessEqual.of_not_Less with lower
+    obtain ⟨e, eNat, split⟩ := LessEqual.exists_add with atLeast
+    have index := sub.of_add at t, length{A}(ds), e with split
+    have below : succ(e) ≤ length{A}(cs) by arith
+    obtain ⟨d, dNat, split2⟩ := LessEqual.exists_add with below
+    have index2 := sub.of_add at length{A}(cs), succ(e), d with split2
+    have rowList := sylvesterRow.list at A, zero, b, ds, e with *
+    have rowLength := sylvesterRow.length at A, zero, b, ds, e
+    have inside : j < length{A}(sylvesterRow{A}(zero, b, ds, e)) + d
+      rw rowLength
+      arith
+    have padded := listReplicate.pad_coefficient at A, zero,
+      sylvesterRow{A}(zero, b, ds, e), d, j with *
+    have entry := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+      one,
+      a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), t, j with *
+    rw [test, boolChoice.false, index, index2, padded, entry, index]
+    rfl
+
+-- The row combination: a list of length m + n whose entries are the
+-- partial sums of the weighted column entries.
+theorem sylvesterCombination.data (A add zero neg mul one a b w : Set)
+  (cs ds : List(A)) (t : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  requires weights : w : ℕ → A
+  requires bound : t ≤ length{A}(cs) + length{A}(ds)
+  shows List(A, sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, t)) ∧
+    length{A}(sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, t)) =
+      length{A}(cs) + length{A}(ds)
+proof
+  induction t
+  | zero =>
+    intro bound
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have zeros := listReplicate.closed at A, zero,
+      length{A}(cs) + length{A}(ds) with zeroIn
+    have zerosLength := listReplicate.length at A, zero,
+      length{A}(cs) + length{A}(ds) with zeroIn
+    have unfolded : sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds,
+      0) =
+        listReplicate(length{A}(cs) + length{A}(ds), zero)
+      simp [sylvesterCombination]
+    rw unfolded
+    exact ⟨zeros, zerosLength⟩
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ length{A}(cs) + length{A}(ds) by arith
+    have previous := ih with smaller
+    have previousList := previous.left
+    have previousLength := previous.right
+    have below : k < length{A}(cs) + length{A}(ds) by arith
+    have rowData := sylvesterRowPadded.data at A, add, zero, neg, mul, one, a,
+      b,
+      cs, ds, k with *
+    have rowList := rowData.left
+    have reversedRow : List(A, reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+      ds, k))) by typecheck
+    have kNat : Nat(k) by typecheck
+    have weight := FunctionBetween.apply_closed at w, ℕ, A, k with weights, kNat
+    have scaled := hornerScale.data at A, add, zero, neg, mul, one, w(k),
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, k)) with *
+    have scaledList := scaled.left
+    have added := hornerAdd.data at A, add, zero, neg, mul, one,
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, k),
+      hornerScale{A}(mul, w(k), reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+        ds, k))) with *
+    have unfolded : sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds,
+        succ(k)) =
+        hornerAdd{A}(add, zero,
+          sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, k),
+          hornerScale{A}(mul, w(k),
+            reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, k))))
+      simp [sylvesterCombination]
+    rw unfolded
+    constructor
+    . exact added.left
+    . rw added.right
+      exact previousLength
+
+theorem sylvesterCombination.coefficient (A add zero neg mul one a b w : Set)
+  (cs ds : List(A)) (t : Nat)
+  requires ring : IsCommRing(A, add, zero, neg, mul, one)
+  requires left : a ∈ A
+  requires right : b ∈ A
+  requires weights : w : ℕ → A
+  requires bound : t ≤ length{A}(cs) + length{A}(ds)
+  shows ∀ j, ∀ e, Nat(j) → Nat(e) → j + e + 1 = length{A}(cs) + length{A}(ds) →
+    listCoefficient{A}(zero, sylvesterCombination{A}(add, zero, mul, a, b, w,
+    cs,
+      ds, t), j) =
+    indexedRingSum(rowVectorWeights(length{A}(cs) + length{A}(ds), A, add, zero,
+      neg, mul, one, restrict(w, length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds)), e),
+      identity(length{A}(cs) + length{A}(ds)), add, zero, t)
+proof
+  induction t
+  | zero =>
+    intros bound j e jNat eNat split
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have below : j < length{A}(cs) + length{A}(ds) by arith
+    have zeros := listReplicate.coefficient at A, zero, zero,
+      length{A}(cs) + length{A}(ds), j with *
+    have unfolded : sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds,
+      0) =
+        listReplicate(length{A}(cs) + length{A}(ds), zero)
+      simp [sylvesterCombination]
+    have unfoldedSum : indexedRingSum(rowVectorWeights(length{A}(cs) +
+        length{A}(ds), A, add, zero, neg, mul, one,
+        restrict(w, length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), e),
+        identity(length{A}(cs) + length{A}(ds)), add, zero, 0) = zero
+      simp [indexedRingSum]
+    rw [unfolded, unfoldedSum]
+    exact zeros
+  | succ(k) using ih =>
+    intros bound j e jNat eNat split
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have smaller : k ≤ length{A}(cs) + length{A}(ds) by arith
+    have previous := ih with smaller, j, e, jNat, eNat, split
+    have kNat : Nat(k) by typecheck
+    have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+    have below : k < length{A}(cs) + length{A}(ds) by arith
+    have memberRule := membership.of_Less at k, length{A}(cs) + length{A}(ds)
+      with *
+    have kMember := memberRule with below
+    have columnBelow : e < length{A}(cs) + length{A}(ds) by arith
+    have columnRule := membership.of_Less at e, length{A}(cs) + length{A}(ds)
+      with *
+    have eMember := columnRule with columnBelow
+    have positions := natural.member at length{A}(cs) + length{A}(ds)
+    have subset : length{A}(cs) + length{A}(ds) ⊆ ℕ
+      intros i hi
+      exact positions with i, hi
+    have restricted := restrict.domain_function at w, ℕ, A,
+      length{A}(cs) + length{A}(ds) with *
+    have restrictValue := restrict.domain_apply at w, ℕ, A,
+      length{A}(cs) + length{A}(ds), k with *
+    have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+      a,
+      b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with *
+    have weightValue := rowVectorWeights.value at length{A}(cs) + length{A}(ds),
+      A, add, zero, neg, mul, one, restrict(w, length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds)), e, k with *
+    have identityValue := identity.apply at k, length{A}(cs) + length{A}(ds)
+      with kMember
+    have combData := sylvesterCombination.data at A, add, zero, neg, mul, one,
+      a,
+      b, w, cs, ds, k with *
+    have combList := combData.left
+    have combLength := combData.right
+    have rowData := sylvesterRowPadded.data at A, add, zero, neg, mul, one, a,
+      b,
+      cs, ds, k with *
+    have rowList := rowData.left
+    have rowLength := rowData.right
+    have reversedRow : List(A, reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+      ds, k))) by typecheck
+    have weight := FunctionBetween.apply_closed at w, ℕ, A, k with weights, kNat
+    have annihilates := IsRing.mul_zero with ordinary, weight
+    have inside : j < length{A}(sylvesterCombination{A}(add, zero, mul, a, b, w,
+        cs, ds, k))
+      rw combLength
+      arith
+    have scaled := hornerScale.data at A, add, zero, neg, mul, one, w(k),
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, k)) with *
+    have scaledList := scaled.left
+    have added := hornerAdd.entry_below at A, add, zero,
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, k),
+      hornerScale{A}(mul, w(k), reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+        ds, k))), j with *
+    have scaledCoefficient := hornerScale.coefficient at A, mul, w(k), zero,
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, k)),
+      j with annihilates
+    have position : j + e + 1 = length{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+        ds, k))
+      rw rowLength
+      exact split
+    have reversed := listCoefficient.reverse at A, zero,
+      sylvesterRowPadded{A}(zero, a, b, cs, ds, k), j, e with position
+    have entry := sylvesterRowPadded.coefficient at A, add, zero, neg, mul, one,
+      a, b, cs, ds, k, e with *
+    have unfolded : sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds,
+        succ(k)) =
+        hornerAdd{A}(add, zero,
+          sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, k),
+          hornerScale{A}(mul, w(k),
+            reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, k))))
+      simp [sylvesterCombination]
+    have unfoldedSum : indexedRingSum(rowVectorWeights(length{A}(cs) +
+        length{A}(ds), A, add, zero, neg, mul, one,
+        restrict(w, length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), e),
+        identity(length{A}(cs) + length{A}(ds)), add, zero, succ(k)) =
+        call2(add, indexedRingSum(rowVectorWeights(length{A}(cs) +
+          length{A}(ds), A, add, zero, neg, mul, one,
+          restrict(w, length{A}(cs) + length{A}(ds)),
+          sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+            length{A}(cs) + length{A}(ds)), e),
+          identity(length{A}(cs) + length{A}(ds)), add, zero, k),
+          rowVectorWeights(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+          mul,
+            one, restrict(w, length{A}(cs) + length{A}(ds)),
+            sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+              length{A}(cs) + length{A}(ds)), e)(identity(length{A}(cs) +
+                length{A}(ds))(k)))
+      simp [indexedRingSum]
+    rw [unfolded, unfoldedSum, added, previous, scaledCoefficient, reversed,
+      entry,
+      identityValue, weightValue, restrictValue]
+    rfl
+
+section Rings2
+variable (A add zero neg mul one a b : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring P := R[oneVariable]
+hypothesis ring : IsCommRing(R)
+hypothesis left : a ∈ R
+hypothesis right : b ∈ R
 
 -- Swapping the pairs changes the sign by (−1)^(m·n).
 theorem resultant.swap (cs ds : List(A))
@@ -157,16 +2553,152 @@ theorem resultant.swap (cs ds : List(A))
     R[monoidPow(R, -R[1], length{A}(cs) * length{A}(ds)) *
       resultant(R, a, cs, b, ds)]
 proof
-  sorry
-
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have commuted := add.commutative at length{A}(cs), length{A}(ds)
+  have matrixS := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with *
+  have matrixN := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, b,
+    a, ds, cs, length{A}(cs), length{A}(cs) + length{A}(ds) with *
+  have permutation := blockSwap.permutation at length{A}(cs), length{A}(ds)
+  have rows := sylvesterBlockMatrix.swap_rows at A, add, zero, neg, mul, one, a,
+    b, cs, ds with *
+  have permuted := determinant.row_permutation at A, add, zero, neg, mul, one,
+    length{A}(cs) + length{A}(ds),
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)),
+    sylvesterBlockMatrix(A, zero, b, a, ds, cs, length{A}(cs),
+      length{A}(cs) + length{A}(ds)),
+    blockSwap(length{A}(cs), length{A}(ds)) with *
+  have count := blockSwap.inversion_count at length{A}(cs), length{A}(ds)
+  unfold resultant
+  unfold sylvesterMatrix
+  rw [commuted, permuted]
+  unfold permutationSign
+  rw count
+  rfl
+-- The resultant of X − r with q is q(r).
+theorem resultant.linear_left (r : Set) (ds : List(A))
+  requires center : r ∈ R
+  shows resultant(R, one, neg(r) :: [], b, ds) = hornerAt{A}(add, mul, b, r, ds)
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have negIn := IsRing.neg_closed with ordinary, center
+  have empty : List(A, []) by typecheck
+  have size : length{A}(neg(r) :: []) + length{A}(ds) = succ(length{A}(ds))
+    rw [length.cons, length.nil]
+    arith
+  have same : length{A}(ds) = length{A}(ds) by rfl
+  have chain := linearReduced.chain at A, add, zero, neg, mul, one, b, r, ds,
+    length{A}(ds), length{A}(ds) with *
+  have reflexive : length{A}(ds) ≤ length{A}(ds) by arith
+  have value := chain with reflexive
+  have final := linearReduced.final at A, add, zero, neg, mul, one, b, r, ds,
+    length{A}(ds) with *
+  unfold resultant
+  unfold sylvesterMatrix
+  rw [size, ← value, final]
+  rfl
 theorem resultant.scale_left (c : Set) (cs ds : List(A))
   requires scalar : c ∈ R
   shows resultant(R, R[c * a], hornerScale{A}(mul, c, cs), b, ds) =
     R[monoidPow(R, c, length{A}(ds)) * resultant(R, a, cs, b, ds)]
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have scaledLeading := IsRing.mul_closed with ordinary, scalar, left
+  have scaledData := hornerScale.data at A, add, zero, neg, mul, one, c, cs
+    with *
+  have scaledList := scaledData.left
+  have scaledLength := scaledData.right
+  have annihilates : R[c * R[0]] = R[0] by ring
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have matrixM := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with *
+  have matrixN := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one,
+    R[c * a], b, hornerScale{A}(mul, c, cs), ds, length{A}(ds),
+    length{A}(cs) + length{A}(ds) with *
+  have scaled := scaledTopRows.matrix at A, add, zero, neg, mul, one,
+    length{A}(cs) + length{A}(ds), c, length{A}(ds),
+    sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)) with *
+  have positions := natural.member at length{A}(cs) + length{A}(ds)
+  have entries : ∀ i ∈ length{A}(cs) + length{A}(ds),
+      ∀ j ∈ length{A}(cs) + length{A}(ds),
+      sylvesterBlockMatrix(A, zero, R[c * a], b, hornerScale{A}(mul, c, cs), ds,
+        length{A}(ds), length{A}(cs) + length{A}(ds))[i, j] =
+      scaledTopRows(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one,
+        c, length{A}(ds), sylvesterBlockMatrix(A, zero, a, b, cs, ds,
+          length{A}(ds), length{A}(cs) + length{A}(ds)))[i, j]
+    intros i hi j hj
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have rowRule := Less.of_membership at i,
+      length{A}(cs) + length{A}(ds) with *
+    have row := rowRule with hi
+    have columnRule := Less.of_membership at j, length{A}(cs) + length{A}(ds)
+      with *
+    have column := columnRule with hj
+    have alternatives : i < length{A}(ds) ∨ ¬(i < length{A}(ds)) by tauto
+    cases alternatives with upper | lower
+    . have upperRule := membership.of_Less at i, length{A}(ds) with *
+      have upperMember := upperRule with upper
+      have entryM := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+        one, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), i, j
+        with *
+      have entryN := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+        one, R[c * a], b, hornerScale{A}(mul, c, cs), ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds), i, j with *
+      have entryS := scaledTopRows.entry_scaled at A, add, zero, neg, mul, one,
+        length{A}(cs) + length{A}(ds), c, length{A}(ds),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), i, j with *
+      have rowScale := sylvesterRow.scale at A, mul, c, zero, a, cs, i with *
+      have rowList := sylvesterRow.list at A, zero, a, cs, i with *
+      have coefficientScale := hornerScale.coefficient at A, mul, c, zero,
+        sylvesterRow{A}(zero, a, cs, i), j with annihilates
+      rw [entryN, entryS, entryM, rowScale, coefficientScale]
+      rfl
+    . have bound := LessEqual.of_not_Less with lower
+      have absent : ¬(i ∈ length{A}(ds))
+        intro member
+        have belowRule := Less.of_membership at i, length{A}(ds) with *
+        have below := belowRule with member
+        arith
+      have entryM := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+        one, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), i, j
+        with *
+      have entryN := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+        one, R[c * a], b, hornerScale{A}(mul, c, cs), ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds), i, j with *
+      have entryS := scaledTopRows.entry_other at A, add, zero, neg, mul, one,
+        length{A}(cs) + length{A}(ds), c, length{A}(ds),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), i, j with *
+      rw [entryN, entryS, entryM]
+      rfl
+  have same := determinant.congr at A, add, zero, neg, mul, one,
+    sylvesterBlockMatrix(A, zero, R[c * a], b, hornerScale{A}(mul, c, cs), ds,
+      length{A}(ds), length{A}(cs) + length{A}(ds)),
+    length{A}(cs) + length{A}(ds),
+    scaledTopRows(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one, c,
+      length{A}(ds), sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))) with *
+  have scaling := determinant.scaled_top_rows at A, add, zero, neg, mul, one,
+    length{A}(cs) + length{A}(ds), c, sylvesterBlockMatrix(A, zero, a, b, cs,
+    ds,
+      length{A}(ds), length{A}(cs) + length{A}(ds)), length{A}(ds) with *
+  have bound : length{A}(ds) ≤ length{A}(cs) + length{A}(ds) by arith
+  have value := scaling with bound
+  unfold resultant
+  unfold sylvesterMatrix
+  rw [scaledLength, same, value]
+  rfl
 
--- Multiplicativity in the first argument.
+-- Multiplicativity in the first argument. Left admitted in round 1: the
+-- matrix-factorization proof needs cancellation of a power of the leading
+-- coefficient; to be proved through the roots (ResultantRoots) or dropped.
 theorem resultant.mul_left (c : Set) (cs es ds : List(A))
   requires other : c ∈ R
   shows resultant(R, R[a * c], hornerMulList{A}(add, zero, mul, a, c, cs, es),
@@ -175,8 +2707,249 @@ theorem resultant.mul_left (c : Set) (cs es ds : List(A))
 proof
   sorry
 
--- The Bézout combination: res = A·p + B·q with deg A < n, deg B < m.
+-- The polynomials of the reversed padded rows are the shifted pairs.
+theorem sylvesterRowPadded.poly_upper (cs ds : List(A)) (t d : Nat)
+  requires split : t + d + 1 = length{A}(ds)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, t))) =
+    P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), d) *
+      hornerPoly{A}(add, zero, neg, mul, one, a, cs)]
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have upper : t < length{A}(ds) by arith
+  have memberRule := membership.of_Less at t, length{A}(ds) with *
+  have member := memberRule with upper
+  have test := memberTest.true with member
+  have index := sub.of_succ_add at length{A}(ds), t, d with split
+  have full := hornerFullList.list at A, a, cs with left
+  have reversedFull : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zerosT := listReplicate.closed at A, zero, t with zeroIn
+  have zerosD := listReplicate.closed at A, zero, d with zeroIn
+  have rowList := sylvesterRow.list at A, zero, a, cs, t with *
+  have rowReverse : reverse{A}(sylvesterRow{A}(zero, a, cs, t)) =
+      append{A}(listReplicate(t, zero), hornerFullList{A}(a, cs))
+    unfold sylvesterRow
+    rw [reverse.append, listReplicate.reverse, reverse.involutive]
+    rfl
+  have paddedReverse : reverse{A}(append{A}(listReplicate(d, zero),
+      sylvesterRow{A}(zero, a, cs, t))) =
+      append{A}(reverse{A}(sylvesterRow{A}(zero, a, cs, t)), listReplicate(d,
+      zero))
+    rw [reverse.append, listReplicate.reverse]
+    rfl
+  have shifted : List(A, append{A}(listReplicate(t, zero), hornerFullList{A}(a,
+    cs))) by typecheck
+  have leading := hornerPoly.leading_zeros at A, add, zero, neg, mul, one,
+    append{A}(listReplicate(t, zero), hornerFullList{A}(a, cs)), d with *
+  have trailing := hornerPoly.trailing_zeros at A, add, zero, neg, mul, one,
+    hornerFullList{A}(a, cs), t with *
+  have fullList := hornerPoly.full_list at A, add, zero, neg, mul, one, a, cs
+    with *
+  unfold sylvesterRowPadded
+  rw [test, boolChoice.true, index, paddedReverse, rowReverse, leading,
+    trailing,
+    fullList]
+  rfl
+
+theorem sylvesterRowPadded.poly_lower (cs ds : List(A)) (t e d : Nat)
+  requires split1 : t = length{A}(ds) + e
+  requires split2 : e + d + 1 = length{A}(cs)
+  shows hornerPoly{A}(add, zero, neg, mul, one, zero,
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, t))) =
+    P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), d) *
+      hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+proof
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have absent : ¬(t ∈ length{A}(ds))
+    intro member
+    have belowRule := Less.of_membership at t, length{A}(ds) with *
+    have below := belowRule with member
+    arith
+  have test := memberTest.false with absent
+  have index := sub.of_add at t, length{A}(ds), e with split1
+  have index2 := sub.of_succ_add at length{A}(cs), e, d with split2
+  have full := hornerFullList.list at A, b, ds with right
+  have reversedFull : List(A, reverse{A}(hornerFullList{A}(b, ds))) by typecheck
+  have zerosE := listReplicate.closed at A, zero, e with zeroIn
+  have zerosD := listReplicate.closed at A, zero, d with zeroIn
+  have rowList := sylvesterRow.list at A, zero, b, ds, e with *
+  have rowReverse : reverse{A}(sylvesterRow{A}(zero, b, ds, e)) =
+      append{A}(listReplicate(e, zero), hornerFullList{A}(b, ds))
+    unfold sylvesterRow
+    rw [reverse.append, listReplicate.reverse, reverse.involutive]
+    rfl
+  have paddedReverse : reverse{A}(append{A}(listReplicate(d, zero),
+      sylvesterRow{A}(zero, b, ds, e))) =
+      append{A}(reverse{A}(sylvesterRow{A}(zero, b, ds, e)), listReplicate(d,
+      zero))
+    rw [reverse.append, listReplicate.reverse]
+    rfl
+  have shifted : List(A, append{A}(listReplicate(e, zero), hornerFullList{A}(b,
+    ds))) by typecheck
+  have leading := hornerPoly.leading_zeros at A, add, zero, neg, mul, one,
+    append{A}(listReplicate(e, zero), hornerFullList{A}(b, ds)), d with *
+  have trailing := hornerPoly.trailing_zeros at A, add, zero, neg, mul, one,
+    hornerFullList{A}(b, ds), e with *
+  have fullList := hornerPoly.full_list at A, add, zero, neg, mul, one, b, ds
+    with *
+  unfold sylvesterRowPadded
+  rw [test, boolChoice.false, index, index2, paddedReverse, rowReverse, leading,
+    trailing, fullList]
+  rfl
+
+-- Accumulating a block of rows whose polynomials are g shifted by
+-- descending powers builds a Horner polynomial of the weights times g.
+theorem sylvesterCombination.block (w g : Set) (cs ds : List(A))
+  (start len t : Nat)
+  requires weights : w : ℕ → A
+  requires polynomial : g ∈ P
+  requires within : start + len ≤ length{A}(cs) + length{A}(ds)
+  requires rows : ∀ k, ∀ d, Nat(k) → Nat(d) → k + d + 1 = len →
+    hornerPoly{A}(add, zero, neg, mul, one, zero,
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, start + k))) =
+    P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), d) * g]
+  shows t ≤ len →
+    hornerPoly{A}(add, zero, neg, mul, one, zero,
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start + t)) =
+    P[hornerPoly{A}(add, zero, neg, mul, one, zero,
+        sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start)) +
+      hornerPoly{A}(add, zero, neg, mul, one, zero,
+        append{A}(reverse{A}(coefficientWindow(w, start, t)),
+          listReplicate(sub(len, t), zero))) * g]
+proof
+  induction t
+  | zero =>
+    intro bound
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with *
+    have startBound : start ≤ length{A}(cs) + length{A}(ds) by arith
+    have combData := sylvesterCombination.data at A, add, zero, neg, mul, one,
+      a,
+      b, w, cs, ds, start with *
+    have combList := combData.left
+    have inner := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start) with *
+    have unit := add.right_unit at start
+    have window0 : coefficientWindow(w, start,
+      0) = [] by simp [coefficientWindow]
+    have reverse0 : reverse{A}([]) = [] by simp [reverse]
+    have zeroSub := sub.zero_right at len
+    have appendNil := listReplicate.append_nil at A, zero, len
+    have replicateZero := hornerPoly.replicate_zero at A, add, zero, neg, mul,
+      one, len with *
+    rw [unit, window0, reverse0, zeroSub, appendNil, replicateZero]
+    ring
+  | succ(k) using ih =>
+    intro bound
+    have ordinary := IsCommRing.ring with ring
+    have zeroIn := IsRing.zero_in_carrier with ordinary
+    have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+      mul, one with *
+    have polynomialRing := IsCommRing.ring with polynomials
+    have multiplicative := IsRing.multiplicative with polynomialRing
+    have oneIn : R[1] ∈ R by typecheck
+    have variable := polynomialVariable.member at oneVariable, A, zero, one,
+      (0 : Nat) with *
+    have smaller : k ≤ len by arith
+    have previous := ih with smaller
+    obtain ⟨d, dNat, split⟩ := LessEqual.exists_add with bound
+    have kNat : Nat(k) by typecheck
+    have splitSwap := natural.split_succ at len, k, d with split
+    have indices := sub.succ_of_split at len, k, d with splitSwap
+    have rowPoly := rows with k, d, kNat, dNat, splitSwap
+    have shift := add.succ_right at k, start
+    have startBound : start ≤ length{A}(cs) + length{A}(ds) by arith
+    have stepBound : start + k ≤ length{A}(cs) + length{A}(ds) by arith
+    have rowBound : start + k < length{A}(cs) + length{A}(ds) by arith
+    have combStart := sylvesterCombination.data at A, add, zero, neg, mul,
+      one, a,
+      b, w, cs, ds, start with *
+    have startList := combStart.left
+    have combData := sylvesterCombination.data at A, add, zero, neg, mul, one,
+      a,
+      b, w, cs, ds, start + k with *
+    have combList := combData.left
+    have combLength := combData.right
+    have rowData := sylvesterRowPadded.data at A, add, zero, neg, mul, one, a,
+      b,
+      cs, ds, start + k with *
+    have rowList := rowData.left
+    have rowLength := rowData.right
+    have reversedRow : List(A, reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs,
+      ds, start + k))) by typecheck
+    have sameLength : length{A}(sylvesterCombination{A}(add, zero, mul, a, b, w,
+        cs, ds, start + k)) =
+        length{A}(reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds,
+        start + k)))
+      rw [combLength, reverse.length, rowLength]
+      rfl
+    have shiftNat : Nat(start + k) by typecheck
+    have weight := FunctionBetween.apply_closed at w, ℕ, A, start + k
+      with weights, shiftNat
+    have unfolded : sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds,
+        succ(start + k)) =
+        hornerAdd{A}(add, zero,
+          sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start + k),
+          hornerScale{A}(mul, w(start + k),
+            reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, start + k))))
+      simp [sylvesterCombination]
+    have addScale := hornerPoly.add_scale at A, add, zero, neg, mul, one,
+      w(start + k),
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start + k),
+      reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, start + k)) with *
+    have windowSnoc := coefficientWindow.snoc at A, w, start, k
+    have windowList := coefficientWindow.closed at A, w, start, k with weights
+    have single : List(A, w(start + k) :: []) by typecheck
+    have reversedWindow : List(A, reverse{A}(coefficientWindow(w, start, k)))
+      by typecheck
+    have reverseSnoc : reverse{A}(coefficientWindow(w, start, succ(k))) =
+        w(start + k) :: reverse{A}(coefficientWindow(w, start, k))
+      rw [windowSnoc, reverse.append, reverse.singleton]
+      simp [append]
+    have consList : List(A, w(start + k) :: reverse{A}(coefficientWindow(w,
+      start,
+      k))) by typecheck
+    have zeroConsList : List(A, zero :: reverse{A}(coefficientWindow(w, start,
+      k))) by typecheck
+    have leadingA := hornerPoly.leading_zeros at A, add, zero, neg, mul, one,
+      w(start + k) :: reverse{A}(coefficientWindow(w, start, k)), d with *
+    have leadingZ := hornerPoly.leading_zeros at A, add, zero, neg, mul, one,
+      zero :: reverse{A}(coefficientWindow(w, start, k)), d with *
+    have consA : hornerPoly{A}(add, zero, neg, mul, one, zero,
+        w(start + k) :: reverse{A}(coefficientWindow(w, start, k))) =
+        P[polynomialConstant(oneVariable, R, w(start + k)) +
+          polynomialVariable(oneVariable, R, (0 : Nat)) *
+            hornerPoly{A}(add, zero, neg, mul, one, zero,
+              reverse{A}(coefficientWindow(w, start, k)))]
+      unfold hornerPoly
+      rw polynomialFromHorner.cons
+      rfl
+    have consZ := hornerPoly.zero_cons at A, add, zero, neg, mul, one,
+      reverse{A}(coefficientWindow(w, start, k)) with *
+    have power := monoidPow.closed at polynomials(oneVariable, A, zero),
+      polynomialMul(oneVariable, R), polynomialConstant(oneVariable, R, one),
+      polynomialVariable(oneVariable, R, (0 : Nat)), d with *
+    have constantIn := polynomialConstant.member at oneVariable, A, zero,
+      w(start + k) with *
+    have windowPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+      reverse{A}(coefficientWindow(w, start, k)) with *
+    have startPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+      sylvesterCombination{A}(add, zero, mul, a, b, w, cs, ds, start) with *
+    rw [shift, unfolded, addScale, previous, rowPoly, reverseSnoc, indices.left,
+      indices.right, listReplicate.append_succ, leadingA, leadingZ, consA,
+      consZ]
+    ring
+
+
+-- The Bézout combination: res = A·p + B·q with deg A < n, deg B < m. The
+-- hypothesis m + n > 0 was added in round 1: two constants have
+-- resultant 1, which is no combination of degrees below 0.
 theorem resultant.combination (cs ds : List(A))
+  requires positive : 0 < length{A}(cs) + length{A}(ds)
   shows ∃ us, List(A, us) ∧ ∃ vs, List(A, vs) ∧
     length{A}(us) = length{A}(ds) ∧ length{A}(vs) = length{A}(cs) ∧
     P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) * hornerPoly{A}(add,
@@ -185,18 +2958,583 @@ theorem resultant.combination (cs ds : List(A))
         zero, neg, mul, one, b, ds)] =
     polynomialConstant(oneVariable, R, resultant(R, a, cs, b, ds))
 proof
-  sorry
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have oneIn : R[1] ∈ R by typecheck
+  have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+    mul, one with *
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have finite := Finite.natural at length{A}(cs) + length{A}(ds)
+  have positions := natural.member at length{A}(cs) + length{A}(ds)
+  have subset : length{A}(cs) + length{A}(ds) ⊆ ℕ
+    intros i hi
+    exact positions with i, hi
+  have pMember := hornerPoly.member at A, add, zero, neg, mul, one, a, cs with *
+  have qMember := hornerPoly.member at A, add, zero, neg, mul, one, b, ds with *
+  have resultantIn := resultant.closed at A, add, zero, neg, mul, one, a, b, cs,
+    ds with *
+  have shape := natural.zero_or_successor at length{A}(cs) + length{A}(ds)
+    with sizeNat
+  cases shape with isZero | successor
+  . rw isZero at positive
+    exfalso
+    exact Less.irreflexive with Naturals.constructor.zero, positive
+  obtain ⟨last, lastNat, sShape⟩ := successor
+  have lastBelow : last < length{A}(cs) + length{A}(ds) by arith
+  have lastRule := membership.of_Less at last, length{A}(cs) + length{A}(ds)
+    with *
+  have lastMember := lastRule with lastBelow
+  have matrix := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with *
+  have transposed := transposedMatrix.matrix at length{A}(cs) + length{A}(ds),
+    A, sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+      length{A}(cs) + length{A}(ds)) with matrix
+  have adj := adjugate.matrix at length{A}(cs) + length{A}(ds), A, add, zero,
+    neg, mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+      length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b, cs,
+        ds, length{A}(ds), length{A}(cs) + length{A}(ds))) with *
+  have weights := adjugateColumn.function at length{A}(cs) + length{A}(ds), A,
+    add, zero, neg, mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+      length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b, cs,
+        ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last with *
+  have restricted := restrict.domain_function at
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one,
+      transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs,
+          ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+    ℕ, A, length{A}(cs) + length{A}(ds) with *
+  have identity : ∀ j ∈ length{A}(cs) + length{A}(ds),
+      rowVectorEntry(length{A}(cs) + length{A}(ds), R,
+        restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero,
+        neg,
+          mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+          length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), j) =
+      singleValue(A, zero, resultant(R, a, cs, b, ds), last, j)
+    intros j hj
+    have product := adjugate.right_identity at A, add, zero, neg, mul, one,
+      length{A}(cs) + length{A}(ds), transposedMatrix(length{A}(cs) +
+        length{A}(ds), length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A,
+          zero, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), j,
+      last with *
+    have transposeDet := determinant.transpose at A, add, zero, neg, mul, one,
+      length{A}(cs) + length{A}(ds), sylvesterBlockMatrix(A, zero, a, b, cs, ds,
+        length{A}(ds), length{A}(cs) + length{A}(ds)) with *
+    have weightsFunction := rowVectorWeights.function at
+      length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one,
+      restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+        mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+          length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+            cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+        length{A}(cs) + length{A}(ds)),
+      sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds)), j with *
+    have productWeights := matrixProductWeights.function at
+      length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one,
+      transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs,
+          ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+      adjugate(length{A}(cs) + length{A}(ds), R,
+        transposedMatrix(length{A}(cs) + length{A}(ds),
+          length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+            cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds)))), j, last
+      with *
+    have same : ∀ k ∈ length{A}(cs) + length{A}(ds),
+        rowVectorWeights(length{A}(cs) + length{A}(ds), R,
+          restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero,
+            neg, mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+              length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+                b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+                last),
+            length{A}(cs) + length{A}(ds)),
+          sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+            length{A}(cs) + length{A}(ds)), j)(k) =
+        matrixProductWeights(length{A}(cs) + length{A}(ds), R,
+          transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+          adjugate(length{A}(cs) + length{A}(ds), R,
+            transposedMatrix(length{A}(cs) + length{A}(ds),
+              length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+                b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds)))), j,
+          last)(k)
+      intros k hk
+      have rowValue := rowVectorWeights.value at
+        length{A}(cs) + length{A}(ds), A,
+        add, zero, neg, mul, one,
+        restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero,
+        neg,
+          mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+          length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), j, k with *
+      have productValue := matrixProductWeights.value at
+        length{A}(cs) + length{A}(ds), A, add, zero, neg, mul, one,
+        transposedMatrix(length{A}(cs) + length{A}(ds),
+          length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+            cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+        adjugate(length{A}(cs) + length{A}(ds), R,
+          transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds)))), j, last,
+        k with *
+      have transposeEntry := transposedMatrix.entry at
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs,
+          ds, length{A}(ds), length{A}(cs) + length{A}(ds)), j, k with *
+      have restrictValue := restrict.domain_apply at
+        adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg, mul,
+        one,
+          transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+        ℕ, A, length{A}(cs) + length{A}(ds), k with *
+      have columnValue := adjugateColumn.entry at length{A}(cs) + length{A}(ds),
+        A, add, zero, neg, mul, one, transposedMatrix(length{A}(cs) +
+          length{A}(ds), length{A}(cs) + length{A}(ds), A,
+          sylvesterBlockMatrix(A,
+            zero, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+        last, k with *
+      have entryS := RingMatrix.entry at length{A}(cs) + length{A}(ds), A,
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), k, j with *
+      have entryAdj := RingMatrix.entry at length{A}(cs) + length{A}(ds), A,
+        adjugate(length{A}(cs) + length{A}(ds), R,
+          transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds)))), k, last
+        with *
+      rw [rowValue, productValue, transposeEntry, restrictValue, columnValue]
+      ring
+    have sums := finiteRingSum.congr at length{A}(cs) + length{A}(ds), A, add,
+      zero, neg, mul, one,
+      rowVectorWeights(length{A}(cs) + length{A}(ds), R,
+        restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero,
+        neg,
+          mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))), last),
+          length{A}(cs) + length{A}(ds)),
+        sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+          length{A}(cs) + length{A}(ds)), j),
+      matrixProductWeights(length{A}(cs) + length{A}(ds), R,
+        transposedMatrix(length{A}(cs) + length{A}(ds),
+          length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+            cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds))),
+        adjugate(length{A}(cs) + length{A}(ds), R,
+          transposedMatrix(length{A}(cs) + length{A}(ds),
+            length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a,
+            b,
+              cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds)))), j, last)
+      with *
+    unfold rowVectorEntry
+    unfold matrixProductEntry at product
+    rw [sums, product, transposeDet]
+    unfold resultant
+    unfold sylvesterMatrix
+    rfl
+  have reflexive : length{A}(cs) + length{A}(ds) ≤
+    length{A}(cs) + length{A}(ds) by arith
+  have coefficientLaw := sylvesterCombination.coefficient at A, add, zero, neg,
+    mul, one, a, b, adjugateColumn(length{A}(cs) + length{A}(ds), A, add,
+    zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds) with *
+  have combData := sylvesterCombination.data at A, add, zero, neg, mul, one, a,
+    b, adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds) with *
+  have combList := combData.left
+  have combLength := combData.right
+  have identityBijective := identity.bijective at length{A}(cs) + length{A}(ds)
+  have replicateList := listReplicate.closed at A, zero, last with zeroIn
+  have replicateLength := listReplicate.length at A, zero, last with zeroIn
+  have equalLists : sylvesterCombination{A}(add, zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds)) =
+      resultant(R, a, cs, b, ds) :: listReplicate(last, zero)
+    have sameLength : length{A}(sylvesterCombination{A}(add, zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds))) =
+        length{A}(resultant(R, a, cs, b, ds) :: listReplicate(last, zero))
+      rw [combLength, length.cons, replicateLength]
+      exact sShape
+    have entries : ∀ j, Nat(j) → j < length{A}(sylvesterCombination{A}(add,
+      zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds))) →
+        listCoefficient{A}(zero, sylvesterCombination{A}(add, zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds)), j) =
+        listCoefficient{A}(zero, resultant(R, a, cs, b,
+        ds) :: listReplicate(last, zero), j)
+      intros j jNat jBound
+      rw combLength at jBound
+      have jLe : j ≤ last by arith
+      obtain ⟨e, eNat, splitE⟩ := LessEqual.exists_add with jLe
+      have position := natural.position_of_split at j, e, last with splitE
+      rw ← sShape at position
+      have value := coefficientLaw with j, e, jNat, eNat, position
+      have eBelow : e < length{A}(cs) + length{A}(ds) by arith
+      have eRule := membership.of_Less at e,
+        length{A}(cs) + length{A}(ds) with *
+      have eMember := eRule with eBelow
+      have weightsFunction := rowVectorWeights.function at
+        length{A}(cs) + length{A}(ds), A, add, zero, neg,
+        mul, one, restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A,
+        add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last),
+        length{A}(cs) + length{A}(ds)), sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds)), e with *
+      have enumeration := finiteRingSum.enumeration at
+        length{A}(cs) + length{A}(ds), A, add, zero, neg,
+        mul, one, rowVectorWeights(length{A}(cs) + length{A}(ds), R,
+        restrict(adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero,
+        neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last),
+        length{A}(cs) + length{A}(ds)), sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds)), e),
+        identity(length{A}(cs) + length{A}(ds)),
+        length{A}(cs) + length{A}(ds) with *
+      have selected := identity with e, eMember
+      unfold rowVectorEntry at selected
+      rw [value, ← enumeration, selected]
+      have shapeJ := natural.zero_or_successor at j with jNat
+      cases shapeJ with jZero | jSucc
+      . have eLast : e = last by arith
+        have delta := singleValue.same at A, zero, resultant(R, a, cs, b, ds),
+          last, e with *
+        have head := listCoefficient.zero at A, zero, resultant(R, a, cs, b,
+          ds),
+          listReplicate(last, zero) with resultantIn
+        rw [delta, jZero, head]
+        rfl
+      . obtain ⟨j2, j2Nat, jShape⟩ := jSucc
+        have eNotLast : e ≠ last
+          intro equal
+          rw [jShape, equal] at splitE
+          arith
+        have delta := singleValue.other at A, zero, resultant(R, a, cs, b,
+          ds), last, e with *
+        have tail := listCoefficient.succ at A, zero, resultant(R, a, cs, b,
+          ds),
+          listReplicate(last, zero), j2 with resultantIn
+        have j2Below : j2 < last by arith
+        have padding := listReplicate.coefficient at A, zero, zero, last, j2
+          with *
+        rw [delta, jShape, tail, padding]
+        rfl
+    exact listCoefficient.ext at A, zero, sylvesterCombination{A}(add, zero,
+      mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds)),
+      resultant(R, a, cs, b, ds) :: listReplicate(last, zero) with *
+  have variable := polynomialVariable.member at oneVariable, A, zero, one,
+    (0 : Nat) with *
+  have constantIn := polynomialConstant.member at oneVariable, A, zero,
+    resultant(R, a, cs, b, ds)
+    with *
+  have polyComb : hornerPoly{A}(add, zero, neg, mul, one, zero,
+    sylvesterCombination{A}(add, zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds,
+        length{A}(cs) + length{A}(ds))) =
+      polynomialConstant(oneVariable, R, resultant(R, a, cs, b, ds))
+    have replicateZero := hornerPoly.replicate_zero at A, add, zero, neg, mul,
+      one, last with *
+    rw equalLists
+    unfold hornerPoly at replicateZero
+    unfold hornerPoly
+    rw [polynomialFromHorner.cons, replicateZero]
+    ring
+  have rowsP : ∀ k, ∀ d, Nat(k) → Nat(d) → k + d + 1 = length{A}(ds) →
+      hornerPoly{A}(add, zero, neg, mul, one, zero,
+        reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds, (0 : Nat) + k))) =
+      P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), d) *
+        hornerPoly{A}(add, zero, neg, mul, one, a, cs)]
+    intros k d kNat dNat split
+    have shift := add.left_unit at k
+    rw shift
+    exact sylvesterRowPadded.poly_upper at A, add, zero, neg, mul, one, a, b,
+      cs,
+      ds, k, d with split
+  have withinP : (0 : Nat) + length{A}(ds) ≤ length{A}(cs) + length{A}(ds)
+    by arith
+  have blockP := sylvesterCombination.block at A, add, zero, neg, mul, one, a,
+    b,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), hornerPoly{A}(add, zero, neg,
+        mul, one, a, cs), cs, ds, (0 : Nat),
+    length{A}(ds), length{A}(ds) with *
+  have reflexiveN : length{A}(ds) ≤ length{A}(ds) by arith
+  have valueP := blockP with reflexiveN
+  have rowsQ : ∀ k, ∀ d, Nat(k) → Nat(d) → k + d + 1 = length{A}(cs) →
+      hornerPoly{A}(add, zero, neg, mul, one, zero,
+        reverse{A}(sylvesterRowPadded{A}(zero, a, b, cs, ds,
+          length{A}(ds) + k))) =
+      P[monoidPow(P, polynomialVariable(oneVariable, R, (0 : Nat)), d) *
+        hornerPoly{A}(add, zero, neg, mul, one, b, ds)]
+    intros k d kNat dNat split
+    have split1 : length{A}(ds) + k = length{A}(ds) + k by rfl
+    exact sylvesterRowPadded.poly_lower at A, add, zero, neg, mul, one, a, b,
+      cs,
+      ds, length{A}(ds) + k, k, d with split1, split
+  have withinQ : length{A}(ds) + length{A}(cs) ≤ length{A}(cs) + length{A}(ds)
+    by arith
+  have blockQ := sylvesterCombination.block at A, add, zero, neg, mul, one, a,
+    b,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), hornerPoly{A}(add, zero, neg,
+        mul, one, b, ds), cs, ds, length{A}(ds),
+    length{A}(cs), length{A}(cs) with *
+  have reflexiveM : length{A}(cs) ≤ length{A}(cs) by arith
+  have valueQ := blockQ with reflexiveM
+  have commuted := add.commutative at length{A}(cs), length{A}(ds)
+  rw commuted at valueQ
+  have zeroAdd := add.left_unit at length{A}(ds)
+  rw zeroAdd at valueP
+  have selfSplitC : length{A}(cs) = length{A}(cs) + 0 by arith
+  have selfSubC := sub.of_add at length{A}(cs), length{A}(cs), 0 with selfSplitC
+  have selfSplitD : length{A}(ds) = length{A}(ds) + 0 by arith
+  have selfSubD := sub.of_add at length{A}(ds), length{A}(ds), 0 with selfSplitD
+  have usWindow := coefficientWindow.closed at A,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat), length{A}(ds)
+    with weights
+  have vsWindow := coefficientWindow.closed at A,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+    length{A}(cs) with weights
+  have usWindowLength := coefficientWindow.length at A,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat),
+    length{A}(ds) with weights
+  have vsWindowLength := coefficientWindow.length at A,
+    adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+    length{A}(cs) with weights
+  have usList : List(A,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat),
+    length{A}(ds)))) by typecheck
+  have vsList : List(A,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+    length{A}(cs)))) by typecheck
+  have usNil := append.nil at A,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat),
+    length{A}(ds)))
+  have vsNil := append.nil at A,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last),
+    length{A}(ds), length{A}(cs)))
+  rw [selfSubC, listReplicate.zero, vsNil] at valueQ
+  rw [selfSubD, listReplicate.zero, usNil] at valueP
+  have combZero : sylvesterCombination{A}(add, zero, mul, a, b,
+      adjugateColumn(length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), cs, ds, (0 : Nat)) =
+      listReplicate(length{A}(cs) + length{A}(ds), zero)
+    simp [sylvesterCombination]
+  have replicateZero := hornerPoly.replicate_zero at A, add, zero, neg, mul,
+    one,
+    length{A}(cs) + length{A}(ds) with *
+  rw [combZero, replicateZero] at valueP
+  have usLength : length{A}(reverse{A}(coefficientWindow(adjugateColumn(
+      length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat),
+      length{A}(ds)))) = length{A}(ds)
+    rw [reverse.length, usWindowLength]
+    rfl
+  have vsLength : length{A}(reverse{A}(coefficientWindow(adjugateColumn(
+      length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+      length{A}(cs)))) = length{A}(cs)
+    rw [reverse.length, vsWindowLength]
+    rfl
+  have usPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat),
+        length{A}(ds))) with *
+  have vsPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+        length{A}(cs))) with *
+  refine ⟨reverse{A}(coefficientWindow(adjugateColumn(
+      length{A}(cs) + length{A}(ds), A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), (0 : Nat), length{A}(ds))),
+        usList,
+    reverse{A}(coefficientWindow(adjugateColumn(length{A}(cs) + length{A}(ds),
+    A, add, zero, neg,
+      mul, one, transposedMatrix(length{A}(cs) + length{A}(ds),
+        length{A}(cs) + length{A}(ds), A, sylvesterBlockMatrix(A, zero, a, b,
+        cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))), last), length{A}(ds),
+        length{A}(cs))), vsList,
+    usLength, vsLength, ?_⟩
+  rw [← polyComb, valueQ, valueP]
+  ring
 
--- At a common root the resultant vanishes.
+-- At a common root the resultant vanishes (m + n > 0 added in round 1).
 theorem resultant.eq_zero_of_common_root (r : Set) (cs ds : List(A))
+  requires positive : 0 < length{A}(cs) + length{A}(ds)
   requires center : r ∈ R
   requires rootLeft : hornerAt{A}(add, mul, a, r, cs) = R[0]
   requires rootRight : hornerAt{A}(add, mul, b, r, ds) = R[0]
   shows resultant(R, a, cs, b, ds) = R[0]
 proof
-  sorry
-
-end Rings
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have polynomials := polynomials.comm_ring at oneVariable, A, add, zero, neg,
+    mul, one with *
+  have polynomialRing := IsCommRing.ring with polynomials
+  obtain ⟨us, usList, vs, vsList, usLength, vsLength, identity⟩ :=
+    resultant.combination at A, add, zero, neg, mul, one, a, b, cs, ds with *
+  have assignment := constantFunction.function at oneVariable, A, r with *
+  have hom := polynomialAt.hom at oneVariable, A, add, zero, neg, mul, one,
+    constantFunction(oneVariable, A, r) with *
+  have usPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    us with *
+  have vsPoly := hornerPoly.member at A, add, zero, neg, mul, one, zero,
+    vs with *
+  have pMember := hornerPoly.member at A, add, zero, neg, mul, one, a, cs with *
+  have qMember := hornerPoly.member at A, add, zero, neg, mul, one, b, ds with *
+  have leftIn := IsRing.mul_closed with polynomialRing, usPoly, pMember
+  have rightIn := IsRing.mul_closed with polynomialRing, vsPoly, qMember
+  have resultantIn := resultant.closed at A, add, zero, neg, mul, one, a, b, cs,
+    ds with *
+  have mapped : polynomialAt(oneVariable, R, constantFunction(oneVariable, A,
+      r))(P[hornerPoly{A}(add, zero, neg, mul, one, zero, us) *
+        hornerPoly{A}(add, zero, neg, mul, one, a, cs) +
+        hornerPoly{A}(add, zero, neg, mul, one, zero, vs) *
+        hornerPoly{A}(add, zero, neg, mul, one, b, ds)]) =
+      polynomialAt(oneVariable, R, constantFunction(oneVariable, A,
+        r))(polynomialConstant(oneVariable, R, resultant(R, a, cs, b, ds)))
+    rw identity
+    rfl
+  have addLaw := IsRingHom.add with hom, leftIn, rightIn
+  have mulLawP := IsRingHom.mul with hom, usPoly, pMember
+  have mulLawQ := IsRingHom.mul with hom, vsPoly, qMember
+  have valueP := hornerPoly.value at A, add, zero, neg, mul, one, a, r,
+    cs with *
+  have valueQ := hornerPoly.value at A, add, zero, neg, mul, one, b, r,
+    ds with *
+  have constantLaw := polynomialAt.constant at oneVariable, A, add, zero, neg,
+    mul, one, constantFunction(oneVariable, A, r), resultant(R, a, cs, b, ds)
+    with *
+  rw [addLaw, mulLawP, mulLawQ, valueP, valueQ, rootLeft, rootRight,
+    constantLaw]
+    at mapped
+  have usValue := IsRingHom.closed with hom, usPoly
+  have vsValue := IsRingHom.closed with hom, vsPoly
+  rw ← mapped
+  ring
+end Rings2
 
 section Homomorphisms
 variable (A add zero neg mul one B plus z minus times unit h a b : Set)
@@ -208,11 +3546,101 @@ hypothesis hom : IsRingHom(h, R, S)
 hypothesis left : a ∈ R
 hypothesis right : b ∈ R
 
+theorem sylvesterRow.map (cs : List(A)) (i : Nat)
+  shows listMap{A}(h, sylvesterRow{A}(zero, a, cs, i)) =
+    sylvesterRow{B}(z, h(a), listMap{A}(h, cs), i)
+proof
+  have function := IsRingHom.function with hom
+  have ordinary := IsCommRing.ring with source
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have mapsZero := IsRingHom.zero with hom
+  have full := hornerFullList.list at A, a, cs with left
+  have reversed : List(A, reverse{A}(hornerFullList{A}(a, cs))) by typecheck
+  have zeros := listReplicate.closed at A, zero, i with zeroIn
+  have fullMap := hornerFullList.map at A, add, zero, neg, mul, one, B, plus, z,
+    minus, times, unit, h, a, cs with *
+  have reverseMap := listMap.reverse at A, B, h, hornerFullList{A}(a, cs)
+    with function
+  have zerosMap := listReplicate.map at A, B, h, zero, i with function, zeroIn
+  unfold sylvesterRow
+  rw [listMap.append, reverseMap, fullMap, zerosMap, mapsZero]
+  rfl
+
 theorem resultant.map (cs ds : List(A))
   shows h(resultant(R, a, cs, b, ds)) =
     resultant(S, h(a), listMap{A}(h, cs), h(b), listMap{A}(h, ds))
 proof
-  sorry
+  have function := IsRingHom.function with hom
+  have ordinary := IsCommRing.ring with source
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have mapsZero := IsRingHom.zero with hom
+  have mappedLeft := IsRingHom.closed with hom, left
+  have mappedRight := IsRingHom.closed with hom, right
+  have csMapped := listMap.closed at A, B, h, cs with function
+  have dsMapped := listMap.closed at A, B, h, ds with function
+  have csLength := listMap.length at A, B, h, cs with function
+  have dsLength := listMap.length at A, B, h, ds with function
+  have matrixM := sylvesterBlockMatrix.matrix at A, add, zero, neg, mul, one, a,
+    b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds) with *
+  have matrixN := sylvesterBlockMatrix.matrix at B, plus, z, minus, times, unit,
+    h(a), h(b), listMap{A}(h, cs), listMap{A}(h, ds), length{A}(ds),
+    length{A}(cs) + length{A}(ds) with *
+  have sizeNat : Nat(length{A}(cs) + length{A}(ds)) by typecheck
+  have positions := natural.member at length{A}(cs) + length{A}(ds)
+  have entries : ∀ i ∈ length{A}(cs) + length{A}(ds),
+      ∀ j ∈ length{A}(cs) + length{A}(ds),
+      sylvesterBlockMatrix(B, z, h(a), h(b), listMap{A}(h, cs), listMap{A}(h,
+      ds),
+        length{A}(ds), length{A}(cs) + length{A}(ds))[i, j] =
+      h(sylvesterBlockMatrix(A, zero, a, b, cs, ds, length{A}(ds),
+        length{A}(cs) + length{A}(ds))[i, j])
+    intros i hi j hj
+    have iNat := positions with i, hi
+    have jNat := positions with j, hj
+    have rowRule := Less.of_membership at i,
+      length{A}(cs) + length{A}(ds) with *
+    have row := rowRule with hi
+    have columnRule := Less.of_membership at j, length{A}(cs) + length{A}(ds)
+      with *
+    have column := columnRule with hj
+    have alternatives : i < length{A}(ds) ∨ ¬(i < length{A}(ds)) by tauto
+    cases alternatives with upper | lower
+    . have entryM := sylvesterBlockMatrix.entry_upper at A, add, zero, neg, mul,
+        one, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), i, j
+        with *
+      have entryN := sylvesterBlockMatrix.entry_upper at B, plus, z, minus,
+        times,
+        unit, h(a), h(b), listMap{A}(h, cs), listMap{A}(h, ds), length{A}(ds),
+        length{A}(cs) + length{A}(ds), i, j with *
+      have rowMap := sylvesterRow.map at A, add, zero, neg, mul, one, B, plus,
+        z,
+        minus, times, unit, h, a, b, cs, i with *
+      have rowList := sylvesterRow.list at A, zero, a, cs, i with *
+      have coefficientMap := listCoefficient.map at A, B, h, zero,
+        sylvesterRow{A}(zero, a, cs, i), j with function, zeroIn
+      rw [entryM, entryN, ← coefficientMap, rowMap, mapsZero]
+      rfl
+    . have bound := LessEqual.of_not_Less with lower
+      have entryM := sylvesterBlockMatrix.entry_lower at A, add, zero, neg, mul,
+        one, a, b, cs, ds, length{A}(ds), length{A}(cs) + length{A}(ds), i, j
+        with *
+      have entryN := sylvesterBlockMatrix.entry_lower at B, plus, z, minus,
+        times,
+        unit, h(a), h(b), listMap{A}(h, cs), listMap{A}(h, ds), length{A}(ds),
+        length{A}(cs) + length{A}(ds), i, j with *
+      have rowMap := sylvesterRow.map at A, add, zero, neg, mul, one, B, plus,
+        z,
+        minus, times, unit, h, b, b, ds, i - length{A}(ds) with *
+      have rowList := sylvesterRow.list at A, zero, b, ds, i - length{A}(ds)
+        with *
+      have coefficientMap := listCoefficient.map at A, B, h, zero,
+        sylvesterRow{A}(zero, b, ds, i - length{A}(ds)), j with function, zeroIn
+      rw [entryM, entryN, ← coefficientMap, rowMap, mapsZero]
+      rfl
+  unfold resultant
+  unfold sylvesterMatrix
+  rw [csLength, dsLength]
+  exact determinant.map with *
 
 end Homomorphisms
 
@@ -234,7 +3662,10 @@ theorem resultant.evaluate (cs ds : List(polynomials(I, A, zero)))
       polynomialAt(I, R, v)(b),
       listMap{polynomials(I, A, zero)}(polynomialAt(I, R, v), ds))
 proof
-  sorry
+  have polynomials := polynomials.comm_ring at I, A, add, zero, neg, mul, one
+    with *
+  have evaluation := polynomialAt.hom with *
+  exact resultant.map with *
 
 end Evaluation
 
@@ -249,13 +3680,27 @@ def resultantOf (a b cs ds : Set) : Set :=
 instance resultantOf.mem (a b : R) (cs ds : List(R.carrier))
   shows resultantOf(a, b, cs, ds) ∈ R
 proof
-  sorry
+  have parts := CommRing.parts with comm
+  have aIn : a ∈ R by assumption
+  have bIn : b ∈ R by assumption
+  unfold resultantOf
+  exact resultant.closed at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, a, b,
+    cs, ds with *
 
+-- m + n > 0 added in round 1 (two zero constants have resultant 1).
 theorem resultantOf.eq_zero_of_common_root (a b r : R) (cs ds : List(R.carrier))
+  requires positive : 0 < length{R.carrier}(cs) + length{R.carrier}(ds)
   requires rootLeft : horner(R, a, r, cs) = R[0]
   requires rootRight : horner(R, b, r, ds) = R[0]
   shows resultantOf(a, b, cs, ds) = R[0]
 proof
-  sorry
-
+  have parts := CommRing.parts with comm
+  have aIn : a ∈ R by assumption
+  have bIn : b ∈ R by assumption
+  have rIn : r ∈ R by assumption
+  rw horner.graph at rootLeft
+  rw horner.graph at rootRight
+  unfold resultantOf
+  exact resultant.eq_zero_of_common_root at R.carrier, R.add, R.zero, R.neg,
+    R.mul, R.one, a, b, r, cs, ds with *
 end Bundled
