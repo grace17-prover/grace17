@@ -292,7 +292,7 @@ graph TD
 | CAD.HornerMultiplicity | 26 | 26 | 0 |
 | CAD.RealPowerRule | 23 | 23 | 0 |
 | CAD.RealHorner | 31 | 31 | 0 |
-| CAD.RealSquarefree | 9 | 0 | 9 |
+| CAD.RealSquarefree | 72 | 72 | 0 |
 | CAD.Discriminant | 10 | 0 | 10 |
 | CAD.HornerRootCount | 21 | 21 | 0 |
 | CAD.RealSign | 25 | 25 | 0 |
@@ -300,10 +300,10 @@ graph TD
 | CAD.RealConstantSign | 13 | 13 | 0 |
 | CAD.RealFiniteExtrema | 24 | 24 | 0 |
 | CAD.StrictlyIncreasingList | 19 | 19 | 0 |
-| CAD.RealRootOrder | 11 | 0 | 11 |
+| CAD.RealRootOrder | 17 | 17 | 0 |
 | CAD.SignVariations | 30 | 30 | 0 |
 | CAD.Sturm | 30 | 3 | 27 |
 | CAD.Subresultant | 11 | 0 | 11 |
 | CAD.Thom | 9 | 3 | 6 |
-| **total** | **570** | **462** | **108** |
+| **total** | **639** | **551** | **88** |
 <!-- /blueprint-status -->
