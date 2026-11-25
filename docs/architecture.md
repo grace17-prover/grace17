@@ -349,7 +349,7 @@ kernel admission.
 ## Proof export and visualization
 
 The kernel retains each admitted theorem's checked certificate. `exportTheorem`
-packages that certificate as `grace17.proof` version 4 with:
+packages that certificate as `grace17.proof` version 5 with:
 
 - the theorem statement and theorem name;
 - the exact environment digest;
@@ -360,19 +360,31 @@ packages that certificate as `grace17.proof` version 4 with:
 - the transitive axiom, theorem, and definition dependency sets;
 - an envelope digest binding all of the above.
 
+A judgment's context repeats its parent's formulas, so in the file
+(`exportedProofText`, read back by `parseExportedProof`) every formula outside
+the proof DAG is written once, in a `formulas` table, and referenced elsewhere
+as `{"$": index}`; the envelope digest covers that form. The file grows with
+the distinct formulas of a proof rather than with its judgments times their
+contexts. A version 4 export, which wrote every formula where it occurs, still
+verifies.
+
 `verifyExportedProof` checks the envelope and environment, validates the DAG's
 digest and backward-only topology, replays every primitive inference, and
 compares the derived formula with both the exported and registered statements.
 It also regenerates and compares the judgment trace, so a certificate cannot
-misreport an intermediate goal even if its envelope digest is recomputed. JSON
-serialization and parsing preserve verifiability.
+misreport an intermediate goal even if its envelope digest is recomputed. Writing
+and reading the file preserve verifiability.
 
 `g17 view` renders the same export as a dependency-free HTML proof explorer.
 Its primary view follows the proof script you wrote, showing the focused goal
 and local facts after every tactic. A collapsed “Drill into kernel proof”
 section exposes the primitive inference tree, where every node shows its active
 context, established formula, and premises. It also includes links for shared
-judgments, raw kernel data, and the environment and envelope hashes. Example
+judgments, raw kernel data, and the environment and envelope hashes. When the
+written-out tree would be too large, the page carries each formatted formula
+once and renders a judgment when it is opened; following a shared-judgment
+link or a `#kernel-step-N` address opens the path to it, and judgments past a
+few levels stop indenting and show their depth. Example
 outputs are `../examples/pair-left-judgments.html` and
 `../examples/membership-identity.*`; the latter shows assumption introduction
 and discharge clearly.

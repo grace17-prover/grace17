@@ -4,7 +4,7 @@
 // Authors: Grant Passmore
 
 import {
-  and, canonicalDigest, canonicalEquals, formulaEquals, formulaCanonical, pred, substituteFormula, v, type Formula,
+  and, canonical, canonicalDigest, canonicalEquals, formulaEquals, formulaCanonical, pred, substituteFormula, v, type Formula,
 } from "./ast.ts";
 import { checkProofDag, decodeProofDag, encodeProofDagWithIndex, type ProofDag } from "./dag.ts";
 import { KernelError, type Kernel } from "./kernel.ts";
@@ -17,9 +17,14 @@ export interface ProofDependencies {
   readonly definitions: readonly string[];
 }
 
+/**
+ * A proof export in memory. Version 5 is what `exportTheorem` makes; its
+ * digest covers the file form (see `encodeExportedProof`). A version 4
+ * object, whose digest covers this form itself, still verifies.
+ */
 export interface ExportedProof {
   readonly format: "grace17.proof";
-  readonly version: 4;
+  readonly version: 4 | 5;
   readonly theorem: string;
   readonly environment: string;
   readonly statement: Formula;
@@ -53,7 +58,167 @@ export interface ProofTrace {
 
 export function exportTheorem(kernel: Kernel, name: string): ExportedProof {
   const body = exportTheoremBody(kernel, name);
-  return Object.freeze({ ...body, digest: digestExport(body) });
+  const exported = Object.freeze({ ...body, digest: digestExport(body) });
+  encodedExports.set(exported, encodeExportedProof(body));
+  return exported;
+}
+
+/** A formula of an export's file form: an index into its `formulas`. */
+export interface FormulaReference { readonly $: number }
+
+/**
+ * The file form of a version 5 export. A judgment's context repeats the
+ * formulas of its parent's, so writing every formula in full where it
+ * occurs made the file of a large proof grow with the product of its
+ * judgments and their contexts. Here every formula outside the proof DAG
+ * is written once, in `formulas`, and referenced elsewhere by index; the
+ * proof DAG is shared already.
+ */
+export interface EncodedProofExport {
+  readonly format: "grace17.proof";
+  readonly version: 5;
+  readonly theorem: string;
+  readonly environment: string;
+  readonly formulas: readonly Formula[];
+  readonly statement: FormulaReference;
+  readonly dependencies: ProofDependencies;
+  readonly proof: ProofDag;
+  readonly trace: unknown;
+  readonly tactics?: unknown;
+}
+
+const formulaTags = new Set(["bottom", "eq", "pred", "imp", "forall", "and", "or", "iff", "exists"]);
+function isFormula(value: unknown): value is Formula {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    formulaTags.has((value as { tag?: unknown }).tag as string);
+}
+
+const encodedExports = new WeakMap<object, EncodedProofExport>();
+
+/** The file form of a version 5 export, without its digest. */
+export function encodeExportedProof(exported: Omit<ExportedProof, "digest">): EncodedProofExport {
+  const known = encodedExports.get(exported);
+  if (known) return known;
+  const formulas: Formula[] = [];
+  const byObject = new Map<object, number>();
+  const byText = new Map<string, number>();
+  const reference = (formula: Formula): FormulaReference => {
+    let index = byObject.get(formula);
+    if (index === undefined) {
+      // Exact text: formulaCanonical identifies formulas up to their bound
+      // names, and the trace must come back exactly as written.
+      const text = canonical(formula);
+      index = byText.get(text);
+      if (index === undefined) {
+        index = formulas.length;
+        formulas.push(formula);
+        byText.set(text, index);
+      }
+      byObject.set(formula, index);
+    }
+    return { $: index };
+  };
+  const encode = (value: unknown): unknown => {
+    if (isFormula(value)) return reference(value);
+    if (Array.isArray(value)) return value.map(encode);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, encode(item)]));
+  };
+  const statement = reference(exported.statement);
+  const trace = encode(exported.trace);
+  const tactics = exported.tactics === undefined ? undefined : encode(exported.tactics);
+  const encoded: EncodedProofExport = {
+    format: "grace17.proof",
+    version: 5,
+    theorem: exported.theorem,
+    environment: exported.environment,
+    formulas,
+    statement,
+    dependencies: exported.dependencies,
+    proof: exported.proof,
+    trace,
+    ...(tactics === undefined ? {} : { tactics }),
+  };
+  encodedExports.set(exported, encoded);
+  return encoded;
+}
+
+/** The export a file form denotes, its formulas shared as they are referenced. */
+export function decodeExportedProof(encoded: EncodedProofExport & { readonly digest: string }): ExportedProof {
+  const formulas = encoded.formulas;
+  if (!Array.isArray(formulas) || !formulas.every(isFormula)) throw new KernelError("Malformed or corrupted exported proof");
+  const resolve = (item: FormulaReference): Formula => {
+    const formula = Number.isSafeInteger(item.$) ? formulas[item.$] : undefined;
+    if (!formula) throw new KernelError("Exported proof refers to a missing formula");
+    return formula;
+  };
+  const decode = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(decode);
+    if (value === null || typeof value !== "object") return value;
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === "$") return resolve(value as FormulaReference);
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decode(item)]));
+  };
+  return {
+    format: encoded.format,
+    version: encoded.version,
+    theorem: encoded.theorem,
+    environment: encoded.environment,
+    statement: resolve(encoded.statement),
+    dependencies: encoded.dependencies,
+    proof: encoded.proof,
+    trace: decode(encoded.trace) as ProofTrace,
+    ...(encoded.tactics === undefined ? {} : { tactics: decode(encoded.tactics) as TacticTrace }),
+    digest: encoded.digest,
+  };
+}
+
+/**
+ * The text of an export's file, in pieces: one line for each formula of the
+ * table, each judgment, and each tactic step, so no piece is large however
+ * large the proof.
+ */
+export function* exportedProofText(exported: ExportedProof): Generator<string> {
+  if (exported.version !== 5) throw new KernelError("Only version 5 exports have a file form");
+  const encoded = { ...encodeExportedProof(exported), digest: exported.digest };
+  // Arrays and objects down to `depth` put each entry on its own line; deeper ones are one JSON text.
+  function* write(value: unknown, depth: number, indent: string): Generator<string> {
+    if (depth === 0 || value === null || typeof value !== "object") { yield JSON.stringify(value); return; }
+    const inner = `${indent}  `;
+    const entries: [string | undefined, unknown][] = Array.isArray(value)
+      ? value.map(item => [undefined, item])
+      : Object.entries(value).filter(([, item]) => item !== undefined);
+    if (entries.length === 0) { yield Array.isArray(value) ? "[]" : "{}"; return; }
+    yield Array.isArray(value) ? "[\n" : "{\n";
+    for (let index = 0; index < entries.length; index += 1) {
+      const [key, item] = entries[index]!;
+      yield `${inner}${key === undefined ? "" : `${JSON.stringify(key)}: `}`;
+      yield* write(item, depth - 1, inner);
+      yield index + 1 < entries.length ? ",\n" : "\n";
+    }
+    yield `${indent}${Array.isArray(value) ? "]" : "}"}`;
+  }
+  const depths: Record<string, number> = { formulas: 1, proof: 2, trace: 2, tactics: 2 };
+  const keys = Object.keys(encoded).filter(key => (encoded as Record<string, unknown>)[key] !== undefined);
+  yield "{\n";
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index]!;
+    yield `  ${JSON.stringify(key)}: `;
+    yield* write((encoded as Record<string, unknown>)[key], depths[key] ?? 0, "  ");
+    yield index + 1 < keys.length ? ",\n" : "\n";
+  }
+  yield "}\n";
+}
+
+/** The export a file's text holds, of either version; `verifyExportedProof` checks it. */
+export function parseExportedProof(text: string): ExportedProof {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new KernelError("Malformed or corrupted exported proof"); }
+  const record = value as { format?: unknown; version?: unknown } | null;
+  if (record === null || typeof record !== "object" || record.format !== "grace17.proof") throw new KernelError("Malformed or corrupted exported proof");
+  if (record.version === 4) return value as ExportedProof;
+  if (record.version !== 5) throw new KernelError("Malformed or corrupted exported proof");
+  return decodeExportedProof(value as EncodedProofExport & { readonly digest: string });
 }
 
 /**
@@ -68,7 +233,7 @@ export function exportTheoremBody(kernel: Kernel, name: string): Omit<ExportedPr
   const tactics = kernel.theoremTacticTraces.get(name);
   const body = {
     format: "grace17.proof" as const,
-    version: 4 as const,
+    version: 5 as const,
     theorem: name,
     environment: kernel.digest(),
     statement,
@@ -116,7 +281,7 @@ export function exportProofForMachine(
 
 export function verifyExportedProof(kernel: Kernel, exported: ExportedProof): Formula {
   const { digest, ...body } = exported;
-  if (exported.format !== "grace17.proof" || exported.version !== 4 || digest !== digestExport(body)) {
+  if (exported.format !== "grace17.proof" || (exported.version !== 4 && exported.version !== 5) || digest !== digestExport(body)) {
     throw new KernelError("Malformed or corrupted exported proof");
   }
   if (exported.environment !== kernel.digest()) throw new KernelError("Exported proof belongs to a different environment");
@@ -128,7 +293,7 @@ export function verifyExportedProof(kernel: Kernel, exported: ExportedProof): Fo
   const decoded = decodeProofDag(exported.proof);
   const nodeIds = new Map(decoded.map((proof, index) => [proof, index]));
   const expectedTrace = buildProofTrace(kernel, decoded[exported.proof.root]!, nodeIds);
-  if (!canonicalEquals(expectedTrace, exported.trace)) {
+  if (!traceEquals(expectedTrace, exported.trace)) {
     throw new KernelError("Exported proof judgment trace does not match the checked proof");
   }
   if (exported.tactics) validateTacticTrace(exported.tactics);
@@ -356,6 +521,32 @@ function isProof(value: unknown): value is Proof {
   return value !== null && typeof value === "object" && typeof (value as { rule?: unknown }).rule === "string";
 }
 
-function digestExport(body: object): string {
-  return canonicalDigest(body);
+/** Version 5 digests the file form; version 4 digested the export itself. */
+function digestExport(body: Omit<ExportedProof, "digest">): string {
+  return canonicalDigest(body.version === 5 ? encodeExportedProof(body) : body);
+}
+
+/**
+ * Whether two judgment traces are the same, as their canonical texts are.
+ * Their formulas recur across judgments, so a pair found equal once is not
+ * compared again.
+ */
+function traceEquals(expected: ProofTrace, actual: ProofTrace): boolean {
+  if (expected.root !== actual.root || expected.nodes.length !== actual.nodes.length) return false;
+  const equal = new Map<Formula, Set<Formula>>();
+  const same = (left: Formula, right: Formula): boolean => {
+    if (left === right || equal.get(left)?.has(right)) return true;
+    if (!canonicalEquals(left, right)) return false;
+    let known = equal.get(left);
+    if (!known) { known = new Set(); equal.set(left, known); }
+    known.add(right);
+    return true;
+  };
+  return expected.nodes.every((node, index) => {
+    const other = actual.nodes[index]!;
+    return canonicalEquals(Object.keys(node).sort(), Object.keys(other).sort()) && node.proofNode === other.proofNode &&
+      node.children.length === other.children.length && node.children.every((child, at) => child === other.children[at]) &&
+      node.assumptions.length === other.assumptions.length &&
+      node.assumptions.every((formula, at) => same(formula, other.assumptions[at]!)) && same(node.conclusion, other.conclusion);
+  });
 }

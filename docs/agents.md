@@ -73,7 +73,8 @@ node bin/g17.ts search 'name:transitive module:Set.Core'
 | TypeScript API, `checkWorkbenchFiles` | The same data in-process | The same structure, without a server |
 | `g17 axiom-audit --json` | What a proof depends on | Named axioms, schema instances, Choice usage, dependency paths |
 | Library search | Finding existing results | Qualified names, statements, source locations |
-| `g17 export`, independent checkers | Handing off a certificate | A proof tape replayable by the Python, OCaml, and Rust checkers |
+| `g17 export`, `g17 view` | Handing off or reading one proof | The proof DAG, every judgment with its context, and the tactic states, as JSON that `verifyExportedProof` replays, or as an HTML proof explorer |
+| `g17 compile`, independent checkers | Handing off a certificate | A proof tape replayable by the Python, OCaml, and Rust checkers |
 
 ## The structured checking API
 

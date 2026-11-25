@@ -5,12 +5,12 @@
 // Authors: Grant Passmore
 
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
 import {
   auditTheoremAxioms, callNative, compileProofModule, createSetTheoryKernel, encodeProofMachineBinary,
-  exportKernelEnvironment, exportTheorem, exportTheoremForMachine, KernelError, loadModuleGraph,
+  exportedProofText, exportKernelEnvironment, exportTheorem, exportTheoremForMachine, KernelError, loadModuleGraph,
   renderProofHtml, SurfaceError, verifyExportedProof, verifyProofMachineBinary,
   workbenchFailure, rememberFailureDisplay, renderCheckedWorkspace,
   type LoadedModule, type WorkbenchFile,
@@ -316,7 +316,8 @@ export function runCli(args: readonly string[]): void {
         verifyExportedProof(kernel, exported);
         const fallback = `${safeName(theorem)}.${command === "export" ? "g17proof.json" : "html"}`;
         const output = resolve(option("--out") ?? fallback);
-        writeFileSync(output, command === "export" ? `${JSON.stringify(exported, null, 2)}\n` : renderProofHtml(exported));
+        if (command === "export") writeTextPieces(output, exportedProofText(exported));
+        else writeFileSync(output, renderProofHtml(exported));
         const result = {
           ok: true,
           operation: command,
@@ -527,4 +528,19 @@ function usage(print: (line: string) => void): void {
   print("settings: --module-root dir, --artifacts dir or --store, --foundation F, and --heap MB on the command line; G17_MODULE_ROOTS,");
   print("  G17_ARTIFACTS, G17_FOUNDATION, G17_HEAP in the environment; then g17.json up from the working directory, then");
   print("  ~/.config/grace17/config.json; the bundled library is always a module root (docs/machine-interface.md, Settings).");
+}
+
+/** Write a text given in pieces, so a file may be larger than a string can be. */
+function writeTextPieces(path: string, pieces: Iterable<string>): void {
+  const file = openSync(path, "w");
+  try {
+    let pending = "";
+    for (const piece of pieces) {
+      pending += piece;
+      if (pending.length >= 1 << 20) { writeSync(file, pending); pending = ""; }
+    }
+    if (pending) writeSync(file, pending);
+  } finally {
+    closeSync(file);
+  }
 }
