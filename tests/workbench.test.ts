@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  checkWorkbenchFiles, checkWorkbenchSource, prepareWorkbenchFiles, runWorkbenchFiles, runWorkbenchFunction, theoremRanges, workbenchCacheSizes, workbenchFailure,
+  checkWorkbenchFiles, checkWorkbenchSource, prepareWorkbenchFiles, runWorkbenchFiles, runWorkbenchFunction, theoremRanges, releaseWorkbenchCaches, workbenchCacheSizes, workbenchFailure,
 } from "../src/workbench.ts";
 
 const source = `module WorkbenchTest
@@ -786,6 +786,64 @@ end Leaf.Release
   // The newest version is still a kept leaf: checking it again elaborates nothing.
   const sizes = workbenchCacheSizes();
   assert.equal(checkWorkbenchFiles([version(edits - 1)], "ZFG", ["LeafRelease.g17"]).ok, true);
+  assert.deepEqual(workbenchCacheSizes(), sizes);
+});
+
+test("a checkpoint dropped from the incremental cache is not kept alive by the files checked over it", () => {
+  // Each workspace imports its own version of a dependency, so each is a
+  // dependency graph of its own and gets a checkpoint; more graphs than the
+  // cache keeps push the oldest checkpoints out.
+  const workspace = (version: number) => [
+    { name: `Dropped${version}.g17`, source: `module Dropped${version}
+namespace Dropped${version}
+import Grace.Core
+theorem base (x : Set)
+  shows x = x
+proof
+  rfl
+
+end Dropped${version}
+` },
+    { name: `DroppedLeaf${version}.g17`, source: `module DroppedLeaf${version}
+namespace DroppedLeaf${version}
+import Dropped${version}
+theorem leaf (x : Set)
+  shows x = x
+proof
+  rfl
+
+end DroppedLeaf${version}
+` },
+  ];
+  for (let version = 0; version < 6; version += 1) {
+    const files = workspace(version);
+    assert.equal(checkWorkbenchFiles(files, "ZFG", [files[1]!.name]).ok, true);
+  }
+  const { incrementalBases, checkpoints } = workbenchCacheSizes();
+  assert.equal(checkpoints, incrementalBases, `leaves keep only kept checkpoints (${checkpoints} held, ${incrementalBases} kept)`);
+});
+
+test("releasing the workbench caches keeps the environment last used", () => {
+  const file = (edit: number) => ({ name: "Released.g17", source: `module Released
+namespace Released
+import Grace.Core
+theorem first (x : Set)
+  shows x = x
+proof
+  rfl
+-- edit ${edit}
+
+end Released
+` });
+  assert.equal(checkWorkbenchFiles([file(0)], "ZFG", ["Released.g17"]).ok, true);
+  releaseWorkbenchCaches();
+  const { incrementalBases, checkpoints, workspaceKernels } = workbenchCacheSizes();
+  assert.equal(incrementalBases, 1);
+  assert.equal(checkpoints, 1);
+  assert.equal(workspaceKernels, 0);
+  // The kept leaf answers again without elaborating anything.
+  const sizes = workbenchCacheSizes();
+  assert.equal(checkWorkbenchFiles([file(0)], "ZFG", ["Released.g17"]).ok, true);
   assert.deepEqual(workbenchCacheSizes(), sizes);
 });
 

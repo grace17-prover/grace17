@@ -341,10 +341,19 @@ function useLeafDeclarations(checkpoint: DependencyCheckpoint, kernel: ReturnTyp
 }
 
 /** How much the incremental caches hold, for tests and diagnostics. */
-export function workbenchCacheSizes(): { readonly incrementalBases: number; readonly checkedLeaves: number; readonly leafDeclarations: number } {
+export function workbenchCacheSizes(): {
+  readonly incrementalBases: number; readonly checkedLeaves: number; readonly leafDeclarations: number;
+  /** The checkpoints the caches keep alive, those kept leaves were checked over included. */
+  readonly checkpoints: number; readonly workspaceKernels: number;
+} {
   let declarations = 0;
   for (const checkpoint of incrementalBases.values()) declarations += leafDeclarations.get(checkpoint)?.cache.size ?? 0;
-  return { incrementalBases: incrementalBases.size, checkedLeaves: checkedLeaves.size, leafDeclarations: declarations };
+  const checkpoints = new Set<DependencyCheckpoint>(incrementalBases.values());
+  for (const leaf of checkedLeaves.values()) checkpoints.add(leaf.checkpoint);
+  return {
+    incrementalBases: incrementalBases.size, checkedLeaves: checkedLeaves.size, leafDeclarations: declarations,
+    checkpoints: checkpoints.size, workspaceKernels: workspaceKernels.size,
+  };
 }
 
 /** Release the leaf declarations of `checkpoint` that no kept or recent check uses. */
@@ -679,8 +688,30 @@ function matchingStandardCheckpoints(graph: DependencyGraph, profile: WorkbenchF
 
 function rememberCheckpoint(checkpoint: DependencyCheckpoint): DependencyCheckpoint {
   incrementalBases.set(checkpoint.key, checkpoint);
-  while (incrementalBases.size > maximumIncrementalBases) incrementalBases.delete(incrementalBases.keys().next().value!);
+  while (incrementalBases.size > maximumIncrementalBases) forgetCheckpoint(incrementalBases.values().next().value!);
   return checkpoint;
+}
+
+/**
+ * Drop a checkpoint and the leaves checked over it. A kept leaf holds its
+ * checkpoint's whole kernel, so leaves left behind would keep a dropped
+ * checkpoint alive, one per leaf.
+ */
+function forgetCheckpoint(checkpoint: DependencyCheckpoint): void {
+  incrementalBases.delete(checkpoint.key);
+  for (const [key, leaf] of checkedLeaves) if (leaf.checkpoint === checkpoint) checkedLeaves.delete(key);
+}
+
+/**
+ * Give back what the incremental caches hold beyond the most recently used
+ * checkpoint and the leaves checked over it, for a process near its heap
+ * limit: the next check of another dependency graph elaborates it again.
+ */
+export function releaseWorkbenchCaches(): void {
+  const kept = [...incrementalBases.values()].at(-1);
+  for (const checkpoint of [...incrementalBases.values()]) if (checkpoint !== kept) forgetCheckpoint(checkpoint);
+  for (const [key, leaf] of checkedLeaves) if (leaf.checkpoint !== kept) checkedLeaves.delete(key);
+  workspaceKernels.clear();
 }
 
 function dependencyCheckpoint(
