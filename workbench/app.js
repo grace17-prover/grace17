@@ -11,6 +11,7 @@ import { declaredParameterNames, moduleNameOf, changedTextParts, checkedFileProo
 import { declarationHelpAtTextOffset, documentedTacticFamilies, helpInferenceRule, highlightGrace17, tacticGuideSections, tacticHelpEntries } from "./tactics-guide.js";
 import { tacticReferenceNotes } from "./tactics-reference.js";
 import { requestWorkbench } from "./worker-client.js";
+import { expandInspectedKernel } from "./kernel-inspection.js";
 import { standardLibrary } from "./generated/shims/standard-library.js";
 import { version as WORKBENCH_VERSION } from "./generated/version.js";
 
@@ -1680,16 +1681,17 @@ async function renderSelectedKernel() {
   document.querySelector("#kernelSummary").textContent = "loading checked kernel proof…";
   try {
     const inspected = await requestWorkbench("inspect", {
-      files: workspacePayload(), activeFile: activeFile().name,
+      files: workspacePayload(), activeFile: activeFile().name, theorem: theoremName,
     });
     if (generation !== checkGeneration || !inspected.ok) return;
     const details = inspected.theorems.find(item => item.name === theoremName);
     if (!details) return;
+    const kernel = expandInspectedKernel(details);
     Object.assign(theorem, {
       proofNodes: details.proofNodes,
       judgments: details.judgments,
       dependencies: details.dependencies,
-      kernel: details.kernel,
+      kernel,
     });
     document.querySelector("#kernelSummary").textContent = `${theorem.kernel.length} proof lines`;
     if (document.querySelector("#kernelDrawer").open) renderKernel(theorem);
@@ -1703,7 +1705,7 @@ async function renderSelectedKernel() {
 function renderKernel(theorem) {
   const ordered = kernelFitchOrder(theorem.kernel);
   const byId = new Map(theorem.kernel.map(node => [node.id, node]));
-  const contextKey = node => JSON.stringify(node.assumptions);
+  const contextKey = node => node.contextKey ?? JSON.stringify(node.assumptions);
   const referenceById = new Map(ordered.map((node, index) => {
     let start = index;
     while (start > 0 && contextKey(ordered[start - 1]) === contextKey(node)) start -= 1;

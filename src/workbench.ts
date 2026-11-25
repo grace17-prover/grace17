@@ -872,7 +872,12 @@ export interface WorkbenchWorkspaceOptions {
 }
 
 export interface WorkbenchCheckOptions extends WorkbenchWorkspaceOptions {
-  readonly includeKernelDetails?: boolean;
+  /**
+   * Each theorem's kernel derivation (the default), none, or only that of the
+   * named theorems: a large proof's derivation runs to many megabytes, and a
+   * reader inspects one theorem at a time.
+   */
+  readonly includeKernelDetails?: boolean | readonly string[];
   readonly includeEnvironmentDigest?: boolean;
   /** Compute each theorem's dependencies even without kernel details. */
   readonly includeDependencies?: boolean;
@@ -1129,8 +1134,10 @@ function renderTheorem(
 ): WorkbenchTheorem {
   const statement = kernel.theorems.get(name)!;
   const tactics = kernel.theoremTacticTraces.get(name);
+  const selection = options.includeKernelDetails;
+  const kernelDetails = Array.isArray(selection) ? selection.includes(name) : selection !== false;
   const display = formulaDisplay(kernel, shortNames, notations, tactics?.rings, tactics?.operations, tactics?.predicates, tactics?.functors, tactics?.carriers, tactics?.functions);
-  const dependencies = options.includeKernelDetails === false && !options.includeDependencies && sorries.length === 0
+  const dependencies = !kernelDetails && !options.includeDependencies && sorries.length === 0
     ? { axioms: [], theorems: [], definitions: [] } as const
     : theoremDependencies(kernel, name);
   const theoremSorries = sorries.filter(sorry => dependencies.axioms.includes(sorry.axiom));
@@ -1144,7 +1151,7 @@ function renderTheorem(
     before: displayState(step.before, display),
     after: displayState(step.after, display),
   })) ?? [];
-  if (options.includeKernelDetails === false) return {
+  if (!kernelDetails) return {
     name,
     ...location,
     statement: display(statement),

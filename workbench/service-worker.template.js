@@ -11,7 +11,7 @@ const localWorkbench = ["127.0.0.1", "localhost", "[::1]"].includes(self.locatio
 const shell = [
   "/", "/index.html", "/styles.css", "/bootstrap.js", "/app.js", "/editor-utils.js", "/module-navigation.js", "/axiom-audit.js", "/tactics-guide.js",
   "/deep-links.js", "/library-search.js", "/library-search-worker.js", "/library-search-ui.js",
-  "/worker-client.js", "/browser-worker.js", "/manifest.webmanifest",
+  "/worker-client.js", "/browser-worker.js", "/kernel-inspection.js", "/manifest.webmanifest",
   "/generated/shims/standard-library.js",
   "/generated/version.js",
   "/assets/grace-icon.svg", "/assets/grace17-wordmark-dark.svg", "/assets/qed-mark.svg", "/assets/qed-mark-sorry.svg",

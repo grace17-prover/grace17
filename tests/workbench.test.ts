@@ -4,6 +4,7 @@
 // Authors: Grant Passmore
 
 import { resolveSymbolCandidate } from "../workbench/editor-utils.js";
+import { compactInspection, expandInspectedKernel } from "../workbench/kernel-inspection.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -814,6 +815,30 @@ end Prepared
   const detailed = checkWorkbenchFiles([file], "ZFG", [file.name], { includeKernelDetails: true });
   assert.ok(detailed.theorems[0]!.proofNodes > 0);
   assert.ok(detailed.theorems[0]!.kernel.length > 0);
+});
+
+test("kernel details for named theorems leave the others without, and an inspection carries one theorem compactly", () => {
+  const file = { name: "Sets.g17", source: readFileSync(fileURLToPath(new URL("../examples/Sets.g17", import.meta.url)), "utf8") };
+  const every = checkWorkbenchFiles([file], "ZFG", [file.name], { includeKernelDetails: true });
+  const one = checkWorkbenchFiles([file], "ZFG", [file.name], { includeKernelDetails: ["membership.identity"] });
+  assert.equal(every.ok, true);
+  const chain = one.theorems.find(item => item.name === "membership.identity");
+  assert.deepEqual(chain, every.theorems.find(item => item.name === "membership.identity"));
+  const others = one.theorems.filter(item => item.name !== "membership.identity");
+  assert.ok(others.length > 0 && others.every(item => item.kernel.length === 0 && item.proofNodes === 0));
+  assert.deepEqual(one.theorems.map(item => item.steps), every.theorems.map(item => item.steps));
+
+  const compact = compactInspection(one, "membership.identity");
+  assert.deepEqual(compact.theorems.map((item: { name: string }) => item.name), ["membership.identity"]);
+  const details = compact.theorems[0];
+  assert.equal(new Set(details.kernelAssumptions).size, details.kernelAssumptions.length);
+  assert.ok(details.kernel.some((node: { assumptions: number[] }) => node.assumptions.length > 0));
+  const rows = expandInspectedKernel(details);
+  assert.deepEqual(rows.map(({ contextKey: _key, ...node }: { contextKey: string }) => node), chain!.kernel);
+  for (const left of rows) for (const right of rows) {
+    assert.equal(left.contextKey === right.contextKey, JSON.stringify(left.assumptions) === JSON.stringify(right.assumptions));
+  }
+  assert.deepEqual(compactInspection({ ok: false, message: "x" }, "membership.identity"), { ok: false, message: "x" });
 });
 
 test("an opened core source overrides rather than duplicates an imported core module", () => {
