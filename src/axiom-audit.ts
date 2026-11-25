@@ -7,6 +7,7 @@ import { MachineOp, type ProofMachineModuleProgram } from "./machine.ts";
 import { KernelError, type Kernel, type KernelAdmissionEvent } from "./kernel.ts";
 import { formatFormula } from "./pretty.ts";
 import type { Proof } from "./proof.ts";
+import { largeCardinalOccurrences, type LargeCardinalHypothesis } from "./large-cardinals.ts";
 
 export interface AxiomAudit {
   readonly theorem: string;
@@ -20,6 +21,15 @@ export interface AxiomAudit {
   readonly unavailable: readonly { name: string; path: readonly string[] }[];
   readonly classicalLogic: boolean;
   readonly visited: number;
+  /**
+   * The registered large cardinal hypotheses (`register largecardinal`) the
+   * theorem's statement assumes, each with the shortest path to a lemma it
+   * relies on that assumes it too, when one does; and those it only mentions.
+   */
+  readonly largeCardinals: {
+    readonly assumes: readonly (LargeCardinalHypothesis & { readonly path: readonly string[] })[];
+    readonly mentions: readonly LargeCardinalHypothesis[];
+  };
 }
 
 type Ref = { kind: "theorem" | "definition"; name: string };
@@ -115,9 +125,17 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
       for (let i = 0; i < count; i++) pending.push(instruction[4 + i]!);
     }
   };
+  const own = largeCardinalOccurrences(kernel, kernel.theorems.get(theorem)!);
+  const assumedBy = new Map<string, Ref>();
   for (let cursor = 0; cursor < queue.length; cursor++) {
     const ref = queue[cursor]!;
     if (ref.kind === "theorem") {
+      if (ref !== root && own.assumes.length > 0 && assumedBy.size < own.assumes.length) {
+        const statement = kernel.theorems.get(ref.name);
+        if (statement) for (const item of largeCardinalOccurrences(kernel, statement).assumes) {
+          if (!assumedBy.has(item.predicate)) assumedBy.set(item.predicate, ref);
+        }
+      }
       const proof = kernel.theoremProofs.get(ref.name);
       const machine = kernel.theoremMachineProofs.get(ref.name);
       if (proof) scan(proof, ref);
@@ -159,5 +177,12 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
       direct: direct.has(name), path: [...path(axioms.get(name)!), `axiom ${name}`] })),
     mechanisms: mechanisms.sort((a, b) => a.name.localeCompare(b.name)),
     unavailable, classicalLogic, visited: queue.length,
+    largeCardinals: {
+      assumes: own.assumes.map(item => {
+        const by = assumedBy.get(item.predicate);
+        return { ...item, path: by ? path(by) : [theorem] };
+      }),
+      mentions: own.mentions,
+    },
   };
 }

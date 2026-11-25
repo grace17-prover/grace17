@@ -54,6 +54,39 @@ mechanisms to a minimal list of ZF axioms. A theorem may have another proof
 that uses fewer axioms. An imported choice symbol that occurs in a reflexive
 equality need not use the axiom of Choice at all.
 
+## Large cardinal hypotheses
+
+Grace17 adds no large cardinal axiom to any foundation. A predicate that
+states a large cardinal hypothesis is registered as one in the module that
+defines it,
+
+```g17 fragment
+register largecardinal TarskiGrothendieck "every set lies in a Grothendieck universe"
+```
+
+and a theorem that needs it takes it as a premise, usually as a hypothesis
+of its theorem section. The theorem's certificate is then a certificate,
+from the foundation's axioms, of the implication: the theorem holds in
+every universe of sets where the hypothesis does. Since ZF(C) proves no
+instance of such a hypothesis, a theorem that relies on a lemma assuming
+one must assume it too, and the theorem's own statement shows every large
+cardinal hypothesis it rests on.
+
+The audit's `largeCardinals` reads them off the statement. `assumes` lists
+the registered hypotheses that occur negatively, as a premise or under
+one, each with its `predicate`, its `label` (the registration's words), the
+`module` that registers it, and a `path`: the shortest dependency path to a
+lemma the proof uses that assumes it too, or the theorem alone when none
+does. `mentions` lists those that occur only positively, as in a theorem
+that proves a set is inaccessible; such a theorem assumes nothing. A
+hypothesis hidden inside the definition of another predicate is reported
+only if that predicate is registered too.
+
+In the Workbench a completed proof that assumes one carries a badge naming
+it, the audit hover adds it to the summary, and the audit panel lists each
+hypothesis with its path. The check result's theorems carry the same list
+as `largeCardinals`; the command-line audit prints a line for each.
+
 ## ZF checks
 
 The mathematical modules `Int`, `NumberTheory`, `Cardinal`, `Geometry`,

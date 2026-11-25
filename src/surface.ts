@@ -174,9 +174,16 @@ export interface SurfaceNotationRecord {
  * `Q := R ⧸ J` is the six terms on the right at the pieces of `R` and the
  * operand; the form after the pieces is an infix token and an operand, or
  * `[I]` for the bracket form `R[I]`.
+ *
+ * `register largecardinal TarskiGrothendieck "every set lies in a Grothendieck universe"`:
+ * the predicate states a large cardinal hypothesis. A theorem that assumes
+ * it is labelled so in audits and in the Workbench; the registration
+ * changes no statement and no proof.
  */
 export interface SurfaceRegistrationRecord {
-  readonly form: "kinds" | "application" | "facts" | "simp" | "ring";
+  readonly form: "kinds" | "application" | "facts" | "simp" | "ring" | "largecardinal";
+  /** `largecardinal`: what the hypothesis says, in words. */
+  readonly label?: string;
   /**
    * The declaration the registration is about: a structure predicate; for
    * `facts`, the head symbol of the pattern; for `simp`, the rule's
@@ -981,7 +988,8 @@ function surfaceIndexContentsMalformed(value: Record<string, unknown>): boolean 
           typeof item.hypothesis.predicate !== "string" || !Number.isSafeInteger(item.hypothesis.arity) ||
           !Array.isArray(item.hypothesis.names) || !Array.isArray(item.hypothesis.carriers)))) ||
       (value.registrations !== undefined && (!Array.isArray(value.registrations) ||
-        value.registrations.some(item => !surfaceIndexRecord(item) || !["kinds", "application", "facts", "simp", "ring"].includes(item.form as string) ||
+        value.registrations.some(item => !surfaceIndexRecord(item) || !["kinds", "application", "facts", "simp", "ring", "largecardinal"].includes(item.form as string) ||
+          (item.label !== undefined && typeof item.label !== "string") ||
           typeof item.predicate !== "string" || !Number.isSafeInteger(item.arity) ||
           (item.kinds !== undefined && (!Array.isArray(item.kinds) || item.kinds.some(kind =>
             !surfaceIndexRecord(kind) || typeof kind.name !== "string" || typeof kind.projection !== "string"))) ||
@@ -3534,7 +3542,8 @@ function registerNotationGuards(kernel: Kernel, notations: readonly SurfaceNotat
 const REGISTRATION_FORMS = "`register kinds Category object obj morphism mor`, " +
   "`register application Functor(F, C, D) over C object obj morphism map`, " +
   "`register facts Morphism(C, f, a, b) gives f ∈ C.mor ∧ a ∈ C.obj ∧ b ∈ C.obj`, " +
-  "`register simp union2.membership`, or " +
+  "`register simp union2.membership`, " +
+  "`register largecardinal TarskiGrothendieck \"every set lies in a Grothendieck universe\"`, or " +
   "`register ring (A, add, zero, neg, mul, one) ⧸ I := (…)`";
 
 /**
@@ -3562,6 +3571,8 @@ function elaborateRegistration(
   }
   const facts = /^register\s+facts\s+(.+?)(?:\s+with\s+(.+?))?\s+gives\s+(.+)$/u.exec(line.text);
   if (facts) { elaborateFactsRegistration(kernel, line, scope, environment, facts[1]!, facts[2], facts[3]!); return; }
+  const largeCardinal = /^register\s+largecardinal\s+(\S+)\s+"([^"]+)"$/u.exec(line.text);
+  if (largeCardinal) { elaborateLargeCardinalRegistration(kernel, line, scope, environment, largeCardinal[1]!, largeCardinal[2]!); return; }
   const simp = /^register\s+simp\s+(\S+)$/u.exec(line.text);
   if (simp) { elaborateSimpRegistration(kernel, line, scope, environment, simp[1]!); return; }
   const ring = /^register\s+ring\s+\(([^()]*)\)\s*(?:\[\s*([\p{L}_][\p{L}\p{M}\p{N}_]*)\s*\]|([^\s\p{L}\p{N}_(\[]+)\s*([\p{L}_][\p{L}\p{M}\p{N}_]*))\s*:=\s*(.+)$/u.exec(line.text);
@@ -3570,6 +3581,31 @@ function elaborateRegistration(
     return;
   }
   throw new SurfaceError(line.number, `expected ${REGISTRATION_FORMS}`);
+}
+
+/**
+ * `register largecardinal Inaccessible "an inaccessible cardinal"`: the
+ * predicate states a large cardinal hypothesis, described by the quoted
+ * words. ZF(C) proves no instance of it, so a theorem has it only as a
+ * premise, and audits and the Workbench report the theorems that do.
+ */
+function elaborateLargeCardinalRegistration(
+  kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment, rawPredicate: string, label: string,
+): void {
+  const predicate = resolveExisting(surfaceSymbol(rawPredicate), scope, candidate =>
+    kernel.predicates.has(candidate) && visibleDeclaration(candidate, scope), line.number, "large cardinal predicate");
+  registrationDeclared(environment, scope, line, "largecardinal", predicate, rawPredicate);
+  environment.registrations.push({
+    form: "largecardinal", predicate, arity: kernel.predicates.get(predicate)!, label,
+    ...(scope.moduleName ? { module: scope.moduleName } : {}),
+  });
+}
+
+/** The large cardinal hypotheses registered in the kernel's environment: each predicate, what it says, and its module. */
+export function largeCardinalRegistrations(kernel: Kernel): readonly { readonly predicate: string; readonly label: string; readonly module?: string }[] {
+  return (surfaceEnvironments.get(kernel)?.registrations ?? [])
+    .filter(item => item.form === "largecardinal")
+    .map(item => ({ predicate: item.predicate, label: item.label ?? "", ...(item.module ? { module: item.module } : {}) }));
 }
 
 /**
