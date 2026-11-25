@@ -119,6 +119,41 @@ test("a failing proof yields a diagnostic with position and the partial trace", 
   assert.equal(result.files[0]!.status, "failed");
 });
 
+test("check without states leaves out the states of the theorems that did not fail", () => {
+  const sets = [example("Sets.g17")];
+  const full = ok<MachineCheckResult>(handleMachineRequest({ id: 40, method: "check", params: { files: sets } }));
+  const lean = ok<MachineCheckResult>(handleMachineRequest({ id: 41, method: "check", params: { files: sets, states: false } }));
+  assert.ok(full.theorems.length >= 7 && full.theorems.every(theorem => theorem.steps.length > 0));
+  assert.ok(lean.theorems.every(theorem => !("steps" in theorem) && !("initial" in theorem)));
+  const rest = (theorem: object) => Object.fromEntries(Object.entries(theorem).filter(([key]) => key !== "steps" && key !== "initial"));
+  assert.deepEqual(lean.theorems, full.theorems.map(rest));
+  assert.ok(JSON.stringify(lean).length < JSON.stringify(full).length);
+
+  const files = [{ name: "Broken.g17", source: brokenSource }];
+  const broken = ok<MachineCheckResult>(handleMachineRequest({ id: 42, method: "check", params: { files, states: false } }));
+  assert.equal(broken.theorems[0]!.status, "failed");
+  assert.equal(broken.theorems[0]!.steps.length, 3);
+  const goal = ok(handleMachineRequest({ id: 43, method: "goal", params: { files, line: 10, column: 3 } }));
+  assert.equal(goal.state.goals[0].goal, "x ∈ A → x ∈ C");
+
+  const cli = (...args: string[]) => spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", "bin/g17.ts", "check", "--json", "--no-states", ...args], { cwd: project, encoding: "utf8" });
+  const checked = cli("examples/Sets.g17");
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.deepEqual(JSON.parse(checked.stdout).theorems.map((theorem: { name: string; status: string; steps?: unknown }) => [theorem.name, theorem.status, theorem.steps]),
+    full.theorems.map(theorem => [theorem.name, theorem.status, undefined]));
+  const directory = mkdtempSync(join(tmpdir(), "g17-states-"));
+  try {
+    writeFileSync(join(directory, "Broken.g17"), brokenSource);
+    const failing = cli(join(directory, "Broken.g17"));
+    assert.equal(failing.status, 1);
+    const [theorem] = JSON.parse(failing.stdout).theorems;
+    assert.equal(theorem.status, "failed");
+    assert.equal(theorem.steps.length, 3);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("goal returns the state the Workbench shows at a position", () => {
   const files = [{ name: "Broken.g17", source: brokenSource }];
   const start = ok(handleMachineRequest({ id: 5, method: "goal", params: { files, line: 9, column: 1 } }));

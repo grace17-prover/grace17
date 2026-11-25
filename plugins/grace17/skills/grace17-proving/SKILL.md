@@ -93,7 +93,10 @@ prints the usage.
    theorem carries the partial trace up to the failing step; that step's
    `after` is the state where the proof stopped. The JSON is on standard
    output whether or not the file checks (the exit status says), so
-   `> out.json` captures it.
+   `> out.json` captures it. To read statuses only, add `--no-states`
+   (`"states": false` over `serve`): the step states of the theorems that
+   did not fail are left out, which on a large file shrinks the result
+   from tens of megabytes to a few, and `goal` still answers at any line.
    A `defgraph`'s codomain proof is a proof block like a theorem's, named
    `ident.closed`. `python3 scripts/all-errors.py <file>` lists the
    first error of every theorem in one run; `g17 check --continue` goes on
