@@ -5,7 +5,7 @@
 
 import { NameResolutionIndex, AmbiguousNameError } from "./name-resolution.ts";
 import { resolveImportName } from "./module-names.ts";
-import { and, app, bottom, canonical, containsFunction, eq, exists, forall, foralls, formulaEquals, formulaCanonical, freeFormulaVariables, freeTermVariables, iff, imp, nat, naturalValue, not, or, pred, substituteFormula, substituteTerm, termCanonical, termEquals, v, type Formula, type Term } from "./ast.ts";
+import { and, app, bottom, canonical, canonicalDigest, containsFunction, eq, exists, forall, foralls, formulaEquals, formulaCanonical, freeFormulaVariables, freeTermVariables, iff, imp, nat, naturalValue, not, or, pred, substituteFormula, substituteTerm, termCanonical, termEquals, v, type Formula, type Term } from "./ast.ts";
 import { sha256Hex } from "./hash.ts";
 import { bind, ctor, Kernel, KernelError, type ConstructorSpec, type DatatypeRecord, type DefinitionRecord, type EvaluationStats, type Pattern, type RecursiveEquation } from "./kernel.ts";
 import { compute,
@@ -779,7 +779,7 @@ export function exportSurfaceEnvironmentIndex(
       .map(([name, entries]) => [name, [...entries].sort(([left], [right]) => left.localeCompare(right))] as const)
       .sort(([left], [right]) => left.localeCompare(right)),
   };
-  return surfaceIndexFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  return surfaceIndexFreeze({ ...body, digest: canonicalDigest(body) });
 }
 
 export function encodeSurfaceEnvironmentIndex(index: SurfaceEnvironmentIndex): Uint8Array {
@@ -877,7 +877,7 @@ export function exportSurfaceEnvironmentDelta(
     annotations: [...(moduleAnnotations.get(kernel)?.get(module) ?? kernelAnnotations.get(kernel) ?? [])]
       .sort(([left], [right]) => left.localeCompare(right)),
   };
-  return surfaceIndexFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  return surfaceIndexFreeze({ ...body, digest: canonicalDigest(body) });
 }
 
 export function encodeSurfaceEnvironmentDelta(delta: SurfaceEnvironmentDelta): Uint8Array {
@@ -950,7 +950,7 @@ function validateSurfaceEnvironmentDelta(value: unknown): asserts value is Surfa
     throw new KernelError("Malformed surface-delta envelope");
   }
   const { digest, ...body } = value;
-  if (sha256Hex(canonical(body)) !== digest) throw new KernelError("Malformed or corrupted surface delta");
+  if (canonicalDigest(body) !== digest) throw new KernelError("Malformed or corrupted surface delta");
   surfaceIndexFreeze(value);
 }
 
@@ -1013,7 +1013,7 @@ function validateSurfaceEnvironmentIndex(value: unknown): asserts value is Surfa
   }
   if (surfaceIndexContentsMalformed(value)) throw new KernelError("Malformed surface-index contents");
   const { digest, ...body } = value;
-  if (sha256Hex(canonical(body)) !== digest) throw new KernelError("Malformed or corrupted surface index");
+  if (canonicalDigest(body) !== digest) throw new KernelError("Malformed or corrupted surface index");
   surfaceIndexFreeze(value);
 }
 

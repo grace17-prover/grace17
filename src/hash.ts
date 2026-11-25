@@ -29,65 +29,54 @@ const rotateRight = (value: number, bits: number): number => (value >>> bits) | 
 // below produces the same bytes everywhere else. Node 22 exposes built-in
 // modules through process.getBuiltinModule without a static import, which
 // keeps this file loadable in the browser bundle.
-const nativeHash: ((input: Uint8Array) => Uint8Array) | undefined = (() => {
+interface NativeHasher { update(data: Uint8Array): NativeHasher; digest(): Uint8Array }
+const nativeCreateHash: (() => NativeHasher) | undefined = (() => {
   try {
     const crypto = (globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } })
-      .process?.getBuiltinModule?.("node:crypto") as { createHash?: (name: string) => { update(data: Uint8Array): { digest(): Uint8Array } } } | undefined;
+      .process?.getBuiltinModule?.("node:crypto") as { createHash?: (name: string) => NativeHasher } | undefined;
     if (!crypto?.createHash) return undefined;
     const probe = crypto.createHash("sha256").update(new Uint8Array()).digest();
-    return probe.length === 32 ? input => new Uint8Array(crypto.createHash!("sha256").update(input).digest()) : undefined;
+    return probe.length === 32 ? () => crypto.createHash!("sha256") : undefined;
   } catch { return undefined; }
 })();
 
-export function sha256Bytes(value: string | Uint8Array): Uint8Array {
-  const input = typeof value === "string" ? new TextEncoder().encode(value) : value;
-  if (nativeHash) return nativeHash(input);
-  const paddedLength = Math.ceil((input.length + 9) / 64) * 64;
-  const padded = new Uint8Array(paddedLength);
-  padded.set(input);
-  padded[input.length] = 0x80;
-  const bitLength = BigInt(input.length) * 8n;
-  for (let index = 0; index < 8; index += 1) {
-    padded[paddedLength - 1 - index] = Number((bitLength >> BigInt(index * 8)) & 0xffn);
+/** Fold one 64-byte block of `data` at `offset` into `hash`. */
+function compress(hash: Uint32Array, words: Uint32Array, data: Uint8Array, offset: number): void {
+  for (let index = 0; index < 16; index += 1) {
+    const at = offset + index * 4;
+    words[index] = ((data[at]! << 24) | (data[at + 1]! << 16) |
+      (data[at + 2]! << 8) | data[at + 3]!) >>> 0;
+  }
+  for (let index = 16; index < 64; index += 1) {
+    const x = words[index - 15]!;
+    const y = words[index - 2]!;
+    const s0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
+    const s1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
+    words[index] = (words[index - 16]! + s0 + words[index - 7]! + s1) >>> 0;
   }
 
-  const hash = new Uint32Array(initial);
-  const words = new Uint32Array(64);
-  for (let offset = 0; offset < padded.length; offset += 64) {
-    for (let index = 0; index < 16; index += 1) {
-      const at = offset + index * 4;
-      words[index] = ((padded[at]! << 24) | (padded[at + 1]! << 16) |
-        (padded[at + 2]! << 8) | padded[at + 3]!) >>> 0;
-    }
-    for (let index = 16; index < 64; index += 1) {
-      const x = words[index - 15]!;
-      const y = words[index - 2]!;
-      const s0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
-      const s1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
-      words[index] = (words[index - 16]! + s0 + words[index - 7]! + s1) >>> 0;
-    }
-
-    let [a, b, c, d, e, f, g, h] = hash;
-    for (let index = 0; index < 64; index += 1) {
-      const sum1 = rotateRight(e!, 6) ^ rotateRight(e!, 11) ^ rotateRight(e!, 25);
-      const choose = (e! & f!) ^ (~e! & g!);
-      const first = (h! + sum1 + choose + constants[index]! + words[index]!) >>> 0;
-      const sum0 = rotateRight(a!, 2) ^ rotateRight(a!, 13) ^ rotateRight(a!, 22);
-      const majority = (a! & b!) ^ (a! & c!) ^ (b! & c!);
-      const second = (sum0 + majority) >>> 0;
-      h = g; g = f; f = e; e = (d! + first) >>> 0;
-      d = c; c = b; b = a; a = (first + second) >>> 0;
-    }
-    hash[0] = (hash[0]! + a!) >>> 0;
-    hash[1] = (hash[1]! + b!) >>> 0;
-    hash[2] = (hash[2]! + c!) >>> 0;
-    hash[3] = (hash[3]! + d!) >>> 0;
-    hash[4] = (hash[4]! + e!) >>> 0;
-    hash[5] = (hash[5]! + f!) >>> 0;
-    hash[6] = (hash[6]! + g!) >>> 0;
-    hash[7] = (hash[7]! + h!) >>> 0;
+  let [a, b, c, d, e, f, g, h] = hash;
+  for (let index = 0; index < 64; index += 1) {
+    const sum1 = rotateRight(e!, 6) ^ rotateRight(e!, 11) ^ rotateRight(e!, 25);
+    const choose = (e! & f!) ^ (~e! & g!);
+    const first = (h! + sum1 + choose + constants[index]! + words[index]!) >>> 0;
+    const sum0 = rotateRight(a!, 2) ^ rotateRight(a!, 13) ^ rotateRight(a!, 22);
+    const majority = (a! & b!) ^ (a! & c!) ^ (b! & c!);
+    const second = (sum0 + majority) >>> 0;
+    h = g; g = f; f = e; e = (d! + first) >>> 0;
+    d = c; c = b; b = a; a = (first + second) >>> 0;
   }
+  hash[0] = (hash[0]! + a!) >>> 0;
+  hash[1] = (hash[1]! + b!) >>> 0;
+  hash[2] = (hash[2]! + c!) >>> 0;
+  hash[3] = (hash[3]! + d!) >>> 0;
+  hash[4] = (hash[4]! + e!) >>> 0;
+  hash[5] = (hash[5]! + f!) >>> 0;
+  hash[6] = (hash[6]! + g!) >>> 0;
+  hash[7] = (hash[7]! + h!) >>> 0;
+}
 
+function hashBytes(hash: Uint32Array): Uint8Array {
   const output = new Uint8Array(32);
   hash.forEach((word, index) => {
     output[index * 4] = word >>> 24;
@@ -98,8 +87,77 @@ export function sha256Bytes(value: string | Uint8Array): Uint8Array {
   return output;
 }
 
+/** The padding that ends a message of `length` bytes, from its last partial block on. */
+function finalBlocks(tail: Uint8Array, length: number): Uint8Array {
+  const paddedLength = Math.ceil((tail.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(tail);
+  padded[tail.length] = 0x80;
+  const bitLength = BigInt(length) * 8n;
+  for (let index = 0; index < 8; index += 1) {
+    padded[paddedLength - 1 - index] = Number((bitLength >> BigInt(index * 8)) & 0xffn);
+  }
+  return padded;
+}
+
+export function sha256Bytes(value: string | Uint8Array): Uint8Array {
+  const input = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  if (nativeCreateHash) return new Uint8Array(nativeCreateHash().update(input).digest());
+  const padded = finalBlocks(input, input.length);
+  const hash = new Uint32Array(initial);
+  const words = new Uint32Array(64);
+  for (let offset = 0; offset < padded.length; offset += 64) compress(hash, words, padded, offset);
+  return hashBytes(hash);
+}
+
+const hex = (bytes: Uint8Array): string => [...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
+
 export function sha256Hex(value: string | Uint8Array): string {
-  return [...sha256Bytes(value)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return hex(sha256Bytes(value));
+}
+
+/**
+ * SHA-256 of a message given in pieces: the digest of the concatenation,
+ * for messages too large to hold as one string.
+ */
+export class Sha256 {
+  readonly #native: NativeHasher | undefined;
+  readonly #hash = new Uint32Array(initial);
+  readonly #words = new Uint32Array(64);
+  readonly #block = new Uint8Array(64);
+  #buffered = 0;
+  #length = 0;
+
+  /** `portable` uses the implementation here even where Node's digest is present, as in a browser. */
+  constructor(options: { readonly portable?: boolean } = {}) {
+    this.#native = options.portable ? undefined : nativeCreateHash?.();
+  }
+
+  update(data: Uint8Array): this {
+    if (this.#native) { this.#native.update(data); return this; }
+    this.#length += data.length;
+    let offset = 0;
+    if (this.#buffered > 0) {
+      const take = Math.min(64 - this.#buffered, data.length);
+      this.#block.set(data.subarray(0, take), this.#buffered);
+      this.#buffered += take;
+      offset = take;
+      if (this.#buffered < 64) return this;
+      compress(this.#hash, this.#words, this.#block, 0);
+      this.#buffered = 0;
+    }
+    for (; offset + 64 <= data.length; offset += 64) compress(this.#hash, this.#words, data, offset);
+    this.#block.set(data.subarray(offset), 0);
+    this.#buffered = data.length - offset;
+    return this;
+  }
+
+  digestHex(): string {
+    if (this.#native) return hex(new Uint8Array(this.#native.digest()));
+    const padded = finalBlocks(this.#block.subarray(0, this.#buffered), this.#length);
+    for (let offset = 0; offset < padded.length; offset += 64) compress(this.#hash, this.#words, padded, offset);
+    return hex(hashBytes(this.#hash));
+  }
 }
 
 export function timingSafeBytesEqual(left: Uint8Array, right: Uint8Array): boolean {

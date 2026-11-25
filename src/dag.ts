@@ -3,8 +3,7 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { sha256Hex } from "./hash.ts";
-import { canonical, type Formula } from "./ast.ts";
+import { canonical, canonicalDigest, type Formula } from "./ast.ts";
 import { KernelError, type Kernel, type ProofCheckStats } from "./kernel.ts";
 import type { Proof } from "./proof.ts";
 
@@ -75,7 +74,7 @@ export function encodeProofDagWithIndex(proof: Proof): IndexedProofDag {
 
   const root = intern(proof);
   const body = { version: 1 as const, nodes, root };
-  const digest = sha256Hex(canonical(body));
+  const digest = canonicalDigest(body);
   const dag = Object.freeze({ ...body, nodes: Object.freeze([...nodes]), digest });
   return { dag, nodeIds };
 }
@@ -94,7 +93,7 @@ export function checkProofDag(
   assumptions: readonly Formula[] = [],
 ): CheckedProofDag {
   const body = { version: dag.version, nodes: dag.nodes, root: dag.root };
-  const digest = sha256Hex(canonical(body));
+  const digest = canonicalDigest(body);
   if (dag.version !== 1 || digest !== dag.digest) throw new KernelError("Malformed or corrupted proof DAG");
   if (!Number.isSafeInteger(dag.root) || dag.root < 0 || dag.root >= dag.nodes.length) {
     throw new KernelError("Proof DAG has an invalid root");

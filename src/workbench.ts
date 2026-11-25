@@ -9,7 +9,7 @@ import { projectRoot } from "./project-root.ts";
 import { relative, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { callNative } from "./runtime.ts";
-import { exportTheorem, theoremDependencies } from "./export.ts";
+import { exportTheoremBody, theoremDependencies } from "./export.ts";
 import { formatFormula, formatTerm, type PrettyOptions } from "./pretty.ts";
 import { createSetTheoryFoundationKernel, createSetTheoryKernel, SET_THEORY_BOOTSTRAP_FILES } from "./zfg.ts";
 import {
@@ -1159,7 +1159,7 @@ function renderTheorem(
     steps,
     kernel: [],
   };
-  const exported = exportTheorem(kernel, name);
+  const exported = exportTheoremBody(kernel, name);
   return {
     name,
     ...location,
