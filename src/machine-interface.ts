@@ -10,6 +10,7 @@
 // newline-delimited JSON; the command line offers each method as a
 // subcommand. See docs/machine-interface.md.
 
+import { compactKernelContexts } from "./kernel-contexts.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { createServer } from "node:net";
@@ -38,7 +39,7 @@ import {
 import { diagnosticSpan, resolveSymbolCandidate, tacticStepAtCursor } from "./workbench-navigation.ts";
 
 /** The protocol version; it changes only when a documented shape changes incompatibly. */
-export const MACHINE_PROTOCOL_VERSION = "1";
+export const MACHINE_PROTOCOL_VERSION = "2";
 
 export const grace17Version: string = (() => {
   try { return String(JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8")).version); }
@@ -495,9 +496,12 @@ function sorryDiagnostic(sorry: WorkbenchCheckResult["sorries"][number]): Machin
   };
 }
 
+/** A theorem without its kernel derivation, or with it, each context formula written once (src/kernel-contexts.ts). */
 function stripKernel(theorem: WorkbenchTheorem, keepKernel: boolean) {
   const { kernel, proofNodes, judgments, ...rest } = theorem;
-  return keepKernel ? { ...rest, proofNodes, judgments, kernel } : rest;
+  if (!keepKernel) return rest;
+  const compact = compactKernelContexts(kernel);
+  return { ...rest, proofNodes, judgments, kernel: compact.rows, kernelAssumptions: compact.assumptions };
 }
 
 /** The theorems that completed before a failure, presented as a checked file presents them. */

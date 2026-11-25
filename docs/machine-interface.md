@@ -19,7 +19,7 @@ There are two ways in:
   every connection is a session of the stdio protocol, one request per
   line and one response per line in order, and the connections share the
   cached environments. `--port 0` takes a free port. The process prints
-  one JSON line when it listens, `{"version": "1", "listening": {"host":
+  one JSON line when it listens, `{"version": "2", "listening": {"host":
   "127.0.0.1", "port": N}}`, and serves until it is terminated; `--pin`
   holds for every connection.
 - **Subcommands** run one method and exit: `g17 check --json`, `g17 goal`,
@@ -53,8 +53,8 @@ A response repeats the `id` and carries `version`, the protocol version,
 on success and on failure:
 
 ```json
-{"id": 1, "version": "1", "ok": true, "method": "goal", "result": {...}}
-{"id": 1, "version": "1", "ok": false, "method": "goal",
+{"id": 1, "version": "2", "ok": true, "method": "goal", "result": {...}}
+{"id": 1, "version": "2", "ok": false, "method": "goal",
   "error": {"code": "unknown_file", "message": "Probe.g17 is not among the files",
             "file": "Probe.g17"}}
 ```
@@ -85,7 +85,7 @@ A proof that does not check is not an error of the protocol: `check`
 answers `ok: true` with `status: "failed"` and a diagnostic.
 
 The subcommands print the response without an `id`: `g17 signature X`
-prints `{"ok": true, "version": "1", "method": "signature", "result":
+prints `{"ok": true, "version": "2", "method": "signature", "result":
 {...}}`, and the object each method's section below shows is that
 `result`. The one exception is `check --json`, which prints the check
 result's fields at the top level with `ok`, `version`, and `operation`
@@ -136,7 +136,7 @@ Request: a workspace, and optionally `audit: true` to add each theorem's
 axiom audit, `dependencies: false` to skip each theorem's dependency lists,
 `kernel: true` to add the kernel derivation of each theorem (or `kernel`
 as a list of theorem names, for those theorems only: a large proof's
-derivation runs to many megabytes), `symbols: true`
+derivation runs to many megabytes; see the kernel rows below), `symbols: true`
 to add the symbol table the hover uses, `digest: true` to add the
 environment digest, `imports: true` to audit the imports (see below),
 `states: false` to leave out the `initial` and `steps` of every theorem
@@ -197,6 +197,14 @@ The shape:
   checked and the diagnostic on its last line. Theorems after the failure
   are not reported: nothing past it was checked. A `sorry` in a completed
   theorem is still a warning diagnostic.
+- With `kernel`, a theorem also carries `proofNodes`, `judgments`, and
+  `kernel`, one row per judgment of its derivation: `id`, `proofNode`, `rule`,
+  `ruleCode`, `ruleName`, `premiseLabels`, `sideConditions`, `arguments`,
+  `conclusion`, `children` (the ids of its premises), and `assumptions`,
+  its context, as indices into the theorem's `kernelAssumptions`, where
+  each context formula is written once. A context repeats along a
+  derivation, and written out in every row a large proof's rows run to
+  hundreds of megabytes.
 - `foundation` is the kernel's foundation report: `profile`, and when the
   check succeeded, `axioms` and `schemaInstances`.
 - `files` summarizes each workspace file: `status` is `checked`, `context`
@@ -957,7 +965,7 @@ Check it. The proof is complete modulo its `sorry`, which is a warning:
 ```
 
 ```json
-{"id": 1, "version": "1", "ok": true, "method": "check",
+{"id": 1, "version": "2", "ok": true, "method": "check",
  "result": {"status": "checked",
    "theorems": [{"name": "Probe.image_in", "status": "admitted", ...}],
    "diagnostics": [{"severity": "warning", "kind": "sorry",
@@ -974,7 +982,7 @@ Read the goal at the `sorry`:
 ```
 
 ```json
-{"id": 2, "version": "1", "ok": true, "method": "goal",
+{"id": 2, "version": "2", "ok": true, "method": "goal",
  "result": {"kind": "theorem", "theorem": "Probe.image_in", "step": 0,
    "caption": "Current goal, at theorem start",
    "state": {"goals": [{"goal": "f(Xₖ) ∈ B",
@@ -1003,7 +1011,7 @@ again, sending the edited source:
 ```
 
 ```json
-{"id": 4, "version": "1", "ok": true, "method": "check",
+{"id": 4, "version": "2", "ok": true, "method": "check",
  "result": {"status": "checked",
    "theorems": [{"name": "Probe.image_in", "status": "proved",
      "audit": {"complete": true, "direct": [], "hereditary": [], ...},
