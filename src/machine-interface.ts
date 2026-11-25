@@ -15,6 +15,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
+import { getHeapStatistics, setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import type { Formula, Term } from "./ast.ts";
 import { KernelError, type Kernel } from "./kernel.ts";
 import { auditTheoremAxioms } from "./axiom-audit.ts";
@@ -32,7 +34,7 @@ import { SurfaceError } from "./surface.ts";
 import { createSetTheoryKernel } from "./zfg.ts";
 import {
   auditWorkbenchTheorem, checkWorkbenchFiles, declarationAtLine, describeWorkbenchProperty, describeWorkbenchStatement, forkDependencyEnvironment,
-  pinWorkbenchDependencies, pinnedWorkbenchDependencies, declarationBoundary, proofRanges, renderCheckedWorkspace, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
+  pinWorkbenchDependencies, pinnedWorkbenchDependencies, releaseWorkbenchCaches, declarationBoundary, proofRanges, renderCheckedWorkspace, theoremRanges, workbenchFailure, workbenchFailureEnvironment,
   type WorkbenchCheckResult, type WorkbenchFile, type WorkbenchFoundation, type WorkbenchState, type WorkbenchStep,
   type WorkbenchStepInfo, type WorkbenchSuggestion, type WorkbenchTheorem,
 } from "./workbench.ts";
@@ -1892,6 +1894,47 @@ export async function serveMachineInterfaceOnPort(options: ServePortOptions): Pr
   };
 }
 
+// A server holds checked environments between requests: dependency
+// checkpoints, checked files, memoized checks. Several servers on one
+// machine, or one asked about many dependency graphs, could hold more than
+// the heap allows and fail mid-request. After a request leaves the heap
+// past `heapPressure` of its limit, the server collects garbage and, if
+// what is live is still past it, keeps only the environment last used.
+// Collecting a multi-gigabyte heap takes a second or more, so the next
+// collection waits until the heap has grown well past what the last one
+// left live.
+const heapPressure = 0.6;
+let heapCheckAt = 0;
+let collectGarbage: (() => void) | undefined;
+
+function relieveHeapPressure(): void {
+  const limit = getHeapStatistics().heap_size_limit;
+  const threshold = Math.max(limit * heapPressure, heapCheckAt);
+  if (getHeapStatistics().used_heap_size < threshold) return;
+  collectGarbage ??= garbageCollector();
+  collectGarbage();
+  let live = getHeapStatistics().used_heap_size;
+  if (live >= limit * heapPressure) {
+    const before = live;
+    checkMemo.clear();
+    workspaceMemo.clear();
+    releaseWorkbenchCaches();
+    collectGarbage();
+    live = getHeapStatistics().used_heap_size;
+    const mb = (bytes: number) => Math.round(bytes / 2 ** 20);
+    process.stderr.write(`g17 serve: ${mb(before)} of ${mb(limit)} MB of heap in use; kept only the environment last checked, now ${mb(live)} MB\n`);
+  }
+  heapCheckAt = live + (limit - live) / 2;
+}
+
+/** The runtime's full collection, exposed for this process when it was started without --expose-gc. */
+function garbageCollector(): () => void {
+  const exposed = (globalThis as { gc?: () => void }).gc;
+  if (exposed) return exposed;
+  setFlagsFromString("--expose-gc");
+  return runInNewContext("gc") as () => void;
+}
+
 let dependenciesPinned = false;
 function pinWorkbenchDependenciesOnce(): void {
   if (dependenciesPinned) return;
@@ -1936,6 +1979,7 @@ export async function serveMachineInterface(
         response = { id: typeof id === "string" || typeof id === "number" ? id : null, version, ok: false, error: machineErrorBody(error) };
       }
       respond(response);
+      relieveHeapPressure();
     }
   } finally {
     if (!mode.session) {

@@ -1129,6 +1129,12 @@ serve.kill();
   connections are served one request at a time between them, and a
   connection ends with its input as the stdio session does; an error
   raised outside any request is reported on the stdio session only.
+- `serve` keeps the checked environments of the last few dependency
+  graphs it was asked about, and the recent versions of the files checked
+  over them. When a request leaves more than 60% of the heap in use after
+  a full collection, it keeps only the environment last checked and its
+  files, and writes a line saying so to standard error; a later request
+  over another dependency graph elaborates that graph again.
 - A failed check stops at the first error. To see every theorem's first
   error in a module, end each unfinished proof with `sorry` and read the
   warnings, or run `python3 scripts/all-errors.py`; to see every failing
