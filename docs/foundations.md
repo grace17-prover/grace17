@@ -17,6 +17,18 @@ the unique witnesses supplied by the corresponding textbook existence axioms.
 This Skolemized presentation is convenient for computation and theorem
 statements. Their membership laws fix the intended sets extensionally.
 
+## Large cardinal hypotheses
+
+No profile has a large cardinal axiom. `Grace.Cumulus.LargeCardinal`
+defines Grothendieck universes, inaccessible cardinals as the heights of
+universes (every universe is a stage `V(κ)`, checked under ZF), and the
+sentences `TarskiGrothendieck()` (every set lies in a universe) and
+`ExistsInaccessible()`. A theorem that needs one takes it as a premise,
+usually a section hypothesis `hypothesis TG : TarskiGrothendieck()`, so its
+certificate is a certificate of the implication in the chosen profile. The
+[axiom audit](axiom-audit.md#large-cardinal-hypotheses) and the Workbench
+report the hypotheses a theorem assumes.
+
 ## Schemas and definitions
 
 Separation and Replacement cannot be captured by one fixed first-order formula.

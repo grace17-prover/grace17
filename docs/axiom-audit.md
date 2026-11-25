@@ -67,7 +67,7 @@ register largecardinal TarskiGrothendieck "every set lies in a Grothendieck univ
 and a theorem that needs it takes it as a premise, usually as a hypothesis
 of its theorem section. The theorem's certificate is then a certificate,
 from the foundation's axioms, of the implication: the theorem holds in
-every universe of sets where the hypothesis does. Since ZF(C) proves no
+every model of the foundation in which the hypothesis holds. Since ZF(C) proves no
 instance of such a hypothesis, a theorem that relies on a lemma assuming
 one must assume it too, and the theorem's own statement shows every large
 cardinal hypothesis it rests on.

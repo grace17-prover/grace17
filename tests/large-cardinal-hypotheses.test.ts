@@ -150,3 +150,20 @@ test("a checked theorem carries the hypotheses it assumes, and the Workbench sho
   const { largeCardinals: _, ...older } = clean;
   assert.doesNotMatch(renderAxiomAudit(older), /Large cardinal/u);
 });
+
+test("the library's large cardinal axioms are registered, and a path runs through the lemma that assumes the hypothesis", () => {
+  const kernel = createZfKernel();
+  loadModuleSourceGraph(kernel, [{ file: "UsesAxioms.g17", source: "module UsesAxioms\nimport Grace.Cumulus.LargeCardinal.Axioms\n" }], ["lib"]);
+  const axioms = "Grace.Cumulus.LargeCardinal.Axioms";
+  const audit = auditTheoremAxioms(kernel, `${axioms}.TarskiGrothendieck.existsInaccessible`);
+  // The proof also cites a lemma assuming ExistsInaccessible, which this
+  // theorem proves rather than assumes; that lemma is no path to TarskiGrothendieck.
+  assert.deepEqual(audit.largeCardinals.assumes.map(item => [item.predicate, item.label, item.path]), [[
+    `${axioms}.TarskiGrothendieck`, "every set lies in a Grothendieck universe",
+    [`${axioms}.TarskiGrothendieck.existsInaccessible`, `${axioms}.TarskiGrothendieck.universe_containing`],
+  ]]);
+  assert.deepEqual(audit.largeCardinals.mentions.map(item => item.predicate), [`${axioms}.ExistsInaccessible`]);
+  assert.equal(audit.hereditary.some(name => /choice/iu.test(name)), false);
+  // Williamson's theorem is a theorem of ZF about universes: it assumes no hypothesis.
+  assert.deepEqual(auditTheoremAxioms(kernel, "Grace.Cumulus.LargeCardinal.Inaccessible.GrothendieckUniverse.eq_V").largeCardinals.assumes, []);
+});

@@ -126,6 +126,7 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
     }
   };
   const own = largeCardinalOccurrences(kernel, kernel.theorems.get(theorem)!);
+  const ownAssumed = new Set(own.assumes.map(item => item.predicate));
   const assumedBy = new Map<string, Ref>();
   for (let cursor = 0; cursor < queue.length; cursor++) {
     const ref = queue[cursor]!;
@@ -133,7 +134,7 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
       if (ref !== root && own.assumes.length > 0 && assumedBy.size < own.assumes.length) {
         const statement = kernel.theorems.get(ref.name);
         if (statement) for (const item of largeCardinalOccurrences(kernel, statement).assumes) {
-          if (!assumedBy.has(item.predicate)) assumedBy.set(item.predicate, ref);
+          if (ownAssumed.has(item.predicate) && !assumedBy.has(item.predicate)) assumedBy.set(item.predicate, ref);
         }
       }
       const proof = kernel.theoremProofs.get(ref.name);

@@ -26,7 +26,7 @@ function renderLargeCardinals(report) {
     ? `<p class="audit-note">Assumed by a lemma this proof uses:</p><ol>${item.path.map(step => `<li><code>${html(step)}</code></li>`).join("")}</ol>`
     : `<p class="audit-note">A premise of this theorem.</p>`}</details>`).join("");
   return `<h3>Large cardinal hypotheses</h3>
-    <p class="audit-note">Grace17 adds no large cardinal axiom. This theorem is proved from the foundation's axioms with ${assumed.length === 1 ? "this hypothesis" : "these hypotheses"} as ${assumed.length === 1 ? "a premise" : "premises"}, so it holds in every universe of sets where ${assumed.length === 1 ? "it holds" : "they hold"}.</p>${items}`;
+    <p class="audit-note">Grace17 adds no large cardinal axiom. This theorem is proved from the foundation's axioms with ${assumed.length === 1 ? "this hypothesis" : "these hypotheses"} as ${assumed.length === 1 ? "a premise" : "premises"}, so it holds in every model of the foundation in which ${assumed.length === 1 ? "the hypothesis holds" : "the hypotheses hold"}.</p>${items}`;
 }
 
 export function renderAxiomAudit(audit) {
