@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  checkWorkbenchFiles, checkWorkbenchSource, prepareWorkbenchFiles, runWorkbenchFiles, runWorkbenchFunction, theoremRanges, workbenchFailure,
+  checkWorkbenchFiles, checkWorkbenchSource, prepareWorkbenchFiles, runWorkbenchFiles, runWorkbenchFunction, theoremRanges, workbenchCacheSizes, workbenchFailure,
 } from "../src/workbench.ts";
 
 const source = `module WorkbenchTest
@@ -746,6 +746,46 @@ end Leaf.Cache
     "theorem second (x : Set)\n  shows x = empty",
   ) };
   assert.throws(() => checkWorkbenchFiles([broken], "ZFG", [broken.name]));
+});
+
+test("declarations of versions edited away are released, those still used are kept", () => {
+  const version = (edit: number) => ({ name: "LeafRelease.g17", source: `module Leaf.Release
+namespace Leaf.Release
+import Grace.Core
+theorem first (x : Set)
+  shows x = x
+proof
+  rfl
+theorem second (x : Set)
+  shows x = x
+proof
+  rfl
+-- edit ${edit}
+theorem third (x : Set)
+  shows x = x
+proof
+  rfl
+
+end Leaf.Release
+` });
+  // Each version shares the first two declarations and has a third of its
+  // own. Without release, the third declarations of every version stay.
+  // Files checked by earlier tests may keep declarations over other checkpoints.
+  const before = workbenchCacheSizes().leafDeclarations;
+  const edits = 80;
+  for (let edit = 0; edit < edits; edit += 1) {
+    const file = version(edit);
+    assert.equal(checkWorkbenchFiles([file], "ZFG", [file.name]).ok, true);
+  }
+  const { checkedLeaves, leafDeclarations } = workbenchCacheSizes();
+  const added = leafDeclarations - before;
+  assert.ok(leafDeclarations >= 2, `the shared declarations are kept (${leafDeclarations})`);
+  assert.ok(added <= 2 + checkedLeaves, `only kept versions keep declarations (${added} > 2 + ${checkedLeaves})`);
+  assert.ok(added < 2 + edits);
+  // The newest version is still a kept leaf: checking it again elaborates nothing.
+  const sizes = workbenchCacheSizes();
+  assert.equal(checkWorkbenchFiles([version(edits - 1)], "ZFG", ["LeafRelease.g17"]).ok, true);
+  assert.deepEqual(workbenchCacheSizes(), sizes);
 });
 
 test("workbench prechecks dependencies and materializes kernel detail only on demand", () => {

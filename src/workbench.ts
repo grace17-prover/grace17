@@ -19,7 +19,7 @@ import {
 import { scanModule, type ModuleNameDeriver } from "./module-source-loader.ts";
 import { openParentheses } from "./library-search.ts";
 import { resolveImportName } from "./module-names.ts";
-import { applicationProjections, classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, registrationReport, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
+import { applicationProjections, classReport, elaborateModule, exportSurfaceEnvironmentIndex, forkSurfaceEnvironment, installSurfaceEnvironmentIndex, moduleReport, notationReport, registrationReport, setDeclarationCacheScope, setSurfaceTraceCapture, SurfaceError, tacticReport } from "./surface.ts";
 import { compileSeparateKernelModule, replaySeparateKernelModuleExact, type CompiledModuleDependency } from "./compiled-module.ts";
 import { installStandardCheckpoint, standardDependencyCheckpoints, type StandardDependencyCheckpoint } from "./standard-checkpoints.ts";
 export { installStandardCheckpoint };
@@ -309,9 +309,55 @@ const maximumIncrementalBases = 3;
 interface CheckedLeafCheckpoint {
   readonly kernel: ReturnType<typeof createSetTheoryKernel>;
   readonly activeLoaded: readonly LoadedModule[];
+  /** The checkpoint the leaf was checked over, and the declaration-cache keys its check used. */
+  readonly checkpoint: DependencyCheckpoint;
+  readonly declarations: ReadonlySet<string>;
 }
 const checkedLeaves = new Map<string, CheckedLeafCheckpoint>();
 const maximumCheckedLeaves = 32;
+
+// The declarations of files checked over a checkpoint, kept apart from the
+// checkpoint's own: an entry lives while a version of a file that used it is
+// still kept in checkedLeaves, or was among the last few checks over the
+// checkpoint, a failed one included. Editing a file anywhere reuses every
+// declaration above the edit, as with one cache; the versions edited away
+// are released instead of accumulating with the checkpoint.
+interface LeafDeclarations {
+  readonly cache: Map<string, unknown>;
+  readonly recent: ReadonlySet<string>[];
+}
+const leafDeclarations = new WeakMap<DependencyCheckpoint, LeafDeclarations>();
+const recentLeafChecks = 8;
+
+/** Give a fork of `checkpoint` the checkpoint's cache of leaf declarations; the returned set fills with the keys it uses. */
+function useLeafDeclarations(checkpoint: DependencyCheckpoint, kernel: ReturnType<typeof createSetTheoryKernel>): ReadonlySet<string> {
+  let store = leafDeclarations.get(checkpoint);
+  if (!store) { store = { cache: new Map(), recent: [] }; leafDeclarations.set(checkpoint, store); }
+  const used = new Set<string>();
+  setDeclarationCacheScope(kernel, { cache: store.cache, used });
+  store.recent.push(used);
+  if (store.recent.length > recentLeafChecks) store.recent.shift();
+  return used;
+}
+
+/** How much the incremental caches hold, for tests and diagnostics. */
+export function workbenchCacheSizes(): { readonly incrementalBases: number; readonly checkedLeaves: number; readonly leafDeclarations: number } {
+  let declarations = 0;
+  for (const checkpoint of incrementalBases.values()) declarations += leafDeclarations.get(checkpoint)?.cache.size ?? 0;
+  return { incrementalBases: incrementalBases.size, checkedLeaves: checkedLeaves.size, leafDeclarations: declarations };
+}
+
+/** Release the leaf declarations of `checkpoint` that no kept or recent check uses. */
+function pruneLeafDeclarations(checkpoint: DependencyCheckpoint): void {
+  const store = leafDeclarations.get(checkpoint);
+  if (!store) return;
+  const live = new Set<string>();
+  for (const used of store.recent) for (const key of used) live.add(key);
+  for (const leaf of checkedLeaves.values()) {
+    if (leaf.checkpoint === checkpoint) for (const key of leaf.declarations) live.add(key);
+  }
+  for (const key of store.cache.keys()) if (!live.has(key)) store.cache.delete(key);
+}
 
 function loadWorkspace(files: readonly WorkbenchFile[], profile: WorkbenchFoundation, entryFiles?: readonly string[], roots: WorkspaceRoots = workspaceRoots()) {
   if (files.length === 0) throw new SurfaceError(1, "workspace has no files");
@@ -488,10 +534,15 @@ function loadIncrementalWorkspace(
   const kernel = checkpoint.kernel.fork();
   forkSurfaceEnvironment(checkpoint.kernel, kernel);
   setSurfaceTraceCapture(kernel, true);
-  const activeLoaded = loadDisplayedModuleGraph(kernel, [{ file: active.name, source: active.source }], roots.roots, undefined, [], roots.derive);
-  checkedLeaves.set(leafKey, { kernel, activeLoaded });
-  while (checkedLeaves.size > maximumCheckedLeaves) checkedLeaves.delete(checkedLeaves.keys().next().value!);
-  return { kernel, loaded: [...checkpoint.loaded, ...activeLoaded], context: "workspace" as const };
+  const declarations = useLeafDeclarations(checkpoint, kernel);
+  try {
+    const activeLoaded = loadDisplayedModuleGraph(kernel, [{ file: active.name, source: active.source }], roots.roots, undefined, [], roots.derive);
+    checkedLeaves.set(leafKey, { kernel, activeLoaded, checkpoint, declarations });
+    while (checkedLeaves.size > maximumCheckedLeaves) checkedLeaves.delete(checkedLeaves.keys().next().value!);
+    return { kernel, loaded: [...checkpoint.loaded, ...activeLoaded], context: "workspace" as const };
+  } finally {
+    pruneLeafDeclarations(checkpoint);
+  }
 }
 
 /**
@@ -509,6 +560,9 @@ export function forkDependencyEnvironment(
   const kernel = checkpoint.kernel.fork();
   forkSurfaceEnvironment(checkpoint.kernel, kernel);
   setSurfaceTraceCapture(kernel, true);
+  // The loader elaborates after this returns: its keys count as a recent
+  // check, and the next check over the checkpoint prunes what it leaves.
+  useLeafDeclarations(checkpoint, kernel);
   return { kernel, loaded: checkpoint.loaded };
 }
 
