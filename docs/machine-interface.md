@@ -134,7 +134,9 @@ one-line description each, and the foundation profiles.
 
 Request: a workspace, and optionally `audit: true` to add each theorem's
 axiom audit, `dependencies: false` to skip each theorem's dependency lists,
-`kernel: true` to add the kernel derivation of each theorem, `symbols: true`
+`kernel: true` to add the kernel derivation of each theorem (or `kernel`
+as a list of theorem names, for those theorems only: a large proof's
+derivation runs to many megabytes), `symbols: true`
 to add the symbol table the hover uses, `digest: true` to add the
 environment digest, `imports: true` to audit the imports (see below),
 `states: false` to leave out the `initial` and `steps` of every theorem

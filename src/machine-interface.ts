@@ -135,6 +135,15 @@ function booleanParam(params: Params, name: string, fallback: boolean): boolean 
   return value;
 }
 
+/** `kernel`: true or false, or the names of the theorems whose kernel derivations to add. */
+function kernelParam(params: Params): boolean | readonly string[] {
+  const value = params.kernel;
+  if (value === undefined || value === null) return false;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value) && value.every(item => typeof item === "string")) return value;
+  throw new MachineError("invalid_params", "kernel must be true, false, or a list of theorem names");
+}
+
 function foundationParam(params: Params): WorkbenchFoundation {
   const value = stringParam(params, "foundation") ?? "ZFG";
   if (!FOUNDATIONS.includes(value as WorkbenchFoundation)) throw new MachineError("invalid_params", "foundation must be ZF, ZFC, or ZFG");
@@ -237,7 +246,8 @@ function currentEntry(memo: Map<string, CheckMemoEntry>, key: string): RawCheck 
 }
 
 interface CheckOptions {
-  readonly kernel: boolean;
+  /** Kernel derivations: of every theorem, of none, or of the named theorems. */
+  readonly kernel: boolean | readonly string[];
   readonly digest: boolean;
   readonly dependencies: boolean;
   /** Audit the imports: note every declaration a module uses only through a transitive import. */
@@ -541,10 +551,10 @@ function presentCheck(workspace: Workspace, raw: RawCheck, options: CheckOptions
  * theorem's axiom audit.
  */
 export function presentCheckedWorkspace(result: WorkbenchCheckResult, options: {
-  readonly kernel?: boolean; readonly symbols?: boolean; readonly imports?: boolean; readonly audit?: (theorem: string) => unknown;
+  readonly kernel?: boolean | readonly string[]; readonly symbols?: boolean; readonly imports?: boolean; readonly audit?: (theorem: string) => unknown;
 } = {}) {
   const theorems = result.theorems.map(theorem => ({
-    ...stripKernel(theorem, options.kernel ?? false),
+    ...stripKernel(theorem, Array.isArray(options.kernel) ? options.kernel.includes(theorem.name) : options.kernel ?? false),
     status: theoremStatus(theorem),
     ...(options.audit ? { audit: options.audit(theorem.name) } : {}),
   }));
@@ -591,7 +601,7 @@ export type MachineCheckedResult = ReturnType<typeof presentCheckedWorkspace>;
 
 function checkOptions(params: Params): CheckOptions & { readonly audit: boolean; readonly symbols: boolean } {
   return {
-    kernel: booleanParam(params, "kernel", false),
+    kernel: kernelParam(params),
     digest: booleanParam(params, "digest", false),
     dependencies: booleanParam(params, "dependencies", true),
     imports: booleanParam(params, "imports", false),

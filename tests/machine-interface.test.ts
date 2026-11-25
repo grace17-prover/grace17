@@ -154,6 +154,18 @@ test("check without states leaves out the states of the theorems that did not fa
   }
 });
 
+test("check adds the kernel derivations of the named theorems only", () => {
+  const sets = [example("Sets.g17")];
+  const every = ok<MachineCheckResult>(handleMachineRequest({ id: 50, method: "check", params: { files: sets, kernel: true } }));
+  const [first, second] = every.theorems;
+  const named = ok<MachineCheckResult>(handleMachineRequest({ id: 51, method: "check", params: { files: sets, kernel: [second!.name] } }));
+  const kernelOf = (theorem: object) => (theorem as { kernel?: unknown[] }).kernel;
+  assert.equal(kernelOf(named.theorems.find(item => item.name === first!.name)!), undefined);
+  assert.deepEqual(kernelOf(named.theorems.find(item => item.name === second!.name)!), kernelOf(second!));
+  assert.ok(kernelOf(second!)!.length > 0);
+  assert.match(failed(handleMachineRequest({ id: 52, method: "check", params: { files: sets, kernel: "all" } })).message, /list of theorem names/);
+});
+
 test("goal returns the state the Workbench shows at a position", () => {
   const files = [{ name: "Broken.g17", source: brokenSource }];
   const start = ok(handleMachineRequest({ id: 5, method: "goal", params: { files, line: 9, column: 1 } }));

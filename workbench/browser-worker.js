@@ -8,6 +8,7 @@ import {
   installStandardCheckpoint, prepareWorkbenchFiles, runWorkbenchFiles, workbenchFailure,
 } from "./generated/src/workbench.js";
 import { standardDependencyCheckpoints } from "./generated/src/standard-checkpoints.js";
+import { compactInspection } from "./kernel-inspection.js";
 
 // Requests are answered in order. Before a workspace is prepared or checked,
 // the best checkpoint for its dependency prefix is made available: one this
@@ -30,9 +31,10 @@ self.addEventListener("message", event => {
         : operation === "check"
         ? checkWorkbenchFiles(files, "ZFG", active, { includeKernelDetails: false, includeEnvironmentDigest: false })
         : operation === "inspect"
-          ? checkWorkbenchFiles(files, "ZFG", active, { includeKernelDetails: true })
+          // The kernel derivation of the theorem being inspected, or of every theorem.
+          ? checkWorkbenchFiles(files, "ZFG", active, { includeKernelDetails: body.theorem === undefined ? true : [String(body.theorem)] })
           : runWorkbenchFiles(files, String(body.function ?? ""), naturalArguments(body.args), "ZFG", active);
-      self.postMessage({ id, result });
+      self.postMessage({ id, result: operation === "inspect" && body.theorem !== undefined ? compactInspection(result, String(body.theorem)) : result });
       if (operation === "prepare" || operation === "check") scheduleKeep(files, activeName);
     } catch (error) {
       self.postMessage({ id, result: workbenchFailure(error) });
