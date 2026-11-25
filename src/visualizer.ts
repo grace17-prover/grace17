@@ -3,13 +3,31 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { formatFormula, formatTerm } from "./pretty.ts";
+import { formatFormula as formatPlainFormula, formatTerm } from "./pretty.ts";
 import type { ExportedProof } from "./export.ts";
-import { formulaEquals, type Term } from "./ast.ts";
+import { formulaEquals, type Formula, type Term } from "./ast.ts";
 import type { TacticStateSnapshot, TacticTrace } from "./tactic-trace.ts";
 
+export interface ProofHtmlOptions {
+  /**
+   * The size, in characters, up to which the kernel proof is written into the
+   * page. A larger one is rendered by the page as its judgments are opened,
+   * from each formula written once: written out, every judgment repeats its
+   * whole context, and a large proof's page would be longer than a string.
+   */
+  readonly staticKernelLimit?: number;
+}
+
 /** Render a self-contained, dependency-free proof explorer. */
-export function renderProofHtml(exported: ExportedProof): string {
+export function renderProofHtml(exported: ExportedProof, options: ProofHtmlOptions = {}): string {
+  const formatted = new Map<Formula, string>();
+  const formatFormula = (formula: Formula): string => {
+    let text = formatted.get(formula);
+    if (text === undefined) { text = formatPlainFormula(formula); formatted.set(formula, text); }
+    return text;
+  };
+  const kernel = staticKernelSize(exported, formatFormula) <= (options.staticKernelLimit ?? 8_000_000)
+    ? undefined : lazyKernel(exported, formatFormula);
   const visited = new Set<number>();
   const renderNode = (id: number): string => {
     if (visited.has(id)) return `<a class="shared" href="#kernel-step-${id}">↩ shared judgment #${id}</a>`;
@@ -30,7 +48,7 @@ export function renderProofHtml(exported: ExportedProof): string {
     ...exported.dependencies.theorems.map(name => `<span class="dependency theorem">theorem · ${escapeHtml(name)}</span>`),
     ...exported.dependencies.definitions.map(name => `<span class="dependency definition">definition · ${escapeHtml(name)}</span>`),
   ].join("") || '<span class="dependency">no named dependencies</span>';
-  const tactics = exported.tactics ? renderTacticTrace(exported.tactics) : "";
+  const tactics = exported.tactics ? renderTacticTrace(exported.tactics, formatFormula) : "";
   const kernelOpen = exported.tactics ? "" : " open";
 
   return `<!doctype html>
@@ -43,18 +61,18 @@ export function renderProofHtml(exported: ExportedProof): string {
 <header><div class="brand">GRACE17 proof</div><h1>${escapeHtml(exported.theorem)}</h1><div class="statement">${escapeHtml(formatFormula(exported.statement))}</div><div class="meta">${exported.tactics ? `<span><code>${exported.tactics.steps.length}</code> tactic steps</span>` : ""}<span><code>${exported.proof.nodes.length}</code> primitive nodes</span><span>certificate <code>${escapeHtml(exported.proof.digest.slice(0,16))}…</code></span></div></header>
 <section><h2>Trusted dependencies</h2><div class="dependencies">${dependencies}</div></section>
 ${tactics ? `<section><h2>Tactic proof</h2>${tactics}</section>` : ""}
-<details class="kernel-proof"${kernelOpen}><summary>Drill into kernel proof <span class="kernel-note">${exported.proof.nodes.length} primitive nodes · ${exported.trace.nodes.length} judgments</span></summary><div class="toolbar"><button type="button" data-action="expand">Expand primitive proof</button><button type="button" data-action="collapse">Collapse primitive proof</button></div>${renderNode(exported.trace.root)}</details>
+<details class="kernel-proof"${kernelOpen}><summary>Drill into kernel proof <span class="kernel-note">${exported.proof.nodes.length} primitive nodes · ${exported.trace.nodes.length} judgments</span></summary><div class="toolbar"><button type="button" data-action="expand">Expand primitive proof</button><button type="button" data-action="collapse">Collapse primitive proof</button></div>${kernel ? kernel.html : renderNode(exported.trace.root)}</details>
 <footer>Environment <code>${escapeHtml(exported.environment)}</code><br>Envelope <code>${escapeHtml(exported.digest)}</code></footer>
-</main><script>document.querySelector('[data-action="expand"]').onclick=()=>document.querySelectorAll('.proof-node').forEach(x=>x.open=true);document.querySelector('[data-action="collapse"]').onclick=()=>document.querySelectorAll('.proof-node,.raw').forEach(x=>x.open=false);</script></body></html>`;
+</main>${kernel ? kernel.script : `<script>document.querySelector('[data-action="expand"]').onclick=()=>document.querySelectorAll('.proof-node').forEach(x=>x.open=true);document.querySelector('[data-action="collapse"]').onclick=()=>document.querySelectorAll('.proof-node,.raw').forEach(x=>x.open=false);</script>`}</body></html>`;
 }
 
-function renderTacticTrace(trace: TacticTrace): string {
-  const initial = `<div class="initial-state"><div class="state-caption">Initial goal</div>${renderTacticState(trace.initial)}</div>`;
-  const steps = trace.steps.map((step, index) => `<div class="tactic-step"><div class="tactic-command"><span class="line-number">${step.line}</span><code>${escapeHtml(step.command)}</code></div>${renderTacticState(step.after, index + 1)}</div>`).join("");
+function renderTacticTrace(trace: TacticTrace, formatFormula: (formula: Formula) => string): string {
+  const initial = `<div class="initial-state"><div class="state-caption">Initial goal</div>${renderTacticState(trace.initial, formatFormula)}</div>`;
+  const steps = trace.steps.map((step, index) => `<div class="tactic-step"><div class="tactic-command"><span class="line-number">${step.line}</span><code>${escapeHtml(step.command)}</code></div>${renderTacticState(step.after, formatFormula, index + 1)}</div>`).join("");
   return `<div class="tactic-trace">${initial}${steps}</div>`;
 }
 
-function renderTacticState(state: TacticStateSnapshot, step?: number): string {
+function renderTacticState(state: TacticStateSnapshot, formatFormula: (formula: Formula) => string, step?: number): string {
   if (state.goals.length === 0) return '<div class="surface-state"><div class="proof-complete">✓ No goals</div></div>';
   const goals = state.goals.map((item, index) => {
     const locals = item.locals.map(local => `<div><span class="local-name">${escapeHtml(local.name)}</span> : ${escapeHtml(formatFormula(local.formula))}</div>`);
@@ -65,6 +83,109 @@ function renderTacticState(state: TacticStateSnapshot, step?: number): string {
   }).join("");
   return `<div class="surface-state">${goals}</div>`;
 }
+
+/**
+ * The judgments in the order the written page renders them, each under the
+ * premise it is first reached from; a later premise naming one again is a
+ * link to it. `first[c]` is the parent and position of judgment c's first
+ * occurrence.
+ */
+function firstOccurrences(exported: ExportedProof): { readonly order: number[]; readonly parent: Int32Array; readonly position: Int32Array } {
+  const nodes = exported.trace.nodes;
+  const parent = new Int32Array(nodes.length).fill(-1);
+  const position = new Int32Array(nodes.length).fill(-1);
+  const seen = new Uint8Array(nodes.length);
+  const root = exported.trace.root;
+  const order = [root];
+  seen[root] = 1;
+  const stack: [number, number][] = [[root, 0]];
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]!;
+    const children = nodes[top[0]]!.children;
+    if (top[1] >= children.length) { stack.pop(); continue; }
+    const at = top[1]++;
+    const child = children[at]!;
+    if (seen[child]) continue;
+    seen[child] = 1;
+    parent[child] = top[0];
+    position[child] = at;
+    order.push(child);
+    stack.push([child, 0]);
+  }
+  return { order, parent, position };
+}
+
+/** An estimate, from below, of the written kernel proof's size; it stops counting past any limit that matters. */
+function staticKernelSize(exported: ExportedProof, formatFormula: (formula: Formula) => string): number {
+  let size = 0;
+  for (const id of firstOccurrences(exported).order) {
+    const judgment = exported.trace.nodes[id]!;
+    // Each formula is written as text and again in the judgment's kernel data.
+    for (const formula of judgment.assumptions) size += 2 * formatFormula(formula).length;
+    size += 2 * formatFormula(judgment.conclusion).length + 1200;
+    if (size > 1e9) break;
+  }
+  return size;
+}
+
+/** A kernel proof the page renders as its judgments are opened, from each formatted formula written once. */
+function lazyKernel(exported: ExportedProof, formatFormula: (formula: Formula) => string): { readonly html: string; readonly script: string } {
+  const { parent, position } = firstOccurrences(exported);
+  const formulas: string[] = [];
+  const indices = new Map<string, number>();
+  const index = (formula: Formula): number => {
+    const text = formatFormula(formula);
+    let known = indices.get(text);
+    if (known === undefined) { known = formulas.length; formulas.push(text); indices.set(text, known); }
+    return known;
+  };
+  // A judgment is [proof node, context, conclusion, premises]; a premise
+  // written as ~id is a link to a judgment rendered under another.
+  const nodes = exported.trace.nodes.map((judgment, id) => [
+    judgment.proofNode,
+    judgment.assumptions.map(index),
+    index(judgment.conclusion),
+    judgment.children.map((child, at) => parent[child] === id && position[child] === at ? child : ~child),
+  ]);
+  const payloads: Record<number, [string, string, unknown]> = {};
+  for (const judgment of exported.trace.nodes) {
+    const payload = exported.proof.nodes[judgment.proofNode]!.payload as Record<string, unknown>;
+    payloads[judgment.proofNode] ??= [ruleLabel(payload), ruleDetail(payload), payload];
+  }
+  const data = JSON.stringify({ root: exported.trace.root, parent: [...parent], formulas, nodes, payloads }).replaceAll("<", "\\u003c");
+  return {
+    // Past a few levels a judgment no longer indents, or a deep one would
+    // have no width left; its depth is shown instead.
+    html: `<style>.proof-node.flat{margin-left:0;border-left-style:dashed}.proof-node.flat>.node-body{padding-left:0}.depth{font:11px ui-monospace,monospace;color:var(--muted)}</style><div id="kernel-root"></div><script type="application/json" id="kernel-data">${data}</script>`,
+    script: `<script>${lazyKernelScript}</script>`,
+  };
+}
+
+// Builds the markup renderNode writes, one judgment at a time: a judgment's
+// body when it is opened, a shared judgment's path when its link is followed.
+// "Expand" opens the next closed judgments in page order, 200 at a time.
+const lazyKernelScript = `(()=>{const d=JSON.parse(document.getElementById('kernel-data').textContent),F=d.formulas,N=d.nodes,P=d.payloads,made=new Map();
+const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+const open=(e,id)=>{if(!e.dataset.filled)fill(e,id);e.open=true};
+function node(id,depth){const p=P[N[id][0]],e=el('details','proof-node'),s=el('summary');e.id='kernel-step-'+id;e.dataset.depth=depth;
+s.append(el('span','node-id','#'+id),el('span','rule',p[0]),el('span','summary-text',p[1]));
+if(depth>=12){e.classList.add('flat');s.append(el('span','depth','depth '+depth))}e.append(s);
+e.addEventListener('toggle',()=>{if(e.open&&!e.dataset.filled)fill(e,id)});made.set(id,e);return e}
+function fill(e,id){e.dataset.filled='1';const n=N[id],b=el('div','node-body'),j=el('div','judgment'),c=el('div','context'),items=el('div','context-items'),g=el('div','goal');
+c.append(el('span','judgment-label','Context \\u0393'));
+if(!n[1].length)items.append(el('span','empty-context','\\u2205'));else n[1].forEach((f,i)=>{const a=el('span','assumption');a.append(el('span',null,String(i+1)),F[f]);items.append(a)});
+c.append(items);g.append(el('span','judgment-label','Goal / result'),el('div','formula',F[n[2]]));j.append(c,el('div','turnstile','\\u22a2'),g);b.append(j);
+if(n[3].length){b.append(el('div','premise-label',n[3].length===1?'Premise':'Premises'));n[3].forEach(k=>{if(k>=0)b.append(node(k,Number(e.dataset.depth)+1));else{const a=el('a','shared','\\u21a9 shared judgment #'+~k);a.href='#kernel-step-'+~k;a.onclick=v=>{v.preventDefault();reveal(~k)};b.append(a)}})}
+else b.append(el('span','leaf','\\u2713 no remaining premises'));
+const r=el('details','raw'),pre=el('pre');r.append(el('summary',null,'kernel data'),pre);
+r.addEventListener('toggle',()=>{if(r.open&&!pre.textContent)pre.textContent=JSON.stringify({judgment:{proofNode:n[0],assumptions:n[1].map(f=>F[f]),conclusion:F[n[2]],children:n[3].map(k=>k<0?~k:k)},proof:P[n[0]][2]},null,2)});
+b.append(r);e.append(b)}
+function reveal(id){const path=[];for(let x=id;x>=0;x=d.parent[x])path.unshift(x);for(const x of path){const e=made.get(x);if(e)open(e,x)}const t=made.get(id);if(t){history.replaceState(null,'','#kernel-step-'+id);t.scrollIntoView()}}
+const root=node(d.root,0);document.getElementById('kernel-root').append(root);open(root,d.root);
+document.querySelector('[data-action="expand"]').onclick=()=>{for(let budget=200;budget>0;budget--){const e=document.querySelector('#kernel-root .proof-node:not([open])');if(!e)break;open(e,Number(e.id.slice(12)))}};
+document.querySelector('[data-action="collapse"]').onclick=()=>document.querySelectorAll('.proof-node,.raw').forEach(x=>x.open=false);
+const follow=()=>{if(location.hash.startsWith('#kernel-step-'))reveal(Number(location.hash.slice(13)))};
+addEventListener('hashchange',follow);follow()})();`;
 
 function ruleLabel(payload: Record<string, unknown>): string {
   const labels: Record<string, string> = {
