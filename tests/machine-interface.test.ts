@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { callMachineMethod, handleMachineRequest, MACHINE_METHODS, MACHINE_PROTOCOL_VERSION, type MachineCheckResult } from "../src/machine-interface.ts";
 import { checkWorkbenchFiles } from "../src/workbench.ts";
+import { expandKernelContexts } from "../src/kernel-contexts.ts";
 import { LibrarySearchIndex, scanSearchDeclarations } from "../src/library-search.ts";
 import { tacticStepAtCursor, resolveSymbolCandidate } from "../src/workbench-navigation.ts";
 
@@ -163,6 +164,13 @@ test("check adds the kernel derivations of the named theorems only", () => {
   assert.equal(kernelOf(named.theorems.find(item => item.name === first!.name)!), undefined);
   assert.deepEqual(kernelOf(named.theorems.find(item => item.name === second!.name)!), kernelOf(second!));
   assert.ok(kernelOf(second!)!.length > 0);
+  // Contexts are indices into kernelAssumptions; expanded, they are the Workbench's rows.
+  const membership = ok<MachineCheckResult>(handleMachineRequest({ id: 53, method: "check", params: { files: sets, kernel: ["membership.identity"] } }))
+    .theorems.find(item => item.name === "membership.identity") as unknown as { kernel: { assumptions: number[] }[]; kernelAssumptions: string[] };
+  assert.equal(new Set(membership.kernelAssumptions).size, membership.kernelAssumptions.length);
+  assert.ok(membership.kernel.some(row => row.assumptions.length > 0 && row.assumptions.every(item => Number.isInteger(item))));
+  const workbench = checkWorkbenchFiles(sets, "ZFG", undefined, { includeKernelDetails: ["membership.identity"] }).theorems.find(item => item.name === "membership.identity")!;
+  assert.deepEqual(expandKernelContexts(membership.kernel, membership.kernelAssumptions).map(({ contextKey: _key, ...row }) => row), workbench.kernel);
   assert.match(failed(handleMachineRequest({ id: 52, method: "check", params: { files: sets, kernel: "all" } })).message, /list of theorem names/);
 });
 
