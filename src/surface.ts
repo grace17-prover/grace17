@@ -517,6 +517,26 @@ interface CachedTheoremDeclaration {
 }
 const theoremDeclarationCaches = new WeakMap<object, Map<string, CachedTheoremDeclaration>>();
 const maximumTheoremDeclarations = 2_048;
+
+/**
+ * Declarations elaborated in a fork go, by default, to the cache of the
+ * lineage the fork shares with its source, and outlive the fork. An editor
+ * that rechecks one file in a fresh fork of its dependencies for every edit
+ * gives the fork a cache of its own instead, so the versions of that file
+ * neither stay in the dependencies' cache nor evict its entries from it.
+ */
+export interface DeclarationCacheScope {
+  /** Cached declarations of the edited file, kept across forks by the editor. */
+  readonly cache: Map<string, unknown>;
+  /** The keys elaboration in this kernel looked up or stored, for the editor to retire the rest. */
+  readonly used: Set<string>;
+}
+const declarationCacheScopes = new WeakMap<Kernel, DeclarationCacheScope>();
+
+/** Elaborate in `kernel` against `scope` rather than the cache of its lineage. */
+export function setDeclarationCacheScope(kernel: Kernel, scope: DeclarationCacheScope): void {
+  declarationCacheScopes.set(kernel, scope);
+}
 const listLiteralCarriers = new WeakMap<object, Term>();
 const notationResultTypes = new WeakMap<object, string>();
 /**
@@ -1104,8 +1124,10 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
   kernelAnnotations.set(kernel, new Map());
   const lineage = surfaceLineages.get(kernel) ?? {};
   if (!surfaceLineages.has(kernel)) surfaceLineages.set(kernel, lineage);
-  const declarationCache = theoremDeclarationCaches.get(lineage) ?? new Map<string, CachedTheoremDeclaration>();
-  if (!theoremDeclarationCaches.has(lineage)) theoremDeclarationCaches.set(lineage, declarationCache);
+  const declarationScope = declarationCacheScopes.get(kernel);
+  const declarationCache = (declarationScope?.cache as Map<string, CachedTheoremDeclaration> | undefined)
+    ?? theoremDeclarationCaches.get(lineage) ?? new Map<string, CachedTheoremDeclaration>();
+  if (!declarationScope && !theoremDeclarationCaches.has(lineage)) theoremDeclarationCaches.set(lineage, declarationCache);
   let moduleBaseStamp: string | undefined;
   let declarationChain = "";
   let declarationPrefixEnd = 0;
@@ -1577,6 +1599,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       ]));
       declarationPrefixEnd = cacheLineEnd;
       const declarationKey = declarationChain;
+      declarationScope?.used.add(declarationKey);
       const candidate = declarationCache.get(declarationKey);
       // A checked proof and an interactive trace are separate cache capabilities.
       // Re-elaborate a dependency-only entry when the editor requests snapshots.
