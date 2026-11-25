@@ -3,9 +3,8 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { sha256Hex } from "./hash.ts";
 import {
-  and, canonical, formulaEquals, formulaCanonical, pred, substituteFormula, v, type Formula,
+  and, canonicalDigest, canonicalEquals, formulaEquals, formulaCanonical, pred, substituteFormula, v, type Formula,
 } from "./ast.ts";
 import { checkProofDag, decodeProofDag, encodeProofDagWithIndex, type ProofDag } from "./dag.ts";
 import { KernelError, type Kernel } from "./kernel.ts";
@@ -53,6 +52,15 @@ export interface ProofTrace {
 }
 
 export function exportTheorem(kernel: Kernel, name: string): ExportedProof {
+  const body = exportTheoremBody(kernel, name);
+  return Object.freeze({ ...body, digest: digestExport(body) });
+}
+
+/**
+ * The content of a proof export without its digest, for presenting a proof:
+ * digesting the judgment trace of a large proof costs more than building it.
+ */
+export function exportTheoremBody(kernel: Kernel, name: string): Omit<ExportedProof, "digest"> {
   const statement = kernel.theorems.get(name);
   const proof = kernel.theoremProofs.get(name);
   if (!statement || !proof) throw new KernelError(`Theorem has no retained proof: ${name}`);
@@ -69,7 +77,7 @@ export function exportTheorem(kernel: Kernel, name: string): ExportedProof {
     trace: buildProofTrace(kernel, proof, encoded.nodeIds),
     ...(tactics ? { tactics } : {}),
   };
-  return Object.freeze({ ...body, digest: digestExport(body) });
+  return body;
 }
 
 /**
@@ -120,7 +128,7 @@ export function verifyExportedProof(kernel: Kernel, exported: ExportedProof): Fo
   const decoded = decodeProofDag(exported.proof);
   const nodeIds = new Map(decoded.map((proof, index) => [proof, index]));
   const expectedTrace = buildProofTrace(kernel, decoded[exported.proof.root]!, nodeIds);
-  if (canonical(expectedTrace) !== canonical(exported.trace)) {
+  if (!canonicalEquals(expectedTrace, exported.trace)) {
     throw new KernelError("Exported proof judgment trace does not match the checked proof");
   }
   if (exported.tactics) validateTacticTrace(exported.tactics);
@@ -135,7 +143,7 @@ function validateTacticTrace(trace: TacticTrace): void {
   trace.steps.forEach((step, index) => {
     if (!Number.isSafeInteger(step.line) || step.line < 1 || typeof step.command !== "string" || !step.command ||
         !step.before || !Array.isArray(step.before.goals) || !step.after || !Array.isArray(step.after.goals) ||
-        canonical(step.before) !== canonical(state)) {
+        !canonicalEquals(step.before, state)) {
       throw new KernelError(`Malformed tactic trace step #${index}`);
     }
     state = step.after;
@@ -349,5 +357,5 @@ function isProof(value: unknown): value is Proof {
 }
 
 function digestExport(body: object): string {
-  return sha256Hex(canonical(body));
+  return canonicalDigest(body);
 }

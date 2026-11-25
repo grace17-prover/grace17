@@ -3,10 +3,9 @@
 // Released under the Apache License 2.0. See LICENSE in the repository root.
 // Authors: Grant Passmore
 
-import { canonical } from "./ast.ts";
+import { canonical, canonicalDigest } from "./ast.ts";
 import { decodeProofDag, encodeProofDag, type ProofDag } from "./dag.ts";
 import { deepFreeze as freezeCertificate } from "./freeze.ts";
-import { sha256Hex } from "./hash.ts";
 import { exportProofForMachine } from "./export.ts";
 import {
   Kernel, KernelError, type KernelAdmissionCheckpoint, type KernelAdmissionEvent,
@@ -129,7 +128,7 @@ export function compileKernelModule(
     events,
     resultEnvironment: kernel.digest(),
   };
-  const result = deepFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  const result = deepFreeze({ ...body, digest: canonicalDigest(body) });
   validatedModules.add(result);
   return result;
 }
@@ -235,7 +234,7 @@ export function compileDenseKernelModule(
     events,
     resultEnvironment: completed.digest(),
   };
-  return deepFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  return deepFreeze({ ...body, digest: canonicalDigest(body) });
 }
 
 export function encodeDenseKernelModule(module: DenseCompiledKernelModule): Uint8Array {
@@ -317,7 +316,7 @@ export function compileSeparateKernelModule(
     events: dense.events,
     resultEnvironment: dense.resultEnvironment,
   };
-  return deepFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  return deepFreeze({ ...body, digest: canonicalDigest(body) });
 }
 
 /** The proof-checked bootstrap prelude over the bare axioms, as replayable events. */
@@ -426,7 +425,7 @@ export function compileSeparateKernelModuleOverClosure(
     events: dense.events,
     resultEnvironment: dense.resultEnvironment,
   };
-  return deepFreeze({ ...body, digest: sha256Hex(canonical(body)) });
+  return deepFreeze({ ...body, digest: canonicalDigest(body) });
 }
 
 export function encodeSeparateKernelModule(module: SeparateCompiledKernelModule): Uint8Array {
@@ -590,7 +589,7 @@ function validateEnvelope(value: unknown): asserts value is CompiledKernelModule
     throw new KernelError("Malformed compiled module events");
   }
   const { digest, ...body } = value;
-  if (sha256Hex(canonical(body)) !== digest) throw new KernelError("Malformed or corrupted compiled module");
+  if (canonicalDigest(body) !== digest) throw new KernelError("Malformed or corrupted compiled module");
   deepFreeze(value);
   validatedModules.add(value);
 }
@@ -622,7 +621,7 @@ function validateDenseEnvelope(value: unknown): asserts value is DenseCompiledKe
     } else throw new KernelError("Unknown dense compiled module event");
   }
   const { digest, ...body } = value;
-  if (sha256Hex(canonical(body)) !== digest) throw new KernelError("Malformed or corrupted dense compiled module");
+  if (canonicalDigest(body) !== digest) throw new KernelError("Malformed or corrupted dense compiled module");
   deepFreeze(value);
   validatedModules.add(value);
 }
@@ -644,7 +643,7 @@ function validateSeparateEnvelope(value: unknown): asserts value is SeparateComp
   if (isRecord(value) && validatedModules.has(value)) return;
   validateSeparateShape(value);
   const { digest, ...body } = value;
-  if (sha256Hex(canonical(body)) !== digest) throw new KernelError("Malformed or corrupted separate compiled module");
+  if (canonicalDigest(body) !== digest) throw new KernelError("Malformed or corrupted separate compiled module");
   deepFreeze(value);
   validatedModules.add(value);
 }

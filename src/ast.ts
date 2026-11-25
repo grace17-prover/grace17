@@ -4,6 +4,7 @@
 // Authors: Grant Passmore
 
 import { pairInternKey, type InternKey } from "./intern-key.ts";
+import { Sha256 } from "./hash.ts";
 
 export type Term =
   | { readonly tag: "var"; readonly name: string }
@@ -260,6 +261,82 @@ export function canonical(value: unknown): string {
   const record = value as Record<string, unknown>;
   // An absent optional field and an undefined one read the same, as in JSON.
   return `{${Object.keys(record).filter(key => record[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+}
+
+/**
+ * The canonical text of a value, read in chunks: `canonical(value)` is the
+ * concatenation of the chunks, or the empty text where `canonical` gives
+ * undefined. A value's text may be longer than a string can be; its chunks
+ * never are. Chunks end between whole JSON texts or punctuation, so none
+ * splits a surrogate pair.
+ */
+export class CanonicalText {
+  // What remains to be written, last first: text, or a value to write. A
+  // value `joined` is an array element, which canonical writes as empty where
+  // JSON has no text for it; elsewhere a template writes "undefined".
+  readonly #pending: (string | { readonly value: unknown; readonly joined: boolean })[];
+
+  constructor(value: unknown) {
+    this.#pending = [{ value, joined: true }];
+  }
+
+  /** The next chunk, of at least `size` characters while the text lasts; undefined at its end. */
+  next(size = 1 << 16): string | undefined {
+    const pending = this.#pending;
+    let chunk = "";
+    while (chunk.length < size && pending.length > 0) {
+      const top = pending.pop()!;
+      if (typeof top === "string") { chunk += top; continue; }
+      const item = top.value;
+      if (item === null || typeof item !== "object") {
+        chunk += (JSON.stringify(item) as string | undefined) ?? (top.joined ? "" : "undefined");
+      } else if (Array.isArray(item)) {
+        chunk += "[";
+        pending.push("]");
+        for (let index = item.length - 1; index >= 0; index -= 1) {
+          pending.push({ value: item[index], joined: true });
+          if (index > 0) pending.push(",");
+        }
+      } else {
+        const record = item as Record<string, unknown>;
+        const keys = Object.keys(record).filter(key => record[key] !== undefined).sort();
+        chunk += "{";
+        pending.push("}");
+        for (let index = keys.length - 1; index >= 0; index -= 1) {
+          pending.push({ value: record[keys[index]!], joined: false });
+          pending.push(`${index > 0 ? "," : ""}${JSON.stringify(keys[index])}:`);
+        }
+      }
+    }
+    return chunk === "" ? undefined : chunk;
+  }
+}
+
+/** `sha256Hex(canonical(value))`, for values whose canonical text is longer than a string can be. */
+export function canonicalDigest(value: unknown, options: { readonly portable?: boolean } = {}): string {
+  const hasher = new Sha256(options);
+  const encoder = new TextEncoder();
+  const text = new CanonicalText(value);
+  for (let chunk = text.next(); chunk !== undefined; chunk = text.next()) hasher.update(encoder.encode(chunk));
+  return hasher.digestHex();
+}
+
+/** `canonical(left) === canonical(right)`, for values whose canonical text is longer than a string can be. */
+export function canonicalEquals(left: unknown, right: unknown): boolean {
+  const leftText = new CanonicalText(left);
+  const rightText = new CanonicalText(right);
+  let leftChunk = "";
+  let rightChunk = "";
+  for (;;) {
+    if (leftChunk === "") leftChunk = leftText.next() ?? "";
+    if (rightChunk === "") rightChunk = rightText.next() ?? "";
+    // A chunk still empty after reading is the end of its text.
+    if (leftChunk === "" || rightChunk === "") return leftChunk === rightChunk;
+    const length = Math.min(leftChunk.length, rightChunk.length);
+    if (leftChunk.slice(0, length) !== rightChunk.slice(0, length)) return false;
+    leftChunk = leftChunk.slice(length);
+    rightChunk = rightChunk.slice(length);
+  }
 }
 
 export function freeTermVariables(term: Term, into = new Set<string>()): Set<string> {
