@@ -17,7 +17,7 @@ import {
 } from "./index.ts";
 import { checkContinuing, failureText, type ContinuedCheck } from "./continued-check.ts";
 import {
-  callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface, serveMachineInterfaceOnPort,
+  callMachineMethod, MACHINE_PROTOCOL_VERSION, MachineError, machineCheckFailure, machineErrorBody, presentCheckedWorkspace, serveMachineInterface, withoutProofStates, serveMachineInterfaceOnPort,
   shadowedPropertyWarnings, transitiveImportNotes,
 } from "./machine-interface.ts";
 import { shadowedProperties } from "./workbench.ts";
@@ -70,7 +70,7 @@ export function runCli(args: readonly string[]): void {
   };
   const optionNames = new Set(["--theorem", "--out", "--machine", "--environment", "--foundation", "--module-root", "--function", "--args", "--artifacts",
     "--line", "--column", "--tactic", "--active", "--limit", "--module", "--area", "--file", "--kind", "--variables", "--heap", "--port"]);
-  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet", "--store"]);
+  const flagNames = new Set(["--json", "--text", "--verify", "--audit", "--declarations", "--continue", "--all", "--elaborate", "--pin", "--imports", "--quiet", "--store", "--no-states"]);
   const optionNames2 = ["--from"];
   optionNames2.forEach(name => optionNames.add(name));
   const modules: string[] = [];
@@ -211,11 +211,13 @@ export function runCli(args: readonly string[]): void {
           // Under --continue every failure is a diagnostic, each with the
           // partial trace of its theorem, and the dependents it blocked are listed.
           const failed = failures.map(item => machineCheckFailure(item.error, [{ name: item.file, source: item.source }], roots));
+          // --no-states leaves out the proof states of the theorems that did not fail.
+          const theorems = [...presented.theorems, ...failed.flatMap(item => item.theorems)];
           const result = {
             ok: failures.length === 0, version: MACHINE_PROTOCOL_VERSION, operation: command, ...presented,
             ...(failures.length ? { status: "failed" as const } : {}),
             diagnostics: [...failed.flatMap(item => item.diagnostics), ...presented.diagnostics],
-            theorems: [...presented.theorems, ...failed.flatMap(item => item.theorems)],
+            theorems: args.includes("--no-states") ? withoutProofStates(theorems) : theorems,
             admitted: [...presented.admitted, ...failed.flatMap(item => item.admitted)],
             ...(continued ? {
               failures: failures.map((item, index) => ({ module: item.module, file: item.file, ...failed[index]!.diagnostics[0]! })),
@@ -346,7 +348,9 @@ export function runCli(args: readonly string[]): void {
         const sources = modules.filter(entry => entry.endsWith(".g17")).flatMap(entry => {
           try { return [{ name: resolve(entry), source: readFileSync(resolve(entry), "utf8") }]; } catch { return []; }
         });
-        console.log(JSON.stringify({ ...failure, ...machineCheckFailure(error, sources, settings.moduleRoots), milliseconds: Number((performance.now() - started).toFixed(3)) }));
+        const failed = machineCheckFailure(error, sources, settings.moduleRoots);
+        const theorems = args.includes("--no-states") ? withoutProofStates(failed.theorems) : failed.theorems;
+        console.log(JSON.stringify({ ...failure, ...failed, theorems, milliseconds: Number((performance.now() - started).toFixed(3)) }));
       } else if (json) console.error(JSON.stringify(trace ? { ...failure, trace } : failure));
       else {
         console.error(`${failure.kind} error${failure.file ? ` in ${failure.file}` : ""}: ${failure.message}`);
@@ -498,7 +502,7 @@ function safeName(name: string): string {
 function usage(print: (line: string) => void): void {
   print("usage:");
   print("  g17 axiom-audit [--json] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] <module.g17> --theorem <qualified-name>");
-  print("  g17 check [--json] [--audit] [--imports] [--continue [--quiet]] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] <module.g17> [...]");
+  print("  g17 check [--json [--no-states]] [--audit] [--imports] [--continue [--quiet]] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] <module.g17> [...]");
   print("  g17 build [--json] [--foundation ZF|ZFC|ZFG] [--module-root dir ...] [--artifacts dir] [--verify] <Module.Name|module.g17> [...]");
   print("  g17 run [--json] [--module-root dir ...] <module.g17> --function <name> --args <naturals>");
   print("  g17 export [--json] <module.g17> [...] --theorem <name> [--out proof.g17proof.json]");

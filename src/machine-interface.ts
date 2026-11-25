@@ -603,8 +603,23 @@ function checkOptions(params: Params): CheckOptions & { readonly audit: boolean;
 function check(params: Params): MachineCheckResult | MachineContinuedCheckResult {
   const workspace = workspaceParam(params);
   const options = checkOptions(params);
-  if (booleanParam(params, "continue", false)) return continuedCheck(workspace, options);
-  return presentCheck(workspace, rawCheck(workspace, options), options);
+  const result = booleanParam(params, "continue", false)
+    ? continuedCheck(workspace, options)
+    : presentCheck(workspace, rawCheck(workspace, options), options);
+  return booleanParam(params, "states", true) ? result : { ...result, theorems: withoutProofStates(result.theorems) };
+}
+
+/**
+ * Theorems without the proof states of those that did not fail, for a
+ * client that reads statuses: a failed theorem keeps its partial trace.
+ * The states are still captured, so `goal` answers as before.
+ */
+export function withoutProofStates<Theorem extends { readonly status: string }>(theorems: readonly Theorem[]): Theorem[] {
+  return theorems.map(theorem => {
+    if (theorem.status === "failed") return theorem;
+    const { initial: _initial, steps: _steps, ...rest } = theorem as Theorem & { readonly initial?: unknown; readonly steps?: unknown };
+    return rest as Theorem;
+  });
 }
 
 /**

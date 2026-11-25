@@ -136,9 +136,12 @@ Request: a workspace, and optionally `audit: true` to add each theorem's
 axiom audit, `dependencies: false` to skip each theorem's dependency lists,
 `kernel: true` to add the kernel derivation of each theorem, `symbols: true`
 to add the symbol table the hover uses, `digest: true` to add the
-environment digest, `imports: true` to audit the imports (see below), and
-`continue: true` to go on past a failing file and report every failure
-(see `--continue` below).
+environment digest, `imports: true` to audit the imports (see below),
+`states: false` to leave out the `initial` and `steps` of every theorem
+that did not fail, and `continue: true` to go on past a failing file and
+report every failure (see `--continue` below). Without states a large
+file's result is a small fraction of its size; a failed theorem keeps its
+partial trace, and `goal` answers from the full states as before.
 
 ```json
 {"id": 2, "method": "check",
@@ -277,7 +280,8 @@ The shape:
 `g17 check --json file...` prints the same object, with `ok: true`,
 `version`, and `operation: "check"` added, over the checker's own loader:
 it honors `--foundation`, `--module-root`, `--artifacts`, `--store`, `--audit`,
-and `--imports`, and the settings below. Without `--json`, `--imports` prints each note as
+`--imports`, and `--no-states` (the request's `states: false`), and the
+settings below. Without `--json`, `--imports` prints each note as
 `note: <file>:<line>: <message>` and a count, and a shadowed-property
 warning prints as `warning: <file>:<line>: <message>`; neither changes the
 exit status.
