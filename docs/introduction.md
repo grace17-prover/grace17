@@ -16,7 +16,7 @@ Start from the empty set, form new sets from what is already there, and
 continue through the transfinite. The result is the cumulative hierarchy, a
 common setting for numbers, functions, spaces, structures and morphisms that leaves
 mathematicians free to study each through its own properties. That
-combination of unity and freedom is beautiful and powerful, and is to me the
+combination of unity and freedom is beautiful and powerful, and is to me a
 gold standard foundation of classical mathematics.
 
 <!-- cumulus-source: lib/Grace/Cumulus/Set/Hierarchy.g17 -->
