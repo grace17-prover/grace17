@@ -233,9 +233,9 @@ graph TD
 | GRH.Holomorphic | 189 | 184 | 5 |
 | GRH.Integral | 127 | 125 | 2 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
-| GRH.Hurwitz | 63 | 36 | 27 |
-| GRH.Zeta | 27 | 13 | 14 |
-| GRH.LFunction | 36 | 15 | 21 |
+| GRH.Hurwitz | 198 | 198 | 0 |
+| GRH.Zeta | 38 | 35 | 3 |
+| GRH.LFunction | 68 | 63 | 5 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **1246** | **1171** | **75** |
+| **total** | **1424** | **1403** | **21** |
 <!-- /blueprint-status -->
