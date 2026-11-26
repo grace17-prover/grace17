@@ -231,11 +231,11 @@ graph TD
 | GRH.Trig | 132 | 132 | 0 |
 | GRH.Log | 108 | 108 | 0 |
 | GRH.Holomorphic | 515 | 515 | 0 |
-| GRH.Integral | 127 | 125 | 2 |
+| GRH.Integral | 154 | 154 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 90 | 89 | 1 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **1832** | **1823** | **9** |
+| **total** | **1859** | **1852** | **7** |
 <!-- /blueprint-status -->
