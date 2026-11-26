@@ -114,7 +114,9 @@ check result's theorems carry the statement's hypotheses as
 
 The mathematical modules `Int`, `NumberTheory`, `Cardinal`, `Geometry`,
 `LinearAlgebra`, `GraphTheory`, the group theory up to Lagrange's and
-Sylow's theorems, the finite combinatorics, and real analysis through
+Sylow's theorems, the finite combinatorics, point-set topology with the
+bundled topological and metric spaces (all but the uncountability of perfect
+sets), and real analysis through
 derivatives, the intermediate value theorem, and induction along a closed
 interval, and the compactness of products and of closed rectangles in the
 plane are checked under ZF by `tests/zf-library.test.ts` and

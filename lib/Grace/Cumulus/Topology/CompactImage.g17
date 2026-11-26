@@ -1,7 +1,7 @@
 -- The continuous image of a compact set is compact: pull a cover back,
--- take a finite subcover, and push each member forward through a chosen
--- original. The choice of originals is the one use of choice in the
--- compactness development
+-- take a finite subcover, and by induction on that finite subcover find
+-- finitely many members of the cover whose preimages include it. No
+-- choice is used
 -- Part of Cumulus, the Grace17 mathematics library.
 -- Copyright (c) 2026 Grant Passmore.
 -- Released under the Apache License 2.0. See LICENSE in the repository root.
@@ -9,18 +9,56 @@
 
 module Grace.Cumulus.Topology.CompactImage
 import Compact
-import Set.Choice
+import Cardinal.Counting
 
-defgraph originalMap (f X C F : Set) (U ∈ F) : C := choose(originals(f, X, C, U))
-requires inside : F ⊆ preimages(f, X, C)
+-- The subfamilies G of F each of whose members is the preimage of one of
+-- finitely many members of C.
+def pushedFamilies (f X C F : Set) : Set :=
+  { G ∈ 𝒫(F) | ∃ H, H ⊆ C ∧ Finite(H) ∧
+    ∀ P ∈ G, ∃ V ∈ H, functionPreimage(f, X, V) = P }
+
+theorem preimages.finite_originals (f X C F : Set)
+  requires inside : F ⊆ preimages(f, X, C)
+  requires finite : Finite(F)
+  shows ∃ H, H ⊆ C ∧ Finite(H) ∧
+    ∀ P ∈ F, ∃ V ∈ H, functionPreimage(f, X, V) = P
 proof
-  have hU := inside with U, assumption
-  obtain ⟨V, hV, shape⟩ := preimages.membership.forward with hU
-  have original : V ∈ originals(f, X, C, U) := originals.membership.backward with ⟨hV, shape⟩
-  have inhabited : Nonempty(originals(f, X, C, U)) := ⟨V, original⟩
-  have chosen := choose.member with inhabited
-  have parts := originals.membership.forward with chosen
-  exact parts.left
+  have base : ∅ ∈ pushedFamilies(f, X, C, F)
+    apply pushedFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), ∅,
+      (empty.subset at C), Finite.empty, ?_⟩
+    intros P hP
+    simp at hP
+  have step : ∀ G ⊆ F, Finite(G) → ∀ U ∈ F, U ∉ G →
+      G ∈ pushedFamilies(f, X, C, F) → G ∪ {U} ∈ pushedFamilies(f, X, C, F)
+    intros G hG finiteG U hU fresh known
+    obtain ⟨_, H, hH, finiteH, found⟩ :=
+      pushedFamilies.membership.forward with known
+    obtain ⟨W, hW, shape⟩ := preimages.membership.forward with (inside with U, hU)
+    have bound : G ∪ {U} ⊆ F
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isU
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isU)
+    apply pushedFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), H ∪ {W}, ?_,
+      (Finite.union with finiteH, (Finite.singleton at W)), ?_⟩
+    . intros Z hZ
+      cases (union2.membership.forward with hZ) with inH | isW
+      . exact hH with Z, inH
+      . rwa (singleton.membership.forward with isW)
+    . intros P hP
+      cases (union2.membership.forward with hP) with inG | isU
+      . obtain ⟨V, hV, preimage⟩ := found with P, inG
+        exact ⟨V, (union2.left with hV), preimage⟩
+      . have member : W ∈ H ∪ {W} :=
+          union2.right with (singleton.membership.backward with rfl)
+        rw (singleton.membership.forward with isU)
+        exact ⟨W, member, shape⟩
+  have all := Finite.induction with base, step
+  have member := all with F, (Subset.reflexive at F), finite
+  obtain ⟨_, rest⟩ := pushedFamilies.membership.forward with member
+  exact rest
 
 theorem IsCompact.image (f X T Y S A : Set)
   requires continuous : ContinuousMap(f, X, T, Y, S)
@@ -47,32 +85,15 @@ proof
       have inPreimage : a ∈ functionPreimage(f, X, V) := functionPreimage.membership.backward with ⟨haX, inV⟩
       exact union.contains with member, inPreimage
     obtain ⟨F, hF, finiteF, coveredA⟩ := compact.right with preimages(f, X, D), ⟨pulledOpen, pulledCover⟩
-    have graph := originalMap.function with hF
-    witness functionImage(originalMap(f, X, D, F), F, D)
-    refine ⟨(functionImage.subset at originalMap(f, X, D, F), F, D), (Finite.function_image with graph, finiteF, (Subset.reflexive at F)), ?_⟩
+    obtain ⟨H, hH, finiteH, found⟩ := preimages.finite_originals with hF, finiteF
+    refine ⟨H, hH, finiteH, ?_⟩
     intros y hy
     simp [functionImage.membership] at hy
     obtain ⟨hyY, a, ha, shape⟩ := hy
     have covered := coveredA with a, ha
     obtain ⟨U, hU, haU⟩ := union.membership.forward with covered
-    have value := originalMap.value with hF
-    have hUP := hF with U, hU
-    obtain ⟨V, hV, preimageShape⟩ := preimages.membership.forward with hUP
-    have member : V ∈ originals(f, X, D, U) := originals.membership.backward with ⟨hV, preimageShape⟩
-    have inhabited : Nonempty(originals(f, X, D, U)) := ⟨V, member⟩
-    have chosen := choose.member with inhabited
-    have chosenParts := originals.membership.forward with chosen
-    rw ← value at chosenParts
-    have inChosen : a ∈ functionPreimage(f, X, originalMap(f, X, D, F)(U)) by rwa chosenParts.right
-    have hit := functionPreimage.membership.forward with inChosen
-    have chosenMember : originalMap(f, X, D, F)(U) ∈ functionImage(originalMap(f, X, D, F), F, D)
-      have closed := FunctionBetween.apply_closed with graph, hU
-      simp [functionImage.membership]
-      constructor
-      . exact closed
-      . witness U
-        constructor
-        . exact hU
-        . rfl
+    obtain ⟨V, hV, preimage⟩ := found with U, hU
+    rw ← preimage at haU
+    have hit := functionPreimage.membership.forward with haU
     rw shape
-    exact union.contains with chosenMember, hit.right
+    exact union.contains with hV, hit.right
