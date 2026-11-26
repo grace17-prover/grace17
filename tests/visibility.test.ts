@@ -125,3 +125,45 @@ test("a guard registered by one module does not open the predicate in a module t
   const imported = outcome([sharedPredicate, guardModule, dependent("GuardD", ["GuardA"], openedGuard)], "GuardD");
   assert.match(imported, /^GuardD\.opened/);
 });
+
+// Many typing rules of one module, none about `step`, and in another module
+// a typecheck whose search visits one goal per `step`. A goal charges its
+// budget for the rules the head index skips; the rules of a module the
+// scope does not import are not charged, so the search ends the same way
+// whether or not that module was loaded first.
+const budgetRules = (proof: string): Entry => ({ file: "BudgetA.g17", source: `module BudgetA
+
+def other (x : Set) : Set := x
+
+${Array.from({ length: 600 }, (_, index) => `theorem other.closed${index} (S x : Set)
+  requires member : x ∈ S
+  shows other(x) ∈ S
+proof
+  ${proof}
+`).join("\n")}` });
+const budgetSearch: Entry = dependent("BudgetB", [], `def step (x : Set) : Set := x
+
+theorem step.closed (S x : Set)
+  requires member : x ∈ S
+  shows step(x) ∈ S
+proof
+  unfold step
+  exact member
+
+theorem deep (S x : Set)
+  requires member : x ∈ S
+  shows ${"step(".repeat(240)}x${")".repeat(240)} ∈ S
+proof
+  typecheck
+`);
+
+test("typing rules of a module that is not imported do not spend the typecheck budget", () => {
+  const alone = outcome([budgetSearch], "BudgetB");
+  assert.match(alone, /^BudgetB\.deep/m);
+  assert.equal(outcome([budgetRules("unfold other\n  exact member"), budgetSearch], "BudgetB"), alone);
+});
+
+test("the admissions of a module that is not imported give no typing rules", () => {
+  const alone = outcome([budgetSearch], "BudgetB");
+  assert.equal(outcome([budgetRules("sorry"), budgetSearch], "BudgetB"), alone);
+});
