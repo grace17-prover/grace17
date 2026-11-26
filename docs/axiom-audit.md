@@ -56,6 +56,8 @@ equality need not use the axiom of Choice at all.
 
 ## Large cardinal hypotheses
 
+What the hypotheses mean, with pictures, is in [large cardinals](large-cardinals.md).
+
 Grace17 adds no large cardinal axiom to any foundation. A predicate that
 states a large cardinal hypothesis, a sentence or a property of a set, is
 registered as one in the module that defines it:
