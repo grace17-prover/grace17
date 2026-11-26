@@ -226,8 +226,8 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | GRH.Bernoulli | 142 | 133 | 9 |
-| GRH.DirichletCharacter | 113 | 109 | 4 |
-| GRH.Exp | 129 | 38 | 91 |
+| GRH.DirichletCharacter | 113 | 110 | 3 |
+| GRH.Exp | 207 | 206 | 1 |
 | GRH.Trig | 81 | 16 | 65 |
 | GRH.Log | 91 | 16 | 75 |
 | GRH.Holomorphic | 125 | 51 | 74 |
@@ -237,5 +237,5 @@ graph TD
 | GRH.Zeta | 27 | 13 | 14 |
 | GRH.LFunction | 36 | 15 | 21 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **899** | **488** | **411** |
+| **total** | **977** | **657** | **320** |
 <!-- /blueprint-status -->
