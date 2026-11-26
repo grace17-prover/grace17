@@ -12,7 +12,7 @@
 module GRH.DirichletCharacter
 import Grace.Cumulus.Complex.Norm
 import Grace.Cumulus.NumberTheory.IntegerRemainder
-import Grace.Cumulus.NumberTheory.ResidueLists
+import Grace.Cumulus.NumberTheory.Euler
 import Grace.Cumulus.Algebra.Ring.FiniteSetSum
 
 -- A Dirichlet character modulo N is a function on all of ℤ. An N-periodic
@@ -124,6 +124,57 @@ proof
   obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
   exact vanishing with a, integer, notCoprime
 
+-- Shifting by a natural multiple of N leaves a value unchanged.
+theorem DirichletCharacter.shift_natural (N : Nat) (χ : Set, n : Nat)
+  requires character : DirichletCharacter(N, χ)
+  shows ∀ x ∈ ℤ, χ(x + integerOfNat(N) * integerOfNat(n)) = χ(x)
+proof
+  induction n
+  | zero =>
+    intros x member
+    have shape : x + integerOfNat(N) * integerOfNat(0) = x
+      rw integerOfNat.zero
+      ring
+    rw shape
+  | k + 1 using ih =>
+    intros x member
+    have step := integerOfNat.add_one at k
+    have shape : x + integerOfNat(N) * integerOfNat(k + 1) =
+        integerAddValue(x + integerOfNat(N) * integerOfNat(k),
+          integerOfNat(N))
+      rw step
+      ring
+    have shifted : x + integerOfNat(N) * integerOfNat(k) ∈ ℤ by typecheck
+    have periodic := DirichletCharacter.periodic with character, shifted
+    have previous := ih with x, member
+    rw [shape, periodic, previous]
+
+-- Shifting by any integer multiple of N leaves a value unchanged.
+theorem DirichletCharacter.shift (N : Nat) (χ x q : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires xInteger : x ∈ ℤ
+  requires qInteger : q ∈ ℤ
+  shows χ(x + integerOfNat(N) * q) = χ(x)
+proof
+  obtain ⟨n, nNat, sign⟩ := Integer.signed_natural at q
+  cases sign with positive | negative
+  . rw positive
+    have shift := DirichletCharacter.shift_natural at N, χ, n with character
+    exact shift with x, xInteger
+  . -- x = (x − N n) + N n.
+    have shift := DirichletCharacter.shift_natural at N, χ, n with character
+    have lowered : x - integerOfNat(N) * integerOfNat(n) ∈ ℤ by typecheck
+    have back := shift with x - integerOfNat(N) * integerOfNat(n), lowered
+    have restore : x - integerOfNat(N) * integerOfNat(n) +
+        integerOfNat(N) * integerOfNat(n) = x by ring
+    rw restore at back
+    have negativeForm := integerOfNat.neg at n
+    have shape : x + integerOfNat(N) * q =
+        x - integerOfNat(N) * integerOfNat(n)
+      rw [negative, ← negativeForm]
+      ring
+    rw [shape, back]
+
 -- Two integers congruent modulo N have the same value.
 theorem DirichletCharacter.congruent (N : Nat) (χ a b : Set)
   requires character : DirichletCharacter(N, χ)
@@ -132,7 +183,27 @@ theorem DirichletCharacter.congruent (N : Nat) (χ a b : Set)
   requires congruent : IntegerCongruent(integerOfNat(N), a, b)
   shows χ(a) = χ(b)
 proof
-  sorry
+  obtain ⟨q, qInteger, equation⟩ := congruent
+  have shape : a = b + integerOfNat(N) * q
+    linear_combination -equation
+  have shift := DirichletCharacter.shift with character, bInteger, qInteger
+  rw [shape, shift]
+
+-- Coprimality to the modulus is a property of the residue class.
+theorem IntegerCoprime.of_congruent (m a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires congruent : IntegerCongruent(m, a, b)
+  requires coprime : IntegerCoprime(a, m)
+  shows IntegerCoprime(b, m)
+proof
+  obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+    with coprime
+  have reverse := IntegerCongruent.symmetric with congruent
+  have scaled := IntegerCongruent.mul_right at m, b, a, u with reverse
+  have chain := IntegerCongruent.transitive with scaled, inverse
+  exact IntegerCoprime.of_modular_inverse with chain
 
 -- Each value is the value at the least nonnegative residue.
 theorem DirichletCharacter.residue (N : Nat) (χ a : Set)
@@ -141,7 +212,35 @@ theorem DirichletCharacter.residue (N : Nat) (χ a : Set)
   requires positive : 0 < N
   shows χ(a) = χ(integerOfNat(integerMod(a, N)))
 proof
-  sorry
+  have congruent := integerMod.congruent at a, N with positive
+  have natural := integerMod.natural at a, N with positive
+  have residue : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+  exact DirichletCharacter.congruent with character, integer, residue,
+    congruent
+
+section Inverses
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- An inverse modulo N gives an inverse value.
+theorem DirichletCharacter.inverse_value (N : Nat) (χ a u : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires uInteger : u ∈ ℤ
+  requires inverse : IntegerCongruent(integerOfNat(N), integerMulValue(a, u),
+    integerOne)
+  shows ℂ[χ(a) * χ(u)] = complexOne
+proof
+  have product : integerMulValue(a, u) ∈ ℤ by typecheck
+  have one : integerOne ∈ ℤ by typecheck
+  have same := DirichletCharacter.congruent with character, product, one,
+    inverse
+  have multiplicative := DirichletCharacter.mul with character, aInteger,
+    uInteger
+  have unit := DirichletCharacter.one with character
+  rw [← multiplicative, same, unit]
+
+end Inverses
 
 -- The character vanishes exactly off the integers coprime to N.
 theorem DirichletCharacter.nonzero_iff (N : Nat) (χ a : Set)
@@ -149,7 +248,27 @@ theorem DirichletCharacter.nonzero_iff (N : Nat) (χ a : Set)
   requires integer : a ∈ ℤ
   shows χ(a) ≠ complexZero ↔ IntegerCoprime(a, integerOfNat(N))
 proof
-  sorry
+  constructor
+  . intro nonzero
+    by_contra notCoprime
+    have zero := DirichletCharacter.not_coprime with character, integer,
+      notCoprime
+    exact nonzero with zero
+  . intro coprime
+    intro zero
+    obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+      with coprime
+    have uMember : u ∈ ℤ by typecheck
+    have unit := DirichletCharacter.inverse_value with character, integer,
+      uMember, inverse
+    have uValue := DirichletCharacter.value with character, uMember
+    rw zero at unit
+    have field := complexes.is_field
+    have ring := IsField.comm_ring with field
+    have absorb : complexMul(complexZero, χ(u)) = complexZero by ring
+    rw absorb at unit
+    obtain ⟨zeroMember, oneMember, distinct⟩ := complexes.nontrivial
+    exact distinct with unit
 
 -- A character is determined by its values on 0, 1, …, N − 1.
 theorem DirichletCharacter.ext (N : Nat) (χ ψ : Set)
@@ -159,7 +278,19 @@ theorem DirichletCharacter.ext (N : Nat) (χ ψ : Set)
   requires agree : ∀ j ∈ N, χ(integerOfNat(j)) = ψ(integerOfNat(j))
   shows χ = ψ
 proof
-  sorry
+  have firstFunction := DirichletCharacter.function with first
+  have secondFunction := DirichletCharacter.function with second
+  apply FunctionBetween.ext at χ, ψ, ℤ, complexCarrier with firstFunction,
+    secondFunction
+  intros a integer
+  have firstResidue := DirichletCharacter.residue with first, integer,
+    positive
+  have secondResidue := DirichletCharacter.residue with second, integer,
+    positive
+  have below := integerMod.below at a, N with positive
+  have member := membership.of_Less at integerMod(a, N), N with below
+  have same := agree with integerMod(a, N), member
+  rw [firstResidue, secondResidue, same]
 
 -- A character modulo 1 is the constant 1.
 theorem DirichletCharacter.modulus_one (χ a : Set)
@@ -167,7 +298,14 @@ theorem DirichletCharacter.modulus_one (χ a : Set)
   requires integer : a ∈ ℤ
   shows χ(a) = complexOne
 proof
-  sorry
+  have congruent : IntegerCongruent(integerOfNat(1), a, integerOne)
+    rw integerOfNat.one
+    exact IntegerCongruent.one_modulus at a, integerOne
+  have one : integerOne ∈ ℤ by typecheck
+  have same := DirichletCharacter.congruent with character, integer, one,
+    congruent
+  have unit := DirichletCharacter.one with character
+  rw [same, unit]
 
 theorem dirichletCharacters.membership (N : Nat) (χ : Set)
   shows χ ∈ dirichletCharacters(N) ↔ DirichletCharacter(N, χ)
@@ -182,9 +320,64 @@ proof
     refine ⟨?_, character⟩
     exact functionSpace.mem_iff.backward with function
 
+-- Euler's theorem for integers: a^φ(N) ≡ 1 modulo N when a is coprime to N.
+theorem IntegerCoprime.pow_totient (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows IntegerCongruent(integerOfNat(N), integerPow(a, totient(N)),
+    integerOne)
+proof
+  by_cases unit : N = 1
+  . rw [unit, integerOfNat.one]
+    exact IntegerCongruent.one_modulus at integerPow(a, totient(1)),
+      integerOne
+  . have aboveOne : 1 < N
+      by_contra notAbove
+      have equal : N = 1 by arith
+      exact unit with equal
+    -- Euler's theorem for the least residue r of a.
+    have residue := integerMod.congruent at a, N with positive
+    have natural := integerMod.natural at a, N with positive
+    have modulus : integerOfNat(N) ∈ ℤ by typecheck
+    have residueMember : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+    have residueCoprime := IntegerCoprime.of_congruent with integer,
+      residueMember, modulus, residue, coprime
+    unfold IntegerCoprime at residueCoprime
+    rw integerGCD.ofNat at residueCoprime
+    have euler := euler.theorem at integerMod(a, N), N with aboveOne,
+      residueCoprime
+    have oneMod := mod.of_less at N, 1 with aboveOne
+    have reduced : CongruentMod(integerMod(a, N) ^ totient(N), 1, N)
+      unfold CongruentMod
+      rw [euler, oneMod]
+    have lifted := IntegerCongruent.ofNat_iff.backward
+      at N, integerMod(a, N) ^ totient(N), 1 with reduced
+    rw [← integerPow.ofNat, integerOfNat.one] at lifted
+    have powers := IntegerCongruent.pow at integerOfNat(N), a,
+      integerOfNat(integerMod(a, N)), totient(N) with residue
+    exact IntegerCongruent.transitive with powers, lifted
+
 section Values
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
   complexMul, complexOne)
+
+-- The value at a natural power is the power of the value.
+theorem DirichletCharacter.pow (N : Nat) (χ a : Set, k : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(integerPow(a, k)) = ℂ[χ(a) ^ k]
+proof
+  induction k
+  | zero =>
+    rw [integerPow.zero, monoidPow.zero]
+    exact DirichletCharacter.one with character
+  | succ(j) using ih =>
+    have powerInteger := integerPow.integer at a, j
+    have power : integerPow(a, j) ∈ ℤ by typecheck
+    have multiplicative := DirichletCharacter.mul with character, integer,
+      power
+    rw [integerPow.succ, multiplicative, ih, monoidPow.succ]
 
 -- On the integers coprime to N the values are φ(N)-th roots of unity.
 theorem DirichletCharacter.pow_totient (N : Nat) (χ a : Set)
@@ -194,15 +387,16 @@ theorem DirichletCharacter.pow_totient (N : Nat) (χ a : Set)
   requires coprime : IntegerCoprime(a, integerOfNat(N))
   shows ℂ[χ(a) ^ totient(N)] = complexOne
 proof
-  sorry
-
--- The value at a natural power is the power of the value.
-theorem DirichletCharacter.pow (N : Nat) (χ a : Set, k : Nat)
-  requires character : DirichletCharacter(N, χ)
-  requires integer : a ∈ ℤ
-  shows χ(integerPow(a, k)) = ℂ[χ(a) ^ k]
-proof
-  sorry
+  have power := DirichletCharacter.pow at N, χ, a, totient(N)
+    with character, integer
+  have powerInteger := integerPow.integer at a, totient(N)
+  have powerMember : integerPow(a, totient(N)) ∈ ℤ by typecheck
+  have one : integerOne ∈ ℤ by typecheck
+  have congruent := IntegerCoprime.pow_totient with positive, integer, coprime
+  have same := DirichletCharacter.congruent with character, powerMember, one,
+    congruent
+  have unit := DirichletCharacter.one with character
+  rw [← power, same, unit]
 
 -- χ(−1) = ±1.
 theorem DirichletCharacter.neg_one (N : Nat) (χ : Set)
@@ -210,7 +404,31 @@ theorem DirichletCharacter.neg_one (N : Nat) (χ : Set)
   shows χ(integerNegValue(integerOne)) = complexOne ∨
     χ(integerNegValue(integerOne)) = ℂ[-1]
 proof
-  sorry
+  have minus : integerNegValue(integerOne) ∈ ℤ by typecheck
+  have multiplicative := DirichletCharacter.mul with character, minus, minus
+  have square : integerMulValue(integerNegValue(integerOne),
+      integerNegValue(integerOne)) = integerOne by ring
+  have unit := DirichletCharacter.one with character
+  rw [square, unit] at multiplicative
+  have value := DirichletCharacter.value with character, minus
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have noZero := IsField.no_zero_divisors at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne with field
+  have factored : ℂ[(χ(integerNegValue(integerOne)) - 1) *
+      (χ(integerNegValue(integerOne)) + 1)] = complexZero
+    linear_combination -multiplicative
+  have left : ℂ[χ(integerNegValue(integerOne)) - 1] ∈ complexCarrier
+    by typecheck
+  have right : ℂ[χ(integerNegValue(integerOne)) + 1] ∈ complexCarrier
+    by typecheck
+  have zero := noZero with ℂ[χ(integerNegValue(integerOne)) - 1], left,
+    ℂ[χ(integerNegValue(integerOne)) + 1], right, factored
+  cases zero with first | second
+  . left
+    linear_combination first
+  . right
+    linear_combination second
 
 end Values
 
