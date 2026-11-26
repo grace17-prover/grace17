@@ -178,11 +178,10 @@ path to where the reliance starts. The JSON interface reports the same as
 
 The Lean proof of the Generalized Riemann Hypothesis that Grace17 is porting
 uses Lean's universes in one region, its étale and Hodge cohomology, where
-spaces are functors on the category of all rings. The rest of the proof
-uses that region through theorems whose statements mention no universe.
-The plan is to write the region over an admissible set of test rings, a
-set closed under the constructions the region performs, obtained first from
-`TarskiGrothendieck()` and then built in ZFC by closing a starting set of
-rings under those constructions along ω. Until that second step the audit
-shows the reliance on a universe all the way up to the final theorems.
-After it, the certificate is a certificate from ZFC alone.
+spaces are functors on the category of all rings. I expected that region to
+need a universe. It does not. Every ring it builds has fewer than ℶ_ω
+elements, and nothing in it ranges over a proper class. So the port writes
+it over the rings whose elements lie in V(ω·2), a stage of the hierarchy
+that ZFC proves exists. The certificate of GRH is meant to be a certificate
+from ZFC alone, and if any large cardinal crept in, the audit would show it
+all the way to the final theorem.
