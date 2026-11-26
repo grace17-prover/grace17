@@ -235,7 +235,7 @@ graph TD
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
 | GRH.Zeta | 98 | 98 | 0 |
-| GRH.LFunction | 90 | 89 | 1 |
+| GRH.LFunction | 229 | 229 | 0 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **1832** | **1823** | **9** |
+| **total** | **1971** | **1963** | **8** |
 <!-- /blueprint-status -->
