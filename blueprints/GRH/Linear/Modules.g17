@@ -16,6 +16,334 @@ import Grace.Cumulus.Algebra.Module.Basic
 import Grace.Cumulus.Algebra.Ring.FiniteSetSum
 import Grace.Cumulus.Relation.QuotientOperations
 
+-- Section: Sums in an abelian group
+-- The enumeration-independence of indexedRingSum (Cumulus's IndexedSum)
+-- needs only the additive abelian group; these helpers redo it under
+-- IsAbelianGroup, so that it applies to the vectors of a module.
+section GroupSums
+variable (A add zero neg : Set)
+hypothesis group : IsAbelianGroup(A, add, zero, neg)
+
+theorem GroupSums.monoid
+  shows IsMonoid(A, add, zero)
+proof
+  have ordinary := IsAbelianGroup.group with group
+  exact IsGroup.monoid with ordinary
+
+theorem GroupSums.zero_mem
+  shows zero ∈ A
+proof
+  have monoid := GroupSums.monoid with *
+  exact IsMonoid.unit_in_carrier with monoid
+
+theorem GroupSums.add_mem (x y : Set)
+  requires xIn : x ∈ A
+  requires yIn : y ∈ A
+  shows call2(add, x, y) ∈ A
+proof
+  have monoid := GroupSums.monoid with *
+  exact IsMonoid.closed with monoid, xIn, yIn
+
+theorem GroupSums.zero_add (x : Set)
+  requires xIn : x ∈ A
+  shows call2(add, zero, x) = x
+proof
+  have monoid := GroupSums.monoid with *
+  exact IsMonoid.left_identity with monoid, xIn
+
+theorem GroupSums.add_zero (x : Set)
+  requires xIn : x ∈ A
+  shows call2(add, x, zero) = x
+proof
+  have monoid := GroupSums.monoid with *
+  exact IsMonoid.right_identity with monoid, xIn
+
+theorem indexedRingSum.group_closed (w f : Set, n : Nat)
+  shows WeightedValues(w, f, A, n) → indexedRingSum(w, f, add, zero, n) ∈ A
+proof
+  induction n
+  | zero =>
+    intro values
+    rw indexedRingSum
+    exact GroupSums.zero_mem with group
+  | succ(k) using ih =>
+    intro values
+    have prefix := WeightedValues.prefix at w, f, A, k with *
+    have last := WeightedValues.last at w, f, A, k with *
+    have previous := ih with prefix
+    rw indexedRingSum
+    exact GroupSums.add_mem with group, previous, last
+
+theorem matchingRingRow.group_closed (w f x : Set, n : Nat)
+  requires value : w(x) ∈ A
+  shows matchingRingRow(A, zero, add, w, f, x, n) ∈ A
+proof
+  induction n
+  | zero =>
+    have zeroIn := GroupSums.zero_mem with group
+    rwa matchingRingRow
+  | succ(k) using ih =>
+    have zeroIn := GroupSums.zero_mem with group
+    have last := singleValue.closed at A, zero, w(x), x, f(k) with *
+    rw matchingRingRow
+    exact GroupSums.add_mem with group, ih, last
+
+theorem matchingRingTotal.group_closed (w f g : Set, n m : Nat)
+  shows WeightedValues(w, g, A, m) →
+    matchingRingTotal(A, zero, add, w, f, g, n, m) ∈ A
+proof
+  induction m
+  | zero =>
+    intro values
+    rw matchingRingTotal
+    exact GroupSums.zero_mem with group
+  | succ(k) using ih =>
+    intro values
+    have prefix := WeightedValues.prefix at w, g, A, k with *
+    have last := WeightedValues.last at w, g, A, k with *
+    have previous := ih with prefix
+    have row := matchingRingRow.group_closed at A, add, zero, neg, w, f, g(k), n with *
+    rw matchingRingTotal
+    exact GroupSums.add_mem with group, previous, row
+
+theorem matchingRingRow.group_absent (w f x : Set, n : Nat)
+  requires value : w(x) ∈ A
+  shows (∀ i ∈ n, f(i) ≠ x) → matchingRingRow(A, zero, add, w, f, x, n) = zero
+proof
+  induction n
+  | zero =>
+    intro absent
+    rw matchingRingRow
+    rfl
+  | succ(k) using ih =>
+    have zeroIn := GroupSums.zero_mem with group
+    intro absent
+    have prefix : ∀ i ∈ k, f(i) ≠ x
+      intros i before
+      have included := membership.into_successor at i, k with *
+      exact absent with i, included
+    have last := absent with k, membership.self_successor at k with *
+    have previous := ih with prefix
+    have entry := singleValue.other at A, zero, w(x), x, f(k) with *
+    rw [matchingRingRow, previous, entry]
+    exact GroupSums.zero_add with group, zeroIn
+
+theorem matchingRingRow.group_unique (w f x : Set, n : Nat)
+  requires value : w(x) ∈ A
+  shows DistinctValues(f, n) → Occurs(f, n, x) →
+    matchingRingRow(A, zero, add, w, f, x, n) = w(x)
+proof
+  induction n
+  | zero =>
+    intros distinct occurs
+    rcases occurs with ⟨i, impossible, same⟩
+    exfalso
+    simp [nat.zero, set.empty]
+  | succ(k) using ih =>
+    have zeroIn := GroupSums.zero_mem with group
+    intros distinct occurs
+    have alternatives : f(k) = x ∨ f(k) ≠ x by tauto
+    cases alternatives with last | other
+    . have fresh := DistinctValues.last_fresh at f, k with *
+      have absent : ∀ i ∈ k, f(i) ≠ x
+        intros i before equal
+        have different := fresh with i, before
+        rw ← last at equal
+        exact different with equal
+      have previous := matchingRingRow.group_absent at A, add, zero, neg, w, f, x, k with *
+      have entry := singleValue.same at A, zero, w(x), x, f(k) with *
+      rw [matchingRingRow, previous, entry]
+      exact GroupSums.zero_add with group, value
+    . obtain ⟨position, before, equal⟩ := Occurs.forward at f, succ(k), x with occurs
+      have shape := membership.successor_forward{n := k} with before
+      have earlier : position ∈ k
+        cases shape with inside | atLast
+        . exact inside
+        . exfalso
+          rw atLast at equal
+          exact other with equal
+      have prefix := DistinctValues.prefix at f, k with *
+      have occurrence : Occurs(f, k, x)
+        unfold Occurs
+        refine ⟨position, earlier, equal⟩
+      have previous := ih with prefix, occurrence
+      have entry := singleValue.other at A, zero, w(x), x, f(k) with *
+      rw [matchingRingRow, previous, entry]
+      exact GroupSums.add_zero with group, value
+
+theorem matchingRingWeight.group_symmetric (w x y : Set)
+  requires xValue : w(x) ∈ A
+  requires yValue : w(y) ∈ A
+  shows singleValue(A, zero, w(x), x, y) = singleValue(A, zero, w(y), y, x)
+proof
+  have zeroIn := GroupSums.zero_mem with group
+  have alternatives : x = y ∨ x ≠ y by tauto
+  cases alternatives with same | different
+  . rw same
+    rfl
+  . have reverse : y ≠ x
+      intro equal
+      have impossible : x = y by cc
+      exact different with impossible
+    have left := singleValue.other at A, zero, w(x), x, y with *
+    have right := singleValue.other at A, zero, w(y), y, x with *
+    cc
+
+theorem matchingRingTotal.group_empty_left (w f g : Set, m : Nat)
+  shows matchingRingTotal(A, zero, add, w, f, g, (0:Nat), m) = zero
+proof
+  induction m
+  | zero =>
+    rw matchingRingTotal
+    rfl
+  | succ(k) using ih =>
+    have zeroIn := GroupSums.zero_mem with group
+    rw [matchingRingTotal, matchingRingRow, ih]
+    exact GroupSums.zero_add with group, zeroIn
+
+theorem matchingRingTotal.group_extend_left (w f g : Set, n m : Nat)
+  requires value : w(f(n)) ∈ A
+  shows WeightedValues(w, g, A, m) →
+    matchingRingTotal(A, zero, add, w, f, g, succ(n), m) =
+    call2(add, matchingRingTotal(A, zero, add, w, f, g, n, m),
+      matchingRingRow(A, zero, add, w, g, f(n), m))
+proof
+  induction m
+  | zero =>
+    have zeroIn := GroupSums.zero_mem with group
+    intro values
+    simp [matchingRingTotal, matchingRingRow]
+    symm
+    exact GroupSums.zero_add with group, zeroIn
+  | succ(k) using ih =>
+    have zeroIn := GroupSums.zero_mem with group
+    intro values
+    have prefix := WeightedValues.prefix at w, g, A, k with *
+    have last := WeightedValues.last at w, g, A, k with *
+    have previous := ih with prefix
+    have symmetric := matchingRingWeight.group_symmetric at A, add, zero, neg, w, g(k), f(n) with *
+    have totalBound := matchingRingTotal.group_closed at A, add, zero, neg, w, f, g, n, k with *
+    have totalIn := totalBound with prefix
+    have rowLeftIn := matchingRingRow.group_closed at A, add, zero, neg, w, g, f(n), k with *
+    have rowRightIn := matchingRingRow.group_closed at A, add, zero, neg, w, f, g(k), n with *
+    have entryIn := singleValue.closed at A, zero, w(f(n)), f(n), g(k) with *
+    rw [matchingRingTotal, matchingRingTotal, matchingRingRow, matchingRingRow, previous, symmetric]
+    exact IsAbelianGroup.four_shuffle with group, totalIn, rowLeftIn, rowRightIn, entryIn
+
+theorem matchingRingTotal.group_transpose (w f g : Set, m n : Nat)
+  requires valuesG : WeightedValues(w, g, A, m)
+  shows WeightedValues(w, f, A, n) →
+    matchingRingTotal(A, zero, add, w, f, g, n, m) =
+    matchingRingTotal(A, zero, add, w, g, f, m, n)
+proof
+  induction n
+  | zero =>
+    intro valuesF
+    have empty := matchingRingTotal.group_empty_left at A, add, zero, neg, w, f, g, m with *
+    rw [empty, matchingRingTotal]
+    rfl
+  | succ(k) using ih =>
+    intro valuesF
+    have prefix := WeightedValues.prefix at w, f, A, k with *
+    have last := WeightedValues.last at w, f, A, k with *
+    have previous := ih with prefix
+    have extended := matchingRingTotal.group_extend_left at A, add, zero, neg, w, f, g, k, m with *
+    rw [extended, matchingRingTotal, previous]
+    rfl
+
+theorem matchingRingTotal.group_sum (w f g : Set, n m : Nat)
+  requires distinct : DistinctValues(f, n)
+  shows WeightedValues(w, g, A, m) → (∀ j ∈ m, Occurs(f, n, g(j))) →
+    matchingRingTotal(A, zero, add, w, f, g, n, m) =
+    indexedRingSum(w, g, add, zero, m)
+proof
+  induction m
+  | zero =>
+    intros values covered
+    simp [matchingRingTotal, indexedRingSum]
+  | succ(k) using ih =>
+    intros values covered
+    have prefix : ∀ j ∈ k, Occurs(f, n, g(j))
+      intros j before
+      have included := membership.into_successor at j, k with *
+      exact covered with j, included
+    have last := covered with k, membership.self_successor at k with *
+    have valuePrefix := WeightedValues.prefix at w, g, A, k with *
+    have valueLast := WeightedValues.last at w, g, A, k with *
+    have row := matchingRingRow.group_unique at A, add, zero, neg, w, f, g(k), n with *
+    have previous := ih with valuePrefix, prefix
+    rw [matchingRingTotal, indexedRingSum, previous, row]
+    rfl
+
+theorem indexedRingSum.group_same_entries (w f g : Set, n m : Nat)
+  requires valuesF : WeightedValues(w, f, A, n)
+  requires valuesG : WeightedValues(w, g, A, m)
+  requires distinctF : DistinctValues(f, n)
+  requires distinctG : DistinctValues(g, m)
+  requires coveredF : ∀ i ∈ n, Occurs(g, m, f(i))
+  requires coveredG : ∀ j ∈ m, Occurs(f, n, g(j))
+  shows indexedRingSum(w, f, add, zero, n) = indexedRingSum(w, g, add, zero, m)
+proof
+  have left := matchingRingTotal.group_sum at A, add, zero, neg, w, g, f, m, n with *
+  have right := matchingRingTotal.group_sum at A, add, zero, neg, w, f, g, n, m with *
+  have transpose := matchingRingTotal.group_transpose at A, add, zero, neg, w, f, g, m, n with *
+  rw [← left, ← right]
+  symm
+  exact transpose with valuesF
+
+theorem indexedRingSum.group_reindex (w V f g : Set, n m : Nat)
+  requires weights : w : V → A
+  requires enumerationF : BijectiveBetween(f, n, V)
+  requires enumerationG : BijectiveBetween(g, m, V)
+  shows indexedRingSum(w, f, add, zero, n) = indexedRingSum(w, g, add, zero, m)
+proof
+  have injF := Bijective.injective with enumerationF
+  have injG := Bijective.injective with enumerationG
+  have surjF := Bijective.surjective with enumerationF
+  have surjG := Bijective.surjective with enumerationG
+  have fnF := Injective.function with injF
+  have fnG := Injective.function with injG
+  have distinctF := Injective.distinct_values with injF
+  have distinctG := Injective.distinct_values with injG
+  have valuesF : WeightedValues(w, f, A, n)
+    intros i hi
+    have member := FunctionBetween.apply_closed with *
+    exact FunctionBetween.apply_closed with *
+  have valuesG : WeightedValues(w, g, A, m)
+    intros j hj
+    have member := FunctionBetween.apply_closed with *
+    exact FunctionBetween.apply_closed with *
+  have coveredF : ∀ i ∈ n, Occurs(g, m, f(i))
+    intros i hi
+    have member := FunctionBetween.apply_closed with *
+    exact Surjective.occurs with *
+  have coveredG : ∀ j ∈ m, Occurs(f, n, g(j))
+    intros j hj
+    have member := FunctionBetween.apply_closed with *
+    exact Surjective.occurs with *
+  exact indexedRingSum.group_same_entries with *
+
+end GroupSums
+
+-- The additive group of a module, unbundled.
+theorem Module.additive_parts (M : Set)
+  requires group : AbelianGroup(Module.additive(M))
+  shows IsAbelianGroup(Module.carrier(M), Module.add(M), Module.zero(M),
+    Module.neg(M))
+proof
+  have parts := AbelianGroup.parts with group
+  module_additive at parts
+  exact parts
+
+-- The coordinates of a member of a product.
+theorem product.member_parts (q A B : Set)
+  requires member : q ∈ A × B
+  shows fst(q) ∈ A ∧ snd(q) ∈ B
+proof
+  obtain ⟨bound, x, hx, y, hy, shape⟩ := product.membership.forward with member
+  rw [shape, fst.pair, snd.pair]
+  exact ⟨hx, hy⟩
+
 -- Section: Linear maps
 -- A module is Cumulus's bundled Module(M, R): the carrier M.carrier with
 -- M.add, M.zero, M.neg and the action M.smul of the ring R. A linear map
@@ -68,9 +396,23 @@ requires group : AbelianGroup(Module.additive(M))
 requires finite : Finite(V)
 requires values : w : V → Module.carrier(M)
 proof
-  sorry
+  have parts := Module.additive_parts with group
+  obtain ⟨n, natural, equivalent⟩ := finite
+  obtain ⟨f, bijective⟩ := equivalent
+  have enumeration := converse.bijective with bijective
+  have function := converse.function_of_bijective with bijective
+  have valuesIn := WeightedValues.of_functions with values, function
+  have closure := indexedRingSum.group_closed at Module.carrier(M), Module.add(M), Module.zero(M), Module.neg(M), w, converse(f, V, n), n with *
+  have sumIn := closure with valuesIn
+  witness indexedRingSum(w, converse(f, V, n), Module.add(M), Module.zero(M), n)
+  refine ⟨sumIn, n, natural, converse(f, V, n), enumeration, rfl⟩
 uniqueness
-  sorry
+  have parts := Module.additive_parts with group
+  intros u uIn first v vIn second
+  obtain ⟨n, naturalN, f, enumerationF, valueF⟩ := first
+  obtain ⟨m, naturalM, g, enumerationG, valueG⟩ := second
+  have same := indexedRingSum.group_reindex at Module.carrier(M), Module.add(M), Module.zero(M), Module.neg(M), w, V, f, g, n, m with *
+  cc
 
 -- The terms c(i) • v(i) of a linear combination, and the combination
 -- Σ_{i ∈ V} c(i) • v(i) itself.
@@ -80,7 +422,9 @@ requires module : Module(M, R)
 requires coefficients : c : V → Ring.carrier(R)
 requires vectors : v : V → Module.carrier(M)
 proof
-  sorry
+  have cIn := FunctionBetween.apply_closed with coefficients, member
+  have vIn := FunctionBetween.apply_closed with vectors, member
+  exact Module.smul_mem with *
 
 def moduleCombination (M R V c v : Set) : Set :=
   moduleSum(M, V, combinationTerms(M, R, V, c, v))
@@ -178,7 +522,12 @@ defgraph productModuleAdd (M R N : Set)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  obtain ⟨l1, l2⟩ := product.member_parts with left
+  obtain ⟨r1, r2⟩ := product.member_parts with right
+  have first := Module.add_mem at R, M, fst(fst(p)), fst(snd(p)) with *
+  have second := Module.add_mem at R, N, snd(fst(p)), snd(snd(p)) with *
+  exact product.pair with first, second
 
 defgraph productModuleNeg (M R N : Set)
     (p ∈ Module.carrier(M) × Module.carrier(N)) :
@@ -187,7 +536,10 @@ defgraph productModuleNeg (M R N : Set)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  have first := Module.neg_mem at R, M, fst(p) with *
+  have second := Module.neg_mem at R, N, snd(p) with *
+  exact product.pair with first, second
 
 defgraph productModuleSmul (M R N : Set)
     (p ∈ Ring.carrier(R) × (Module.carrier(M) × Module.carrier(N))) :
@@ -197,7 +549,11 @@ defgraph productModuleSmul (M R N : Set)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  obtain ⟨r1, r2⟩ := product.member_parts with right
+  have first := Module.smul_mem at R, M, fst(p), fst(snd(p)) with *
+  have second := Module.smul_mem at R, N, fst(p), snd(snd(p)) with *
+  exact product.pair with first, second
 
 -- The projections of a product of two sets.
 def firstProjection (A B : Set) : Set :=
@@ -225,6 +581,173 @@ def pointwiseSmul (I M r u : Set) : Set :=
   { q ∈ I × Module.carrier(M) |
     ∃ i ∈ I, q = (i, call2(Module.smul(M), r, u(i))) }
 
+-- Graph laws of the pointwise operations.
+theorem pointwiseSum.relates (I M u v i : Set)
+  requires index : i ∈ I
+  requires valueIn : call2(Module.add(M), u(i), v(i)) ∈ Module.carrier(M)
+  shows relates(pointwiseSum(I, M, u, v), i, call2(Module.add(M), u(i), v(i)))
+proof
+  unfold relates
+  apply pointwiseSum.membership.backward
+  refine ⟨(product.pair at i, call2(Module.add(M), u(i), v(i)), I, Module.carrier(M) with index, valueIn), i, index, rfl⟩
+
+theorem pointwiseSum.function (I M u v : Set)
+  requires values : ∀ i ∈ I, call2(Module.add(M), u(i), v(i)) ∈ Module.carrier(M)
+  shows pointwiseSum(I, M, u, v) : I → Module.carrier(M)
+proof
+  constructor
+    intros p member
+    obtain ⟨bounded, witnesses⟩ := pointwiseSum.membership.forward with member
+    exact bounded
+  . constructor
+      intros x first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := pointwiseSum.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := pointwiseSum.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros i xIn
+      have valueIn := values with i, xIn
+      refine ⟨call2(Module.add(M), u(i), v(i)), valueIn, (pointwiseSum.relates at I, M, u, v, i with xIn, valueIn)⟩
+
+theorem pointwiseSum.apply (I M u v i : Set)
+  requires values : ∀ i ∈ I, call2(Module.add(M), u(i), v(i)) ∈ Module.carrier(M)
+  requires index : i ∈ I
+  shows pointwiseSum(I, M, u, v)(i) = call2(Module.add(M), u(i), v(i))
+proof
+  have function := pointwiseSum.function at I, M, u, v with values
+  have valueIn := values with i, index
+  have mapped := pointwiseSum.relates at I, M, u, v, i with index, valueIn
+  exact FunctionBetween.apply_value with function, index, mapped
+
+theorem pointwiseNeg.relates (I M u i : Set)
+  requires index : i ∈ I
+  requires valueIn : apply(Module.neg(M), u(i)) ∈ Module.carrier(M)
+  shows relates(pointwiseNeg(I, M, u), i, apply(Module.neg(M), u(i)))
+proof
+  unfold relates
+  apply pointwiseNeg.membership.backward
+  refine ⟨(product.pair at i, apply(Module.neg(M), u(i)), I, Module.carrier(M) with index, valueIn), i, index, rfl⟩
+
+theorem pointwiseNeg.function (I M u : Set)
+  requires values : ∀ i ∈ I, apply(Module.neg(M), u(i)) ∈ Module.carrier(M)
+  shows pointwiseNeg(I, M, u) : I → Module.carrier(M)
+proof
+  constructor
+    intros p member
+    obtain ⟨bounded, witnesses⟩ := pointwiseNeg.membership.forward with member
+    exact bounded
+  . constructor
+      intros x first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := pointwiseNeg.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := pointwiseNeg.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros i xIn
+      have valueIn := values with i, xIn
+      refine ⟨apply(Module.neg(M), u(i)), valueIn, (pointwiseNeg.relates at I, M, u, i with xIn, valueIn)⟩
+
+theorem pointwiseNeg.apply (I M u i : Set)
+  requires values : ∀ i ∈ I, apply(Module.neg(M), u(i)) ∈ Module.carrier(M)
+  requires index : i ∈ I
+  shows pointwiseNeg(I, M, u)(i) = apply(Module.neg(M), u(i))
+proof
+  have function := pointwiseNeg.function at I, M, u with values
+  have valueIn := values with i, index
+  have mapped := pointwiseNeg.relates at I, M, u, i with index, valueIn
+  exact FunctionBetween.apply_value with function, index, mapped
+
+theorem pointwiseSmul.relates (I M r u i : Set)
+  requires index : i ∈ I
+  requires valueIn : call2(Module.smul(M), r, u(i)) ∈ Module.carrier(M)
+  shows relates(pointwiseSmul(I, M, r, u), i, call2(Module.smul(M), r, u(i)))
+proof
+  unfold relates
+  apply pointwiseSmul.membership.backward
+  refine ⟨(product.pair at i, call2(Module.smul(M), r, u(i)), I, Module.carrier(M) with index, valueIn), i, index, rfl⟩
+
+theorem pointwiseSmul.function (I M r u : Set)
+  requires values : ∀ i ∈ I, call2(Module.smul(M), r, u(i)) ∈ Module.carrier(M)
+  shows pointwiseSmul(I, M, r, u) : I → Module.carrier(M)
+proof
+  constructor
+    intros p member
+    obtain ⟨bounded, witnesses⟩ := pointwiseSmul.membership.forward with member
+    exact bounded
+  . constructor
+      intros x first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := pointwiseSmul.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := pointwiseSmul.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros i xIn
+      have valueIn := values with i, xIn
+      refine ⟨call2(Module.smul(M), r, u(i)), valueIn, (pointwiseSmul.relates at I, M, r, u, i with xIn, valueIn)⟩
+
+theorem pointwiseSmul.apply (I M r u i : Set)
+  requires values : ∀ i ∈ I, call2(Module.smul(M), r, u(i)) ∈ Module.carrier(M)
+  requires index : i ∈ I
+  shows pointwiseSmul(I, M, r, u)(i) = call2(Module.smul(M), r, u(i))
+proof
+  have function := pointwiseSmul.function at I, M, r, u with values
+  have valueIn := values with i, index
+  have mapped := pointwiseSmul.relates at I, M, r, u, i with index, valueIn
+  exact FunctionBetween.apply_value with function, index, mapped
+
+theorem pointwiseSum.space (R I M u v : Set)
+  requires module : Module(M, R)
+  requires first : u ∈ functionSpace(I, Module.carrier(M))
+  requires second : v ∈ functionSpace(I, Module.carrier(M))
+  shows pointwiseSum(I, M, u, v) ∈ functionSpace(I, Module.carrier(M))
+proof
+  have uF := functionSpace.mem_iff.forward with first
+  have vF := functionSpace.mem_iff.forward with second
+  have values : ∀ i ∈ I, call2(Module.add(M), u(i), v(i)) ∈ Module.carrier(M)
+    intros i hi
+    have ui := FunctionBetween.apply_closed with uF, hi
+    have vi := FunctionBetween.apply_closed with vF, hi
+    exact Module.add_mem at R, M, u(i), v(i) with *
+  have function := pointwiseSum.function at I, M, u, v with values
+  exact functionSpace.mem_iff.backward with function
+
+theorem pointwiseNeg.space (R I M u : Set)
+  requires module : Module(M, R)
+  requires first : u ∈ functionSpace(I, Module.carrier(M))
+  shows pointwiseNeg(I, M, u) ∈ functionSpace(I, Module.carrier(M))
+proof
+  have uF := functionSpace.mem_iff.forward with first
+  have values : ∀ i ∈ I, apply(Module.neg(M), u(i)) ∈ Module.carrier(M)
+    intros i hi
+    have ui := FunctionBetween.apply_closed with uF, hi
+    exact Module.neg_mem at R, M, u(i) with *
+  have function := pointwiseNeg.function at I, M, u with values
+  exact functionSpace.mem_iff.backward with function
+
+theorem pointwiseSmul.space (R I M r u : Set)
+  requires module : Module(M, R)
+  requires scalar : r ∈ Ring.carrier(R)
+  requires first : u ∈ functionSpace(I, Module.carrier(M))
+  shows pointwiseSmul(I, M, r, u) ∈ functionSpace(I, Module.carrier(M))
+proof
+  have uF := functionSpace.mem_iff.forward with first
+  have values : ∀ i ∈ I, call2(Module.smul(M), r, u(i)) ∈ Module.carrier(M)
+    intros i hi
+    have ui := FunctionBetween.apply_closed with uF, hi
+    exact Module.smul_mem at R, M, r, u(i) with *
+  have function := pointwiseSmul.function at I, M, r, u with values
+  exact functionSpace.mem_iff.backward with function
+
 defgraph functionModuleAdd (R I M : Set)
     (p ∈ functionSpace(I, Module.carrier(M)) ×
       functionSpace(I, Module.carrier(M))) :
@@ -232,7 +755,8 @@ defgraph functionModuleAdd (R I M : Set)
   pointwiseSum(I, M, fst(p), snd(p))
 requires module : Module(M, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  exact pointwiseSum.space with module, left, right
 
 defgraph functionModuleNeg (R I M : Set)
     (u ∈ functionSpace(I, Module.carrier(M))) :
@@ -240,7 +764,7 @@ defgraph functionModuleNeg (R I M : Set)
   pointwiseNeg(I, M, u)
 requires module : Module(M, R)
 proof
-  sorry
+  exact pointwiseNeg.space with module, member
 
 defgraph functionModuleSmul (R I M : Set)
     (p ∈ Ring.carrier(R) × functionSpace(I, Module.carrier(M))) :
@@ -248,7 +772,8 @@ defgraph functionModuleSmul (R I M : Set)
   pointwiseSmul(I, M, fst(p), snd(p))
 requires module : Module(M, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  exact pointwiseSmul.space with module, left, right
 
 def functionModule (R I M : Set) : Set :=
   Module.mk(functionSpace(I, Module.carrier(M)), functionModuleAdd(R, I, M),
@@ -278,6 +803,324 @@ def linearMaps (M R N : Set) : Set :=
   { f ∈ functionSpace(Module.carrier(M), Module.carrier(N)) |
     LinearMap(f, M, R, N) }
 
+-- Section: More laws of a module
+-- Negation and cancellation in the additive group of a module, each a
+-- group law applied to M.additive, and the action on negatives.
+section ModuleToolkit
+variable (R M : Set)
+hypothesis ring : Ring(R)
+hypothesis module : Module(M, R)
+
+theorem Module.add_neg (v : M)
+  shows v + -v = M.zero
+proof
+  have group := Module.additive_group with *
+  have cancel := Group.mul_inv at M.additive, v with group, *
+  module_additive at cancel
+  exact cancel
+
+theorem Module.neg_add_distrib (v w : M)
+  shows -(v + w) = -v + -w
+proof
+  have abelian := Module.additive.abelian_group with module
+  have law := mul_inv at M.additive, v, w with abelian, *
+  module_additive at law
+  exact law
+
+theorem Module.eq_neg_of_add_eq_zero (v w : M)
+  requires equal : v + w = M.zero
+  shows v = -w
+proof
+  have s1 := Module.add_neg at R, M, w with *
+  have s2 := Module.add_assoc at R, M, v, w, -w with *
+  have s3 := Module.add_zero at R, M, v with *
+  have s4 := Module.zero_add at R, M, -w with *
+  rw equal at s2
+  cc
+
+theorem Module.neg_neg (v : M)
+  shows -(-v) = v
+proof
+  have group := Module.additive_group with *
+  have law := inv_inv at M.additive, v with group, *
+  module_additive at law
+  exact law
+
+theorem Module.neg_zero
+  shows -M.zero = M.zero
+proof
+  have group := Module.additive_group with *
+  have law := inv_one at M.additive with group
+  module_additive at law
+  exact law
+
+theorem Module.add_left_cancel (u v w : M)
+  requires equal : u + v = u + w
+  shows v = w
+proof
+  have s1 := Module.neg_add at R, M, u with *
+  have s2 := Module.add_assoc at R, M, -u, u, v with *
+  have s3 := Module.add_assoc at R, M, -u, u, w with *
+  have s4 := Module.zero_add at R, M, v with *
+  have s5 := Module.zero_add at R, M, w with *
+  rw s1 at s2
+  rw s1 at s3
+  cc
+
+theorem Module.add_right_cancel (u v w : M)
+  requires equal : v + u = w + u
+  shows v = w
+proof
+  have c1 := Module.add_comm at R, M, v, u with *
+  have c2 := Module.add_comm at R, M, w, u with *
+  have swapped : u + v = u + w by cc
+  exact Module.add_left_cancel with swapped
+
+theorem Module.add_add_add_comm (a b c d : M)
+  shows a + b + (c + d) = a + c + (b + d)
+proof
+  have abelian := Module.additive.abelian_group with module
+  have law := mul_mul_mul_comm at M.additive, a, b, c, d with abelian, *
+  module_additive at law
+  exact law
+
+theorem Module.sub_eq_zero_iff (v w : M)
+  shows v + -w = M.zero ↔ v = w
+proof
+  constructor
+  . intro equal
+    have same := Module.eq_neg_of_add_eq_zero at R, M, v, -w with *
+    have back := Module.neg_neg at R, M, w with *
+    rw back at same
+    exact same
+  . intro equal
+    rw equal
+    exact Module.add_neg at R, M, w with *
+
+theorem smul_neg (r : R) (v : M)
+  shows r • -v = -(r • v)
+proof
+  have sum : r • -v + r • v = M.zero
+    rw [← smul_add, Module.neg_add, smul_zero]
+  exact Module.eq_neg_of_add_eq_zero with *
+
+theorem neg_smul (r : R) (v : M)
+  shows (-r) • v = -(r • v)
+proof
+  have negIn : -r ∈ R.carrier := Ring.neg_mem with *
+  have parts := Ring.parts with ring
+  have cancel := IsRing.add_inverse_left at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, r with parts, *
+  have sum : (-r) • v + r • v = M.zero
+    rw [← add_smul, cancel, zero_smul]
+  exact Module.eq_neg_of_add_eq_zero with *
+
+end ModuleToolkit
+
+-- Section: First laws of linear maps
+-- Helpers for the definitions below: a linear map unpacked and rebuilt,
+-- and the pointwise operations and composites of linear maps.
+theorem LinearMap.of_laws (f M R N : Set)
+  requires moduleM : Module(M, R)
+  requires moduleN : Module(N, R)
+  requires function : f : Module.carrier(M) → Module.carrier(N)
+  requires additive : ∀ v w ∈ Module.carrier(M),
+    f(call2(Module.add(M), v, w)) = call2(Module.add(N), f(v), f(w))
+  requires homogeneous : ∀ r ∈ Ring.carrier(R), ∀ v ∈ Module.carrier(M),
+    f(call2(Module.smul(M), r, v)) = call2(Module.smul(N), r, f(v))
+  shows LinearMap(f, M, R, N)
+proof
+  unfold LinearMap
+  exact ⟨moduleM, moduleN, function, additive, homogeneous⟩
+
+theorem LinearMap.add_law (f M R N v w : Set)
+  requires linear : LinearMap(f, M, R, N)
+  requires first : v ∈ Module.carrier(M)
+  requires second : w ∈ Module.carrier(M)
+  shows f(call2(Module.add(M), v, w)) = call2(Module.add(N), f(v), f(w))
+proof
+  obtain ⟨moduleM, moduleN, function, additive, homogeneous⟩ := linear
+  exact additive with v, first, w, second
+
+theorem LinearMap.smul_law (f M R N r v : Set)
+  requires linear : LinearMap(f, M, R, N)
+  requires scalar : r ∈ Ring.carrier(R)
+  requires vector : v ∈ Module.carrier(M)
+  shows f(call2(Module.smul(M), r, v)) = call2(Module.smul(N), r, f(v))
+proof
+  obtain ⟨moduleM, moduleN, function, additive, homogeneous⟩ := linear
+  exact homogeneous with r, scalar, v, vector
+
+theorem LinearMap.function_of (f M R N : Set)
+  requires linear : LinearMap(f, M, R, N)
+  shows f : Module.carrier(M) → Module.carrier(N)
+proof
+  obtain ⟨moduleM, moduleN, function, additive, homogeneous⟩ := linear
+  exact function
+
+theorem LinearMap.value_mem (f M R N v : Set)
+  requires linear : LinearMap(f, M, R, N)
+  requires vector : v ∈ Module.carrier(M)
+  shows f(v) ∈ Module.carrier(N)
+proof
+  have function := LinearMap.function_of with linear
+  exact FunctionBetween.apply_closed with function, vector
+
+theorem linearMaps.linear (f M R N : Set)
+  requires member : f ∈ linearMaps(M, R, N)
+  shows LinearMap(f, M, R, N)
+proof
+  obtain ⟨space, linear⟩ := linearMaps.membership.forward with member
+  exact linear
+
+theorem linearMaps.of_linear (f M R N : Set)
+  requires linear : LinearMap(f, M, R, N)
+  shows f ∈ linearMaps(M, R, N)
+proof
+  have function := LinearMap.function_of with linear
+  have space := functionSpace.mem_iff.backward with function
+  apply linearMaps.membership.backward
+  exact ⟨space, linear⟩
+
+theorem LinearMap.pointwise_add (f g M R N : Set)
+  requires first : LinearMap(f, M, R, N)
+  requires second : LinearMap(g, M, R, N)
+  shows LinearMap(pointwiseSum(Module.carrier(M), N, f, g), M, R, N)
+proof
+  obtain ⟨moduleM, moduleN, fF, fAdd, fSmul⟩ := first
+  obtain ⟨_, _, gF, gAdd, gSmul⟩ := second
+  have ring := Module.ring with moduleM
+  have abelian := Module.additive.abelian_group with moduleN
+  have parts := Module.additive_parts with abelian
+  have values : ∀ v ∈ Module.carrier(M),
+      call2(Module.add(N), f(v), g(v)) ∈ Module.carrier(N)
+    intros v hv
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have gv := FunctionBetween.apply_closed with gF, hv
+    exact Module.add_mem at R, N, f(v), g(v) with *
+  have function := pointwiseSum.function at Module.carrier(M), N, f, g with values
+  apply LinearMap.of_laws with moduleM, moduleN, function
+  . intros v hv w hw
+    have vw := Module.add_mem at R, M, v, w with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have gv := FunctionBetween.apply_closed with gF, hv
+    have fw := FunctionBetween.apply_closed with fF, hw
+    have gw := FunctionBetween.apply_closed with gF, hw
+    have e1 := pointwiseSum.apply at Module.carrier(M), N, f, g, call2(Module.add(M), v, w) with values, vw
+    have e2 := pointwiseSum.apply at Module.carrier(M), N, f, g, v with values, hv
+    have e3 := pointwiseSum.apply at Module.carrier(M), N, f, g, w with values, hw
+    have fa := fAdd with v, hv, w, hw
+    have ga := gAdd with v, hv, w, hw
+    have shuffle := IsAbelianGroup.four_shuffle at Module.carrier(N), Module.add(N), Module.zero(N), Module.neg(N), f(v), f(w), g(v), g(w) with *
+    rw [e1, e2, e3, fa, ga]
+    exact shuffle
+  . intros r hr v hv
+    have rv := Module.smul_mem at R, M, r, v with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have gv := FunctionBetween.apply_closed with gF, hv
+    have e1 := pointwiseSum.apply at Module.carrier(M), N, f, g, call2(Module.smul(M), r, v) with values, rv
+    have e2 := pointwiseSum.apply at Module.carrier(M), N, f, g, v with values, hv
+    have fs := fSmul with r, hr, v, hv
+    have gs := gSmul with r, hr, v, hv
+    have distribute := smul_add at R, N, r, f(v), g(v) with *
+    rw [e1, e2, fs, gs, distribute]
+theorem LinearMap.pointwise_neg (f M R N : Set)
+  requires linear : LinearMap(f, M, R, N)
+  shows LinearMap(pointwiseNeg(Module.carrier(M), N, f), M, R, N)
+proof
+  obtain ⟨moduleM, moduleN, fF, fAdd, fSmul⟩ := linear
+  have ring := Module.ring with moduleM
+  have values : ∀ v ∈ Module.carrier(M),
+      apply(Module.neg(N), f(v)) ∈ Module.carrier(N)
+    intros v hv
+    have fv := FunctionBetween.apply_closed with fF, hv
+    exact Module.neg_mem at R, N, f(v) with *
+  have function := pointwiseNeg.function at Module.carrier(M), N, f with values
+  apply LinearMap.of_laws with moduleM, moduleN, function
+  . intros v hv w hw
+    have vw := Module.add_mem at R, M, v, w with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have fw := FunctionBetween.apply_closed with fF, hw
+    have e1 := pointwiseNeg.apply at Module.carrier(M), N, f, call2(Module.add(M), v, w) with values, vw
+    have e2 := pointwiseNeg.apply at Module.carrier(M), N, f, v with values, hv
+    have e3 := pointwiseNeg.apply at Module.carrier(M), N, f, w with values, hw
+    have fa := fAdd with v, hv, w, hw
+    have distribute := Module.neg_add_distrib at R, N, f(v), f(w) with *
+    rw [e1, e2, e3, fa, distribute]
+  . intros r hr v hv
+    have rv := Module.smul_mem at R, M, r, v with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have e1 := pointwiseNeg.apply at Module.carrier(M), N, f, call2(Module.smul(M), r, v) with values, rv
+    have e2 := pointwiseNeg.apply at Module.carrier(M), N, f, v with values, hv
+    have fs := fSmul with r, hr, v, hv
+    have negate := smul_neg at R, N, r, f(v) with *
+    rw [e1, e2, fs, negate]
+
+theorem LinearMap.pointwise_smul (f M R N a : Set)
+  requires comm : CommRing(R)
+  requires linear : LinearMap(f, M, R, N)
+  requires scalar : a ∈ Ring.carrier(R)
+  shows LinearMap(pointwiseSmul(Module.carrier(M), N, a, f), M, R, N)
+proof
+  obtain ⟨moduleM, moduleN, fF, fAdd, fSmul⟩ := linear
+  have ring := Module.ring with moduleM
+  have values : ∀ v ∈ Module.carrier(M),
+      call2(Module.smul(N), a, f(v)) ∈ Module.carrier(N)
+    intros v hv
+    have fv := FunctionBetween.apply_closed with fF, hv
+    exact Module.smul_mem at R, N, a, f(v) with *
+  have function := pointwiseSmul.function at Module.carrier(M), N, a, f with values
+  apply LinearMap.of_laws with moduleM, moduleN, function
+  . intros v hv w hw
+    have vw := Module.add_mem at R, M, v, w with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have fw := FunctionBetween.apply_closed with fF, hw
+    have e1 := pointwiseSmul.apply at Module.carrier(M), N, a, f, call2(Module.add(M), v, w) with values, vw
+    have e2 := pointwiseSmul.apply at Module.carrier(M), N, a, f, v with values, hv
+    have e3 := pointwiseSmul.apply at Module.carrier(M), N, a, f, w with values, hw
+    have fa := fAdd with v, hv, w, hw
+    have distribute := smul_add at R, N, a, f(v), f(w) with *
+    rw [e1, e2, e3, fa, distribute]
+  . intros r hr v hv
+    have rv := Module.smul_mem at R, M, r, v with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have e1 := pointwiseSmul.apply at Module.carrier(M), N, a, f, call2(Module.smul(M), r, v) with values, rv
+    have e2 := pointwiseSmul.apply at Module.carrier(M), N, a, f, v with values, hv
+    have fs := fSmul with r, hr, v, hv
+    have swap : a * r = r * a by ring
+    have left := mul_smul at R, N, a, r, f(v) with *
+    have right := mul_smul at R, N, r, a, f(v) with *
+    rw [e1, e2, fs, ← left, swap, right]
+
+theorem LinearMap.compose_of (f g M R N P : Set)
+  requires first : LinearMap(f, M, R, N)
+  requires second : LinearMap(g, N, R, P)
+  shows LinearMap(compose(g, f, Module.carrier(M), Module.carrier(N),
+    Module.carrier(P)), M, R, P)
+proof
+  obtain ⟨moduleM, moduleN, fF, fAdd, fSmul⟩ := first
+  obtain ⟨_, moduleP, gF, gAdd, gSmul⟩ := second
+  have ring := Module.ring with moduleM
+  have function := compose.function at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P) with fF, gF
+  apply LinearMap.of_laws with moduleM, moduleP, function
+  . intros v hv w hw
+    have vw := Module.add_mem at R, M, v, w with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have fw := FunctionBetween.apply_closed with fF, hw
+    have e1 := compose.apply at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P), call2(Module.add(M), v, w) with fF, gF, vw
+    have e2 := compose.apply at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P), v with fF, gF, hv
+    have e3 := compose.apply at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P), w with fF, gF, hw
+    have fa := fAdd with v, hv, w, hw
+    have ga := gAdd with f(v), fv, f(w), fw
+    rw [e1, e2, e3, fa, ga]
+  . intros r hr v hv
+    have rv := Module.smul_mem at R, M, r, v with *
+    have fv := FunctionBetween.apply_closed with fF, hv
+    have e1 := compose.apply at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P), call2(Module.smul(M), r, v) with fF, gF, rv
+    have e2 := compose.apply at g, f, Module.carrier(M), Module.carrier(N), Module.carrier(P), v with fF, gF, hv
+    have fs := fSmul with r, hr, v, hv
+    have gs := gSmul with r, hr, f(v), fv
+    rw [e1, e2, fs, gs]
+
 defgraph linearMapAdd (M R N : Set)
     (p ∈ linearMaps(M, R, N) × linearMaps(M, R, N)) : linearMaps(M, R, N) :=
   pointwiseSum(Module.carrier(M), N, fst(p), snd(p))
@@ -285,7 +1128,11 @@ requires ring : CommRing(R)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  have lf := linearMaps.linear with left
+  have lg := linearMaps.linear with right
+  have sum := LinearMap.pointwise_add with lf, lg
+  exact linearMaps.of_linear with sum
 
 defgraph linearMapNeg (M R N : Set) (f ∈ linearMaps(M, R, N)) :
     linearMaps(M, R, N) :=
@@ -294,7 +1141,9 @@ requires ring : CommRing(R)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  have lf := linearMaps.linear with member
+  have negated := LinearMap.pointwise_neg with lf
+  exact linearMaps.of_linear with negated
 
 defgraph linearMapSmul (M R N : Set)
     (p ∈ Ring.carrier(R) × linearMaps(M, R, N)) : linearMaps(M, R, N) :=
@@ -303,7 +1152,10 @@ requires ring : CommRing(R)
 requires moduleM : Module(M, R)
 requires moduleN : Module(N, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  have lf := linearMaps.linear with right
+  have scaled := LinearMap.pointwise_smul with ring, lf, left
+  exact linearMaps.of_linear with scaled
 
 def homModule (M R N : Set) : Set :=
   Module.mk(linearMaps(M, R, N), linearMapAdd(M, R, N),
@@ -316,7 +1168,11 @@ defgraph linearMapCompose (M R : Set)
     Module.carrier(M))
 requires module : Module(M, R)
 proof
-  sorry
+  obtain ⟨left, right⟩ := product.member_parts with member
+  have lf := linearMaps.linear with left
+  have lg := linearMaps.linear with right
+  have composite := LinearMap.compose_of with lg, lf
+  exact linearMaps.of_linear with composite
 
 -- End(M) = Ring.mk(linear maps, +, 0, −, ∘, id): the product f * g is the
 -- composite f ∘ g.
