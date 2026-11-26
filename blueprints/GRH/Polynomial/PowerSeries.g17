@@ -1,0 +1,836 @@
+-- Formal power series over a commutative ring R: in one variable, the
+-- functions ℕ → R with the Cauchy product (Mathlib's PowerSeries R), and
+-- in a set I of variables, the functions monomials(I) → R
+-- (MvPowerSeries I R). Coefficients, constants, the variable, the
+-- constant coefficient, polynomials as power series, coefficient maps,
+-- truncation, rescaling, the derivative and partial derivatives, units
+-- (invertibility of the constant coefficient), divisibility by powers of
+-- X, substitution of a series with nilpotent constant coefficient
+-- (PowerSeries.subst on its HasSubst domain for discrete R), and the
+-- exponential series over a ring where every n! is a unit.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/PowerSeries.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Polynomial.PowerSeries
+import GRH.Polynomial.Multivariate
+
+-- Section: Power series in one variable
+-- The coefficient sequences, and the operations: pointwise sum and
+-- negation, the Cauchy product (f g)ₙ = Σ_{i + j = n} fᵢ gⱼ, zero, and one.
+def powerSeriesCarrier (R : Set) : Set := functionSpace(ℕ, Ring.carrier(R))
+
+def cauchyTerms (R f g : Set, n : Nat) : Set :=
+  { u ∈ antidiagonal(n) × Ring.carrier(R) | ∃ i ∈ ℕ, ∃ j ∈ ℕ,
+    u = ((i, j), call2(Ring.mul(R), f(i), g(j))) }
+
+def cauchyProduct (R f g : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, finiteRingSum(antidiagonal(n),
+    Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R),
+    Ring.one(R), cauchyTerms(R, f, g, n))) }
+
+def seriesSum (R f g : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, call2(Ring.add(R), f(n), g(n))) }
+
+def seriesNeg (R f : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, apply(Ring.neg(R), f(n))) }
+
+-- The sequence a, 0, 0, … (PowerSeries.C a), and X = 0, 1, 0, 0, …
+def seriesConstant (R a : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ,
+    (n = 0 ∧ u = (n, a)) ∨ (n ≠ 0 ∧ u = (n, Ring.zero(R))) }
+
+def seriesX (R : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ,
+    (n = 1 ∧ u = (n, Ring.one(R))) ∨ (n ≠ 1 ∧ u = (n, Ring.zero(R))) }
+
+def seriesAdd (R : Set) : Set :=
+  { q ∈ (powerSeriesCarrier(R) × powerSeriesCarrier(R)) × powerSeriesCarrier(R) |
+    ∃ f ∈ powerSeriesCarrier(R), ∃ g ∈ powerSeriesCarrier(R),
+      q = ((f, g), seriesSum(R, f, g)) }
+
+def seriesMul (R : Set) : Set :=
+  { q ∈ (powerSeriesCarrier(R) × powerSeriesCarrier(R)) × powerSeriesCarrier(R) |
+    ∃ f ∈ powerSeriesCarrier(R), ∃ g ∈ powerSeriesCarrier(R),
+      q = ((f, g), cauchyProduct(R, f, g)) }
+
+def seriesNegation (R : Set) : Set :=
+  { q ∈ powerSeriesCarrier(R) × powerSeriesCarrier(R) |
+    ∃ f ∈ powerSeriesCarrier(R), q = (f, seriesNeg(R, f)) }
+
+-- R[[X]] (PowerSeries R).
+def powerSeriesRing (R : Set) : Set :=
+  Ring.mk(powerSeriesCarrier(R), seriesAdd(R),
+    constantFunction(ℕ, Ring.carrier(R), Ring.zero(R)), seriesNegation(R),
+    seriesMul(R), seriesConstant(R, Ring.one(R)))
+
+-- The coefficient of Xⁿ (PowerSeries.coeff) and the constant coefficient
+-- (PowerSeries.constantCoeff). A sequence ℕ → R is itself a series
+-- (PowerSeries.mk is the identity here).
+def seriesCoeff (f : Set, n : Nat) : Set := f(n)
+
+def seriesConstantCoeff (f : Set) : Set := f(0)
+
+-- The constants as a map R → R[[X]] (PowerSeries.C as a homomorphism).
+def seriesConstantMap (R : Set) : Set :=
+  { u ∈ Ring.carrier(R) × powerSeriesCarrier(R) | ∃ a ∈ Ring.carrier(R),
+    u = (a, seriesConstant(R, a)) }
+
+-- A polynomial as a power series (Polynomial.coeToPowerSeries): its
+-- coefficient sequence.
+def polySequence (R p : Set) : Set :=
+  { v ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, v = (n, p({(0, n)})) }
+
+def polynomialToSeries (R : Set) : Set :=
+  { u ∈ Ring.carrier(polynomialRing(R, {0})) × powerSeriesCarrier(R) |
+    ∃ p ∈ Ring.carrier(polynomialRing(R, {0})),
+      u = (p, polySequence(R, p)) }
+
+-- The coefficientwise image (PowerSeries.map), as a map on series.
+def seriesMap (R S f : Set) : Set :=
+  { u ∈ powerSeriesCarrier(R) × powerSeriesCarrier(S) |
+    ∃ g ∈ powerSeriesCarrier(R), u = (g, compose(f, g, ℕ, Ring.carrier(R),
+      Ring.carrier(S))) }
+
+-- The truncation Σ_{k < n} fₖ Xᵏ, a polynomial (PowerSeries.trunc).
+def seriesTrunc (R f : Set, n : Nat) : Set :=
+  { u ∈ monomials({0}) × Ring.carrier(R) | ∃ k ∈ ℕ,
+    (k < n ∧ u = ({(0, k)}, f(k))) ∨ (n ≤ k ∧ u = ({(0, k)}, Ring.zero(R))) }
+
+-- f(a X): the coefficients aⁿ fₙ (PowerSeries.rescale).
+def seriesRescale (R a f : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ,
+    u = (n, call2(Ring.mul(R), Ring.pow(R, a, n), f(n))) }
+
+-- The derivative: (f')ₙ = (n + 1) fₙ₊₁ (PowerSeries.derivative).
+def seriesDerivative (R f : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, call2(Ring.mul(R),
+    ringNat(Ring.add(R), Ring.zero(R), Ring.one(R), succ(n)), f(succ(n)))) }
+
+-- The exponential series Σ Xⁿ / n!, over a ring in which every n! is a
+-- unit (PowerSeries.exp over a ℚ-algebra).
+def seriesExp (R : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, ringInverse(R,
+    ringNat(Ring.add(R), Ring.zero(R), Ring.one(R), factorial(n)))) }
+
+-- Substitution of g with nilpotent constant coefficient into f: the n-th
+-- coefficient of Σₖ fₖ gᵏ, a sum that is eventually constant in the
+-- number of terms because (gᵏ)ₙ = 0 for large k (PowerSeries.subst and
+-- PowerSeries.coeff_subst on HasSubst for the discrete topology).
+def substTerms (R f g : Set, n L : Nat) : Set :=
+  { u ∈ L × Ring.carrier(R) | ∃ k ∈ ℕ, k < L ∧ u = (k, call2(Ring.mul(R), f(k),
+    Ring.pow(powerSeriesRing(R), g, k)(n))) }
+
+defunique substCoeff (R f g : Set, n : Nat) (c ∈ Ring.carrier(R)) :=
+  ∃ K ∈ ℕ, ∀ L ∈ ℕ, K ≤ L → c = finiteRingSum(L, Ring.carrier(R),
+    Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R), Ring.one(R),
+    substTerms(R, f, g, n, L))
+requires ring : CommRing(R)
+requires series : f ∈ powerSeriesCarrier(R)
+requires substituted : g ∈ powerSeriesCarrier(R)
+requires nilpotent : RingNilpotent(R, g(0))
+proof
+  sorry
+uniqueness
+  sorry
+
+def seriesSubst (R f g : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(R) | ∃ n ∈ ℕ, u = (n, substCoeff(R, f, g, n)) }
+
+-- PowerSeries.HasSubst for discrete R: the constant coefficient is
+-- nilpotent.
+predicate SeriesHasSubst (R g : Set) :=
+  g ∈ powerSeriesCarrier(R) ∧ RingNilpotent(R, g(0))
+
+-- Section: Power series in several variables
+-- MvPowerSeries I R: maps monomials(I) → R with the product over the
+-- finitely many pairs of exponents adding to m.
+def mvSeriesCarrier (R I : Set) : Set := functionSpace(monomials(I), Ring.carrier(R))
+
+def monomialAntidiagonal (I m : Set) : Set :=
+  { t ∈ monomials(I) × monomials(I) | monomialMul(I)(t) = m }
+
+def mvCauchyTerms (R I f g m : Set) : Set :=
+  { u ∈ monomialAntidiagonal(I, m) × Ring.carrier(R) |
+    ∃ a ∈ monomials(I), ∃ b ∈ monomials(I),
+      u = ((a, b), call2(Ring.mul(R), f(a), g(b))) }
+
+def mvCauchyProduct (R I f g : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    u = (m, finiteRingSum(monomialAntidiagonal(I, m), Ring.carrier(R),
+      Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R), Ring.one(R),
+      mvCauchyTerms(R, I, f, g, m))) }
+
+def mvSeriesSum (R I f g : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    u = (m, call2(Ring.add(R), f(m), g(m))) }
+
+def mvSeriesNeg (R I f : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    u = (m, apply(Ring.neg(R), f(m))) }
+
+-- The constant a (MvPowerSeries.C) and the variable Xᵢ (MvPowerSeries.X).
+def mvSeriesConstant (R I a : Set) : Set :=
+  coefficientSingle(monomials(I), Ring.carrier(R), Ring.zero(R), a, monomialOne(I))
+
+def mvSeriesX (R I i : Set) : Set :=
+  coefficientSingle(monomials(I), Ring.carrier(R), Ring.zero(R), Ring.one(R),
+    monomialVariable(I, i))
+
+def mvSeriesAdd (R I : Set) : Set :=
+  { q ∈ (mvSeriesCarrier(R, I) × mvSeriesCarrier(R, I)) × mvSeriesCarrier(R, I) |
+    ∃ f ∈ mvSeriesCarrier(R, I), ∃ g ∈ mvSeriesCarrier(R, I),
+      q = ((f, g), mvSeriesSum(R, I, f, g)) }
+
+def mvSeriesMul (R I : Set) : Set :=
+  { q ∈ (mvSeriesCarrier(R, I) × mvSeriesCarrier(R, I)) × mvSeriesCarrier(R, I) |
+    ∃ f ∈ mvSeriesCarrier(R, I), ∃ g ∈ mvSeriesCarrier(R, I),
+      q = ((f, g), mvCauchyProduct(R, I, f, g)) }
+
+def mvSeriesNegation (R I : Set) : Set :=
+  { q ∈ mvSeriesCarrier(R, I) × mvSeriesCarrier(R, I) |
+    ∃ f ∈ mvSeriesCarrier(R, I), q = (f, mvSeriesNeg(R, I, f)) }
+
+def mvPowerSeriesRing (R I : Set) : Set :=
+  Ring.mk(mvSeriesCarrier(R, I), mvSeriesAdd(R, I),
+    constantFunction(monomials(I), Ring.carrier(R), Ring.zero(R)),
+    mvSeriesNegation(R, I), mvSeriesMul(R, I),
+    mvSeriesConstant(R, I, Ring.one(R)))
+
+-- The constant coefficient f(0) (MvPowerSeries.constantCoeff).
+def mvSeriesConstantCoeff (I f : Set) : Set := f(monomialOne(I))
+
+-- A polynomial is a series (MvPolynomial.coeToMvPowerSeries): the inclusion
+-- of finitely supported maps.
+def mvPolynomialToSeries (R I : Set) : Set :=
+  identity(Ring.carrier(polynomialRing(R, I)))
+
+-- The coefficientwise image (MvPowerSeries.map).
+def mvSeriesMap (R S I f : Set) : Set :=
+  { u ∈ mvSeriesCarrier(R, I) × mvSeriesCarrier(S, I) |
+    ∃ g ∈ mvSeriesCarrier(R, I), u = (g, compose(f, g, monomials(I),
+      Ring.carrier(R), Ring.carrier(S))) }
+
+-- The partial derivative ∂/∂Xᵢ: the coefficient at m is (m(i) + 1) times
+-- the coefficient at m + eᵢ (MvPowerSeries.pderiv, coeff_pderiv).
+def mvSeriesPartial (R I i f : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    u = (m, call2(Ring.mul(R), ringNat(Ring.add(R), Ring.zero(R), Ring.one(R),
+      succ(m(i))), f(monomialMul(I)((m, monomialVariable(I, i)))))) }
+
+-- The truncation to total degree below n, a polynomial
+-- (MvPowerSeries.truncTotal).
+def mvSeriesTruncTotal (R I f : Set, n : Nat) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    (monomialDegree(I, m) < n ∧ u = (m, f(m))) ∨
+    (n ≤ monomialDegree(I, m) ∧ u = (m, Ring.zero(R))) }
+
+-- Renaming along an injective σ : I → J: the coefficient at the image
+-- m ∘ σ⁻¹ of m is f(m), and 0 at exponents involving variables outside
+-- the range (MvPowerSeries.rename for an embedding).
+def monomialPushforward (I J σ m : Set) : Set :=
+  { u ∈ J × ℕ | ∃ j ∈ J, ((∃ i ∈ I, σ(i) = j ∧ u = (j, m(i))) ∨
+    ((∀ i ∈ I, σ(i) ≠ j) ∧ u = (j, 0))) }
+
+def mvSeriesRename (R I J σ f : Set) : Set :=
+  { u ∈ monomials(J) × Ring.carrier(R) | ∃ n ∈ monomials(J),
+    ((∃ m ∈ monomials(I), monomialPushforward(I, J, σ, m) = n ∧ u = (n, f(m))) ∨
+     ((∀ m ∈ monomials(I), monomialPushforward(I, J, σ, m) ≠ n) ∧
+      u = (n, Ring.zero(R)))) }
+
+-- A series in one variable as a series in the variables {0}
+-- (PowerSeries.toMvPowerSeries, which is definitional in Mathlib).
+def seriesToMv (R f : Set) : Set :=
+  { u ∈ monomials({0}) × Ring.carrier(R) | ∃ m ∈ monomials({0}), u = (m, f(m(0))) }
+
+-- The maps f ↦ f(a X) and f ↦ f(g) on series.
+def rescaleMap (R a : Set) : Set :=
+  { u ∈ powerSeriesCarrier(R) × powerSeriesCarrier(R) |
+    ∃ f ∈ powerSeriesCarrier(R), u = (f, seriesRescale(R, a, f)) }
+
+def substMap (R g : Set) : Set :=
+  { u ∈ powerSeriesCarrier(R) × powerSeriesCarrier(R) |
+    ∃ f ∈ powerSeriesCarrier(R), u = (f, seriesSubst(R, f, g)) }
+
+-- The maps C : R → R[[I]] and rename f ↦ f ∘ σ⁻¹ on series.
+def mvSeriesConstantMap (R I : Set) : Set :=
+  { u ∈ Ring.carrier(R) × mvSeriesCarrier(R, I) | ∃ a ∈ Ring.carrier(R),
+    u = (a, mvSeriesConstant(R, I, a)) }
+
+def mvSeriesRenameMap (R I J σ : Set) : Set :=
+  { u ∈ mvSeriesCarrier(R, I) × mvSeriesCarrier(R, J) |
+    ∃ f ∈ mvSeriesCarrier(R, I), u = (f, mvSeriesRename(R, I, J, σ, f)) }
+
+-- The isomorphism from one-variable series to series over {0}.
+def seriesToMvMap (R : Set) : Set :=
+  { u ∈ powerSeriesCarrier(R) × mvSeriesCarrier(R, {0}) |
+    ∃ f ∈ powerSeriesCarrier(R), u = (f, seriesToMv(R, f)) }
+
+-- Section: Laws of power series in one variable
+section Series
+variable (R : Set)
+hypothesis comm : CommRing(R)
+
+theorem powerSeriesRing.comm_ring
+  shows CommRing(powerSeriesRing(R))
+proof
+  sorry
+
+-- PowerSeries.ext and coeff laws: coeff_add, coeff_mul (the Cauchy
+-- product), coeff_C, coeff_X, coeff_one, coeff_X_pow, coeff_C_mul (with
+-- smul_eq_C_mul, the R-action as multiplication by constants),
+-- coeff_X_pow_mul'.
+theorem powerSeries.ext (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  requires agree : ∀ n ∈ ℕ, f(n) = g(n)
+  shows f = g
+proof
+  sorry
+
+theorem seriesCoeff.add (f g : Set) (n : Nat)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows seriesCoeff(call2(Ring.add(powerSeriesRing(R)), f, g), n) =
+    call2(R.add, seriesCoeff(f, n), seriesCoeff(g, n))
+proof
+  sorry
+
+theorem seriesCoeff.mul (f g : Set) (n : Nat)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows seriesCoeff(call2(Ring.mul(powerSeriesRing(R)), f, g), n) =
+    finiteRingSum(antidiagonal(n), R.carrier, R.add, R.zero, R.neg, R.mul,
+      R.one, cauchyTerms(R, f, g, n))
+proof
+  sorry
+
+theorem seriesCoeff.C (a : R) (n : Nat)
+  shows (n = 0 → seriesCoeff(seriesConstant(R, a), n) = a) ∧
+    (n ≠ 0 → seriesCoeff(seriesConstant(R, a), n) = R[0])
+proof
+  sorry
+
+theorem seriesCoeff.X_pow (k n : Nat)
+  shows (n = k → seriesCoeff(Ring.pow(powerSeriesRing(R), seriesX(R), k), n) = R[1]) ∧
+    (n ≠ k → seriesCoeff(Ring.pow(powerSeriesRing(R), seriesX(R), k), n) = R[0])
+proof
+  sorry
+
+theorem seriesCoeff.C_mul (a f : Set) (n : Nat)
+  requires scalar : a ∈ R.carrier
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesCoeff(call2(Ring.mul(powerSeriesRing(R)), seriesConstant(R, a), f), n) =
+    call2(R.mul, a, seriesCoeff(f, n))
+proof
+  sorry
+
+theorem seriesCoeff.X_pow_mul (f : Set) (k n : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesCoeff(call2(Ring.mul(powerSeriesRing(R)),
+      Ring.pow(powerSeriesRing(R), seriesX(R), k), f), n + k) = seriesCoeff(f, n) ∧
+    (n < k → seriesCoeff(call2(Ring.mul(powerSeriesRing(R)),
+      Ring.pow(powerSeriesRing(R), seriesX(R), k), f), n) = R[0])
+proof
+  sorry
+
+-- PowerSeries.C is an injective ring homomorphism (C_injective); the
+-- constant coefficient is a ring homomorphism (constantCoeff).
+theorem seriesConstantMap.hom
+  shows seriesConstantMap(R) : R →+* powerSeriesRing(R)
+proof
+  sorry
+
+theorem seriesConstantCoeff.hom
+  shows RingHom(evaluationMap(ℕ, selfModule(R), 0), powerSeriesRing(R), R)
+proof
+  sorry
+
+-- Polynomials are power series: the inclusion is an injective ring
+-- homomorphism preserving coefficients, X and C (Polynomial.coe_X,
+-- coe_C, coeff_coe, Polynomial.coe_injective).
+theorem polynomialToSeries.hom
+  shows polynomialToSeries(R) : polynomialRing(R, {0}) →+* powerSeriesRing(R)
+proof
+  sorry
+
+theorem polynomialToSeries.coeff (p : Set) (n : Nat)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows seriesCoeff(polynomialToSeries(R)(p), n) = polyCoeff(p, n)
+proof
+  sorry
+
+theorem polynomialToSeries.X
+  shows polynomialToSeries(R)(polyX(R)) = seriesX(R)
+proof
+  sorry
+
+theorem polynomialToSeries.injective
+  shows InjectiveBetween(polynomialToSeries(R), Ring.carrier(polynomialRing(R, {0})),
+    powerSeriesCarrier(R))
+proof
+  sorry
+
+-- Units: f is a unit iff its constant coefficient is
+-- (PowerSeries.isUnit_iff_constantCoeff); 1 − X is a unit with inverse
+-- Σ Xⁿ (PowerSeries.invUnitsSub).
+theorem powerSeriesRing.unit_iff (f : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows RingUnit(powerSeriesRing(R), f) ↔ RingUnit(R, f(0))
+proof
+  sorry
+
+theorem powerSeriesRing.geometric
+  shows call2(Ring.mul(powerSeriesRing(R)),
+      Ring.sub(powerSeriesRing(R), seriesConstant(R, R.one), seriesX(R)),
+      constantFunction(ℕ, R.carrier, R.one)) = seriesConstant(R, R.one)
+proof
+  sorry
+
+-- PowerSeries.X_dvd_iff and X_pow_dvd_iff.
+theorem seriesX.dvd_iff (f : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows RingDvd(powerSeriesRing(R), seriesX(R), f) ↔ f(0) = R[0]
+proof
+  sorry
+
+theorem seriesX.pow_dvd_iff (f : Set) (n : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows RingDvd(powerSeriesRing(R), Ring.pow(powerSeriesRing(R), seriesX(R), n), f) ↔
+    (∀ k ∈ n, f(k) = R[0])
+proof
+  sorry
+
+-- R[[X]] is a domain when R is (PowerSeries.instIsDomain), and local with
+-- maximal ideal (m, X) when R is a field.
+theorem powerSeriesRing.domain
+  requires domain : IntegralDomain(R)
+  shows IntegralDomain(powerSeriesRing(R))
+proof
+  sorry
+
+-- Coefficient maps (PowerSeries.map, coeff_map, map_X, map_C,
+-- map_injective).
+theorem seriesMap.hom (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  shows seriesMap(R, S, f) : powerSeriesRing(R) →+* powerSeriesRing(S)
+proof
+  sorry
+
+theorem seriesMap.coeff (S f g : Set) (n : Nat)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires series : g ∈ powerSeriesCarrier(R)
+  shows seriesCoeff(seriesMap(R, S, f)(g), n) = f(seriesCoeff(g, n))
+proof
+  sorry
+
+theorem seriesMap.X (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  shows seriesMap(R, S, f)(seriesX(R)) = seriesX(S)
+proof
+  sorry
+
+theorem seriesMap.injective (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires injective : InjectiveBetween(f, R.carrier, S.carrier)
+  shows InjectiveBetween(seriesMap(R, S, f), powerSeriesCarrier(R),
+    powerSeriesCarrier(S))
+proof
+  sorry
+
+-- Truncation (PowerSeries.trunc, coeff_trunc, trunc of a polynomial).
+theorem seriesTrunc.coeff (f : Set) (n k : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesTrunc(R, f, n) ∈ Ring.carrier(polynomialRing(R, {0})) ∧
+    (k < n → polyCoeff(seriesTrunc(R, f, n), k) = f(k)) ∧
+    (n ≤ k → polyCoeff(seriesTrunc(R, f, n), k) = R[0])
+proof
+  sorry
+
+-- Rescaling (PowerSeries.rescale): a ring homomorphism, multiplicative
+-- in the scale (rescale_mul), commuting with map (rescale_map), and
+-- substitution of a X (rescale_eq_subst).
+theorem seriesRescale.hom (a : R)
+  shows RingHom(rescaleMap(R, a), powerSeriesRing(R), powerSeriesRing(R))
+proof
+  sorry
+
+theorem seriesRescale.mul (a b f : Set)
+  requires first : a ∈ R.carrier
+  requires second : b ∈ R.carrier
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesRescale(R, a, seriesRescale(R, b, f)) =
+    seriesRescale(R, call2(R.mul, a, b), f)
+proof
+  sorry
+
+theorem seriesRescale.map (S φ a f : Set)
+  requires target : CommRing(S)
+  requires hom : φ : R →+* S
+  requires scalar : a ∈ R.carrier
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesMap(R, S, φ)(seriesRescale(R, a, f)) =
+    seriesRescale(S, φ(a), seriesMap(R, S, φ)(f))
+proof
+  sorry
+
+theorem seriesRescale.eq_subst (a f : Set)
+  requires scalar : a ∈ R.carrier
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesRescale(R, a, f) = seriesSubst(R, f,
+    call2(Ring.mul(powerSeriesRing(R)), seriesConstant(R, a), seriesX(R)))
+proof
+  sorry
+
+-- The derivative (PowerSeries.derivative): additive, Leibniz
+-- (derivative_mul), coefficientwise (coeff_derivative), d X = 1, and
+-- compatible with substitution (derivative_subst: (f ∘ g)' = (f' ∘ g) g').
+theorem seriesDerivative.add (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows seriesDerivative(R, call2(Ring.add(powerSeriesRing(R)), f, g)) =
+    call2(Ring.add(powerSeriesRing(R)), seriesDerivative(R, f), seriesDerivative(R, g))
+proof
+  sorry
+
+theorem seriesDerivative.mul (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows seriesDerivative(R, call2(Ring.mul(powerSeriesRing(R)), f, g)) =
+    call2(Ring.add(powerSeriesRing(R)),
+      call2(Ring.mul(powerSeriesRing(R)), seriesDerivative(R, f), g),
+      call2(Ring.mul(powerSeriesRing(R)), f, seriesDerivative(R, g)))
+proof
+  sorry
+
+theorem seriesDerivative.X
+  shows seriesDerivative(R, seriesX(R)) = seriesConstant(R, R.one)
+proof
+  sorry
+
+theorem seriesDerivative.subst (f g : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesDerivative(R, seriesSubst(R, f, g)) =
+    call2(Ring.mul(powerSeriesRing(R)), seriesSubst(R, seriesDerivative(R, f), g),
+      seriesDerivative(R, g))
+proof
+  sorry
+
+-- Substitution (PowerSeries.subst on HasSubst): a ring homomorphism in f
+-- (substAlgHom), X ↦ g (subst_X), constants fixed, composition
+-- (subst_comp_subst_apply), compatible with map (map_subst), the
+-- constant coefficient (constantCoeff_subst for g(0) = 0), and the
+-- n-th coefficient as a finite sum (coeff_subst').
+theorem seriesSubst.hom (g : Set)
+  requires substitutable : SeriesHasSubst(R, g)
+  shows RingHom(substMap(R, g), powerSeriesRing(R), powerSeriesRing(R))
+proof
+  sorry
+
+theorem seriesSubst.X (g : Set)
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesSubst(R, seriesX(R), g) = g
+proof
+  sorry
+
+theorem seriesSubst.C (a g : Set)
+  requires scalar : a ∈ R.carrier
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesSubst(R, seriesConstant(R, a), g) = seriesConstant(R, a)
+proof
+  sorry
+
+theorem seriesSubst.compose (f g h : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires first : SeriesHasSubst(R, g)
+  requires second : SeriesHasSubst(R, h)
+  shows seriesSubst(R, seriesSubst(R, f, g), h) =
+    seriesSubst(R, f, seriesSubst(R, g, h))
+proof
+  sorry
+
+theorem seriesSubst.map (S φ f g : Set)
+  requires target : CommRing(S)
+  requires hom : φ : R →+* S
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesMap(R, S, φ)(seriesSubst(R, f, g)) =
+    seriesSubst(S, seriesMap(R, S, φ)(f), seriesMap(R, S, φ)(g))
+proof
+  sorry
+
+theorem seriesSubst.constant_coeff (f g : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substituted : g ∈ powerSeriesCarrier(R)
+  requires zero : g(0) = R[0]
+  shows seriesSubst(R, f, g)(0) = f(0)
+proof
+  sorry
+
+-- When g(0) = 0, only the first n + 1 terms reach the n-th coefficient.
+theorem substCoeff.finite_sum (f g : Set) (n : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substituted : g ∈ powerSeriesCarrier(R)
+  requires zero : g(0) = R[0]
+  shows substCoeff(R, f, g, n) = finiteRingSum(succ(n), R.carrier, R.add, R.zero,
+    R.neg, R.mul, R.one, substTerms(R, f, g, n, succ(n)))
+proof
+  sorry
+
+-- Substituting into a polynomial is evaluation (PowerSeries.subst_coe).
+theorem seriesSubst.polynomial (p g : Set)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesSubst(R, polynomialToSeries(R)(p), g) =
+    polyEval2(R, powerSeriesRing(R), seriesConstantMap(R), g, p)
+proof
+  sorry
+
+-- The exponential: its coefficients, exp' = exp (derivative_exp), and
+-- exp(a X) exp(b X) = exp((a + b) X) (PowerSeries.exp_mul_exp_eq_exp_add).
+theorem seriesExp.coeff (n : Nat)
+  requires factorialUnits : ∀ k ∈ ℕ, RingUnit(R, ringNat(R.add, R.zero, R.one, factorial(k)))
+  shows call2(R.mul, seriesExp(R)(n), ringNat(R.add, R.zero, R.one, factorial(n))) = R[1]
+proof
+  sorry
+
+theorem seriesExp.derivative
+  requires factorialUnits : ∀ k ∈ ℕ, RingUnit(R, ringNat(R.add, R.zero, R.one, factorial(k)))
+  shows seriesDerivative(R, seriesExp(R)) = seriesExp(R)
+proof
+  sorry
+
+theorem seriesExp.mul (a b : R)
+  requires factorialUnits : ∀ k ∈ ℕ, RingUnit(R, ringNat(R.add, R.zero, R.one, factorial(k)))
+  shows call2(Ring.mul(powerSeriesRing(R)), seriesRescale(R, a, seriesExp(R)),
+      seriesRescale(R, b, seriesExp(R))) = seriesRescale(R, a + b, seriesExp(R))
+proof
+  sorry
+
+end Series
+
+-- Section: Laws of power series in several variables
+section MvSeries
+variable (R I : Set)
+hypothesis comm : CommRing(R)
+
+theorem mvPowerSeriesRing.comm_ring
+  shows CommRing(mvPowerSeriesRing(R, I))
+proof
+  sorry
+
+-- The pairs of exponents adding to m are finitely many.
+theorem monomialAntidiagonal.finite (m : Set)
+  requires monomial : m ∈ monomials(I)
+  shows Finite(monomialAntidiagonal(I, m))
+proof
+  sorry
+
+-- MvPowerSeries.coeff_mul, coeff_C, coeff_X, coeff_monomial,
+-- monomial_mul_monomial, coeff_X_pow.
+theorem mvSeries.coeff_mul (f g m : Set)
+  requires first : f ∈ mvSeriesCarrier(R, I)
+  requires second : g ∈ mvSeriesCarrier(R, I)
+  requires monomial : m ∈ monomials(I)
+  shows call2(Ring.mul(mvPowerSeriesRing(R, I)), f, g)(m) =
+    finiteRingSum(monomialAntidiagonal(I, m), R.carrier, R.add, R.zero, R.neg,
+      R.mul, R.one, mvCauchyTerms(R, I, f, g, m))
+proof
+  sorry
+
+theorem mvSeries.coeff_C (a m : Set)
+  requires scalar : a ∈ R.carrier
+  requires monomial : m ∈ monomials(I)
+  shows (m = monomialOne(I) → mvSeriesConstant(R, I, a)(m) = a) ∧
+    (m ≠ monomialOne(I) → mvSeriesConstant(R, I, a)(m) = R.zero)
+proof
+  sorry
+
+theorem mvSeries.coeff_X (i m : Set)
+  requires index : i ∈ I
+  requires monomial : m ∈ monomials(I)
+  shows (m = monomialVariable(I, i) → mvSeriesX(R, I, i)(m) = R.one) ∧
+    (m ≠ monomialVariable(I, i) → mvSeriesX(R, I, i)(m) = R.zero)
+proof
+  sorry
+
+-- MvPowerSeries.C is an injective homomorphism (C_injective) and the
+-- constant coefficient a homomorphism; smul_eq_C_mul.
+theorem mvSeriesConstant.hom
+  shows RingHom(mvSeriesConstantMap(R, I), R, mvPowerSeriesRing(R, I))
+proof
+  sorry
+
+theorem mvSeriesConstant.injective (a b : R)
+  requires equal : mvSeriesConstant(R, I, a) = mvSeriesConstant(R, I, b)
+  shows a = b
+proof
+  sorry
+
+theorem mvSeriesConstantCoeff.hom
+  shows RingHom(evaluationMap(monomials(I), selfModule(R), monomialOne(I)),
+    mvPowerSeriesRing(R, I), R)
+proof
+  sorry
+
+-- Polynomials are series: the inclusion is an injective ring
+-- homomorphism (MvPolynomial.coe_mul, coe_injective, coeff_coe,
+-- coe_X, coe_C).
+theorem mvPolynomialToSeries.hom
+  shows RingHom(mvPolynomialToSeries(R, I), polynomialRing(R, I),
+    mvPowerSeriesRing(R, I))
+proof
+  sorry
+
+theorem mvPolynomialToSeries.subset
+  shows Ring.carrier(polynomialRing(R, I)) ⊆ mvSeriesCarrier(R, I)
+proof
+  sorry
+
+theorem mvPolynomialToSeries.X (i : Set)
+  requires index : i ∈ I
+  shows X(R, I, i) = mvSeriesX(R, I, i)
+proof
+  sorry
+
+-- Units: a series is a unit iff its constant coefficient is
+-- (MvPowerSeries.isUnit_iff_constantCoeff), and a series with nilpotent
+-- constant coefficient times anything has vanishing coefficients in high
+-- degree (coeff_eq_zero_of_constantCoeff_nilpotent).
+theorem mvPowerSeriesRing.unit_iff (f : Set)
+  requires series : f ∈ mvSeriesCarrier(R, I)
+  shows RingUnit(mvPowerSeriesRing(R, I), f) ↔ RingUnit(R, f(monomialOne(I)))
+proof
+  sorry
+
+theorem mvSeries.coeff_pow_zero_of_nilpotent (f m : Set) (k : Nat)
+  requires series : f ∈ mvSeriesCarrier(R, I)
+  requires nilpotent : RingNilpotent(R, f(monomialOne(I)))
+  requires monomial : m ∈ monomials(I)
+  shows ∃ N ∈ ℕ, ∀ j ∈ ℕ, N ≤ j →
+    Ring.pow(mvPowerSeriesRing(R, I), f, j)(m) = R.zero
+proof
+  sorry
+
+-- A series with constant coefficient in nonZeroDivisors is a non-zero-
+-- divisor (MvPowerSeries.mem_nonZeroDivisors_of_constantCoeff).
+theorem mvSeries.non_zero_divisor (f : Set)
+  requires series : f ∈ mvSeriesCarrier(R, I)
+  requires constant : f(monomialOne(I)) ∈ nonZeroDivisors(R)
+  shows f ∈ nonZeroDivisors(mvPowerSeriesRing(R, I))
+proof
+  sorry
+
+-- Coefficient maps (MvPowerSeries.map, coeff_map).
+theorem mvSeriesMap.hom (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  shows RingHom(mvSeriesMap(R, S, I, f), mvPowerSeriesRing(R, I),
+    mvPowerSeriesRing(S, I))
+proof
+  sorry
+
+theorem mvSeriesMap.coeff (S f g m : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires series : g ∈ mvSeriesCarrier(R, I)
+  requires monomial : m ∈ monomials(I)
+  shows mvSeriesMap(R, S, I, f)(g)(m) = f(g(m))
+proof
+  sorry
+
+-- Partial derivatives (MvPowerSeries.pderiv): Leibniz, ∂ᵢXⱼ = δᵢⱼ
+-- (pderiv_X), and agreement with the polynomial derivative on
+-- polynomials (MvPowerSeries.pderiv_coe).
+theorem mvSeriesPartial.mul (i f g : Set)
+  requires index : i ∈ I
+  requires first : f ∈ mvSeriesCarrier(R, I)
+  requires second : g ∈ mvSeriesCarrier(R, I)
+  shows mvSeriesPartial(R, I, i, call2(Ring.mul(mvPowerSeriesRing(R, I)), f, g)) =
+    call2(Ring.add(mvPowerSeriesRing(R, I)),
+      call2(Ring.mul(mvPowerSeriesRing(R, I)), mvSeriesPartial(R, I, i, f), g),
+      call2(Ring.mul(mvPowerSeriesRing(R, I)), f, mvSeriesPartial(R, I, i, g)))
+proof
+  sorry
+
+theorem mvSeriesPartial.X (i j : Set)
+  requires first : i ∈ I
+  requires second : j ∈ I
+  shows (i = j → mvSeriesPartial(R, I, i, mvSeriesX(R, I, j)) =
+      mvSeriesConstant(R, I, R.one)) ∧
+    (i ≠ j → mvSeriesPartial(R, I, i, mvSeriesX(R, I, j)) =
+      mvSeriesConstant(R, I, R.zero))
+proof
+  sorry
+
+theorem mvSeriesPartial.polynomial (i p : Set)
+  requires index : i ∈ I
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvSeriesPartial(R, I, i, p) = partialDerivative(R, I, i)(p)
+proof
+  sorry
+
+-- Truncation to total degree (MvPowerSeries.truncTotal): a polynomial;
+-- the coefficients below the degree of a product of truncations agree
+-- with those of the product
+-- (coeff_truncTotal_mul_truncTotal_eq_coeff_mul).
+theorem mvSeriesTruncTotal.polynomial (f : Set) (n : Nat)
+  requires series : f ∈ mvSeriesCarrier(R, I)
+  shows mvSeriesTruncTotal(R, I, f, n) ∈ Ring.carrier(polynomialRing(R, I))
+proof
+  sorry
+
+theorem mvSeriesTruncTotal.mul (f g m : Set) (n : Nat)
+  requires first : f ∈ mvSeriesCarrier(R, I)
+  requires second : g ∈ mvSeriesCarrier(R, I)
+  requires monomial : m ∈ monomials(I)
+  requires low : monomialDegree(I, m) < n
+  shows call2(Ring.mul(polynomialRing(R, I)), mvSeriesTruncTotal(R, I, f, n),
+      mvSeriesTruncTotal(R, I, g, n))(m) =
+    call2(Ring.mul(mvPowerSeriesRing(R, I)), f, g)(m)
+proof
+  sorry
+
+-- Renaming along an injective map: a ring homomorphism extending the
+-- polynomial rename (MvPowerSeries.rename, coeff_rename, rename_X).
+theorem mvSeriesRename.hom (J σ : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  shows RingHom(mvSeriesRenameMap(R, I, J, σ), mvPowerSeriesRing(R, I),
+    mvPowerSeriesRing(R, J))
+proof
+  sorry
+
+theorem mvSeriesRename.X (J σ i : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  requires index : i ∈ I
+  shows mvSeriesRename(R, I, J, σ, mvSeriesX(R, I, i)) = mvSeriesX(R, J, σ(i))
+proof
+  sorry
+
+theorem mvSeriesRename.polynomial (J σ p : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvSeriesRename(R, I, J, σ, p) = polynomialRename(R, I, J, σ)(p)
+proof
+  sorry
+
+end MvSeries
+
+-- One variable inside several: PowerSeries R is MvPowerSeries over {0}
+-- (PowerSeries.toMvPowerSeries, a ring isomorphism).
+theorem seriesToMv.iso (R : Set)
+  requires comm : CommRing(R)
+  shows RingIso(seriesToMvMap(R), powerSeriesRing(R), mvPowerSeriesRing(R, {0}))
+proof
+  sorry
+
