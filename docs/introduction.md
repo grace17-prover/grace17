@@ -16,7 +16,7 @@ Start from the empty set, form new sets from what is already there, and
 continue through the transfinite. The result is the cumulative hierarchy, a
 common setting for numbers, functions, spaces, structures and morphisms that leaves
 mathematicians free to study each through its own properties. That
-combination of unity and freedom is beautiful and powerful, and is to me the
+combination of unity and freedom is beautiful and powerful, and is to me a
 gold standard foundation of classical mathematics.
 
 <!-- cumulus-source: lib/Grace/Cumulus/Set/Hierarchy.g17 -->
@@ -60,9 +60,9 @@ like fun, I welcome your contributions.
 
 Mathematics is better for having many foundations, tools, and habits
 of thought. Grace17 welcomes mathematicians new to formal proof as well as
-users of Lean, Mizar, ACL2, Isabelle, Rocq, PVS, Agda, Metamath, HOL Light,
-HOL4, ProofPower, Naproche, and others to contribute and help us improve the
-system.
+users of Lean, Mizar, ACL2, Isabelle, Rocq, PVS, Imandra, Agda, Metamath,
+HOL Light, HOL4, ProofPower, Naproche, and others to contribute and help us
+improve the system.
 Experience in any of those communities is useful here, and I hope ideas and
 examples travel in both directions.
 
