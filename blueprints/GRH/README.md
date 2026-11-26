@@ -348,5 +348,5 @@ graph TD
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.SpecialFunctions.More | 81 | 8 | 73 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **5389** | **2892** | **2497** |
+| **total** | **5695** | **3356** | **2339** |
 <!-- /blueprint-status -->
