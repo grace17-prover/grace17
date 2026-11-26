@@ -293,9 +293,9 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| GRH.Linear.Modules | 137 | 34 | 103 |
-| GRH.Linear.Dimension | 69 | 2 | 67 |
-| GRH.Matrix.Basic | 86 | 0 | 86 |
+| GRH.Linear.Modules | 313 | 311 | 2 |
+| GRH.Linear.Dimension | 70 | 6 | 64 |
+| GRH.Matrix.Basic | 215 | 183 | 32 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
 | GRH.Matrix.Determinant | 51 | 2 | 49 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
