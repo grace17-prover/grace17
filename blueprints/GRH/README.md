@@ -240,10 +240,10 @@ graph TD
 | GRH.Integral | 154 | 154 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
-| GRH.Gamma | 43 | 26 | 17 |
+| GRH.Gamma | 139 | 136 | 3 |
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 156 | 154 | 2 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **2272** | **2252** | **20** |
+| **total** | **2368** | **2362** | **6** |
 <!-- /blueprint-status -->
