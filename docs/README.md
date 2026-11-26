@@ -31,6 +31,7 @@ developments in Cumulus.
 ## Trust
 
 - [Foundations](foundations.md): the foundation contract and the ZF, ZFC, and ZFG profiles
+- [Large cardinals](large-cardinals.md): inaccessibles, Grothendieck universes, and Tarski–Grothendieck as hypotheses the audit tracks
 - [Natural deduction certificates](natural-deduction.md): every proof as a Fitch-style or Gentzen-style derivation you can read
 - [Soundness](soundness.md): what is trusted, independent checkers, and the path to proved checkers
 - [Checker semantics](checker-semantics.md): the proof checker as a small-step transition system, the definition every independent checker implements
