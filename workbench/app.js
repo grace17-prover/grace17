@@ -6,7 +6,7 @@
 import { resolveWorkbenchLink } from "./deep-links.js";
 import { indexModuleDocuments, importSymbolAt } from "./module-navigation.js";
 import { installLibrarySearch } from "./library-search-ui.js";
-import { axiomAuditSummary, renderAxiomAudit, createAxiomAuditLoader, renderAxiomAuditAction } from "./axiom-audit.js";
+import { axiomAuditSummary, renderAxiomAudit, createAxiomAuditLoader, renderAxiomAuditAction, renderLargeCardinalBadge } from "./axiom-audit.js";
 import { declaredParameterNames, moduleNameOf, changedTextParts, checkedFileProofState, diagnosticIdentifier, diagnosticSpan, equivalenceClassNotationAtTextOffset, isFoundationInternalFile, kernelFitchOrder, localTypeAtTextOffset, migratePersistedCumulusFiles, notationAtTextOffset, notationForOperandTypes, notationOperandTypeAtTextOffset, notationTypeLabel, orderedPairNotationAtTextOffset, preferredProjectFile, proofDeclarationContext, proofMapSections, qualifiedSymbolCompletions, resolveSymbolCandidate, setNotationAtTextOffset, shouldRetainLastGoal, subscriptNotationAtTextOffset, tacticStepAtCursor, tacticTokenAtTextOffset, tokenAtTextOffset, unicodeCompletionAt, visibleTacticSteps, workspaceFilesForCheck } from "./editor-utils.js";
 import { declarationHelpAtTextOffset, documentedTacticFamilies, helpInferenceRule, highlightGrace17, tacticGuideSections, tacticHelpEntries } from "./tactics-guide.js";
 import { tacticReferenceNotes } from "./tactics-reference.js";
@@ -1827,6 +1827,7 @@ function renderState(state, previous, caption = "Current goal", theorem) {
   const file = activeFile();
   const checkedSource = file && [...fileResultNames(file)].map(name => resultSources.get(name)).find(source => source !== undefined);
   const auditAction = renderAxiomAuditAction(state, theorem, Boolean(file && checkedSource === file.source && !currentError));
+  const largeCardinalBadge = renderLargeCardinalBadge(theorem);
   if (!state?.goals?.length && sorries.length) {
     const count = sorries.length;
     const expanded = expandedSorryTheorems.has(theorem.name);
@@ -1834,11 +1835,11 @@ function renderState(state, previous, caption = "Current goal", theorem) {
       const documentName = result?.documents?.find(document => document.file === site.file)?.name || site.file;
       return `<li><button type="button" data-sorry-site="${index}"><code>${escapeHtml(documentName)}:${site.line}</code><span><strong>${escapeHtml(shortTheoremName(site.theorem))}</strong><small>${escapeHtml(site.goal)}</small></span><i aria-hidden="true">open ▸</i></button></li>`;
     }).join("")}</ol>` : "";
-    return `<div class="qed-state qed-sorry ${expanded ? "expanded" : ""}">${qedMark("sorry", count)}<span class="qed-copy">Proof complete, modulo ${count} ${count === 1 ? "sorry" : "sorries"}</span><span class="qed-actions">${auditAction}<button type="button" class="qed-show" data-toggle-sorries aria-expanded="${expanded}">${expanded ? "hide" : "show"} <span aria-hidden="true">${expanded ? "▾" : "▸"}</span></button></span>${sites}</div>`;
+    return `<div class="qed-state qed-sorry ${expanded ? "expanded" : ""}">${qedMark("sorry", count)}<span class="qed-copy">Proof complete, modulo ${count} ${count === 1 ? "sorry" : "sorries"}</span>${largeCardinalBadge}<span class="qed-actions">${auditAction}<button type="button" class="qed-show" data-toggle-sorries aria-expanded="${expanded}">${expanded ? "hide" : "show"} <span aria-hidden="true">${expanded ? "▾" : "▸"}</span></button></span>${sites}</div>`;
   }
   if (!state?.goals?.length) {
     const animation = completionAnimation(theorem);
-    return `<div class="qed-state qed-proven ${animation.className}"${animation.style}>${qedMark("proven")}<span class="qed-copy">No goals remain: proof complete</span>${auditAction}</div>`;
+    return `<div class="qed-state qed-proven ${animation.className}"${animation.style}>${qedMark("proven")}<span class="qed-copy">No goals remain: proof complete</span>${largeCardinalBadge}${auditAction}</div>`;
   }
   return state.goals.map((goal, index) => {
     const prior = previous?.goals?.[index];

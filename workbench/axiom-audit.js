@@ -9,16 +9,44 @@ export function axiomAuditSummary(audit) {
   const inherited = audit.hereditary.filter(name => !audit.direct.includes(name)).length;
   const choice = audit.hereditary.some(name => name === "set.choice" || name === "set.globalChoice");
   const choiceStatus = choice ? "Choice used" : audit.complete ? "no Choice" : "Choice undetermined";
-  return `${audit.complete ? "Complete" : "Incomplete"} axiom audit · ${audit.direct.length} direct · ${inherited} inherited · ${choiceStatus}`;
+  const relied = audit.largeCardinals?.reliesOn ?? [];
+  const largeCardinals = relied.length === 0 ? ""
+    : relied.length === 1 ? ` · relies on ${relied[0].label}` : ` · relies on ${relied.length} large cardinal hypotheses`;
+  return `${audit.complete ? "Complete" : "Incomplete"} axiom audit · ${audit.direct.length} direct · ${inherited} inherited · ${choiceStatus}${largeCardinals}`;
+}
+
+const pathList = path => `<ol>${path.map(step => `<li><code>${html(step)}</code></li>`).join("")}</ol>`;
+
+/**
+ * The large cardinal hypotheses of a theorem, as the audit panel shows
+ * them: each it relies on, with where the reliance starts, and each it is
+ * only about.
+ */
+function renderLargeCardinals(report) {
+  const relied = report?.reliesOn ?? [];
+  const about = report?.about ?? [];
+  if (relied.length === 0 && about.length === 0) return "";
+  const where = item => item.via === "supplied"
+    ? `<p class="audit-note">${item.path.length > 1 ? "A declaration this proof uses" : "This proof"} applies <code>${html(item.lemma)}</code>, a lemma about it, without a premise of its own that supplies it:</p>${pathList(item.path)}`
+    : item.path.length > 1 ? `<p class="audit-note">A lemma this proof uses has it as a premise:</p>${pathList(item.path)}`
+    : `<p class="audit-note">A premise of this theorem.</p>`;
+  const reliedItems = relied.map(item => `<details class="audit-item audit-largecardinal-item" open><summary>${html(item.label)}<span>Relied on</span></summary><p><code>${html(item.predicate)}</code></p>${where(item)}</details>`).join("");
+  const aboutItems = about.map(item => `<details class="audit-item"><summary>${html(item.label)}<span>About</span></summary><p><code>${html(item.predicate)}</code></p><p class="audit-note">The statement is about such objects and relies on none existing: it holds whether or not they do.</p></details>`).join("");
+  const note = relied.length ? `<p class="audit-note">This result relies on a large cardinal hypothesis. Grace17 adds no large cardinal axiom: the theorem is proved from the foundation's axioms with ${relied.length === 1 ? "the hypothesis" : "the hypotheses"} as ${relied.length === 1 ? "a premise" : "premises"}, so it holds in every model of the foundation in which ${relied.length === 1 ? "the hypothesis holds" : "the hypotheses hold"}.</p>` : "";
+  return `<h3>Large cardinal hypotheses</h3>${note}${reliedItems}${aboutItems}`;
 }
 
 export function renderAxiomAudit(audit) {
   const choice = audit.hereditary.some(name => name === "set.choice" || name === "set.globalChoice");
   const status = choice ? "Choice is used" : audit.complete ? "No Choice axiom used" : "Choice usage is undetermined";
-  return `<p class="audit-status ${choice || !audit.complete ? "audit-attention" : ""}">${html(status)}</p>
+  const relied = audit.largeCardinals?.reliesOn ?? [];
+  const largeCardinalStatus = relied.length
+    ? `<p class="audit-status audit-largecardinal">Relies on a large cardinal hypothesis: ${relied.length === 1 ? html(relied[0].label) : `${relied.length} of them`}</p>` : "";
+  return `<p class="audit-status ${choice || !audit.complete ? "audit-attention" : ""}">${html(status)}</p>${largeCardinalStatus}
     <p>${html(axiomAuditSummary(audit))}</p>
     <p class="audit-note">Dependencies of this proof, including theorem and definition certificates. This does not claim that these axioms are logically necessary.</p>
     <h3>Named axioms</h3>${audit.axioms.length ? audit.axioms.map(item => `<details class="audit-item"><summary><code>${html(item.name)}</code><span>${item.direct ? "Direct" : "Inherited"}</span></summary><pre>${html(item.statement)}</pre><ol>${item.path.map(step => `<li><code>${html(step)}</code></li>`).join("")}</ol></details>`).join("") : `<p>${audit.complete ? "No named axioms occur in this proof or its dependencies." : "No named axioms found in the available proofs."}</p>`}
+    ${renderLargeCardinals(audit.largeCardinals)}
     ${audit.unavailable.length ? `<h3>Unavailable proof dependencies</h3><ul>${audit.unavailable.map(item => `<li>${html(item.path.join(" → "))}</li>`).join("")}</ul>` : ""}
     <details class="audit-item"><summary>Definition and schema mechanisms <span>${audit.mechanisms.length}</span></summary><p>These built-in mechanisms are reported separately from named axioms. Unique description is not the axiom of Choice.</p><ul>${audit.mechanisms.map(item => `<li><code>${html(item.name)}</code> · ${html(item.kind)}</li>`).join("")}</ul></details>
     <p class="audit-note">Classical double-negation elimination: ${audit.classicalLogic ? "used" : "not used"}.</p>`;
@@ -42,6 +70,15 @@ export function createAxiomAuditLoader(request) {
     }
     return cache.get(theorem);
   };
+}
+
+/** The badge a completed theorem carries for the large cardinal hypotheses its statement assumes. */
+export function renderLargeCardinalBadge(theorem) {
+  const assumed = theorem?.largeCardinals ?? [];
+  if (assumed.length === 0) return "";
+  const text = assumed.length === 1 ? `relies on ${assumed[0].label}` : `relies on ${assumed.length} large cardinal hypotheses`;
+  const title = `Proved with ${assumed.map(item => item.label).join("; ")} as ${assumed.length === 1 ? "a premise" : "premises"}. Grace17 adds no large cardinal axiom.`;
+  return `<span class="large-cardinal-badge" title="${html(title)}">${html(text)}</span>`;
 }
 
 // Keep the goal pane focused on proof development; offer auditing at QED only.

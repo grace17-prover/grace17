@@ -54,6 +54,60 @@ mechanisms to a minimal list of ZF axioms. A theorem may have another proof
 that uses fewer axioms. An imported choice symbol that occurs in a reflexive
 equality need not use the axiom of Choice at all.
 
+## Large cardinal hypotheses
+
+Grace17 adds no large cardinal axiom to any foundation. A predicate that
+states a large cardinal hypothesis, a sentence or a property of a set, is
+registered as one in the module that defines it:
+
+```g17 fragment
+register largecardinal TarskiGrothendieck "every set lies in a Grothendieck universe"
+register largecardinal Inaccessible "an inaccessible cardinal"
+```
+
+A theorem that needs one takes it as a premise, usually as a hypothesis of
+its theorem section, and its certificate is a certificate, from the
+foundation's axioms, of the implication: the theorem holds in every model
+of the foundation in which the hypothesis holds.
+
+The audit reports, as `largeCardinals.reliesOn`, every registered
+hypothesis the result relies on, over the whole proof:
+
+- **A premise of the statement.** A sentence such as `TarskiGrothendieck()`
+  as a premise, or a property of something the conclusion does not
+  mention: `Inaccessible(κ) → φ` with κ not in φ says that φ holds if some
+  inaccessible exists. A premise inside another formula, as in
+  `(∃ κ, Inaccessible(κ)) → φ`, counts the same way.
+- **A lemma that relies on it.** Reliance passes to every theorem whose
+  proof uses the lemma, through any number of steps.
+- **A lemma about it, used without it.** A lemma with the premise
+  `Inaccessible(κ)` whose conclusion mentions κ is a fact about
+  inaccessibles, true whether or not any exists. A proof that applies it
+  without mentioning the hypothesis anywhere in its own statement (or in
+  the definitions of the registered predicates its statement mentions)
+  has produced an inaccessible from elsewhere, and relies on one.
+
+Each entry has the `predicate`, its `label` (the registration's words), the
+`module` that registers it, and where the reliance starts: `via: "premise"`
+with the `path` to the nearest declaration whose statement relies on it, or
+`via: "supplied"` with the `path` to the declaration that used the lemma
+about it, named in `lemma`. `about` lists the hypotheses the statement is
+about and the proof relies on nowhere, such as Williamson's theorem that
+every Grothendieck universe is a stage `V(κ)`; `mentions` those that occur
+only as what the theorem proves, or on a side of an equivalence, which
+rests on neither side.
+
+The classification reads registered predicates only: a premise equivalent
+to a large cardinal hypothesis but stated with unregistered predicates is
+not recognized as one.
+
+In the Workbench a completed proof whose statement relies on a hypothesis
+carries a badge naming it; the audit, on hover and in its panel, states
+that the result relies on a large cardinal hypothesis, with the path for
+each, whether the reliance comes from the statement or from the proof. The
+check result's theorems carry the statement's hypotheses as
+`largeCardinals`; the command-line audit prints a line for each.
+
 ## ZF checks
 
 The mathematical modules `Int`, `NumberTheory`, `Cardinal`, `Geometry`,

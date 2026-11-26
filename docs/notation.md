@@ -1186,6 +1186,18 @@ restriction `S := R ↾ T` and `Algebra.Polynomial.Ring` the polynomial ring
 two visible modules register is an error that names them, and a form no
 module in scope registers is an error that lists the forms there are.
 
+`register largecardinal TarskiGrothendieck "every set lies in a Grothendieck universe"`
+says that the predicate, a sentence or a property of a set, states a large
+cardinal hypothesis, which the quoted words describe. Grace17 adds no large
+cardinal axiom: a theorem that needs one takes the hypothesis as a premise,
+usually as a hypothesis of its
+[theorem section](definitions.md#theorem-sections), and its certificate is
+a certificate of the implication from the foundation's axioms. The
+[axiom audit](axiom-audit.md#large-cardinal-hypotheses) reports every
+hypothesis a result relies on, through its statement or its proof, and the
+Workbench marks the completed proof. The registration changes no statement
+and no proof.
+
 ## Lists and reopened namespaces
 
 `[a, b, c]` abbreviates the List constructors, and `a :: b :: xs`
