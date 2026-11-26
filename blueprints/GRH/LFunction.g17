@@ -998,6 +998,35 @@ proof
     by linarith
   exact realMulValue.le_of_square_le with valueAbs, oneNonnegative, squares
 
+-- χ(q m) (q m)^(−s) = χ(q) q^(−s) χ(m) m^(−s), in the shifted indexing.
+theorem dirichletSeriesTerms.multiplicative (N : Nat) (χ s : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  shows ∀ r ∈ ℕ, ∀ j ∈ ℕ, dirichletSeriesTerms(χ, s)((r + 1) * j + r) =
+    ℂ[dirichletSeriesTerms(χ, s)(r) * dirichletSeriesTerms(χ, s)(j)]
+proof
+  have values := DirichletCharacter.function with character
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  intros r rMember j jMember
+  have rNat := nat.omega.backward with rMember
+  have jNat := nat.omega.backward with jMember
+  have position : (r + 1) * j + r ∈ ℕ by typecheck
+  have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+  have positiveR : 1 ≤ r + 1 by arith
+  have positiveJ : 1 ≤ j + 1 by arith
+  have rInteger : integerOfNat(r + 1) ∈ ℤ by typecheck
+  have jInteger : integerOfNat(j + 1) ∈ ℤ by typecheck
+  have rValue := FunctionBetween.apply_closed with values, rInteger
+  have jValue := FunctionBetween.apply_closed with values, jInteger
+  have rPower := realCpow.member at realNat(r + 1), ℂ[-s] with negative
+  have jPower := realCpow.member at realNat(j + 1), ℂ[-s] with negative
+  rw [(dirichletSeriesTerms.value with values, hs, position),
+    (dirichletSeriesTerms.value with values, hs, rMember),
+    (dirichletSeriesTerms.value with values, hs, jMember), index,
+    (realCpow.nat_neg_mul with positiveR, positiveJ, hs), integerOfNat.mul,
+    (DirichletCharacter.mul with character, rInteger, jInteger)]
+  ring
+
 -- The hypotheses of the sieve for L(s, χ): t(n) = χ(n + 1) (n + 1)^(−s).
 theorem LFunction.euler_sieve (N : Nat) (χ s : Set)
   requires positive : 1 ≤ N
@@ -1020,28 +1049,13 @@ proof
       natural.zero_add_one, (realCpow.nat_neg_one with hs), integerOfNat.one,
       (DirichletCharacter.one with character)]
     ring
+  have multiplicativeAll := dirichletSeriesTerms.multiplicative with
+    character, hs
   have multiplicative : ∀ r ∈ ℕ, Prime(r + 1) → (∀ j ∈ ℕ,
       dirichletSeriesTerms(χ, s)((r + 1) * j + r) =
         ℂ[dirichletSeriesTerms(χ, s)(r) * dirichletSeriesTerms(χ, s)(j)])
-    intros r rMember prime j jMember
-    have rNat := nat.omega.backward with rMember
-    have jNat := nat.omega.backward with jMember
-    have position : (r + 1) * j + r ∈ ℕ by typecheck
-    have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
-    have positiveR : 1 ≤ r + 1 by arith
-    have positiveJ : 1 ≤ j + 1 by arith
-    have rInteger : integerOfNat(r + 1) ∈ ℤ by typecheck
-    have jInteger : integerOfNat(j + 1) ∈ ℤ by typecheck
-    have rValue := FunctionBetween.apply_closed with values, rInteger
-    have jValue := FunctionBetween.apply_closed with values, jInteger
-    have rPower := realCpow.member at realNat(r + 1), ℂ[-s] with negative
-    have jPower := realCpow.member at realNat(j + 1), ℂ[-s] with negative
-    rw [(dirichletSeriesTerms.value with values, hs, position),
-      (dirichletSeriesTerms.value with values, hs, rMember),
-      (dirichletSeriesTerms.value with values, hs, jMember), index,
-      (realCpow.nat_neg_mul with positiveR, positiveJ, hs), integerOfNat.mul,
-      (DirichletCharacter.mul with character, rInteger, jInteger)]
-    ring
+    intros r rMember prime
+    exact multiplicativeAll with r, rMember
   have notOne : ∀ r ∈ ℕ, Prime(r + 1) → dirichletSeriesTerms(χ, s)(r) ≠ ℂ[1]
     intros r rMember prime isOne
     have rNat := nat.omega.backward with rMember
@@ -1147,20 +1161,343 @@ theorem LFunction.nonzero_re_ge_one (N : Nat) (χ s : Set)
 proof
   sorry
 
--- Change of level: for ψ modulo a divisor d of N, inducing ψ to N
--- multiplies L(s, ψ) by ∏_{p ∣ N} (1 − ψ(p) p^(−s)), away from the pole
--- (Mathlib's DirichletCharacter.LFunction_changeLevel). With ψ primitive
--- this relates every L-function to a primitive one.
-theorem LFunction.changeLevel (N d : Nat) (ψ s : Set)
+-- Section: Change of level
+-- The divisors of N, the primes the change of level sifts out.
+def naturalDivisors (N : Nat) : Set := { p ∈ ℕ | p ∣ N }
+
+-- A divisor of N ≥ 1 is at least 1.
+theorem divides.one_le (d N : Nat)
+  requires positive : 1 ≤ N
+  requires divides : d ∣ N
+  shows 1 ≤ d
+proof
+  by_contra small
+  have zero : d = (0:N) by arith
+  rw zero at divides
+  have nZero := zero.divides_only_zero with *
+  arith
+
+-- k + 1 ≥ 1 has no prime factor dividing N exactly when it is coprime
+-- to N.
+theorem SieveRough.coprime (N m : Nat)
+  requires positive : 1 ≤ N
+  shows SieveRough(naturalDivisors(N), N + 1, m) ↔
+    IntegerCoprime(integerOfNat(m), integerOfNat(N))
+proof
+  have nonzeroN : N ≠ (0:N) by arith
+  have ofNat := integerGCD.ofNat at m, N
+  constructor
+  . intro rough
+    unfold IntegerCoprime
+    rw ofNat
+    have left := gcd.divides_left at m, N
+    have right := gcd.divides_right at m, N
+    by_contra notOne
+    have gNonzero : gcd(m, N) ≠ (0:N)
+      intro zero
+      rw zero at right
+      have nZero := zero.divides_only_zero with *
+      exact nonzeroN with nZero
+    have above : 1 < gcd(m, N) by arith
+    obtain ⟨p, prime, divides⟩ := natural.exists_prime_divisor at gcd(m, N)
+      with above
+    have pNat := Prime.natural with prime
+    have dividesM := divides.transitive with divides, left
+    have dividesN := divides.transitive with divides, right
+    have bound := divides.le with dividesN, nonzeroN
+    have below : p < N + 1 by arith
+    have pMember : p ∈ ℕ := nat.omega.forward at p with *
+    have inP : p ∈ naturalDivisors(N) :=
+      naturalDivisors.membership.backward with ⟨pMember, dividesN⟩
+    exact rough with p, prime, inP, below, dividesM
+  . intro coprime
+    unfold IntegerCoprime at coprime
+    rw ofNat at coprime
+    unfold SieveRough
+    intros p prime inP below dividesM
+    obtain ⟨pMember, dividesN⟩ := naturalDivisors.membership.forward with inP
+    have pNat := Prime.natural with prime
+    obtain ⟨_, _, greatest⟩ := gcd.correct at m, N
+    have dividesG := greatest with p, pNat, dividesM, dividesN
+    rw coprime at dividesG
+    have oneNonzero : (1:N) ≠ (0:N) by arith
+    have bound := divides.le with dividesG, oneNonzero
+    have above := Prime.greater_than_one with prime
+    arith
+
+theorem levelProduct.member (N : Nat) (ψ s : Set) (n : Nat)
+  requires values : FunctionBetween(ψ, ℤ, complexCarrier)
+  requires hs : s ∈ complexCarrier
+  shows levelProduct(N, ψ, s, n) ∈ complexCarrier
+proof
+  induction n
+  | zero =>
+    rw levelProduct
+    exact complexOne.member
+  | succ(k) using ih =>
+    obtain ⟨factor, _⟩ := levelFactor.selected at N, ψ, s, k with values, hs
+    rw levelProduct
+    typecheck
+
+defgraph levelProductMap (N : Nat, ψ : Set, n : Nat) (s ∈ complexCarrier) :
+    complexCarrier := levelProduct(N, ψ, s, n)
+requires values : FunctionBetween(ψ, ℤ, complexCarrier)
+proof
+  exact levelProduct.member with values, member
+
+-- Sifting the Dirichlet series of ψ by the primes below n dividing N
+-- multiplies its sum by the partial product of the level factors.
+theorem LFunction.level_stage (N d : Nat) (ψ s : Set) (n : Nat)
+  requires dPositive : 1 ≤ d
+  requires character : DirichletCharacter(d, ψ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexSumsTo(sieveTerms(dirichletSeriesTerms(ψ, s),
+    naturalDivisors(N), n), ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s, n)])
+proof
+  induction n
+  | zero =>
+    obtain ⟨sums, absolute⟩ := LFunction.series with dPositive, character,
+      hs, halfPlane
+    obtain ⟨sequence, _⟩ := absolute
+    have values := DirichletCharacter.function with character
+    have lMember := LFunction.closed at d, ψ, s with values, hs
+    rw [(sieveTerms.start with sequence), levelProduct]
+    have same : ℂ[LFunction(d, ψ, s) * complexOne] = LFunction(d, ψ, s)
+      by ring
+    rw same
+    exact sums
+  | succ(k) using ih =>
+    obtain ⟨_, absolute⟩ := LFunction.series with dPositive, character, hs,
+      halfPlane
+    have absoluteCopy := absolute
+    obtain ⟨sequence, _⟩ := absoluteCopy
+    have values := DirichletCharacter.function with character
+    have lMember := LFunction.closed at d, ψ, s with values, hs
+    have kMember : k ∈ ℕ := nat.omega.forward at k with *
+    have product := levelProduct.member at N, ψ, s, k with values, hs
+    obtain ⟨_, yes, no⟩ := levelFactor.selected at N, ψ, s, k with values, hs
+    have index : succ(k) = k + 1 by arith
+    rw levelProduct
+    rw index
+    by_cases both : Prime(k) ∧ k ∈ naturalDivisors(N)
+    . obtain ⟨prime, inP⟩ := both
+      obtain ⟨_, dividesN⟩ := naturalDivisors.membership.forward with inP
+      have factor := yes with ⟨prime, dividesN⟩
+      have above := Prime.greater_than_one with prime
+      have atLeast : 1 ≤ k by arith
+      obtain ⟨r, rNat, split⟩ := LessEqual.exists_add with atLeast
+      have shape : k = r + 1 by arith
+      rw shape at prime
+      rw shape at inP
+      rw shape at ih
+      rw shape at factor
+      rw shape
+      have rMember : r ∈ ℕ := nat.omega.forward at r with *
+      have multiplicative := dirichletSeriesTerms.multiplicative with
+        character, hs
+      have step := sieveTerms.step at dirichletSeriesTerms(ψ, s),
+        naturalDivisors(N), ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s,
+        r + 1)], r with absolute, prime, inP, (multiplicative with r,
+        rMember), ih
+      rw (dirichletSeriesTerms.value with values, hs, rMember) at step
+      rw factor
+      have rIndex : integerOfNat(r + 1) ∈ ℤ by typecheck
+      have value := FunctionBetween.apply_closed with values, rIndex
+      have negative : ℂ[-s] ∈ ℂ by typecheck
+      have power := realCpow.member at realNat(r + 1), ℂ[-s] with negative
+      have productR := levelProduct.member at N, ψ, s, r + 1 with values, hs
+      have same : ℂ[LFunction(d, ψ, s) * (levelProduct(N, ψ, s, r + 1) *
+          (1 - ψ(integerOfNat(r + 1)) * realCpow(realNat(r + 1), ℂ[-s])))] =
+        ℂ[(1 - ψ(integerOfNat(r + 1)) * realCpow(realNat(r + 1), ℂ[-s])) *
+          (LFunction(d, ψ, s) * levelProduct(N, ψ, s, r + 1))] by ring
+      rw same
+      exact step
+    . have notBoth : ¬(Prime(k) ∧ k ∣ N)
+        intro pair
+        obtain ⟨prime, dividesN⟩ := pair
+        apply both
+        exact ⟨prime, (naturalDivisors.membership.backward with
+          ⟨kMember, dividesN⟩)⟩
+      rw [(no with notBoth), (sieveTerms.skip with sequence, both)]
+      have same : ℂ[LFunction(d, ψ, s) * (levelProduct(N, ψ, s, k) * 1)] =
+        ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s, k)] by ring
+      rw same
+      exact ih
+
+-- The change of level for re s > 1, by the sieve.
+theorem LFunction.changeLevel_right (N d : Nat) (ψ s : Set)
   requires positive : 1 ≤ N
   requires divides : d ∣ N
   requires character : DirichletCharacter(d, ψ)
   requires hs : s ∈ ℂ
-  requires notPole : ψ ≠ principalCharacter(d) ∨ s ≠ ℂ[1]
+  requires halfPlane : realOne < complexRe(s)
   shows LFunction(N, changeLevel(N, ψ), s) =
     ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s, succ(N))]
 proof
-  sorry
+  have dPositive := divides.one_le with positive, divides
+  have values := DirichletCharacter.function with character
+  have induced := changeLevel.character with divides, character
+  have inducedValues := DirichletCharacter.function with induced
+  have stage := LFunction.level_stage at N, d, ψ, s, N + 1 with dPositive,
+    character, hs, halfPlane
+  obtain ⟨inducedSums, _⟩ := LFunction.series at N, changeLevel(N, ψ), s with
+    positive, induced, hs, halfPlane
+  have terms := dirichletSeriesTerms.function at ψ, s with values, hs
+  have sequence : ComplexSequence(dirichletSeriesTerms(ψ, s)) by exact terms
+  have sieved := sieveTerms.function at dirichletSeriesTerms(ψ, s),
+    naturalDivisors(N), N + 1 with sequence
+  have inducedTerms := dirichletSeriesTerms.function at changeLevel(N, ψ), s
+    with inducedValues, hs
+  have same : sieveTerms(dirichletSeriesTerms(ψ, s), naturalDivisors(N),
+      N + 1) = dirichletSeriesTerms(changeLevel(N, ψ), s)
+    apply FunctionBetween.ext with sieved, inducedTerms
+    intros k kMember
+    have kNat := nat.omega.backward with kMember
+    have index : integerOfNat(k + 1) ∈ ℤ by typecheck
+    have value := FunctionBetween.apply_closed with values, index
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(k + 1), ℂ[-s] with negative
+    have coprimeIff := SieveRough.coprime at N, k + 1 with positive
+    rw (dirichletSeriesTerms.value at changeLevel(N, ψ), s, k with
+      inducedValues, hs, kMember)
+    by_cases rough : SieveRough(naturalDivisors(N), N + 1, k + 1)
+    . have coprime := coprimeIff.forward with rough
+      rw [(sieveTerms.rough with sequence, rough),
+        (dirichletSeriesTerms.value at ψ, s, k with values, hs, kMember),
+        (changeLevel.coprime with index, coprime, value)]
+    . have notCoprime : ¬IntegerCoprime(integerOfNat(k + 1), integerOfNat(N))
+        intro coprime
+        exact rough with (coprimeIff.backward with coprime)
+      rw [(sieveTerms.sifted with sequence, rough),
+        (changeLevel.not_coprime with index, notCoprime)]
+      ring
+  rw same at stage
+  have next : succ(N) = N + 1 by arith
+  rw next
+  exact ComplexSumsTo.unique with inducedSums, stage
+
+-- s ↦ ∏_{p < n, p ∣ N} (1 − ψ(p) p^(−s)) is entire.
+theorem levelProductMap.holomorphic (N : Nat) (ψ : Set) (n : Nat)
+  requires values : FunctionBetween(ψ, ℤ, complexCarrier)
+  shows HolomorphicOn(levelProductMap(N, ψ, n), complexCarrier)
+proof
+  induction n
+  | zero =>
+    have whole := ComplexOpen.whole
+    have one := complexOne.member
+    apply HolomorphicOn.const_formula with whole, one
+    intros z hz
+    rw [(levelProductMap.value at N, ψ, 0, z with values, hz), levelProduct]
+  | succ(k) using ih =>
+    have whole := ComplexOpen.whole
+    have inside := ComplexOpen.subset with whole
+    have one := complexOne.member
+    have factorMap : ∃ g, HolomorphicOn(g, complexCarrier) ∧
+        (∀ z ∈ complexCarrier, g(z) = levelFactor(N, ψ, z, k))
+      by_cases both : Prime(k) ∧ k ∣ N
+      . have index : integerOfNat(k) ∈ ℤ by typecheck
+        have value := FunctionBetween.apply_closed with values, index
+        have scale : ℂ[-ψ(integerOfNat(k))] ∈ ℂ by typecheck
+        have zero : ℂ[0] ∈ ℂ by typecheck
+        have minusOne : ℂ[-1] ∈ ℂ by typecheck
+        have power := affinePower.holomorphic at realNat(k), ℂ[0], ℂ[-1],
+          complexCarrier with zero, minusOne, whole, inside
+        have scaleMap := HolomorphicOn.const with whole, scale
+        have scaled := HolomorphicOn.mul with scaleMap, power
+        have unit := HolomorphicOn.const with whole, one
+        have sum := HolomorphicOn.add with unit, scaled
+        have powerCopy := power
+        have scaleCopy := scaleMap
+        have scaledCopy := scaled
+        have unitCopy := unit
+        obtain ⟨_, valuesPower, _⟩ := powerCopy
+        obtain ⟨_, valuesScale, _⟩ := scaleCopy
+        obtain ⟨_, valuesScaled, _⟩ := scaledCopy
+        obtain ⟨_, valuesUnit, _⟩ := unitCopy
+        refine ⟨complexFunctionAdd(complexFunctionConst(ℂ[1], complexCarrier),
+          complexFunctionMul(complexFunctionConst(ℂ[-ψ(integerOfNat(k))],
+          complexCarrier), affinePower(realNat(k), ℂ[0], ℂ[-1]),
+          complexCarrier), complexCarrier), sum, ?_⟩
+        intros z hz
+        obtain ⟨_, yes, _⟩ := levelFactor.selected at N, ψ, z, k with values,
+          hz
+        have exponent : ℂ[0 + -1 * z] = ℂ[-z] by ring
+        have negative : ℂ[-z] ∈ ℂ by typecheck
+        have powerValue := realCpow.member at realNat(k), ℂ[-z] with negative
+        rw [(yes with both), (complexFunctionAdd.value with valuesUnit,
+          valuesScaled, hz), (complexFunctionConst.value with one, hz),
+          (complexFunctionMul.value with valuesScale, valuesPower, hz),
+          (complexFunctionConst.value with scale, hz),
+          (affinePower.value with zero, minusOne, hz), exponent]
+        ring
+      . have unit := HolomorphicOn.const with whole, one
+        refine ⟨complexFunctionConst(ℂ[1], complexCarrier), unit, ?_⟩
+        intros z hz
+        obtain ⟨_, _, no⟩ := levelFactor.selected at N, ψ, z, k with values, hz
+        rw [(no with both), (complexFunctionConst.value with one, hz)]
+    obtain ⟨g, holomorphicG, valueG⟩ := factorMap
+    apply HolomorphicOn.mul_formula with ih, holomorphicG
+    intros z hz
+    rw [(levelProductMap.value at N, ψ, succ(k), z with values, hz),
+      (levelProductMap.value at N, ψ, k, z with values, hz), levelProduct,
+      (valueG with z, hz)]
+
+-- The change of level on a connected open set containing re s > 1 where
+-- both L-functions are holomorphic, by the identity theorem.
+theorem LFunction.changeLevel_on (N d : Nat) (ψ U s : Set)
+  requires positive : 1 ≤ N
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  requires holomorphicN : HolomorphicOn(LFunctionMap(N, changeLevel(N, ψ)), U)
+  requires holomorphicD : HolomorphicOn(LFunctionMap(d, ψ), U)
+  requires connected : ComplexConnected(U)
+  requires halfPlane : rightHalfPlane(R[1]) ⊆ U
+  requires hs : s ∈ U
+  shows LFunction(N, changeLevel(N, ψ), s) =
+    ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s, succ(N))]
+proof
+  have values := DirichletCharacter.function with character
+  have induced := changeLevel.character with divides, character
+  have inducedValues := DirichletCharacter.function with induced
+  have holomorphicCopy := holomorphicD
+  obtain ⟨isOpen, valuesD, _⟩ := holomorphicCopy
+  have inside := ComplexOpen.subset with isOpen
+  have product := levelProductMap.holomorphic at N, ψ, succ(N) with values
+  have productU := HolomorphicOn.mono with product, isOpen, inside
+  have productCopy := productU
+  obtain ⟨_, valuesProduct, _⟩ := productCopy
+  have right := HolomorphicOn.mul with holomorphicD, productU
+  have halfOpen := rightHalfPlane.open at R[1]
+  have twoPoint : complexOfReal(R[2]) ∈ rightHalfPlane(R[1])
+    apply rightHalfPlane.membership.backward
+    refine ⟨(complexOfReal.mem at R[2]), ?_⟩
+    rw complexOfReal.re
+    linarith
+  have nonempty : ∃ v, v ∈ rightHalfPlane(R[1]) :=
+    ⟨complexOfReal(R[2]), twoPoint⟩
+  have agree : ∀ z ∈ rightHalfPlane(R[1]),
+      LFunctionMap(N, changeLevel(N, ψ))(z) = complexFunctionMul(
+        LFunctionMap(d, ψ), levelProductMap(N, ψ, succ(N)), U)(z)
+    intros z hz
+    obtain ⟨zMember, zHalfPlane⟩ := rightHalfPlane.membership.forward with hz
+    have zRight : realOne < complexRe(z) by exact zHalfPlane
+    have zU := halfPlane with z, hz
+    rw [(LFunctionMap.apply with inducedValues, zMember),
+      (complexFunctionMul.value with valuesD, valuesProduct, zU),
+      (LFunctionMap.apply with values, zMember),
+      (levelProductMap.value with values, zMember)]
+    exact LFunction.changeLevel_right with positive, divides, character,
+      zMember, zRight
+  have identity := holomorphic.identity with holomorphicN, right, connected,
+    halfOpen, nonempty, halfPlane, agree
+  have atS := identity with s, hs
+  have sMember := inside with s, hs
+  rw [(LFunctionMap.apply with inducedValues, sMember),
+    (complexFunctionMul.value with valuesD, valuesProduct, hs),
+    (LFunctionMap.apply with values, sMember),
+    (levelProductMap.value with values, sMember)] at atS
+  exact atS
 
 -- The induced character is principal exactly when ψ is.
 theorem changeLevel.principal_iff (N d : Nat) (ψ : Set)
@@ -1197,5 +1534,58 @@ proof
       dInteger, levelDivides, coprime
     rw [(changeLevel.coprime with aInteger, coprime, aValue), principal,
       (principalCharacter.coprime with aInteger, coprimeD)]
+
+-- Change of level: for ψ modulo a divisor d of N, inducing ψ to N
+-- multiplies L(s, ψ) by ∏_{p ∣ N} (1 − ψ(p) p^(−s)), away from the pole
+-- (Mathlib's DirichletCharacter.LFunction_changeLevel). With ψ primitive
+-- this relates every L-function to a primitive one.
+theorem LFunction.changeLevel (N d : Nat) (ψ s : Set)
+  requires positive : 1 ≤ N
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  requires hs : s ∈ ℂ
+  requires notPole : ψ ≠ principalCharacter(d) ∨ s ≠ ℂ[1]
+  shows LFunction(N, changeLevel(N, ψ), s) =
+    ℂ[LFunction(d, ψ, s) * levelProduct(N, ψ, s, succ(N))]
+proof
+  have dPositive := divides.one_le with positive, divides
+  have induced := changeLevel.character with divides, character
+  cases notPole with nonPrincipal | notOne
+  . have inducedNonPrincipal : changeLevel(N, ψ) ≠ principalCharacter(N)
+      intro principal
+      apply nonPrincipal
+      exact (changeLevel.principal_iff with positive, divides,
+        character).forward with principal
+    have holomorphicN := LFunction.holomorphic with positive, induced,
+      inducedNonPrincipal
+    have holomorphicD := LFunction.holomorphic with dPositive, character,
+      nonPrincipal
+    have connected := ComplexConnected.whole
+    have halfPlane : rightHalfPlane(R[1]) ⊆ complexCarrier
+      intros z hz
+      obtain ⟨zMember, _⟩ := rightHalfPlane.membership.forward with hz
+      exact zMember
+    exact LFunction.changeLevel_on with positive, divides, character,
+      holomorphicN, holomorphicD, connected, halfPlane, hs
+  . have one := complexOne.member
+    have holomorphicN := LFunction.holomorphic_off_one with positive, induced
+    have holomorphicD := LFunction.holomorphic_off_one with dPositive,
+      character
+    have connected := complexPunctured.connected with one
+    have halfPlane : rightHalfPlane(R[1]) ⊆ complexCarrier ∖ {ℂ[1]}
+      intros z hz
+      obtain ⟨zMember, zRight⟩ := rightHalfPlane.membership.forward with hz
+      refine ⟨zMember, ?_⟩
+      intro single
+      have same := (singleton.membership at z, ℂ[1]).forward with single
+      rw [same, ← complexOfReal.one, complexOfReal.re] at zRight
+      linarith
+    have sU : s ∈ complexCarrier ∖ {ℂ[1]}
+      refine ⟨hs, ?_⟩
+      intro single
+      apply notOne
+      exact (singleton.membership at s, ℂ[1]).forward with single
+    exact LFunction.changeLevel_on with positive, divides, character,
+      holomorphicN, holomorphicD, connected, halfPlane, sU
 
 end LFunctions
