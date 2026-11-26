@@ -228,8 +228,8 @@ graph TD
 | GRH.Bernoulli | 142 | 133 | 9 |
 | GRH.DirichletCharacter | 113 | 110 | 3 |
 | GRH.Exp | 223 | 223 | 0 |
-| GRH.Trig | 81 | 16 | 65 |
-| GRH.Log | 91 | 16 | 75 |
+| GRH.Trig | 132 | 132 | 0 |
+| GRH.Log | 108 | 108 | 0 |
 | GRH.Holomorphic | 125 | 51 | 74 |
 | GRH.Integral | 57 | 39 | 18 |
 | GRH.EulerMaclaurin | 28 | 18 | 10 |
@@ -237,5 +237,5 @@ graph TD
 | GRH.Zeta | 27 | 13 | 14 |
 | GRH.LFunction | 36 | 15 | 21 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **993** | **674** | **319** |
+| **total** | **1061** | **882** | **179** |
 <!-- /blueprint-status -->
