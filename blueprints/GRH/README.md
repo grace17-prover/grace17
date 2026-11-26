@@ -180,6 +180,8 @@ the principal L(·, χ) at s = 1, a pole, plays no part in the theorems.
 | `GRH.Zeta` | ζ(s) = ζ(s, 1); `zeta.series`, `zeta.holomorphic`; the trivial zeros | NumberTheory/Zeta/Riemann |
 | `GRH.DirichletCharacter` | characters of (ℤ/Nℤ)ˣ extended by 0, the principal character, the conductor and primitivity, and orthogonality | NumberTheory/DirichletCharacter |
 | `GRH.LFunction` | L(s, χ) through Hurwitz; `LFunction.series`, `LFunction.holomorphic`; the value at 1 | NumberTheory/Zeta/Dirichlet |
+| `GRH.Gamma` | Γ on ℂ ∖ {0, −1, −2, …} through the entire 1/Γ of Gauss's limit; Γ(s + 1) = sΓ(s), Γ(n + 1) = n!, Γ(1/2) = √π; holomorphy, no zeros; reflection, duplication, Euler's integral | Complex/Gamma |
+| `GRH.FunctionalEquation` | ξ(s) = ξ(1 − s) and the asymmetric form for ζ; Hurwitz's formula; Gauss sums, \|τ(χ)\|² = N; Λ(s, χ) = ε(χ) Λ(1 − s, χ̄) for χ primitive; the trivial zeros; zeros in the strip reflect to 1 − s | NumberTheory/Zeta/FunctionalEquation |
 | `GRH.Statements` | the five theorems, admitted until layer 5 proves them | NumberTheory/GRH |
 
 ```mermaid
@@ -194,6 +196,10 @@ graph TD
   Hurwitz --> Zeta
   Hurwitz --> LFunction
   DirichletCharacter --> LFunction
+  Hurwitz --> Gamma
+  Gamma --> FunctionalEquation
+  LFunction --> FunctionalEquation
+  FunctionalEquation --> Statements
   Zeta --> Statements
   LFunction --> Statements
 ```
@@ -234,8 +240,10 @@ graph TD
 | GRH.Integral | 154 | 154 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
+| GRH.Gamma | 43 | 26 | 17 |
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
-| GRH.Statements | 7 | 4 | 3 |
-| **total** | **2073** | **2070** | **3** |
+| GRH.FunctionalEquation | 31 | 17 | 14 |
+| GRH.Statements | 7 | 6 | 1 |
+| **total** | **2147** | **2115** | **32** |
 <!-- /blueprint-status -->
