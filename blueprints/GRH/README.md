@@ -225,5 +225,7 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| **total** | **0** | **0** | **0** |
+| GRH.Bernoulli | 84 | 40 | 44 |
+| GRH.DirichletCharacter | 53 | 20 | 33 |
+| **total** | **137** | **60** | **77** |
 <!-- /blueprint-status -->

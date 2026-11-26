@@ -1,0 +1,523 @@
+-- Dirichlet characters modulo N as N-periodic, completely multiplicative
+-- functions ℤ → ℂ with χ(1) = 1 that vanish on the integers not coprime to
+-- N; the principal character, change of level, the conductor and
+-- primitivity, the values on units as roots of unity, finiteness, and the
+-- orthogonality relations.
+-- Part of the GRH blueprint.
+-- Planned home: NumberTheory/DirichletCharacter.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.DirichletCharacter
+import Grace.Cumulus.Complex.Norm
+import Grace.Cumulus.NumberTheory.IntegerRemainder
+import Grace.Cumulus.NumberTheory.ResidueLists
+import Grace.Cumulus.Algebra.Ring.FiniteSetSum
+
+-- A Dirichlet character modulo N is a function on all of ℤ. An N-periodic
+-- function on ℤ is a function on ℤ/Nℤ, and the conditions below say
+-- exactly that it is a multiplicative character of the monoid ℤ/Nℤ,
+-- vanishing off the units: the residues a with gcd(a, N) = 1. For N = 1
+-- every residue is a unit and the only character is the constant 1; for
+-- N = 0 the conditions describe the characters of ℤ itself. Values on
+-- every integer, negative ones included, are part of the data, so the
+-- function determines χ(n) for every n the L-series and the Hurwitz
+-- decomposition evaluate.
+predicate DirichletCharacter (N : Nat, χ : Set) :=
+  FunctionBetween(χ, ℤ, complexCarrier) ∧
+  (∀ a ∈ ℤ, χ(integerAddValue(a, integerOfNat(N))) = χ(a)) ∧
+  χ(integerOne) = complexOne ∧
+  (∀ a ∈ ℤ, ∀ b ∈ ℤ,
+    χ(integerMulValue(a, b)) = complexMul(χ(a), χ(b))) ∧
+  (∀ a ∈ ℤ, ¬IntegerCoprime(a, integerOfNat(N)) → χ(a) = complexZero)
+
+-- The set of Dirichlet characters modulo N.
+def dirichletCharacters (N : Nat) : Set :=
+  { χ ∈ functionSpace(ℤ, complexCarrier) | DirichletCharacter(N, χ) }
+
+-- The principal character modulo N: 1 on the integers coprime to N, 0 on
+-- the others.
+def principalCharacter (N : Nat) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ a ∈ ℤ,
+    (IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexOne)) ∨
+    (¬IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexZero)) }
+
+-- The character modulo N induced by a function ψ on ℤ (a character modulo
+-- a divisor d of N): ψ on the integers coprime to N, 0 on the others.
+-- Mathlib's DirichletCharacter.changeLevel.
+def changeLevel (N ψ : Set) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ a ∈ ℤ,
+    (IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, ψ(a))) ∨
+    (¬IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexZero)) }
+
+-- χ modulo N factors through level d: d divides N and χ agrees, on the
+-- integers coprime to N, with a character modulo d; equivalently χ is
+-- changeLevel(N, ψ) for a character ψ modulo d.
+predicate FactorsThrough (N : Nat, χ : Set, d : Nat) :=
+  d ∣ N ∧ ∃ ψ, DirichletCharacter(d, ψ) ∧
+    (∀ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) → χ(a) = ψ(a))
+
+-- The levels through which χ factors.
+def factorLevels (N χ : Set) : Set := { d ∈ ℕ | FactorsThrough(N, χ, d) }
+
+-- The conductor: the least level through which χ factors. The level N
+-- itself qualifies (`FactorsThrough.self`), so the least exists; it divides
+-- N, and it is positive when N is.
+def conductor (N χ : Set) : Set := leastNatural(factorLevels(N, χ))
+
+-- χ is primitive when its conductor is its modulus.
+predicate PrimitiveCharacter (N : Nat, χ : Set) := conductor(N, χ) = N
+
+-- The character sum over the residues 0, 1, …, n − 1:
+-- χ(0) + χ(1) + ⋯ + χ(n − 1).
+def characterSum (χ : Set, n : Nat) → Set
+  | χ, zero => complexZero
+  | χ, succ(k) => complexAdd((characterSum(χ, k), χ(integerOfNat(k))))
+
+-- Basic facts about a character.
+
+theorem DirichletCharacter.function (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ : ℤ → complexCarrier
+proof
+  exact character.left
+
+theorem DirichletCharacter.value (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) ∈ complexCarrier
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact FunctionBetween.apply_closed at χ, ℤ, complexCarrier, a with *
+
+theorem DirichletCharacter.periodic (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(integerAddValue(a, integerOfNat(N))) = χ(a)
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact periodic with a, integer
+
+theorem DirichletCharacter.one (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ(integerOne) = complexOne
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact one
+
+theorem DirichletCharacter.mul (N : Nat) (χ a b : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  shows χ(integerMulValue(a, b)) = complexMul(χ(a), χ(b))
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact multiplicative with a, aInteger, b, bInteger
+
+theorem DirichletCharacter.not_coprime (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows χ(a) = complexZero
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact vanishing with a, integer, notCoprime
+
+-- Two integers congruent modulo N have the same value.
+theorem DirichletCharacter.congruent (N : Nat) (χ a b : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), a, b)
+  shows χ(a) = χ(b)
+proof
+  sorry
+
+-- Each value is the value at the least nonnegative residue.
+theorem DirichletCharacter.residue (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  requires positive : 0 < N
+  shows χ(a) = χ(integerOfNat(integerMod(a, N)))
+proof
+  sorry
+
+-- The character vanishes exactly off the integers coprime to N.
+theorem DirichletCharacter.nonzero_iff (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) ≠ complexZero ↔ IntegerCoprime(a, integerOfNat(N))
+proof
+  sorry
+
+-- A character is determined by its values on 0, 1, …, N − 1.
+theorem DirichletCharacter.ext (N : Nat) (χ ψ : Set)
+  requires first : DirichletCharacter(N, χ)
+  requires second : DirichletCharacter(N, ψ)
+  requires positive : 0 < N
+  requires agree : ∀ j ∈ N, χ(integerOfNat(j)) = ψ(integerOfNat(j))
+  shows χ = ψ
+proof
+  sorry
+
+-- A character modulo 1 is the constant 1.
+theorem DirichletCharacter.modulus_one (χ a : Set)
+  requires character : DirichletCharacter(1, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) = complexOne
+proof
+  sorry
+
+theorem dirichletCharacters.membership (N : Nat) (χ : Set)
+  shows χ ∈ dirichletCharacters(N) ↔ DirichletCharacter(N, χ)
+proof
+  constructor
+  . intro member
+    unfold dirichletCharacters at member
+    exact member.right
+  . intro character
+    have function := DirichletCharacter.function with character
+    unfold dirichletCharacters
+    refine ⟨?_, character⟩
+    exact functionSpace.mem_iff.backward with function
+
+section Values
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- On the integers coprime to N the values are φ(N)-th roots of unity.
+theorem DirichletCharacter.pow_totient (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows ℂ[χ(a) ^ totient(N)] = complexOne
+proof
+  sorry
+
+-- The value at a natural power is the power of the value.
+theorem DirichletCharacter.pow (N : Nat) (χ a : Set, k : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(integerPow(a, k)) = ℂ[χ(a) ^ k]
+proof
+  sorry
+
+-- χ(−1) = ±1.
+theorem DirichletCharacter.neg_one (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ(integerNegValue(integerOne)) = complexOne ∨
+    χ(integerNegValue(integerOne)) = ℂ[-1]
+proof
+  sorry
+
+end Values
+
+-- On the integers coprime to N the values have absolute value 1.
+theorem DirichletCharacter.norm_coprime (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows complexNormSquared(χ(a)) = realOne
+proof
+  sorry
+
+-- Every value has absolute value at most 1.
+theorem DirichletCharacter.norm_le_one (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  shows complexNormSquared(χ(a)) ≤ realOne
+proof
+  sorry
+
+-- The principal character.
+
+theorem principalCharacter.coprime (N : Nat) (a : Set)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows principalCharacter(N)(a) = complexOne
+proof
+  sorry
+
+theorem principalCharacter.not_coprime (N : Nat) (a : Set)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows principalCharacter(N)(a) = complexZero
+proof
+  sorry
+
+theorem principalCharacter.character (N : Nat)
+  shows DirichletCharacter(N, principalCharacter(N))
+proof
+  sorry
+
+-- A character is principal exactly when it is 1 on every integer coprime
+-- to N.
+theorem principalCharacter.eq_iff (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ = principalCharacter(N) ↔
+    (∀ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) → χ(a) = complexOne)
+proof
+  sorry
+
+-- The principal character modulo 1 is the constant 1, the character of ζ.
+theorem principalCharacter.modulus_one (a : Set)
+  requires integer : a ∈ ℤ
+  shows principalCharacter(1)(a) = complexOne
+proof
+  sorry
+
+-- Change of level.
+
+theorem changeLevel.coprime (N : Nat) (ψ a : Set)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows changeLevel(N, ψ)(a) = ψ(a)
+proof
+  sorry
+
+theorem changeLevel.not_coprime (N : Nat) (ψ a : Set)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows changeLevel(N, ψ)(a) = complexZero
+proof
+  sorry
+
+-- A character modulo a divisor d of N induces a character modulo N.
+theorem changeLevel.character (N d : Nat) (ψ : Set)
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  shows DirichletCharacter(N, changeLevel(N, ψ))
+proof
+  sorry
+
+-- Factoring through d is being induced from a character modulo d.
+theorem FactorsThrough.iff_changeLevel (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, d) ↔
+    d ∣ N ∧ (∃ ψ, DirichletCharacter(d, ψ) ∧ χ = changeLevel(N, ψ))
+proof
+  sorry
+
+theorem FactorsThrough.self (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, N)
+proof
+  have divides := divides.reflexive at N
+  refine ⟨divides, χ, character, ?_⟩
+  intros a member coprime
+  rfl
+
+theorem factorLevels.naturals (N χ : Set)
+  shows factorLevels(N, χ) ⊆ ℕ
+proof
+  intros d member
+  unfold factorLevels at member
+  exact member.left
+
+theorem factorLevels.inhabited (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows Nonempty(factorLevels(N, χ))
+proof
+  have factors := FactorsThrough.self with character
+  have natural : N ∈ ℕ by simp [Nat]
+  have level : N ∈ factorLevels(N, χ)
+    unfold factorLevels
+    exact ⟨natural, factors⟩
+  exact ⟨N, level⟩
+
+-- The conductor.
+
+theorem conductor.factors (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, conductor(N, χ))
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have member := leastNatural.member with inhabited, naturals
+  unfold conductor
+  unfold factorLevels at member
+  exact member.right
+
+theorem conductor.least (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires factors : FactorsThrough(N, χ, d)
+  shows conductor(N, χ) ≤ d
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have natural : d ∈ ℕ by simp [Nat]
+  have level : d ∈ factorLevels(N, χ)
+    unfold factorLevels
+    exact ⟨natural, factors⟩
+  unfold conductor
+  exact leastNatural.least with inhabited, naturals, level
+
+theorem conductor.natural (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows Nat(conductor(N, χ))
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have member := leastNatural.member with inhabited, naturals
+  have natural := naturals with member
+  unfold conductor
+  exact nat.omega.backward with natural
+
+theorem conductor.dvd (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows conductor(N, χ) ∣ N
+proof
+  have factors := conductor.factors with character
+  exact factors.left
+
+theorem conductor.positive (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows 0 < conductor(N, χ)
+proof
+  sorry
+
+-- The levels through which χ factors are exactly the multiples of the
+-- conductor that divide N.
+theorem FactorsThrough.iff_conductor_dvd (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows FactorsThrough(N, χ, d) ↔ conductor(N, χ) ∣ d ∧ d ∣ N
+proof
+  sorry
+
+-- Conductor 1 means principal.
+theorem conductor.eq_one_iff (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows conductor(N, χ) = 1 ↔ χ = principalCharacter(N)
+proof
+  sorry
+
+-- Every character modulo N ≥ 1 is induced by a primitive character modulo
+-- its conductor, and that primitive character is unique.
+theorem DirichletCharacter.primitive_induced (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows ∃ ψ, DirichletCharacter(conductor(N, χ), ψ) ∧
+    PrimitiveCharacter(conductor(N, χ), ψ) ∧ χ = changeLevel(N, ψ)
+proof
+  sorry
+
+theorem DirichletCharacter.primitive_induced_unique (N : Nat) (χ ψ ρ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires first : DirichletCharacter(conductor(N, χ), ψ)
+  requires firstInduces : χ = changeLevel(N, ψ)
+  requires second : DirichletCharacter(conductor(N, χ), ρ)
+  requires secondInduces : χ = changeLevel(N, ρ)
+  shows ψ = ρ
+proof
+  sorry
+
+-- The only primitive character modulo 1 is the principal one; no principal
+-- character modulo N > 1 is primitive.
+theorem PrimitiveCharacter.principal_iff (N : Nat)
+  requires positive : 0 < N
+  shows PrimitiveCharacter(N, principalCharacter(N)) ↔ N = 1
+proof
+  sorry
+
+-- Finiteness: there are φ(N) characters modulo N ≥ 1.
+
+theorem dirichletCharacters.finite (N : Nat)
+  requires positive : 0 < N
+  shows Finite(dirichletCharacters(N))
+proof
+  sorry
+
+theorem dirichletCharacters.cardinality (N : Nat)
+  requires positive : 0 < N
+  shows HasCardinality(dirichletCharacters(N), totient(N))
+proof
+  sorry
+
+-- Character sums.
+
+theorem characterSum.zero (χ : Set)
+  shows characterSum(χ, 0) = complexZero
+proof
+  rw characterSum
+
+theorem characterSum.succ (χ : Set, n : Nat)
+  shows characterSum(χ, succ(n)) =
+    complexAdd((characterSum(χ, n), χ(integerOfNat(n))))
+proof
+  rw characterSum
+
+-- Orthogonality over the residues: the sum of χ over a full period is 0
+-- unless χ is principal, when it is φ(N).
+theorem characterSum.non_principal (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows characterSum(χ, N) = complexZero
+proof
+  sorry
+
+theorem characterSum.principal (N : Nat)
+  requires positive : 0 < N
+  shows characterSum(principalCharacter(N), N) = ringNat(complexAdd, complexZero, complexOne,
+    totient(N))
+proof
+  sorry
+
+-- The sum over any N consecutive residues starting at 0 repeats: the sum up
+-- to qN is q times the sum up to N, so a non-principal character has
+-- bounded partial sums.
+theorem characterSum.non_principal_multiple (N q : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows characterSum(χ, mul(q, N)) = complexZero
+proof
+  sorry
+
+theorem characterSum.non_principal_bounded (N n : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows complexNormSquared(characterSum(χ, n)) ≤ realNat(mul(N, N))
+proof
+  sorry
+
+-- The evaluation of the characters at a: a ↦ χ(a) on the set of
+-- characters, the weight of the second orthogonality relation.
+defgraph characterEvaluation (N : Nat, a : Set)
+    (χ ∈ dirichletCharacters(N)) : complexCarrier := χ(a)
+requires integer : a ∈ ℤ
+proof
+  have character := dirichletCharacters.membership.forward with member
+  exact DirichletCharacter.value with character, integer
+
+-- Orthogonality over the characters: Σ_χ χ(a) is φ(N) when a ≡ 1 modulo N
+-- and 0 otherwise.
+theorem dirichletCharacters.sum_one (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, a)) = ringNat(complexAdd, complexZero, complexOne,
+    totient(N))
+proof
+  sorry
+
+theorem dirichletCharacters.sum_other (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires incongruent : ¬IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, a)) = complexZero
+proof
+  sorry
