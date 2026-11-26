@@ -225,17 +225,17 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| GRH.Bernoulli | 84 | 40 | 44 |
-| GRH.DirichletCharacter | 53 | 20 | 33 |
+| GRH.Bernoulli | 142 | 133 | 9 |
+| GRH.DirichletCharacter | 113 | 109 | 4 |
 | GRH.Exp | 129 | 38 | 91 |
 | GRH.Trig | 81 | 16 | 65 |
 | GRH.Log | 91 | 16 | 75 |
 | GRH.Holomorphic | 125 | 51 | 74 |
 | GRH.Integral | 57 | 39 | 18 |
 | GRH.EulerMaclaurin | 28 | 18 | 10 |
-| GRH.Hurwitz | 57 | 27 | 30 |
+| GRH.Hurwitz | 63 | 36 | 27 |
 | GRH.Zeta | 27 | 13 | 14 |
 | GRH.LFunction | 36 | 15 | 21 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **775** | **297** | **478** |
+| **total** | **899** | **488** | **411** |
 <!-- /blueprint-status -->
