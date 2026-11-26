@@ -112,7 +112,8 @@ export interface WorkbenchTheorem {
   readonly steps: readonly WorkbenchStep[];
   /**
    * The large cardinal hypotheses (`register largecardinal`) the statement
-   * assumes; absent when it assumes none.
+   * relies on; absent when it relies on none. The axiom audit follows the
+   * proof as well.
    */
   readonly largeCardinals?: readonly { readonly predicate: string; readonly label: string }[];
   readonly kernel: readonly {
@@ -1178,7 +1179,7 @@ function renderTheorem(
     ? { axioms: [], theorems: [], definitions: [] } as const
     : theoremDependencies(kernel, name);
   const theoremSorries = sorries.filter(sorry => dependencies.axioms.includes(sorry.axiom));
-  const assumed = largeCardinalOccurrences(kernel, statement).assumes;
+  const assumed = largeCardinalOccurrences(kernel, statement).reliesOn;
   const largeCardinals = assumed.length ? { largeCardinals: assumed.map(item => ({ predicate: item.predicate, label: item.label })) } : {};
   const uses = options.includeDirectDependencies ? { uses: directTheoremUses(kernel, name) } : {};
   const steps: WorkbenchStep[] = tactics?.steps.map(step => ({

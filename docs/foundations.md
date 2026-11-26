@@ -23,11 +23,12 @@ No profile has a large cardinal axiom. `Grace.Cumulus.LargeCardinal`
 defines Grothendieck universes, inaccessible cardinals as the heights of
 universes (every universe is a stage `V(κ)`, checked under ZF), and the
 sentences `TarskiGrothendieck()` (every set lies in a universe) and
-`ExistsInaccessible()`. A theorem that needs one takes it as a premise,
+`ExistsInaccessible()`, all four registered as large cardinal hypotheses. A theorem that needs one takes it as a premise,
 usually a section hypothesis `hypothesis TG : TarskiGrothendieck()`, so its
 certificate is a certificate of the implication in the chosen profile. The
 [axiom audit](axiom-audit.md#large-cardinal-hypotheses) and the Workbench
-report the hypotheses a theorem assumes.
+report every hypothesis a result relies on, through its statement or its
+proof.
 
 ## Schemas and definitions
 

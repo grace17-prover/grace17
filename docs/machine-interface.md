@@ -242,8 +242,9 @@ The shape:
   `suggest`). `dependencies` lists the axioms, theorems, and definitions
   the proof uses; `sorries` the admissions it contains; `proofMap` the
   authored headings; `audit` the axiom audit when requested;
-  `largeCardinals`, present when the statement assumes a registered large
-  cardinal hypothesis, each one's `predicate` and `label` (see
+  `largeCardinals`, present when the statement relies on a registered
+  large cardinal hypothesis, each one's `predicate` and `label`; the axiom
+  audit follows the proof as well (see
   [axiom audits](axiom-audit.md#large-cardinal-hypotheses)). `scope` lists
   the names the proof can use without naming a declaration, each with its
   `kind` (`section variable`, `section hypothesis`, `binder`, or

@@ -176,9 +176,9 @@ export interface SurfaceNotationRecord {
  * `[I]` for the bracket form `R[I]`.
  *
  * `register largecardinal TarskiGrothendieck "every set lies in a Grothendieck universe"`:
- * the predicate states a large cardinal hypothesis. A theorem that assumes
- * it is labelled so in audits and in the Workbench; the registration
- * changes no statement and no proof.
+ * the predicate states a large cardinal hypothesis. A result that relies on
+ * it is labelled so in audits and in the Workbench (src/large-cardinals.ts);
+ * the registration changes no statement and no proof.
  */
 export interface SurfaceRegistrationRecord {
   readonly form: "kinds" | "application" | "facts" | "simp" | "ring" | "largecardinal";
@@ -3586,8 +3586,7 @@ function elaborateRegistration(
 /**
  * `register largecardinal Inaccessible "an inaccessible cardinal"`: the
  * predicate states a large cardinal hypothesis, described by the quoted
- * words. ZF(C) proves no instance of it, so a theorem has it only as a
- * premise, and audits and the Workbench report the theorems that do.
+ * words. Audits and the Workbench report the results that rely on it.
  */
 function elaborateLargeCardinalRegistration(
   kernel: Kernel, line: SourceLine, scope: SurfaceScope, environment: SurfaceEnvironment, rawPredicate: string, label: string,

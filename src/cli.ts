@@ -168,10 +168,12 @@ export function runCli(args: readonly string[]): void {
           for (const axiom of audit.axioms) console.log(`  ${axiom.name}: ${axiom.path.join(" → ")}`);
           console.log(`Definition/schema mechanisms: ${[...new Set(audit.mechanisms.map(m => m.kind))].join(", ") || "none"}`);
           console.log(`Classical double-negation elimination: ${audit.classicalLogic ? "used" : "not used"}`);
-          if (audit.largeCardinals.assumes.length === 0) console.log("Large cardinal hypotheses: none");
-          for (const item of audit.largeCardinals.assumes) {
-            console.log(`Large cardinal hypothesis: ${item.predicate} (${item.label})${item.path.length > 1 ? `, assumed by ${item.path.join(" → ")}` : ""}`);
+          if (audit.largeCardinals.reliesOn.length === 0) console.log("Relies on a large cardinal hypothesis: no");
+          for (const item of audit.largeCardinals.reliesOn) {
+            const where = item.via === "supplied" ? `${item.path.join(" → ")} supplies the premise of ${item.lemma}` : item.path.join(" → ");
+            console.log(`Relies on a large cardinal hypothesis: ${item.label} (${item.predicate}), through ${where}`);
           }
+          for (const item of audit.largeCardinals.about) console.log(`About, without relying on it: ${item.label} (${item.predicate})`);
           for (const item of audit.unavailable) console.log(`  Unavailable proof: ${item.path.join(" → ")}`);
           console.log("Proof dependency audit; not a claim that these axioms are logically necessary.");
         }
