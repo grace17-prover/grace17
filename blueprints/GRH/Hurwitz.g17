@@ -376,6 +376,14 @@ defgraph eulerMaclaurinMap (m : Nat, a : Real) (s ∈ complexCarrier) :
 proof
   exact hurwitzEulerMaclaurin.closed with member
 
+-- The power series (e^(κ u) − 1)/u = Σ κ^(n+1) uⁿ/(n + 1)!.
+defgraph regularCoefficients (κ : Set) (n ∈ ℕ) : complexCarrier :=
+    expTerms(κ)(succ(n))
+requires hκ : κ ∈ complexCarrier
+proof
+  have next : succ(n) ∈ ℕ by typecheck
+  exact FunctionBetween.apply_closed with (expTerms.function with hκ), next
+
 -- Section: Rising factorials
 theorem risingFactorial.zero (s : Set)
   shows risingFactorial(s, 0) = ℂ[1]
@@ -3824,6 +3832,146 @@ proof
   rw [(eulerMaclaurinMap.value with zMember), (hurwitzZetaMap.apply with
     zMember), (hurwitzZeta.eq_euler_maclaurin with positive, zMember, zNotOne,
     positiveOrder, zHalfPlane)]
+
+-- Section: The regular part at 1
+theorem complexPow.mul_base (x y : Set) (n : Nat)
+  requires hx : x ∈ ℂ
+  requires hy : y ∈ ℂ
+  shows ℂ[(x * y) ^ n] = ℂ[x ^ n * y ^ n]
+proof
+  induction n
+  | zero =>
+    rw [monoidPow.zero, monoidPow.zero, monoidPow.zero]
+    ring
+  | succ(k) using ih =>
+    have powerX := complexPow.member at x, k with hx
+    have powerY := complexPow.member at y, k with hy
+    rw [monoidPow.succ, monoidPow.succ, monoidPow.succ, ih]
+    ring
+
+-- F P = d⁻¹ (F (d P)) for d ≠ 0.
+theorem complexInv.cancel_left (F P d : Set)
+  requires hF : F ∈ ℂ
+  requires hP : P ∈ ℂ
+  requires hd : d ∈ ℂ
+  requires nonzero : d ≠ ℂ[0]
+  shows ℂ[F * P] = ℂ[complexInv(d) * (F * (d * P))]
+proof
+  have cancel := complexInv.mul_cancel with hd, nonzero
+  linear_combination (-(F * P)) * cancel
+
+-- A series whose terms after the first vanish sums to its first term.
+theorem complexPartialSum.first_only (u : Set) (n : Nat)
+  requires vanishing : ∀ k ∈ ℕ, (0:N) < k → u(k) = ℂ[0]
+  requires sequence : ComplexSequence(u)
+  shows (0:N) < n → complexPartialSum(u, n) = u((0:N))
+proof
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first := FunctionBetween.apply_closed with sequence, zeroMember
+  induction n
+  | zero =>
+    intro positiveN
+    exfalso
+    arith
+  | succ(k) using ih =>
+    intro positiveN
+    have kMember : k ∈ ℕ := nat.omega.forward at k with *
+    rw complexPartialSum.succ
+    by_cases zero : k = (0:N)
+    . rw [zero, complexPartialSum.zero]
+      ring
+    . have kPositive : (0:N) < k by arith
+      rw [(ih with kPositive), (vanishing with k, kMember, kPositive)]
+      ring
+
+theorem ComplexSumsTo.first_only (u : Set)
+  requires sequence : ComplexSequence(u)
+  requires vanishing : ∀ n ∈ ℕ, (0:N) < n → u(n) = ℂ[0]
+  shows ComplexSumsTo(u, u((0:N)))
+proof
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first := FunctionBetween.apply_closed with sequence, zeroMember
+  have prefixes := complexPrefixSums.function with sequence
+  have prefixSequence : ComplexSequence(complexPrefixSums(u)) by exact prefixes
+  refine ⟨sequence, ?_⟩
+  apply (ComplexConvergesTo.iff_abs with prefixSequence, first).backward
+  intros e eMember ePositive
+  have oneMember : (1:N) ∈ ℕ := nat.omega.forward at (1:N) with *
+  refine ⟨(1:N), oneMember, ?_⟩
+  intros n nMember later
+  have nNat := nat.omega.backward with nMember
+  have positiveN : (0:N) < n by arith
+  have constant := complexPartialSum.first_only at u, n with vanishing,
+    sequence
+  rw [(complexPrefixSums.value with sequence), (constant with positiveN)]
+  have zero : ℂ[u((0:N)) - u((0:N))] = ℂ[0] by ring
+  rw [zero, complexAbs.zero]
+  exact ePositive
+
+-- For z ≠ 1 the series Σ κ^(n+1)(z − 1)ⁿ/(n + 1)! sums to
+-- (e^(κ (z − 1)) − 1)/(z − 1); at z = 1 it sums to κ.
+theorem regularCoefficients.sums (κ z : Set)
+  requires hκ : κ ∈ ℂ
+  requires hz : z ∈ ℂ
+  requires notOne : z ≠ ℂ[1]
+  shows ComplexSumsTo(powerSeriesTerms(regularCoefficients(κ), ℂ[1], z),
+    ℂ[(complexExp(κ * (z - 1)) - 1) * complexInv(z - 1)])
+proof
+  have one := complexOne.member
+  have shifted : ℂ[z - 1] ∈ ℂ by typecheck
+  have argument : ℂ[κ * (z - 1)] ∈ ℂ by typecheck
+  have coefficients := regularCoefficients.function with hκ
+  have coefficientSequence : ComplexSequence(regularCoefficients(κ))
+    by exact coefficients
+  have exponential := complexExp.sums with argument
+  have shiftedSums := complexShift.sums with exponential
+  rw (expTerms.zero_value with argument) at shiftedSums
+  have inverse := complexInv.member with shifted
+  have scale : ℂ[-complexInv(z - 1)] ∈ ℂ by typecheck
+  have terms := powerSeriesTerms.function with coefficientSequence, one, hz
+  have termSequence : ComplexSequence(powerSeriesTerms(regularCoefficients(κ),
+    ℂ[1], z)) by exact terms
+  have expSequence := expTerms.function with argument
+  have expSequenceCopy : ComplexSequence(expTerms(ℂ[κ * (z - 1)]))
+    by exact expSequence
+  have combined := ComplexSumsTo.combination at
+    complexShift(expTerms(ℂ[κ * (z - 1)])),
+    complexShift(expTerms(ℂ[κ * (z - 1)])),
+    complexShift(expTerms(ℂ[κ * (z - 1)])),
+    powerSeriesTerms(regularCoefficients(κ), ℂ[1], z), ℂ[-complexInv(z - 1)]
+    with shiftedSums, shiftedSums, shiftedSums, scale, termSequence
+  have shiftedNonzero : ℂ[z - 1] ≠ ℂ[0]
+    intro zero
+    apply notOne
+    linear_combination zero
+  have cancel := complexInv.mul_cancel with shifted, shiftedNonzero
+  have pointwise : ∀ m ∈ ℕ, powerSeriesTerms(regularCoefficients(κ), ℂ[1],
+      z)(m) = ℂ[complexShift(expTerms(ℂ[κ * (z - 1)]))(m) -
+      complexShift(expTerms(ℂ[κ * (z - 1)]))(m) - ℂ[-complexInv(z - 1)] *
+      complexShift(expTerms(ℂ[κ * (z - 1)]))(m)]
+    intros m mMember
+    have mNat := nat.omega.backward with mMember
+    have next : succ(m) ∈ ℕ by typecheck
+    rw [(powerSeriesTerms.value with coefficientSequence, one, hz),
+      (regularCoefficients.value with hκ, mMember),
+      (complexShift.value with expSequenceCopy, mMember),
+      (expTerms.value with hκ, next), (expTerms.value with argument, next),
+      (complexPow.mul_base with hκ, shifted), monoidPow.succ]
+    rw monoidPow.succ
+    have factor := complexOfReal.mem at R[1 / realNat(succ(m)!)]
+    have powerκ := complexPow.member at κ, m with hκ
+    have powerShifted := complexPow.member at ℂ[z - 1], m with shifted
+    have coefficient : ℂ[complexOfReal(R[1 / realNat(succ(m)!)]) *
+      (κ * κ ^ m)] ∈ ℂ by typecheck
+    rw (complexInv.cancel_left with coefficient, powerShifted, shifted,
+      shiftedNonzero)
+    ring
+  have sums := combined with pointwise
+  have expMember := complexExp.member with argument
+  have value : ℂ[(complexExp(κ * (z - 1)) - 1) - (complexExp(κ * (z - 1)) - 1)
+      - -complexInv(z - 1) * (complexExp(κ * (z - 1)) - 1)] =
+    ℂ[(complexExp(κ * (z - 1)) - 1) * complexInv(z - 1)] by ring
+  rwa value at sums
 
 -- The pole: ζ(s, a) − 1/(s − 1) → hurwitzZeta.regular(a) as s → 1.
 theorem hurwitzZeta.pole (a : Real)
