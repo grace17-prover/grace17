@@ -1,0 +1,959 @@
+-- Measures and Lebesgue measure: a measure on a measurable space as a
+-- countably additive function from its measurable sets to [0, ∞]; its
+-- extension to all subsets, null sets and "almost everywhere"; finite,
+-- probability, σ-finite and s-finite measures; restriction, push-forward,
+-- scalar multiples, countable sums, Dirac and counting measures, and
+-- measure-preserving maps; uniqueness from a generating π-system; outer
+-- measures and Carathéodory's theorem; Lebesgue measure on ℝ from
+-- coverings by intervals and on ℝⁿ from coverings by boxes (Mathlib's
+-- volume), with the volumes of intervals and boxes, translation and
+-- scaling, null sets, regularity, and measures of balls.
+-- Part of the GRH blueprint.
+-- Planned home: MeasureTheory/Measure/Lebesgue.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Measure.Lebesgue
+import GRH.Measure.Spaces
+import Grace.Cumulus.Algebra.Ring.FiniteProduct
+
+section Measures
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Measures
+-- The family n ↦ μ(f(n)) of the measures of a sequence of sets.
+def measureSequence (μ f : Set) : Set := { (n, μ(f(n))) | n ∈ ℕ }
+def measureFamily (μ f I : Set) : Set := { (i, μ(f(i))) | i ∈ I }
+
+-- A measure on the measurable space X: a function from the measurable
+-- sets of X to [0, ∞], vanishing at ∅ and countably additive on pairwise
+-- disjoint sequences (Mathlib's Measure, read on measurable sets; its
+-- values on other sets are measureOf below).
+predicate Measure (X μ : Set) :=
+  MeasurableSpace(X) ∧
+  FunctionBetween(μ, MeasurableSpace.sets(X), ennreal) ∧
+  μ(∅) = realZero ∧
+  (∀ f, (∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X)) →
+    PairwiseDisjointSequence(f) →
+    μ(sequenceUnion(f)) = ennTsum(measureSequence(μ, f), ℕ))
+
+-- The measure of any subset A of the carrier: the infimum of the measures
+-- of the measurable sets containing it (the outer measure Mathlib's
+-- Measure carries).
+def measurableSupersets (X A : Set) : Set :=
+  { B ∈ MeasurableSpace.sets(X) | A ⊆ B }
+def supersetMeasures (X μ A : Set) : Set := { μ(B) | B ∈ measurableSupersets(X, A) }
+def measureOf (X μ A : Set) : Set := ennInf(supersetMeasures(X, μ, A))
+def outerMeasureOf (X μ : Set) : Set :=
+  { (A, measureOf(X, μ, A)) | A ∈ 𝒫(MeasurableSpace.carrier(X)) }
+
+-- The real number μ(S), 0 when μ(S) = ∞ (Mathlib's Measure.real).
+def measureReal (μ S : Set) : Set := ennToReal(μ(S))
+
+-- A is null when a measurable set of measure 0 contains it; a property
+-- holds almost everywhere when the points of the carrier outside the set
+-- S it cuts out form a null set (Mathlib's ae as a filter: S ∈ ae μ).
+predicate NullSet (X μ A : Set) :=
+  ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B ∧ μ(B) = realZero
+predicate AlmostEverywhere (X μ S : Set) :=
+  NullSet(X, μ, MeasurableSpace.carrier(X) ∖ S)
+
+-- f = g almost everywhere (Mathlib's f =ᵐ[μ] g).
+predicate AEEqual (X μ f g : Set) :=
+  AlmostEverywhere(X, μ, equalizer(f, g, MeasurableSpace.carrier(X)))
+
+-- Finite, probability, σ-finite measures.
+predicate FiniteMeasure (X μ : Set) :=
+  Measure(X, μ) ∧ μ(MeasurableSpace.carrier(X)) ≠ ennTop
+predicate ProbabilityMeasure (X μ : Set) :=
+  Measure(X, μ) ∧ μ(MeasurableSpace.carrier(X)) = realOne
+predicate SigmaFinite (X μ : Set) :=
+  Measure(X, μ) ∧ ∃ f, (∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X) ∧
+    μ(f(n)) ≠ ennTop) ∧ sequenceUnion(f) = MeasurableSpace.carrier(X)
+
+-- The countable sum Σₙ m(n) of a sequence of measures, and an s-finite
+-- measure: a countable sum of finite measures (Mathlib's SFinite).
+def sumMeasure (X m : Set) : Set :=
+  { (S, ennTsum(familyAt(m, ℕ, S), ℕ)) | S ∈ MeasurableSpace.sets(X) }
+predicate SFinite (X μ : Set) :=
+  Measure(X, μ) ∧ ∃ m, (∀ n ∈ ℕ, FiniteMeasure(X, m(n))) ∧ μ = sumMeasure(X, m)
+
+-- μ restricted to A (Mathlib's Measure.restrict): S ↦ μ(S ∩ A), A any
+-- subset; the push-forward of μ along f : X → Y (Measure.map); c · μ;
+-- the zero measure.
+def restrictMeasure (X μ A : Set) : Set :=
+  { (S, measureOf(X, μ, S ∩ A)) | S ∈ MeasurableSpace.sets(X) }
+def mapMeasure (f X μ Y : Set) : Set :=
+  { (B, μ(functionPreimage(f, MeasurableSpace.carrier(X), B))) |
+    B ∈ MeasurableSpace.sets(Y) }
+def smulMeasure (c X μ : Set) : Set :=
+  { (S, ennMul(c, μ(S))) | S ∈ MeasurableSpace.sets(X) }
+def zeroMeasure (X : Set) : Set := MeasurableSpace.sets(X) × {realZero}
+
+-- The Dirac measure at a (Mathlib's Measure.dirac) and the counting
+-- measure (Measure.count): the number of points of a finite set, ∞ for an
+-- infinite one.
+def diracMeasure (X a : Set) : Set :=
+  { p ∈ MeasurableSpace.sets(X) × ennreal |
+    (a ∈ fst(p) ∧ snd(p) = realOne) ∨ (a ∉ fst(p) ∧ snd(p) = realZero) }
+def ennCard (S : Set) : Set :=
+  ⋃({ v ∈ ennreal | (∃ n ∈ ℕ, HasCardinality(S, n) ∧ v = realNat(n)) ∨
+    (¬Finite(S) ∧ v = ennTop) })
+def countMeasure (X : Set) : Set := { (S, ennCard(S)) | S ∈ MeasurableSpace.sets(X) }
+
+-- f carries μ to ν (Mathlib's MeasurePreserving).
+predicate MeasurePreserving (f X μ Y ν : Set) :=
+  Measurable(f, X, Y) ∧ Measure(X, μ) ∧ mapMeasure(f, X, μ, Y) = ν
+
+-- Section: Measures on topological spaces
+-- For a measure on the Borel sets of a topological space T: finite on
+-- compact sets (IsFiniteMeasureOnCompacts), positive on nonempty open
+-- sets (IsOpenPosMeasure), and regular (Measure.Regular: outer regular by
+-- open sets, inner regular on open sets by compact sets).
+predicate FiniteOnCompacts (T μ : Set) :=
+  ∀ K ∈ borelSigma(T), Compact(T, K) → μ(K) ≠ ennTop
+predicate OpenPositive (T μ : Set) :=
+  ∀ U ∈ TopologicalSpace.opens(T), U ≠ ∅ → μ(U) ≠ realZero
+def openSupersets (T A : Set) : Set := { U ∈ TopologicalSpace.opens(T) | A ⊆ U }
+def compactSubsets (T U : Set) : Set :=
+  { K ∈ borelSigma(T) | K ⊆ U ∧ Compact(T, K) }
+predicate RegularMeasure (T μ : Set) :=
+  Measure(borelSpace(T), μ) ∧ FiniteOnCompacts(T, μ) ∧
+  (∀ A ∈ borelSigma(T), μ(A) = ennInf(valuesOn(μ, openSupersets(T, A)))) ∧
+  (∀ U ∈ TopologicalSpace.opens(T), μ(U) = ennSup(valuesOn(μ, compactSubsets(T, U))))
+
+-- Section: Outer measures
+-- An outer measure on A: a monotone, countably subadditive function on
+-- all subsets of A, vanishing at ∅ (Mathlib's OuterMeasure); the
+-- Carathéodory-measurable sets, which split every set additively.
+predicate OuterMeasure (A m : Set) :=
+  FunctionBetween(m, 𝒫(A), ennreal) ∧ m(∅) = realZero ∧
+  (∀ S ∈ 𝒫(A), ∀ T ∈ 𝒫(A), S ⊆ T → EnnLe(m(S), m(T))) ∧
+  (∀ f, (∀ n ∈ ℕ, f(n) ∈ 𝒫(A)) →
+    EnnLe(m(sequenceUnion(f)), ennTsum(measureSequence(m, f), ℕ)))
+def caratheodorySets (A m : Set) : Set :=
+  { S ∈ 𝒫(A) | ∀ T ∈ 𝒫(A), m(T) = ennAdd(m(T ∩ S), m(T ∖ S)) }
+def restrictTo (m M : Set) : Set := { p ∈ m | fst(p) ∈ M }
+
+-- Section: Lebesgue measure on ℝ
+-- The outer measure of A ⊆ ℝ: the infimum of Σₖ (bₖ − aₖ) over the
+-- sequences of closed intervals [aₖ, bₖ] covering A; Lebesgue measure is
+-- its restriction to the Borel sets (Mathlib's volume on ℝ).
+def realSequences : Set := functionSpace(ℕ, ℝ)
+def coverIntervals (a b : Set) : Set := { realIcc(a(k), b(k)) | k ∈ ℕ }
+def intervalLengths (a b : Set) : Set := { (k, ennOfReal(R[b(k) - a(k)])) | k ∈ ℕ }
+def intervalCoverSums (A : Set) : Set :=
+  { s ∈ ennreal | ∃ a ∈ realSequences, ∃ b ∈ realSequences,
+    A ⊆ ⋃(coverIntervals(a, b)) ∧ s = ennTsum(intervalLengths(a, b), ℕ) }
+def realOuter (A : Set) : Set := ennInf(intervalCoverSums(A))
+def realOuterMeasure : Set := { (A, realOuter(A)) | A ∈ 𝒫(ℝ) }
+def realVolume : Set :=
+  { (S, realOuter(S)) | S ∈ MeasurableSpace.sets(realMeasurableSpace) }
+
+-- Section: Lebesgue measure on ℝⁿ
+-- The closed box ∏ᵢ [a(i), b(i)] and its volume ∏ᵢ (b(i) − a(i))⁺ (1 for
+-- n = 0); the outer measure of A ⊆ ℝⁿ as the infimum of the total
+-- volumes of countable coverings by boxes, and Lebesgue measure on ℝⁿ
+-- its restriction to the Borel sets (Mathlib's volume on Fin n → ℝ, the
+-- product of the volumes of the coordinates).
+def boxSet (n : Nat, a b : Set) : Set :=
+  { x ∈ functionSpace(n, ℝ) | ∀ i ∈ n, a(i) ≤ x(i) ∧ x(i) ≤ b(i) }
+def sideLengths (n : Nat, a b : Set) : Set :=
+  { (i, ennOfReal(R[b(i) - a(i)])) | i ∈ n }
+def boxVolume (n : Nat, a b : Set) : Set :=
+  finiteRingProduct(n, ℝ, realAdd, realZero, realNeg, realMul, realOne,
+    sideLengths(n, a, b))
+def vectorSequences (n : Nat) : Set := functionSpace(ℕ, functionSpace(n, ℝ))
+def coverBoxes (n : Nat, a b : Set) : Set := { boxSet(n, a(k), b(k)) | k ∈ ℕ }
+def boxVolumes (n : Nat, a b : Set) : Set :=
+  { (k, boxVolume(n, a(k), b(k))) | k ∈ ℕ }
+def boxCoverSums (n : Nat, A : Set) : Set :=
+  { s ∈ ennreal | ∃ a ∈ vectorSequences(n), ∃ b ∈ vectorSequences(n),
+    A ⊆ ⋃(coverBoxes(n, a, b)) ∧ s = ennTsum(boxVolumes(n, a, b), ℕ) }
+def lebesgueOuter (n : Nat, A : Set) : Set := ennInf(boxCoverSums(n, A))
+def lebesgueOuterMeasure (n : Nat) : Set :=
+  { (A, lebesgueOuter(n, A)) | A ∈ 𝒫(functionSpace(n, ℝ)) }
+def euclideanVolume (n : Nat) : Set :=
+  { (S, lebesgueOuter(n, S)) | S ∈ MeasurableSpace.sets(euclideanMeasurableSpace(n)) }
+
+-- Translates and dilates of sets of reals and of vectors.
+def realTranslate (A : Set, c : Real) : Set := { R[c + X] | X ∈ A }
+def realDilate (A : Set, c : Real) : Set := { R[c * X] | X ∈ A }
+def vectorAdd (n : Nat, x y : Set) : Set := { (i, R[x(i) + y(i)]) | i ∈ n }
+def vectorScale (n : Nat, c x : Set) : Set := { (i, R[c * x(i)]) | i ∈ n }
+def vectorTranslate (n : Nat, A c : Set) : Set := { vectorAdd(n, c, x) | x ∈ A }
+def vectorDilate (n : Nat, A c : Set) : Set := { vectorScale(n, c, x) | x ∈ A }
+def zeroVector (n : Nat) : Set := n × {realZero}
+
+-- The coordinate hyperplane {x | x(i) = c} of ℝⁿ.
+def hyperplane (n : Nat, i c : Set) : Set := { x ∈ functionSpace(n, ℝ) | x(i) = c }
+
+-- The vector (X) of ℝ¹ = functions 1 → ℝ.
+def realToVector : Set := { (X, {(∅, X)}) | X ∈ ℝ }
+
+-- Section: Laws of measures
+theorem Measure.space (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows MeasurableSpace(X)
+proof
+  sorry
+
+theorem Measure.member (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows μ(S) ∈ ennreal
+proof
+  sorry
+
+theorem Measure.empty (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows μ(∅) = realZero
+proof
+  sorry
+
+-- Mathlib's measure_mono.
+theorem Measure.mono (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  shows EnnLe(μ(S), μ(T))
+proof
+  sorry
+
+theorem Measure.union_disjoint (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires disjoint : Disjoint(S, T)
+  shows μ(S ∪ T) = ennAdd(μ(S), μ(T))
+proof
+  sorry
+
+-- Mathlib's measure_union_le and measure_iUnion_le.
+theorem Measure.union_le (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  shows EnnLe(μ(S ∪ T), ennAdd(μ(S), μ(T)))
+proof
+  sorry
+
+theorem Measure.sequence_union_le (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  shows EnnLe(μ(sequenceUnion(f)), ennTsum(measureSequence(μ, f), ℕ))
+proof
+  sorry
+
+-- Mathlib's measure_iUnion and tsum_meas_le_meas_iUnion_of_disjoint.
+theorem Measure.sequence_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires disjoint : PairwiseDisjointSequence(f)
+  shows μ(sequenceUnion(f)) = ennTsum(measureSequence(μ, f), ℕ)
+proof
+  sorry
+
+-- Mathlib's measure_iUnion_fintype_le: a finite union.
+theorem Measure.finite_union_le (X μ F f : Set)
+  requires measure : Measure(X, μ)
+  requires finite : Finite(F)
+  requires sets : ∀ i ∈ F, MeasurableSet(X, f(i))
+  shows EnnLe(μ(⋃(valuesOn(f, F))), ennFiniteSum(measureFamily(μ, f, F), F))
+proof
+  sorry
+
+-- Continuity from below (Mathlib's measure_iUnion_eq_iSup for an
+-- increasing sequence) and from above for sets of finite measure.
+theorem Measure.increasing_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires increasing : ∀ m ∈ ℕ, ∀ n ∈ ℕ, m ⊆ n → f(m) ⊆ f(n)
+  shows μ(sequenceUnion(f)) = ennSupOn(measureSequence(μ, f), ℕ)
+proof
+  sorry
+
+theorem Measure.decreasing_inter (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires decreasing : ∀ m ∈ ℕ, ∀ n ∈ ℕ, m ⊆ n → f(n) ⊆ f(m)
+  requires finite : μ(f(∅)) ≠ ennTop
+  shows μ(sequenceInter(MeasurableSpace.carrier(X), f)) =
+    ennInfOn(measureSequence(μ, f), ℕ)
+proof
+  sorry
+
+-- Mathlib's measure_diff: μ(T ∖ S) = μ(T) − μ(S) for S ⊆ T, μ(S) < ∞,
+-- stated additively.
+theorem Measure.diff_add (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  shows μ(T) = ennAdd(μ(T ∖ S), μ(S))
+proof
+  sorry
+
+-- Mathlib's measure_ne_top_of_subset / measure_lt_top_mono.
+theorem Measure.finite_of_subset (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  requires finite : μ(T) ≠ ennTop
+  shows μ(S) ≠ ennTop
+proof
+  sorry
+
+-- Mathlib's nonempty_of_measure_ne_zero.
+theorem Measure.nonempty_of_ne_zero (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  requires positive : μ(S) ≠ realZero
+  shows S ≠ ∅
+proof
+  sorry
+
+theorem measureReal.nonneg (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows measureReal(μ, S) ∈ ℝ ∧ realZero ≤ measureReal(μ, S)
+proof
+  sorry
+
+-- Mathlib's measureReal_ne_zero_iff for a finite value.
+theorem measureReal.ne_zero_iff (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  requires finite : μ(S) ≠ ennTop
+  shows measureReal(μ, S) ≠ realZero ↔ μ(S) ≠ realZero
+proof
+  sorry
+
+-- Section: The measure of arbitrary sets
+theorem measureOf.eq_of_measurable (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows measureOf(X, μ, S) = μ(S)
+proof
+  sorry
+
+theorem measureOf.mono (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires inside : A ⊆ B
+  shows EnnLe(measureOf(X, μ, A), measureOf(X, μ, B))
+proof
+  sorry
+
+-- Every set has a measurable hull of the same measure
+-- (Mathlib's toMeasurable).
+theorem measureOf.hull (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires inside : A ⊆ MeasurableSpace.carrier(X)
+  shows ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B ∧ μ(B) = measureOf(X, μ, A)
+proof
+  sorry
+
+theorem measureOf.outer (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows OuterMeasure(MeasurableSpace.carrier(X), outerMeasureOf(X, μ))
+proof
+  sorry
+
+-- Section: Null sets and almost everywhere
+theorem NullSet.iff_measureOf (X μ A : Set)
+  requires measure : Measure(X, μ)
+  shows NullSet(X, μ, A) ↔ measureOf(X, μ, A) = realZero
+proof
+  sorry
+
+theorem NullSet.subset (X μ A B : Set)
+  requires null : NullSet(X, μ, B)
+  requires inside : A ⊆ B
+  shows NullSet(X, μ, A)
+proof
+  sorry
+
+-- Mathlib's measure_iUnion_null_iff: a countable union of null sets is
+-- null.
+theorem NullSet.sequence_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires null : ∀ n ∈ ℕ, NullSet(X, μ, f(n))
+  shows NullSet(X, μ, sequenceUnion(f))
+proof
+  sorry
+
+theorem NullSet.countable_union (X μ C : Set)
+  requires measure : Measure(X, μ)
+  requires countable : Countable(C)
+  requires null : ∀ A ∈ C, NullSet(X, μ, A)
+  shows NullSet(X, μ, ⋃(C))
+proof
+  sorry
+
+-- Mathlib's ae_of_all and Filter.Eventually.mono.
+theorem AlmostEverywhere.of_all (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires everywhere : MeasurableSpace.carrier(X) ⊆ S
+  shows AlmostEverywhere(X, μ, S)
+proof
+  sorry
+
+theorem AlmostEverywhere.mono (X μ S T : Set)
+  requires ae : AlmostEverywhere(X, μ, S)
+  requires inside : S ∩ MeasurableSpace.carrier(X) ⊆ T
+  shows AlmostEverywhere(X, μ, T)
+proof
+  sorry
+
+theorem AlmostEverywhere.inter (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires first : AlmostEverywhere(X, μ, S)
+  requires second : AlmostEverywhere(X, μ, T)
+  shows AlmostEverywhere(X, μ, S ∩ T)
+proof
+  sorry
+
+-- Mathlib's ae_all_iff: countably many almost-everywhere properties hold
+-- together almost everywhere.
+theorem AlmostEverywhere.sequence_inter (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires ae : ∀ n ∈ ℕ, AlmostEverywhere(X, μ, f(n))
+  shows AlmostEverywhere(X, μ, sequenceInter(MeasurableSpace.carrier(X), f))
+proof
+  sorry
+
+-- Mathlib's compl_mem_ae_iff.
+theorem AlmostEverywhere.compl_iff (X μ A : Set)
+  requires measure : Measure(X, μ)
+  shows AlmostEverywhere(X, μ, MeasurableSpace.carrier(X) ∖ A) ↔ NullSet(X, μ, A)
+proof
+  sorry
+
+-- Mathlib's measure_inter_conull and measure_congr: intersecting with an
+-- almost-everywhere set does not change a measure.
+theorem Measure.inter_conull (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires conull : AlmostEverywhere(X, μ, T)
+  shows μ(S ∩ T) = μ(S)
+proof
+  sorry
+
+theorem AEEqual.symm (X μ f g : Set)
+  requires equal : AEEqual(X, μ, f, g)
+  shows AEEqual(X, μ, g, f)
+proof
+  sorry
+
+theorem AEEqual.trans (X μ f g h : Set)
+  requires measure : Measure(X, μ)
+  requires first : AEEqual(X, μ, f, g)
+  requires second : AEEqual(X, μ, g, h)
+  shows AEEqual(X, μ, f, h)
+proof
+  sorry
+
+-- Section: Constructions of measures
+theorem restrictMeasure.measure (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  shows Measure(X, restrictMeasure(X, μ, A))
+proof
+  sorry
+
+theorem restrictMeasure.apply (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires setA : MeasurableSet(X, A)
+  requires setS : MeasurableSet(X, S)
+  shows restrictMeasure(X, μ, A)(S) = μ(S ∩ A)
+proof
+  sorry
+
+theorem restrictMeasure.whole (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows restrictMeasure(X, μ, MeasurableSpace.carrier(X)) = μ
+proof
+  sorry
+
+-- Mathlib's Measure.restrict_restrict.
+theorem restrictMeasure.restrict (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires setA : MeasurableSet(X, A)
+  requires setB : MeasurableSet(X, B)
+  shows restrictMeasure(X, restrictMeasure(X, μ, A), B) = restrictMeasure(X, μ, A ∩ B)
+proof
+  sorry
+
+-- Mathlib's ae_restrict_of_forall_mem and ae_restrict_mem.
+theorem AlmostEverywhere.restrict_of_forall (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  requires holds : A ⊆ S
+  shows AlmostEverywhere(X, restrictMeasure(X, μ, A), S)
+proof
+  sorry
+
+-- Mathlib's ae_restrict_iff': almost everywhere on A.
+theorem AlmostEverywhere.restrict_iff (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  shows AlmostEverywhere(X, restrictMeasure(X, μ, A), S) ↔
+    AlmostEverywhere(X, μ, S ∪ (MeasurableSpace.carrier(X) ∖ A))
+proof
+  sorry
+
+theorem mapMeasure.measure (f X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  shows Measure(Y, mapMeasure(f, X, μ, Y))
+proof
+  sorry
+
+-- Mathlib's Measure.map_apply.
+theorem mapMeasure.apply (f X μ Y B : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  requires set : MeasurableSet(Y, B)
+  shows mapMeasure(f, X, μ, Y)(B) = μ(functionPreimage(f, MeasurableSpace.carrier(X), B))
+proof
+  sorry
+
+-- Mathlib's Measure.map_map and Measure.map_id.
+theorem mapMeasure.comp (f g h X μ Y Z : Set)
+  requires measure : Measure(X, μ)
+  requires measurableF : Measurable(f, X, Y)
+  requires measurableG : Measurable(g, Y, Z)
+  requires composite : ∀ x ∈ MeasurableSpace.carrier(X), h(x) = g(f(x))
+  shows mapMeasure(g, Y, mapMeasure(f, X, μ, Y), Z) = mapMeasure(h, X, μ, Z)
+proof
+  sorry
+
+theorem mapMeasure.identity (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows mapMeasure(identity(MeasurableSpace.carrier(X)), X, μ, X) = μ
+proof
+  sorry
+
+-- Mathlib's Measure.map_congr.
+theorem mapMeasure.congr (f g X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires measurableF : Measurable(f, X, Y)
+  requires measurableG : Measurable(g, X, Y)
+  requires equal : AEEqual(X, μ, f, g)
+  shows mapMeasure(f, X, μ, Y) = mapMeasure(g, X, μ, Y)
+proof
+  sorry
+
+-- Mathlib's ae_map_iff and ae_of_ae_map.
+theorem AlmostEverywhere.of_map (f X μ Y S : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  requires ae : AlmostEverywhere(Y, mapMeasure(f, X, μ, Y), S)
+  shows AlmostEverywhere(X, μ, functionPreimage(f, MeasurableSpace.carrier(X), S))
+proof
+  sorry
+
+theorem smulMeasure.measure (c X μ : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  shows Measure(X, smulMeasure(c, X, μ))
+proof
+  sorry
+
+theorem smulMeasure.apply (c X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires set : MeasurableSet(X, S)
+  shows smulMeasure(c, X, μ)(S) = ennMul(c, μ(S))
+proof
+  sorry
+
+-- Mathlib's Measure.map_smul and Measure.restrict_smul.
+theorem smulMeasure.map (c f X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires measurable : Measurable(f, X, Y)
+  shows mapMeasure(f, X, smulMeasure(c, X, μ), Y) =
+    smulMeasure(c, Y, mapMeasure(f, X, μ, Y))
+proof
+  sorry
+
+theorem smulMeasure.restrict (c X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires set : MeasurableSet(X, A)
+  shows restrictMeasure(X, smulMeasure(c, X, μ), A) =
+    smulMeasure(c, X, restrictMeasure(X, μ, A))
+proof
+  sorry
+
+theorem sumMeasure.measure (X m : Set)
+  requires measures : ∀ n ∈ ℕ, Measure(X, m(n))
+  shows Measure(X, sumMeasure(X, m))
+proof
+  sorry
+
+theorem zeroMeasure.measure (X : Set)
+  requires space : MeasurableSpace(X)
+  shows Measure(X, zeroMeasure(X))
+proof
+  sorry
+
+theorem diracMeasure.probability (X a : Set)
+  requires space : MeasurableSpace(X)
+  requires member : a ∈ MeasurableSpace.carrier(X)
+  shows ProbabilityMeasure(X, diracMeasure(X, a))
+proof
+  sorry
+
+theorem countMeasure.measure (X : Set)
+  requires space : MeasurableSpace(X)
+  shows Measure(X, countMeasure(X))
+proof
+  sorry
+
+-- Mathlib's Measure.count_apply for a finite set.
+theorem countMeasure.apply_finite (X S : Set, n : Nat)
+  requires space : MeasurableSpace(X)
+  requires set : MeasurableSet(X, S)
+  requires card : HasCardinality(S, n)
+  shows countMeasure(X)(S) = realNat(n)
+proof
+  sorry
+
+-- Mathlib's Measure.ae_count_iff: almost everywhere for the counting
+-- measure is everywhere, when singletons are measurable.
+theorem AlmostEverywhere.count_iff (X S : Set)
+  requires space : MeasurableSpace(X)
+  requires singletons : ∀ x ∈ MeasurableSpace.carrier(X), MeasurableSet(X, {x})
+  shows AlmostEverywhere(X, countMeasure(X), S) ↔ MeasurableSpace.carrier(X) ⊆ S
+proof
+  sorry
+
+-- Finite and σ-finite measures.
+theorem FiniteMeasure.sigma_finite (X μ : Set)
+  requires finite : FiniteMeasure(X, μ)
+  shows SigmaFinite(X, μ)
+proof
+  sorry
+
+theorem SigmaFinite.s_finite (X μ : Set)
+  requires sigma : SigmaFinite(X, μ)
+  shows SFinite(X, μ)
+proof
+  sorry
+
+theorem FiniteMeasure.restrict (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  requires finite : μ(A) ≠ ennTop
+  shows FiniteMeasure(X, restrictMeasure(X, μ, A))
+proof
+  sorry
+
+-- Mathlib's prob_le_one and measureReal_le_one.
+theorem ProbabilityMeasure.le_one (X μ S : Set)
+  requires probability : ProbabilityMeasure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows EnnLe(μ(S), realOne)
+proof
+  sorry
+
+-- Mathlib's Measure.isProbabilityMeasure_map.
+theorem ProbabilityMeasure.map (f X μ Y : Set)
+  requires probability : ProbabilityMeasure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  shows ProbabilityMeasure(Y, mapMeasure(f, X, μ, Y))
+proof
+  sorry
+
+-- Section: Measure-preserving maps
+theorem MeasurePreserving.identity (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows MeasurePreserving(identity(MeasurableSpace.carrier(X)), X, μ, X, μ)
+proof
+  sorry
+
+theorem MeasurePreserving.comp (f g h X μ Y ν Z ρ : Set)
+  requires first : MeasurePreserving(f, X, μ, Y, ν)
+  requires second : MeasurePreserving(g, Y, ν, Z, ρ)
+  requires composite : ∀ x ∈ MeasurableSpace.carrier(X), h(x) = g(f(x))
+  shows MeasurePreserving(h, X, μ, Z, ρ)
+proof
+  sorry
+
+-- Mathlib's MeasurePreserving.symm for a measurable equivalence.
+theorem MeasurePreserving.inverse (f X μ Y ν : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires equivalence : MeasurableEquiv(f, X, Y)
+  shows MeasurePreserving(converse(f, MeasurableSpace.carrier(X),
+    MeasurableSpace.carrier(Y)), Y, ν, X, μ)
+proof
+  sorry
+
+theorem MeasurePreserving.preimage (f X μ Y ν B : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires set : MeasurableSet(Y, B)
+  shows μ(functionPreimage(f, MeasurableSpace.carrier(X), B)) = ν(B)
+proof
+  sorry
+
+-- Mathlib's MeasurableEmbedding / MeasurePreserving image form: for a
+-- measure-preserving embedding, μ(S) = ν(f(S)).
+theorem MeasurePreserving.image_of_embedding (f X μ Y ν S : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires embedding : MeasurableEmbedding(f, X, Y)
+  requires set : MeasurableSet(X, S)
+  shows ν(valuesOn(f, S)) = μ(S)
+proof
+  sorry
+
+-- Section: Uniqueness of measures
+-- Two finite measures agreeing on a π-system that generates the
+-- σ-algebra and on the whole space agree (Mathlib's
+-- ext_of_generate_finite).
+theorem Measure.ext_of_generate_finite (X μ ν G : Set)
+  requires firstFinite : FiniteMeasure(X, μ)
+  requires secondFinite : FiniteMeasure(X, ν)
+  requires pi : PiSystem(G)
+  requires generates : MeasurableSpace.sets(X) =
+    generatedSigma(MeasurableSpace.carrier(X), G)
+  requires agree : ∀ S ∈ G, μ(S) = ν(S)
+  requires whole : μ(MeasurableSpace.carrier(X)) = ν(MeasurableSpace.carrier(X))
+  shows μ = ν
+proof
+  sorry
+
+-- The σ-finite form: a generating π-system containing an increasing
+-- sequence of sets of finite measure exhausting the space (Mathlib's
+-- ext_of_generateFrom_of_iUnion).
+theorem Measure.ext_of_generate_exhausting (X μ ν G f : Set)
+  requires firstMeasure : Measure(X, μ)
+  requires secondMeasure : Measure(X, ν)
+  requires pi : PiSystem(G)
+  requires generates : MeasurableSpace.sets(X) =
+    generatedSigma(MeasurableSpace.carrier(X), G)
+  requires spanning : ∀ n ∈ ℕ, f(n) ∈ G ∧ μ(f(n)) ≠ ennTop
+  requires exhausts : sequenceUnion(f) = MeasurableSpace.carrier(X)
+  requires agree : ∀ S ∈ G, μ(S) = ν(S)
+  shows μ = ν
+proof
+  sorry
+
+-- Section: Carathéodory's theorem
+-- The Carathéodory-measurable sets of an outer measure form a σ-algebra,
+-- and the outer measure is a measure on them (Mathlib's
+-- OuterMeasure.caratheodory and OuterMeasure.toMeasure).
+theorem caratheodorySets.sigma (A m : Set)
+  requires outer : OuterMeasure(A, m)
+  shows SigmaAlgebra(A, caratheodorySets(A, m))
+proof
+  sorry
+
+theorem caratheodorySets.measure (A m : Set)
+  requires outer : OuterMeasure(A, m)
+  shows Measure(MeasurableSpace.mk(A, caratheodorySets(A, m)),
+    restrictTo(m, caratheodorySets(A, m)))
+proof
+  sorry
+
+-- Section: Lebesgue measure on ℝ
+theorem realOuterMeasure.outer
+  shows OuterMeasure(ℝ, realOuterMeasure)
+proof
+  sorry
+
+-- The Borel sets are Carathéodory measurable for the Lebesgue outer
+-- measure, so Lebesgue measure is a measure.
+theorem realOuterMeasure.borel_caratheodory
+  shows MeasurableSpace.sets(realMeasurableSpace) ⊆
+    caratheodorySets(ℝ, realOuterMeasure)
+proof
+  sorry
+
+theorem realVolume.measure
+  shows Measure(realMeasurableSpace, realVolume)
+proof
+  sorry
+
+-- Mathlib's Real.volume_Icc, volume_Ioo, volume_Ioc, volume_Ico.
+theorem realVolume.intervals (A B : Real)
+  shows realVolume(realIcc(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIoo(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIoc(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIco(A, B)) = ennOfReal(R[B - A])
+proof
+  sorry
+
+theorem realVolume.rays (A : Real)
+  shows realVolume(realIoi(A)) = ennTop ∧ realVolume(realIic(A)) = ennTop
+proof
+  sorry
+
+theorem realVolume.whole
+  shows realVolume(ℝ) = ennTop
+proof
+  sorry
+
+-- Mathlib's Set.Countable.measure_zero and Set.Countable.ae_notMem for
+-- Lebesgue measure: countable sets are null.
+theorem realVolume.countable_null (C : Set)
+  requires countable : Countable(C)
+  requires inside : C ⊆ ℝ
+  shows realVolume(C) = realZero
+proof
+  sorry
+
+-- Translation invariance and scaling (Mathlib's map_add_left_eq_self and
+-- Real.volume_preimage_mul_left / Real.smul_map_volume_mul_left).
+theorem realVolume.translate (S : Set, c : Real)
+  requires set : MeasurableSet(realMeasurableSpace, S)
+  shows realVolume(realTranslate(S, c)) = realVolume(S)
+proof
+  sorry
+
+theorem realVolume.dilate (S : Set, c : Real)
+  requires set : MeasurableSet(realMeasurableSpace, S)
+  shows realVolume(realDilate(S, c)) = ennMul(abs(c), realVolume(S))
+proof
+  sorry
+
+theorem realVolume.sigma_finite
+  shows SigmaFinite(realMeasurableSpace, realVolume)
+proof
+  sorry
+
+theorem realVolume.regular
+  shows RegularMeasure(realLine, realVolume) ∧ OpenPositive(realLine, realVolume)
+proof
+  sorry
+
+-- Section: Lebesgue measure on ℝⁿ
+theorem lebesgueOuterMeasure.outer (n : Nat)
+  shows OuterMeasure(functionSpace(n, ℝ), lebesgueOuterMeasure(n))
+proof
+  sorry
+
+theorem lebesgueOuterMeasure.borel_caratheodory (n : Nat)
+  shows MeasurableSpace.sets(euclideanMeasurableSpace(n)) ⊆
+    caratheodorySets(functionSpace(n, ℝ), lebesgueOuterMeasure(n))
+proof
+  sorry
+
+theorem euclideanVolume.measure (n : Nat)
+  shows Measure(euclideanMeasurableSpace(n), euclideanVolume(n))
+proof
+  sorry
+
+-- The volume of a box is the product of its side lengths.
+theorem euclideanVolume.box (n : Nat, a b : Set)
+  requires lower : a ∈ functionSpace(n, ℝ)
+  requires upper : b ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(boxSet(n, a, b)) = boxVolume(n, a, b)
+proof
+  sorry
+
+-- Mathlib's volume_pi_pi and Measure.pi_pi: the volume of a product of
+-- Borel sets of ℝ is the product of their volumes, in [0, ∞].
+theorem euclideanVolume.pi_set_null (n : Nat, S : Set)
+  requires sets : ∀ i ∈ n, MeasurableSet(realMeasurableSpace, S(i))
+  requires null : ∃ i ∈ n, realVolume(S(i)) = realZero
+  shows euclideanVolume(n)(piSet(n, ℝ, S)) = realZero
+proof
+  sorry
+
+theorem euclideanVolume.pi_set_finite (n : Nat, S : Set)
+  requires sets : ∀ i ∈ n, MeasurableSet(realMeasurableSpace, S(i))
+  requires finite : ∀ i ∈ n, realVolume(S(i)) ≠ ennTop
+  shows euclideanVolume(n)(piSet(n, ℝ, S)) =
+    finiteRingProduct(n, ℝ, realAdd, realZero, realNeg, realMul, realOne,
+      measureSequence(realVolume, S))
+proof
+  sorry
+
+-- Mathlib's Measure.pi_univ / volume_pi_eq_dirac: ℝ⁰ is one point of
+-- mass 1.
+theorem euclideanVolume.zero_dimension
+  shows euclideanVolume(0)(functionSpace(0, ℝ)) = realOne
+proof
+  sorry
+
+-- ℝ and ℝ¹ (Mathlib's volume_preserving_funUnique).
+theorem realToVector.measure_preserving
+  shows MeasurePreserving(realToVector, realMeasurableSpace, realVolume,
+    euclideanMeasurableSpace(1), euclideanVolume(1))
+proof
+  sorry
+
+theorem euclideanVolume.translate (n : Nat, S c : Set)
+  requires set : MeasurableSet(euclideanMeasurableSpace(n), S)
+  requires vector : c ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(vectorTranslate(n, S, c)) = euclideanVolume(n)(S)
+proof
+  sorry
+
+-- Mathlib's Measure.addHaar_smul: dilating by c multiplies volume by |c|ⁿ.
+theorem euclideanVolume.dilate (n : Nat, S : Set, c : Real)
+  requires set : MeasurableSet(euclideanMeasurableSpace(n), S)
+  shows euclideanVolume(n)(vectorDilate(n, S, c)) =
+    ennMul(abs(c) ^ n, euclideanVolume(n)(S))
+proof
+  sorry
+
+theorem euclideanVolume.sigma_finite (n : Nat)
+  shows SigmaFinite(euclideanMeasurableSpace(n), euclideanVolume(n))
+proof
+  sorry
+
+theorem euclideanVolume.regular (n : Nat)
+  shows RegularMeasure(euclideanTopology(n), euclideanVolume(n)) ∧
+    OpenPositive(euclideanTopology(n), euclideanVolume(n))
+proof
+  sorry
+
+-- Mathlib's Measure.ae_eval_ne: coordinate hyperplanes are null in ℝⁿ.
+theorem euclideanVolume.hyperplane_null (n : Nat, i : Set, c : Real)
+  requires member : i ∈ n
+  shows euclideanVolume(n)(hyperplane(n, i, c)) = realZero
+proof
+  sorry
+
+-- Countable sets are null in ℝⁿ for n ≥ 1.
+theorem euclideanVolume.countable_null (n : Nat, C : Set)
+  requires positive : 0 < n
+  requires countable : Countable(C)
+  requires inside : C ⊆ functionSpace(n, ℝ)
+  shows NullSet(euclideanMeasurableSpace(n), euclideanVolume(n), C)
+proof
+  sorry
+
+-- Balls (Mathlib's addHaar_ball_center, addHaar_ball_mul_of_pos,
+-- measure_ball_pos, measure_ball_ne_top).
+theorem euclideanVolume.ball_center (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) =
+    euclideanVolume(n)(euclideanBall(n, zeroVector(n), r))
+proof
+  sorry
+
+theorem euclideanVolume.ball_scale (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  requires positive : realZero < r
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) =
+    ennMul(r ^ n, euclideanVolume(n)(euclideanBall(n, zeroVector(n), realOne)))
+proof
+  sorry
+
+theorem euclideanVolume.ball_positive_finite (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  requires positive : realZero < r
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) ≠ realZero ∧
+    euclideanVolume(n)(euclideanBall(n, c, r)) ≠ ennTop
+proof
+  sorry
+
+end Measures
