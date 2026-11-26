@@ -11,7 +11,7 @@
 
 module GRH.Zeta
 import GRH.Hurwitz
-import Grace.Cumulus.NumberTheory.Prime
+import Grace.Cumulus.NumberTheory.Factorization
 
 section Zeta
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
@@ -462,20 +462,2280 @@ proof
     (realLess.implies_le with close), cAbs
   linarith
 
+-- Section: The sieve
+-- m has no prime factor p < n lying in P.
+predicate SieveRough (P : Set, n m : Nat) :=
+  ∀ p, Prime(p) → p ∈ P → p < n → ¬(p ∣ m)
+
+theorem SieveRough.zero (P : Set) (m : Nat)
+  shows SieveRough(P, 0, m)
+proof
+  unfold SieveRough
+  intros p prime inP below divides
+  have pNat := Prime.natural with prime
+  arith
+
+theorem SieveRough.one (P : Set) (n : Nat)
+  shows SieveRough(P, n, 1)
+proof
+  unfold SieveRough
+  intros p prime inP below divides
+  have pNat := Prime.natural with prime
+  have above := Prime.greater_than_one with prime
+  have oneNonzero : (1:N) ≠ (0:N) by arith
+  have bound := divides.le with divides, oneNonzero
+  arith
+
+-- Passing n adds the one condition that n does not divide m.
+theorem SieveRough.succ (P : Set) (n m : Nat)
+  shows SieveRough(P, n + 1, m) ↔
+    SieveRough(P, n, m) ∧ (Prime(n) → n ∈ P → ¬(n ∣ m))
+proof
+  constructor
+  . intro rough
+    constructor
+    . unfold SieveRough
+      intros p prime inP below
+      have pNat := Prime.natural with prime
+      have wider : p < n + 1 by arith
+      exact rough with p, prime, inP, wider
+    . intros prime inP
+      have below : n < n + 1 by arith
+      exact rough with n, prime, inP, below
+  . intro both
+    obtain ⟨rough, last⟩ := both
+    unfold SieveRough
+    intros p prime inP below
+    have pNat := Prime.natural with prime
+    by_cases same : p = n
+    . rw same at prime
+      rw same at inP
+      rw same
+      exact last with prime, inP
+    . have less : p < n by arith
+      exact rough with p, prime, inP, less
+
+-- Below a prime q, q m has the prime factors of m.
+theorem SieveRough.prime_mul (P : Set) (q m : Nat)
+  requires prime : Prime(q)
+  shows SieveRough(P, q, q * m) ↔ SieveRough(P, q, m)
+proof
+  constructor
+  . intro rough
+    unfold SieveRough
+    intros p primeP inP below divides
+    have pNat := Prime.natural with primeP
+    have more := divides.multiply_left at p, m, q with *
+    exact rough with p, primeP, inP, below, more
+  . intro rough
+    unfold SieveRough
+    intros p primeP inP below divides
+    have pNat := Prime.natural with primeP
+    have split := Prime.divides_mul with primeP, divides
+    cases split with first | second
+    . have same := Prime.divides_prime with primeP, prime, first
+      rw same at below
+      arith
+    . exact rough with p, primeP, inP, below, second
+
+-- q does not divide M q + j for 0 < j < q.
+theorem divides.not_offset (q M j : Nat)
+  requires positive : 0 < j
+  requires below : j < q
+  shows ¬(q ∣ M * q + j)
+proof
+  intro divides
+  have self := divides.reflexive at q
+  have multiple := divides.multiply_left at q, q, M with *
+  have rest := divides.add_cancel_left with multiple, divides
+  have nonzero : j ≠ (0:N) by arith
+  have bound := divides.le with rest, nonzero
+  arith
+
+-- The sieved terms: t(k) when k + 1 has no prime factor below n in P,
+-- and 0 otherwise.
+defunique sieveTerm (t P : Set, n k : Nat) (w ∈ complexCarrier) :=
+  (SieveRough(P, n, k + 1) → w = t(k)) ∧
+  (¬SieveRough(P, n, k + 1) → w = ℂ[0])
+requires sequence : ComplexSequence(t)
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  have function : t : ℕ → complexCarrier by exact sequence
+  have term := FunctionBetween.apply_closed with function, kMember
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  by_cases rough : SieveRough(P, n, k + 1)
+  . witness t(k)
+    refine ⟨term, ?_, ?_⟩
+    . intro yes
+      rfl
+    . intro no
+      exfalso
+      exact no with rough
+  . witness ℂ[0]
+    refine ⟨zero, ?_, ?_⟩
+    . intro yes
+      exfalso
+      exact rough with yes
+    . intro no
+      rfl
+uniqueness
+  intros w wMember wValue v vMember vValue
+  obtain ⟨wYes, wNo⟩ := wValue
+  obtain ⟨vYes, vNo⟩ := vValue
+  by_cases rough : SieveRough(P, n, k + 1)
+  . rw [(wYes with rough), (vYes with rough)]
+  . rw [(wNo with rough), (vNo with rough)]
+
+defgraph sieveTerms (t P : Set, n : Nat) (k ∈ ℕ) : complexCarrier :=
+    sieveTerm(t, P, n, k)
+requires sequence : ComplexSequence(t)
+proof
+  have kNat := nat.omega.backward with member
+  obtain ⟨value, _⟩ := sieveTerm.selected at t, P, n, k with sequence
+  exact value
+
+theorem sieveTerms.rough (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  requires rough : SieveRough(P, n, k + 1)
+  shows sieveTerms(t, P, n)(k) = t(k)
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  obtain ⟨_, yes, _⟩ := sieveTerm.selected at t, P, n, k with sequence
+  rw (sieveTerms.value at t, P, n, k with sequence, kMember)
+  exact yes with rough
+
+theorem sieveTerms.sifted (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  requires sifted : ¬SieveRough(P, n, k + 1)
+  shows sieveTerms(t, P, n)(k) = ℂ[0]
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  obtain ⟨_, _, no⟩ := sieveTerm.selected at t, P, n, k with sequence
+  rw (sieveTerms.value at t, P, n, k with sequence, kMember)
+  exact no with sifted
+
+theorem sieveTerms.abs_le (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  shows complexAbs(sieveTerms(t, P, n)(k)) ≤ complexAbs(t(k))
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  have function : t : ℕ → complexCarrier by exact sequence
+  have term := FunctionBetween.apply_closed with function, kMember
+  have absReal := complexAbs.real with term
+  have nonnegative := complexAbs.nonnegative with term
+  by_cases rough : SieveRough(P, n, k + 1)
+  . rw (sieveTerms.rough with sequence, rough)
+    linarith
+  . rw (sieveTerms.sifted with sequence, rough)
+    have zero : ℂ[0] ∈ ℂ by typecheck
+    have absZero : complexAbs(ℂ[0]) = R[0]
+      apply (complexAbs.zero_iff with zero).backward
+      rfl
+    rw absZero
+    exact nonnegative
+
+theorem sieveTerms.absolute (t P : Set) (n : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  shows ComplexAbsolutelySummable(sieveTerms(t, P, n))
+proof
+  obtain ⟨sequence, summable⟩ := absolute
+  have terms := sieveTerms.function at t, P, n with sequence
+  have sieved : ComplexSequence(sieveTerms(t, P, n)) by exact terms
+  apply ComplexAbsolutelySummable.of_bound with sieved, summable
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  rw (complexAbsSequence.value with sequence, kMember)
+  exact sieveTerms.abs_le with sequence
+
+-- Nothing is sifted at stage 0.
+theorem sieveTerms.start (t P : Set)
+  requires sequence : ComplexSequence(t)
+  shows sieveTerms(t, P, 0) = t
+proof
+  have terms := sieveTerms.function at t, P, 0 with sequence
+  have function : t : ℕ → complexCarrier by exact sequence
+  apply FunctionBetween.ext with terms, function
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  have rough := SieveRough.zero at P, k + 1
+  exact sieveTerms.rough with sequence, rough
+
+-- A stage at a number that is not a prime of P changes nothing.
+theorem sieveTerms.skip (t P : Set) (n : Nat)
+  requires sequence : ComplexSequence(t)
+  requires skip : ¬(Prime(n) ∧ n ∈ P)
+  shows sieveTerms(t, P, n + 1) = sieveTerms(t, P, n)
+proof
+  have next := sieveTerms.function at t, P, n + 1 with sequence
+  have this := sieveTerms.function at t, P, n with sequence
+  apply FunctionBetween.ext with next, this
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  have step := SieveRough.succ at P, n, k + 1
+  by_cases rough : SieveRough(P, n, k + 1)
+  . have vacuous : Prime(n) → n ∈ P → ¬(n ∣ k + 1)
+      intros prime inP
+      exfalso
+      exact skip with ⟨prime, inP⟩
+    have roughNext := step.backward with ⟨rough, vacuous⟩
+    rw [(sieveTerms.rough with sequence, roughNext),
+      (sieveTerms.rough with sequence, rough)]
+  . have siftedNext : ¬SieveRough(P, n + 1, k + 1)
+      intro roughNext
+      obtain ⟨roughHere, _⟩ := step.forward with roughNext
+      exact rough with roughHere
+    rw [(sieveTerms.sifted with sequence, siftedNext),
+      (sieveTerms.sifted with sequence, rough)]
+
+-- What the stage at q = r + 1 removes.
+defgraph sieveRemoved (t P : Set, n : Nat) (k ∈ ℕ) : complexCarrier :=
+  ℂ[sieveTerms(t, P, n)(k) - sieveTerms(t, P, n + 1)(k)]
+requires sequence : ComplexSequence(t)
+proof
+  have first := FunctionBetween.apply_closed with
+    (sieveTerms.function at t, P, n with sequence), member
+  have second := FunctionBetween.apply_closed with
+    (sieveTerms.function at t, P, n + 1 with sequence), member
+  typecheck
+
+-- The stage at a prime q = r + 1 of P multiplies the sum by 1 − t(r),
+-- when t(q m − 1) = t(q − 1) t(m − 1).
+theorem sieveTerms.step (t P D : Set) (r : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires prime : Prime(r + 1)
+  requires inP : r + 1 ∈ P
+  requires multiplicative : ∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)]
+  requires sums : ComplexSumsTo(sieveTerms(t, P, r + 1), D)
+  shows ComplexSumsTo(sieveTerms(t, P, r + 1 + 1), ℂ[(1 - t(r)) * D])
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, _⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have rMember : r ∈ ℕ := nat.omega.forward at r with *
+  have tr := FunctionBetween.apply_closed with function, rMember
+  have dMember := ComplexSumsTo.member with sums
+  have nextAbsolute := sieveTerms.absolute at t, P, r + 1 + 1 with absolute
+  have nextSummable := ComplexAbsolutelySummable.summable with nextAbsolute
+  obtain ⟨T, tMember, nextSums⟩ := nextSummable
+  have removedFunction := sieveRemoved.function at t, P, r + 1 with sequence
+  have removedSequence : ComplexSequence(sieveRemoved(t, P, r + 1))
+    by exact removedFunction
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  have zeroSums := complexZeroSeries.sums
+  have zeroFunction := complexFunctionConst.function at ℂ[0], ℕ with zero
+  have thisFunction := sieveTerms.function at t, P, r + 1 with sequence
+  have nextFunction := sieveTerms.function at t, P, r + 1 + 1 with sequence
+  have terms : ∀ m ∈ ℕ, sieveRemoved(t, P, r + 1)(m) =
+      ℂ[sieveTerms(t, P, r + 1)(m) - sieveTerms(t, P, r + 1 + 1)(m) -
+        0 * complexFunctionConst(ℂ[0], ℕ)(m)]
+    intros m mMember
+    have first := FunctionBetween.apply_closed with thisFunction, mMember
+    have second := FunctionBetween.apply_closed with nextFunction, mMember
+    rw [(sieveRemoved.value with sequence, mMember),
+      (complexFunctionConst.value with zero, mMember)]
+    ring
+  have difference := ComplexSumsTo.combination with sums, nextSums, zeroSums,
+    zero, removedSequence, terms
+  have removedSummable : ComplexSummable(sieveRemoved(t, P, r + 1))
+    have total : ℂ[D - T - 0 * 0] ∈ ℂ by typecheck
+    exact ⟨ℂ[D - T - 0 * 0], total, difference⟩
+  -- the removed terms sit at the multiples of q
+  have placed : ∀ j ∈ ℕ, sieveRemoved(t, P, r + 1)((r + 1) * j + r) =
+      ℂ[t(r) * sieveTerms(t, P, r + 1)(j)]
+    intros j jMember
+    have jNat := nat.omega.backward with jMember
+    have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+    have position : (r + 1) * j + r ∈ ℕ by typecheck
+    have divides : r + 1 ∣ (r + 1) * (j + 1)
+      have self := divides.reflexive at r + 1
+      exact divides.multiply_right with self
+    have siftedNext : ¬SieveRough(P, r + 1 + 1, (r + 1) * j + r + 1)
+      intro roughNext
+      obtain ⟨_, last⟩ := (SieveRough.succ at P, r + 1,
+        (r + 1) * j + r + 1).forward with roughNext
+      rw index at last
+      exact last with prime, inP, divides
+    have mulRough := SieveRough.prime_mul at P, r + 1, j + 1 with prime
+    rw [(sieveRemoved.value with sequence, position),
+      (sieveTerms.sifted with sequence, siftedNext)]
+    by_cases rough : SieveRough(P, r + 1, j + 1)
+    . have roughHere : SieveRough(P, r + 1, (r + 1) * j + r + 1)
+        rw index
+        exact mulRough.backward with rough
+      rw [(sieveTerms.rough with sequence, roughHere),
+        (sieveTerms.rough with sequence, rough), (multiplicative with j,
+        jMember)]
+      have tj := FunctionBetween.apply_closed with function, jMember
+      ring
+    . have siftedHere : ¬SieveRough(P, r + 1, (r + 1) * j + r + 1)
+        rw index
+        intro roughProduct
+        exact rough with (mulRough.forward with roughProduct)
+      rw [(sieveTerms.sifted with sequence, siftedHere),
+        (sieveTerms.sifted with sequence, rough)]
+      ring
+  -- and vanish elsewhere
+  have elsewhere : ∀ M ∈ ℕ, ∀ k ∈ ℕ, k < r →
+      sieveRemoved(t, P, r + 1)(M * (r + 1) + k) = ℂ[0]
+    intros M mMember k kMember below
+    have mNat := nat.omega.backward with mMember
+    have kNat := nat.omega.backward with kMember
+    have position : M * (r + 1) + k ∈ ℕ by typecheck
+    have index : M * (r + 1) + k + 1 = M * (r + 1) + (k + 1) by arith
+    have positiveK : 0 < k + 1 by arith
+    have belowQ : k + 1 < r + 1 by arith
+    have notDivides := divides.not_offset at r + 1, M, k + 1 with positiveK,
+      belowQ
+    have step := SieveRough.succ at P, r + 1, M * (r + 1) + k + 1
+    rw (sieveRemoved.value with sequence, position)
+    by_cases rough : SieveRough(P, r + 1, M * (r + 1) + k + 1)
+    . have extra : Prime(r + 1) → r + 1 ∈ P →
+          ¬(r + 1 ∣ M * (r + 1) + k + 1)
+        intros _ unused
+        rw index
+        exact notDivides
+      have roughNext := step.backward with ⟨rough, extra⟩
+      rw [(sieveTerms.rough with sequence, rough),
+        (sieveTerms.rough with sequence, roughNext)]
+      have term := FunctionBetween.apply_closed with function, position
+      ring
+    . have siftedNext : ¬SieveRough(P, r + 1 + 1, M * (r + 1) + k + 1)
+        intro roughNext
+        obtain ⟨roughHere, _⟩ := step.forward with roughNext
+        exact rough with roughHere
+      rw [(sieveTerms.sifted with sequence, rough),
+        (sieveTerms.sifted with sequence, siftedNext)]
+      ring
+  have spread := ComplexSumsTo.spread with sums, tr, removedSummable,
+    removedSequence, placed, elsewhere
+  have same := ComplexSumsTo.unique with difference, spread
+  have value : T = ℂ[(1 - t(r)) * D]
+    linear_combination -same
+  rw ← value
+  exact nextSums
+
+-- Sifting by every prime below n multiplies the sum by the inverse of the
+-- n-th partial Euler product E(n), when t(0) = 1 and t is multiplicative
+-- at the primes.
+theorem sieveTerms.euler_stage (t E D : Set) (n : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires sums : ComplexSumsTo(t, D)
+  requires multiplicative : ∀ r ∈ ℕ, Prime(r + 1) →
+    (∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)])
+  requires notOne : ∀ r ∈ ℕ, Prime(r + 1) → t(r) ≠ ℂ[1]
+  requires sequenceE : ComplexSequence(E)
+  requires start : E((0:N)) = ℂ[1]
+  requires primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+    E(r + 1 + 1) = ℂ[E(r + 1) * complexInv(ℂ[1 - t(r)])]
+  requires otherStep : ∀ k ∈ ℕ, ¬Prime(k) → E(k + 1) = E(k)
+  shows ∃ Q ∈ ℂ, ℂ[E(n) * Q] = ℂ[1] ∧
+    ComplexSumsTo(sieveTerms(t, ℕ, n), ℂ[D * Q])
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, _⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have functionE : E : ℕ → complexCarrier by exact sequenceE
+  induction n
+  | zero =>
+    have dMember := ComplexSumsTo.member with sums
+    have one : ℂ[1] ∈ ℂ by typecheck
+    refine ⟨ℂ[1], one, ?_, ?_⟩
+    . rw start
+      ring
+    . rw (sieveTerms.start with sequence)
+      have same : ℂ[D * 1] = D by ring
+      rw same
+      exact sums
+  | succ(k) using ih =>
+    obtain ⟨Q, qMember, inverse, stage⟩ := ih
+    have dMember := ComplexSumsTo.member with sums
+    have kMember : k ∈ ℕ := nat.omega.forward at k with *
+    have eK := FunctionBetween.apply_closed with functionE, kMember
+    by_cases prime : Prime(k)
+    . have above := Prime.greater_than_one with prime
+      have atLeast : 1 ≤ k by arith
+      obtain ⟨r, rNat, split⟩ := LessEqual.exists_add with atLeast
+      have shape : k = r + 1 by arith
+      have next : succ(k) = r + 1 + 1 by arith
+      rw shape at prime
+      rw shape at stage
+      rw shape at inverse
+      rw next
+      have rMember : r ∈ ℕ := nat.omega.forward at r with *
+      have tr := FunctionBetween.apply_closed with function, rMember
+      have inP : r + 1 ∈ ℕ := nat.omega.forward at r + 1 with *
+      have product : ℂ[D * Q] ∈ ℂ by typecheck
+      have step := sieveTerms.step at t, ℕ, ℂ[D * Q], r with absolute, prime,
+        inP, (multiplicative with r, rMember, prime), stage
+      have factor : ℂ[1 - t(r)] ∈ ℂ by typecheck
+      have nonzero : ℂ[1 - t(r)] ≠ ℂ[0]
+        intro zero
+        apply notOne with r, rMember, prime
+        linear_combination -zero
+      have cancel := complexInv.mul_cancel with factor, nonzero
+      have inverseFactor := complexInv.member with factor
+      have newQ : ℂ[Q * (1 - t(r))] ∈ ℂ by typecheck
+      refine ⟨ℂ[Q * (1 - t(r))], newQ, ?_, ?_⟩
+      . rw (primeStep with r, rMember, prime)
+        have eR := FunctionBetween.apply_closed with functionE, inP
+        linear_combination (1 - t(r)) * complexInv(ℂ[1 - t(r)]) * inverse +
+          cancel
+      . have same : ℂ[D * (Q * (1 - t(r)))] = ℂ[(1 - t(r)) * (D * Q)] by ring
+        rw same
+        exact step
+    . have skip : ¬(Prime(k) ∧ k ∈ ℕ)
+        intro both
+        obtain ⟨isPrime, _⟩ := both
+        exact prime with isPrime
+      have index : succ(k) = k + 1 by arith
+      rw [index, (sieveTerms.skip with sequence, skip), (otherStep with k,
+        kMember, prime)]
+      exact ⟨Q, qMember, inverse, stage⟩
+
+-- Below n, only the first term survives the sieve by every prime.
+theorem sieveTerms.first_only (t : Set) (n i : Nat)
+  requires sequence : ComplexSequence(t)
+  requires first : t((0:N)) = ℂ[1]
+  shows i + 1 < n → complexPartialSum(sieveTerms(t, ℕ, n), i + 1) = ℂ[1]
+proof
+  have terms := sieveTerms.function at t, ℕ, n with sequence
+  induction i
+  | zero =>
+    intro below
+    have rough := SieveRough.one at ℕ, n
+    rw [natural.zero_add_one, natural.one_succ, complexPartialSum.succ,
+      complexPartialSum.zero]
+    rw ← natural.zero_add_one at rough
+    rw [(sieveTerms.rough with sequence, rough), first]
+    ring
+  | succ(j) using ih =>
+    intro below
+    have succNat : Nat(succ(j)) by typecheck
+    have earlier : j + 1 < n by arith
+    have index : succ(j) + 1 = succ(j + 1) by arith
+    rw [index, complexPartialSum.succ, (ih with earlier)]
+    have above : 1 < j + 1 + 1 by arith
+    obtain ⟨p, prime, divides⟩ := natural.exists_prime_divisor at j + 1 + 1
+      with above
+    have pNat := Prime.natural with prime
+    have nonzero : j + 1 + 1 ≠ (0:N) by arith
+    have bound := divides.le with divides, nonzero
+    have sifted : ¬SieveRough(ℕ, n, j + 1 + 1)
+      intro rough
+      have pMember : p ∈ ℕ := nat.omega.forward at p with *
+      have less : p < n by arith
+      exact rough with p, prime, pMember, less, divides
+    rw (sieveTerms.sifted with sequence, sifted)
+    ring
+
+-- The Euler product by the sieve. Let t be absolutely summable with sum
+-- D, t(0) = 1, t(q j + q − 1) = t(q − 1) t(j) for every prime q, and
+-- t(q − 1) ≠ 1; let E(n) be the partial products of (1 − t(q − 1))⁻¹ over
+-- the primes q < n. Then E(n) → D and D ≠ 0: the sieved sum
+-- D / E(n) differs from t(0) = 1 by at most the tail Σ_{k ≥ n−1} |t(k)|.
+theorem ComplexConvergesTo.euler_sieve (t E D : Set)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires sums : ComplexSumsTo(t, D)
+  requires first : t((0:N)) = ℂ[1]
+  requires multiplicative : ∀ r ∈ ℕ, Prime(r + 1) →
+    (∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)])
+  requires notOne : ∀ r ∈ ℕ, Prime(r + 1) → t(r) ≠ ℂ[1]
+  requires sequenceE : ComplexSequence(E)
+  requires start : E((0:N)) = ℂ[1]
+  requires primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+    E(r + 1 + 1) = ℂ[E(r + 1) * complexInv(ℂ[1 - t(r)])]
+  requires otherStep : ∀ k ∈ ℕ, ¬Prime(k) → E(k + 1) = E(k)
+  shows ComplexConvergesTo(E, D) ∧ D ≠ ℂ[0]
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, absSummable⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have functionE : E : ℕ → complexCarrier by exact sequenceE
+  have dMember := ComplexSumsTo.member with sums
+  have one : ℂ[1] ∈ ℂ by typecheck
+  obtain ⟨A, aReal, absSums⟩ := absSummable
+  have absConverges := SumsTo.converges with absSums
+  obtain ⟨_, absNear⟩ := absConverges
+  have absFunction := complexAbsSequence.function with sequence
+  have absSequence : RealSequence(complexAbsSequence(t)) by exact absFunction
+  -- The sum of the sieved terms at stage n is within any e of 1 for n
+  -- large.
+  have near : ∀ e ∈ ℝ, R[0] < e → ∃ n0 ∈ ℕ, ∀ n ∈ ℕ, n0 ≤ n → ∀ T ∈ ℂ,
+      ComplexSumsTo(sieveTerms(t, ℕ, n), T) → complexAbs(ℂ[T - 1]) ≤ e
+    intros e eMember ePositive
+    have two : R[0] ≤ R[2] by linarith
+    obtain ⟨d, dReal, dPositive, dSmall⟩ := real.small_multiple with two,
+      ePositive
+    obtain ⟨K, kMember, close⟩ := absNear with d, dReal, dPositive
+    have kNat := nat.omega.backward with kMember
+    have n0Member : K + 1 + 1 ∈ ℕ by typecheck
+    refine ⟨K + 1 + 1, n0Member, ?_⟩
+    intros n nMember later T tMember sieved
+    have nNat := nat.omega.backward with nMember
+    have sievedCopy := sieved
+    obtain ⟨sievedSequence, converges⟩ := sievedCopy
+    apply ComplexConvergesTo.abs_le at complexPrefixSums(sieveTerms(t, ℕ, n)),
+      T, ℂ[1], e, K + 1 with converges, one
+    intros M mMember atLeast
+    have mNat := nat.omega.backward with mMember
+    obtain ⟨B, bNat, mSplit⟩ := LessEqual.exists_add with atLeast
+    have below : K + 1 < n by arith
+    have prefix := sieveTerms.first_only at t, n, K with sequence, first
+    have prefixOne := prefix with below
+    rw [(complexPrefixSums.value with sievedSequence, mMember), mSplit,
+      (complexPartialSum.block with sievedSequence), prefixOne]
+    have blockFunction := complexBlock.function at sieveTerms(t, ℕ, n),
+      K + 1 with sievedSequence
+    have blockSequence : ComplexSequence(complexBlock(sieveTerms(t, ℕ, n),
+      K + 1)) by exact blockFunction
+    have blockSum := complexPartialSum.member at
+      complexBlock(sieveTerms(t, ℕ, n), K + 1), B with blockSequence
+    have shape : ℂ[1 + complexPartialSum(complexBlock(sieveTerms(t, ℕ, n),
+        K + 1), B) - 1] =
+      complexPartialSum(complexBlock(sieveTerms(t, ℕ, n), K + 1), B) by ring
+    rw shape
+    have shifted := shiftedRealSequence.sequence at complexAbsSequence(t),
+      K + 1 with absSequence
+    have bound := complexPartialSum.abs_le at
+      complexBlock(sieveTerms(t, ℕ, n), K + 1),
+      shiftedRealSequence(complexAbsSequence(t), K + 1), B with
+      blockSequence, shifted
+    have termwise : ∀ k ∈ ℕ, k < B →
+        complexAbs(complexBlock(sieveTerms(t, ℕ, n), K + 1)(k)) ≤
+        (shiftedRealSequence(complexAbsSequence(t), K + 1)[k]:R)
+      intros k kIn kBelow
+      have kNatural := nat.omega.backward with kIn
+      have position : K + 1 + k ∈ ℕ by typecheck
+      rw [(complexBlock.value with sievedSequence, kIn),
+        (shiftedRealSequence.value at complexAbsSequence(t), K + 1, k with
+        absSequence, kIn), (complexAbsSequence.value with sequence,
+        position)]
+      exact sieveTerms.abs_le with sequence
+    have estimate := bound with termwise
+    have tail := realPartialSum.tail at complexAbsSequence(t), K + 1, B with
+      absSequence
+    rw tail at estimate
+    have far : K ≤ K + 1 + B by arith
+    have farMember : K + 1 + B ∈ ℕ by typecheck
+    have nearMember : K + 1 ∈ ℕ by typecheck
+    have nearK : K ≤ K + 1 by arith
+    have farBall := close with K + 1 + B, farMember, far
+    have nearBall := close with K + 1, nearMember, nearK
+    rw (prefixSums.value with absSequence, farMember) at farBall
+    rw (prefixSums.value with absSequence, nearMember) at nearBall
+    obtain ⟨farLow, farHigh⟩ := openBall.order_characterization.forward with
+      farBall
+    obtain ⟨nearLow, nearHigh⟩ := openBall.order_characterization.forward
+      with nearBall
+    linarith
+  -- D ≠ 0, since the sieved sums D / E(n) tend to 1.
+  have oneLess : R[0] < R[1] by linarith
+  have two : R[0] ≤ R[2] by linarith
+  obtain ⟨h, hReal, hPositive, hSmall⟩ := real.small_multiple with two,
+    oneLess
+  have nonzero : D ≠ ℂ[0]
+    intro zero
+    obtain ⟨n0, n0Member, eventually⟩ := near with h, hReal, hPositive
+    have n0Nat := nat.omega.backward with n0Member
+    obtain ⟨Q, qMember, inverse, stage⟩ := sieveTerms.euler_stage at t, E, D,
+      n0 with absolute, sums, multiplicative, notOne, sequenceE, start,
+      primeStep, otherStep
+    have reflexive : n0 ≤ n0 by arith
+    have product : ℂ[D * Q] ∈ ℂ by typecheck
+    have bound := eventually with n0, n0Member, reflexive, ℂ[D * Q], product,
+      stage
+    rw zero at bound
+    have value : ℂ[0 * Q - 1] = ℂ[-1] by ring
+    rw [value, (complexAbs.neg with one), complexAbs.one] at bound
+    linarith
+  refine ⟨?_, nonzero⟩
+  -- E(n) − D = −E(n)(D/E(n) − 1), and |E(n)| ≤ 2|D| once D/E(n) is near 1.
+  apply (ComplexConvergesTo.iff_abs with sequenceE, dMember).backward
+  intros e eMember ePositive
+  have dAbs := complexAbs.nonnegative with dMember
+  have dAbsReal := complexAbs.real with dMember
+  have weight : R[0] ≤ R[2 * complexAbs(D)] by linarith
+  obtain ⟨g, gReal, gPositive, gSmall⟩ := real.small_multiple with weight,
+    ePositive
+  obtain ⟨c, cReal, cPositive, belowH, belowG⟩ := positiveRadius.common with
+    hPositive, gPositive
+  obtain ⟨n0, n0Member, eventually⟩ := near with c, cReal, cPositive
+  refine ⟨n0, n0Member, ?_⟩
+  intros n nMember later
+  have nNat := nat.omega.backward with nMember
+  obtain ⟨Q, qMember, inverse, stage⟩ := sieveTerms.euler_stage at t, E, D, n
+    with absolute, sums, multiplicative, notOne, sequenceE, start, primeStep,
+    otherStep
+  have product : ℂ[D * Q] ∈ ℂ by typecheck
+  have close := eventually with n, nMember, later, ℂ[D * Q], product, stage
+  have eN := FunctionBetween.apply_closed with functionE, nMember
+  have shape : ℂ[E(n) - D] = ℂ[-(E(n) * (D * Q - 1))]
+    linear_combination D * inverse
+  have diff : ℂ[D * Q - 1] ∈ ℂ by typecheck
+  have scaled : ℂ[E(n) * (D * Q - 1)] ∈ ℂ by typecheck
+  rw [shape, (complexAbs.neg with scaled), (complexAbs.mul with eN, diff)]
+  have modulus : R[complexAbs(E(n)) * complexAbs(ℂ[D * Q])] = complexAbs(D)
+    rw ← (complexAbs.mul with eN, product)
+    have same : ℂ[E(n) * (D * Q)] = D
+      linear_combination D * inverse
+    rw same
+  have negDiff : ℂ[-(D * Q - 1)] ∈ ℂ by typecheck
+  have triangle := complexAbs.triangle with product, negDiff
+  have oneShape : ℂ[D * Q + -(D * Q - 1)] = ℂ[1] by ring
+  rw [oneShape, complexAbs.one, (complexAbs.neg with diff)] at triangle
+  have eAbs := complexAbs.nonnegative with eN
+  have eAbsReal := complexAbs.real with eN
+  have productAbsReal := complexAbs.real with product
+  have diffAbsReal := complexAbs.real with diff
+  have lower : R[1] ≤ R[2 * complexAbs(ℂ[D * Q])] by linarith
+  have scaledLower := realLe.mul_left_of_nonnegative with lower, eAbs
+  have expand : R[complexAbs(E(n)) * (2 * complexAbs(ℂ[D * Q]))] =
+    R[2 * (complexAbs(E(n)) * complexAbs(ℂ[D * Q]))] by ring
+  have unit : R[complexAbs(E(n)) * 1] = complexAbs(E(n)) by ring
+  have eBound : complexAbs(E(n)) ≤ R[2 * complexAbs(D)] by linarith
+  have step1 := realLe.mul_left_of_nonnegative with close, eAbs
+  have cNonnegative : R[0] ≤ c by linarith
+  have step2 := realLe.mul_right_of_nonnegative with eBound, cNonnegative
+  have step3 := realLe.mul_left_of_nonnegative with belowG, weight
+  linarith
+
+-- The hypotheses of the sieve for ζ: t(n) = (n + 1)^(−s).
+theorem zeta.euler_sieve (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexConvergesTo(zetaEulerProducts(s), riemannZeta(s)) ∧
+    riemannZeta(s) ≠ ℂ[0]
+proof
+  obtain ⟨sums, absolute⟩ := zeta.series with hs, halfPlane
+  have products := zetaEulerProducts.function with hs
+  have sequenceE : ComplexSequence(zetaEulerProducts(s)) by exact products
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first : zetaSeriesTerms(s)((0:N)) = ℂ[1]
+    rw [(zetaSeriesTerms.value with hs, zeroMember), natural.zero_add_one,
+      (realCpow.nat_neg_one with hs)]
+  have multiplicative : ∀ r ∈ ℕ, Prime(r + 1) → (∀ j ∈ ℕ,
+      zetaSeriesTerms(s)((r + 1) * j + r) =
+        ℂ[zetaSeriesTerms(s)(r) * zetaSeriesTerms(s)(j)])
+    intros r rMember prime j jMember
+    have rNat := nat.omega.backward with rMember
+    have jNat := nat.omega.backward with jMember
+    have position : (r + 1) * j + r ∈ ℕ by typecheck
+    have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+    have positiveR : 1 ≤ r + 1 by arith
+    have positiveJ : 1 ≤ j + 1 by arith
+    rw [(zetaSeriesTerms.value with hs, position),
+      (zetaSeriesTerms.value with hs, rMember),
+      (zetaSeriesTerms.value with hs, jMember), index,
+      (realCpow.nat_neg_mul with positiveR, positiveJ, hs)]
+  have notOne : ∀ r ∈ ℕ, Prime(r + 1) → zetaSeriesTerms(s)(r) ≠ ℂ[1]
+    intros r rMember prime isOne
+    have rNat := nat.omega.backward with rMember
+    have above := Prime.greater_than_one with prime
+    have positive : 1 ≤ r + 1 by arith
+    rw (zetaSeriesTerms.value with hs, rMember) at isOne
+    have size := realCpow.nat_neg_abs at r + 1, s with positive, hs
+    rw [isOne, complexAbs.one] at size
+    have base := realNat.lt_of_lt with above
+    rw realNat.one at base
+    have reS : Real(complexRe(s)) by typecheck
+    have exponent : R[-complexRe(s)] < R[0] by linarith
+    have smaller := realRpow.lt_of_exponent with base, exponent
+    rw realRpow.zero at smaller
+    linarith
+  have start : zetaEulerProducts(s)((0:N)) = ℂ[1]
+    rw [(zetaEulerProducts.value with hs, zeroMember), zetaEulerProduct]
+  have primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+      zetaEulerProducts(s)(r + 1 + 1) = ℂ[zetaEulerProducts(s)(r + 1) *
+        complexInv(ℂ[1 - zetaSeriesTerms(s)(r)])]
+    intros r rMember prime
+    have rNat := nat.omega.backward with rMember
+    have here : r + 1 ∈ ℕ by typecheck
+    have next : r + 1 + 1 ∈ ℕ by typecheck
+    obtain ⟨_, primeValue, _⟩ := zetaEulerFactor.selected at s, r + 1 with hs
+    have index : r + 1 + 1 = succ(r + 1) by arith
+    rw [(zetaEulerProducts.value with hs, next),
+      (zetaEulerProducts.value with hs, here),
+      (zetaSeriesTerms.value with hs, rMember), index, zetaEulerProduct,
+      (primeValue with prime)]
+  have otherStep : ∀ k ∈ ℕ, ¬Prime(k) →
+      zetaEulerProducts(s)(k + 1) = zetaEulerProducts(s)(k)
+    intros k kMember notPrime
+    have kNat := nat.omega.backward with kMember
+    have next : k + 1 ∈ ℕ by typecheck
+    obtain ⟨_, _, otherValue⟩ := zetaEulerFactor.selected at s, k with hs
+    have index : k + 1 = succ(k) by arith
+    have product := zetaEulerProduct.member at s, k with hs
+    rw [(zetaEulerProducts.value with hs, next),
+      (zetaEulerProducts.value with hs, kMember), index, zetaEulerProduct,
+      (otherValue with notPrime)]
+    ring
+  exact ComplexConvergesTo.euler_sieve with absolute, sums, first,
+    multiplicative, notOne, sequenceE, start, primeStep, otherStep
+
 -- The Euler product: for re s > 1, ∏_{p < n} (1 − p^(−s))⁻¹ → ζ(s).
 theorem zeta.euler_product (s : Set)
   requires hs : s ∈ ℂ
   requires halfPlane : realOne < complexRe(s)
   shows ComplexConvergesTo(zetaEulerProducts(s), riemannZeta(s))
 proof
-  sorry
+  obtain ⟨converges, _⟩ := zeta.euler_sieve with hs, halfPlane
+  exact converges
 
 theorem zeta.nonzero_re_gt_one (s : Set)
   requires hs : s ∈ ℂ
   requires halfPlane : realOne < complexRe(s)
   shows riemannZeta(s) ≠ ℂ[0]
 proof
-  sorry
+  obtain ⟨_, nonzero⟩ := zeta.euler_sieve with hs, halfPlane
+  exact nonzero
+
+-- Section: Zero derivative on the unit disk
+-- A derivative bounds the increments: |f(A + h) − f(A) − D h| ≤ |h| for
+-- small h.
+theorem HasDerivativeAt.local_bound (f : Set) (D A : Real)
+  requires derivative : HasDerivativeAt(f, D, A)
+  shows ∃ W ∈ ℝ, R[0] < W ∧ (∀ h ∈ ℝ, h ≠ R[0] → abs(h) < W →
+    abs(R[f(R[A + h]) - f(A) - D * h]) ≤ abs(h))
+proof
+  have function := HasDerivativeAt.function with derivative
+  have limit := HasDerivativeAt.limit with derivative
+  have one : R[0] < R[1] by linarith
+  obtain ⟨W, wReal, wPositive, near⟩ := TendsToAt.eventually with limit, one
+  refine ⟨W, wReal, wPositive, ?_⟩
+  intros h hReal nonzero small
+  have upper := abs.upper at h
+  have lower := abs.upper_neg at h
+  have inBall : h ∈ openBall(R[0], W)
+    apply openBall.order_characterization.backward
+    constructor
+    . linarith
+    . linarith
+  have close := near with h, hReal, nonzero, inBall
+  rw (differenceQuotient.value at f, A, h with function) at close
+  obtain ⟨closeLow, closeHigh⟩ := openBall.order_characterization.forward
+    with close
+  have product := realDiv.mul_right at realSubValue(f(R[A + h]), f(A)), h
+    with nonzero
+  have relation : R[R[realSubValue(f(R[A + h]), f(A)) / h - D] * h] =
+      R[f(R[A + h]) - f(A) - D * h] by
+    linear_combination product
+  have absProduct := abs.mul at R[realSubValue(f(R[A + h]), f(A)) / h - D], h
+  rw relation at absProduct
+  rw absProduct
+  have quotientReal : Real(realSubValue(f(R[A + h]), f(A)) / h) by typecheck
+  unfold realSubValue at closeLow
+  unfold realSubValue at closeHigh
+  have lowerBound : R[-1] ≤ R[realSubValue(f(R[A + h]), f(A)) / h - D]
+    unfold realSubValue
+    linarith
+  have upperBound : R[realSubValue(f(R[A + h]), f(A)) / h - D] ≤ R[1]
+    unfold realSubValue
+    linarith
+  have qBound := abs.le_of_bounds with lowerBound, upperBound
+  have hAbs := abs.nonnegative at h
+  have scaled := realLe.mul_right_of_nonnegative with qBound, hAbs
+  have unit : R[1 * abs(h)] = abs(h) by ring
+  linarith
+
+-- Increments that are o(h) give derivative 0.
+theorem HasDerivativeAt.of_small_increments (f : Set) (A : Real)
+  requires function : f : ℝ → ℝ
+  requires small : ∀ e ∈ ℝ, R[0] < e → ∃ W ∈ ℝ, R[0] < W ∧
+    (∀ h ∈ ℝ, h ≠ R[0] → abs(h) < W →
+      abs(R[f(R[A + h]) - f(A)]) ≤ R[e * abs(h)])
+  shows HasDerivativeAt(f, R[0], A)
+proof
+  have quotient := differenceQuotient.function at f, A with function
+  unfold HasDerivativeAt
+  refine ⟨function, ?_⟩
+  unfold TendsToAt
+  refine ⟨quotient, ?_⟩
+  intros e realE positiveE
+  have two : R[0] ≤ R[2] by linarith
+  obtain ⟨g, gReal, gPositive, gSmall⟩ := real.small_multiple with two,
+    positiveE
+  obtain ⟨W, wReal, wPositive, bound⟩ := small with g, gReal, gPositive
+  refine ⟨W, wReal, wPositive, ?_⟩
+  intros x realX nonzero near
+  obtain ⟨above, below⟩ := openBall.order_characterization.forward with near
+  have distance : abs(x) < W
+    have sign := realLess.trichotomy at x, R[0]
+    cases sign with negative | rest
+    . have nonpositive : x ≤ R[0] by linarith
+      rw abs.of_nonpositive with nonpositive
+      linarith
+    . cases rest with zero | positiveX
+      . exfalso
+        exact nonzero with zero
+      . have nonnegative : R[0] ≤ x by linarith
+        rw abs.of_nonnegative with nonnegative
+        linarith
+  have estimate := bound with x, realX, nonzero, distance
+  rw (differenceQuotient.value at f, A, x with function)
+  have product := realDiv.mul_right at realSubValue(f(R[A + x]), f(A)), x
+    with nonzero
+  have relation : R[R[realSubValue(f(R[A + x]), f(A)) / x] * x] =
+      R[f(R[A + x]) - f(A)] by
+    linear_combination product
+  have absProduct := abs.mul at R[realSubValue(f(R[A + x]), f(A)) / x], x
+  rw relation at absProduct
+  have absPositive := abs.positive_of_ne with nonzero
+  have chain : R[abs(R[realSubValue(f(R[A + x]), f(A)) / x]) * abs(x)] ≤
+      R[g * abs(x)]
+    rw ← absProduct
+    exact estimate
+  have cancelled := realLe.mul_right_cancel_positive with absPositive, chain
+  have upper := abs.upper at R[realSubValue(f(R[A + x]), f(A)) / x]
+  have lower := abs.upper_neg at R[realSubValue(f(R[A + x]), f(A)) / x]
+  have quotientReal : Real(realSubValue(f(R[A + x]), f(A)) / x) by typecheck
+  have lowerBound : R[0 - e] < realSubValue(f(R[A + x]), f(A)) / x by
+    linarith
+  have upperBound : realSubValue(f(R[A + x]), f(A)) / x < R[0 + e] by
+    linarith
+  unfold realSubValue at lowerBound
+  unfold realSubValue at upperBound
+  apply openBall.order_characterization.backward
+  unfold realSubValue
+  exact ⟨lowerBound, upperBound⟩
+
+-- |sin(A + h) − sin A| ≤ 2|h| for small h.
+theorem realSin.local_lipschitz (A : Real)
+  shows ∃ W ∈ ℝ, R[0] < W ∧ (∀ h ∈ ℝ, abs(h) < W →
+    abs(R[realSin(R[A + h]) - realSin(A)]) ≤ R[2 * abs(h)])
+proof
+  have derivative := realSin.derivative at A
+  obtain ⟨W, wReal, wPositive, bound⟩ := HasDerivativeAt.local_bound with
+    derivative
+  refine ⟨W, wReal, wPositive, ?_⟩
+  intros h hReal small
+  have hAbs := abs.nonnegative at h
+  by_cases zero : h = R[0]
+  . rw zero
+    have same : R[A + 0] = A by ring
+    rw same
+    have vanish : R[realSin(A) - realSin(A)] = R[0] by ring
+    rw [vanish, abs.zero]
+    linarith
+  . have estimate := bound with h, hReal, zero, small
+    have cosBound := realCos.abs_le_one at A
+    have cosReal := realCos.real at A
+    have sinReal := realSin.real at A
+    have sinMoved := realSin.real at R[A + h]
+    have linear := abs.mul at realCos(A), h
+    have linearBound := realLe.mul_right_of_nonnegative with cosBound, hAbs
+    have triangle := abs.triangle at R[realSin(R[A + h]) - realSin(A) -
+      realCos(A) * h], R[realCos(A) * h]
+    have regroup : R[realSin(R[A + h]) - realSin(A) - realCos(A) * h +
+        realCos(A) * h] = R[realSin(R[A + h]) - realSin(A)] by ring
+    rw regroup at triangle
+    have unit : R[1 * abs(h)] = abs(h) by ring
+    linarith
+
+-- sin(t) z stays in the unit disk with z.
+theorem complexDisk.sin_scale (t z : Set)
+  requires ht : t ∈ ℝ
+  requires hz : z ∈ complexDisk(ℂ[0], R[1])
+  shows ℂ[complexOfReal(realSin(t)) * z] ∈ complexDisk(ℂ[0], R[1])
+proof
+  obtain ⟨zMember, near⟩ := complexDisk.membership.forward with hz
+  have tReal : Real(t) by exact ht
+  have sinMember := complexOfReal.mem at realSin(t)
+  have point : ℂ[complexOfReal(realSin(t)) * z] ∈ ℂ by typecheck
+  apply complexDisk.membership.backward
+  refine ⟨point, ?_⟩
+  have shift : ℂ[complexOfReal(realSin(t)) * z - 0] =
+    ℂ[complexOfReal(realSin(t)) * z] by ring
+  have shiftZ : ℂ[z - 0] = z by ring
+  rw shiftZ at near
+  rw [shift, (complexAbs.mul with sinMember, zMember), complexAbs.of_real]
+  have sinBound := realSin.abs_le_one at t
+  have zAbs := complexAbs.nonnegative with zMember
+  have zAbsReal := complexAbs.real with zMember
+  have sinAbsReal := abs.real at realSin(t)
+  have scaled := realLe.mul_right_of_nonnegative with sinBound, zAbs
+  have unit : R[1 * complexAbs(z)] = complexAbs(z) by ring
+  linarith
+
+-- The path t ↦ Re(c H(sin(t) z)) through the unit disk.
+defgraph diskPath (H c z : Set) (t ∈ ℝ) : ℝ :=
+  complexRe(ℂ[c * H(ℂ[complexOfReal(realSin(t)) * z])])
+requires values : ComplexValuedOn(H, complexDisk(ℂ[0], R[1]))
+requires hc : c ∈ complexCarrier
+requires hz : z ∈ complexDisk(ℂ[0], R[1])
+proof
+  have inside := complexDisk.sin_scale with member, hz
+  have value := values with inside
+  have product : ℂ[c * H(ℂ[complexOfReal(realSin(t)) * z])] ∈ ℂ by typecheck
+  exact complexRe.real with product
+
+-- A function with derivative 0 on the unit disk is constant there.
+theorem complexDisk.constant_of_zero_derivative (H z : Set)
+  requires derivative : ∀ a ∈ complexDisk(ℂ[0], R[1]),
+    HasComplexDerivativeAt(H, complexDisk(ℂ[0], R[1]), ℂ[0], a)
+  requires hz : z ∈ complexDisk(ℂ[0], R[1])
+  shows H(z) = H(ℂ[0])
+proof
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  have zeroDisk := complexDisk.center with zeroMember, oneReal, onePositive
+  obtain ⟨_, _, _, values, _⟩ := derivative with ℂ[0], zeroDisk
+  obtain ⟨zMember, zNear⟩ := complexDisk.membership.forward with hz
+  have shiftZ : ℂ[z - 0] = z by ring
+  rw shiftZ at zNear
+  have hzValue := values with z, hz
+  have h0Value := values with ℂ[0], zeroDisk
+  have u : ℂ[H(z) - H(ℂ[0])] ∈ ℂ by typecheck
+  have cMember := FunctionBetween.apply_closed with complexConj.function, u
+  have pathFunction := diskPath.function at H,
+    complexConj(ℂ[H(z) - H(ℂ[0])]), z with values, cMember, hz
+  have cAbs := complexAbs.nonnegative with cMember
+  have cAbsReal := complexAbs.real with cMember
+  have zAbs := complexAbs.nonnegative with zMember
+  have zAbsReal := complexAbs.real with zMember
+  have flat : ∀ C ∈ ℝ, HasDerivativeAt(diskPath(H,
+      complexConj(ℂ[H(z) - H(ℂ[0])]), z), R[0], C)
+    intros C cReal
+    apply HasDerivativeAt.of_small_increments with pathFunction
+    intros e eReal ePositive
+    have here := complexDisk.sin_scale with cReal, hz
+    obtain ⟨hereMember, _⟩ := complexDisk.membership.forward with here
+    obtain ⟨_, _, _, _, close⟩ := derivative with
+      ℂ[complexOfReal(realSin(C)) * z], here
+    have weight : R[0] ≤ R[2 * complexAbs(complexConj(ℂ[H(z) - H(ℂ[0])]))]
+      by linarith
+    obtain ⟨ε, εReal, εPositive, εSmall⟩ := real.small_multiple with weight,
+      ePositive
+    obtain ⟨δ, δReal, δPositive, near⟩ := close with ε, εReal, εPositive
+    have two : R[0] ≤ R[2] by linarith
+    obtain ⟨η, ηReal, ηPositive, ηSmall⟩ := real.small_multiple with two,
+      δPositive
+    obtain ⟨V, vReal, vPositive, sinBound⟩ := realSin.local_lipschitz at C
+    obtain ⟨W, wReal, wPositive, belowV, belowη⟩ := positiveRadius.common
+      with vPositive, ηPositive
+    refine ⟨W, wReal, wPositive, ?_⟩
+    intros h hReal nonzero small
+    have smallV : abs(h) < V by linarith
+    have sinStep := sinBound with h, hReal, smallV
+    have movedReal : R[C + h] ∈ ℝ by typecheck
+    have moved := complexDisk.sin_scale with movedReal, hz
+    obtain ⟨movedMember, _⟩ := complexDisk.membership.forward with moved
+    have sinHere := complexOfReal.mem at realSin(C)
+    have sinMoved := complexOfReal.mem at realSin(R[C + h])
+    have stepShape : ℂ[complexOfReal(realSin(R[C + h])) * z -
+        complexOfReal(realSin(C)) * z] =
+      ℂ[complexOfReal(R[realSin(R[C + h]) - realSin(C)]) * z]
+      rw [complexOfReal.add, complexOfReal.neg]
+      ring
+    have differenceMember := complexOfReal.mem at
+      R[realSin(R[C + h]) - realSin(C)]
+    have stepAbs : complexAbs(ℂ[complexOfReal(realSin(R[C + h])) * z -
+        complexOfReal(realSin(C)) * z]) =
+      R[abs(R[realSin(R[C + h]) - realSin(C)]) * complexAbs(z)]
+      rw [stepShape, (complexAbs.mul with differenceMember, zMember),
+        complexAbs.of_real]
+    have hAbs := abs.nonnegative at h
+    have sinDiffReal := abs.real at R[realSin(R[C + h]) - realSin(C)]
+    have sinDiffAbs := abs.nonnegative at R[realSin(R[C + h]) - realSin(C)]
+    have zBelowOne : complexAbs(z) ≤ R[1] by linarith
+    have stepScaled := realLe.mul_left_of_nonnegative with zBelowOne,
+      sinDiffAbs
+    have unitStep : R[abs(R[realSin(R[C + h]) - realSin(C)]) * 1] =
+      abs(R[realSin(R[C + h]) - realSin(C)]) by ring
+    have stepBound : complexAbs(ℂ[complexOfReal(realSin(R[C + h])) * z -
+        complexOfReal(realSin(C)) * z]) ≤ R[2 * abs(h)] by linarith
+    have closeEnough : complexAbs(ℂ[complexOfReal(realSin(R[C + h])) * z -
+        complexOfReal(realSin(C)) * z]) < δ by linarith
+    have estimate := near with ℂ[complexOfReal(realSin(R[C + h])) * z],
+      moved, closeEnough
+    have movedValue := values with ℂ[complexOfReal(realSin(R[C + h])) * z],
+      moved
+    have hereValue := values with ℂ[complexOfReal(realSin(C)) * z], here
+    have zeroTerm : ℂ[H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+        H(ℂ[complexOfReal(realSin(C)) * z]) -
+        0 * (ℂ[complexOfReal(realSin(R[C + h])) * z] -
+        ℂ[complexOfReal(realSin(C)) * z])] =
+      ℂ[H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+        H(ℂ[complexOfReal(realSin(C)) * z])] by ring
+    rw zeroTerm at estimate
+    rw [(diskPath.value at H, complexConj(ℂ[H(z) - H(ℂ[0])]), z, R[C + h]
+      with values, cMember, hz, movedReal), (diskPath.value at H,
+      complexConj(ℂ[H(z) - H(ℂ[0])]), z, C with values, cMember, hz, cReal)]
+    have first : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) *
+      H(ℂ[complexOfReal(realSin(R[C + h])) * z])] ∈ ℂ by typecheck
+    have second : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) *
+      H(ℂ[complexOfReal(realSin(C)) * z])] ∈ ℂ by typecheck
+    rw ← (complexRe.sub with first, second)
+    have change : ℂ[H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+      H(ℂ[complexOfReal(realSin(C)) * z])] ∈ ℂ by typecheck
+    have shape : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) *
+        H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+        complexConj(ℂ[H(z) - H(ℂ[0])]) *
+        H(ℂ[complexOfReal(realSin(C)) * z])] =
+      ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) *
+        (H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+        H(ℂ[complexOfReal(realSin(C)) * z]))] by ring
+    rw shape
+    have product : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) *
+        (H(ℂ[complexOfReal(realSin(R[C + h])) * z]) -
+        H(ℂ[complexOfReal(realSin(C)) * z]))] ∈ ℂ by typecheck
+    have reBound := complexAbs.re_le with product
+    rw (complexAbs.mul with cMember, change) at reBound
+    have changeAbs := complexAbs.nonnegative with change
+    have changeAbsReal := complexAbs.real with change
+    have stepMember : ℂ[complexOfReal(realSin(R[C + h])) * z -
+      complexOfReal(realSin(C)) * z] ∈ ℂ by typecheck
+    have stepNonnegative := complexAbs.nonnegative with stepMember
+    have stepReal := complexAbs.real with stepMember
+    have εNonnegative : R[0] ≤ ε by linarith
+    have bound1 := realLe.mul_left_of_nonnegative with stepBound, εNonnegative
+    have bound2 := realLe.mul_left_of_nonnegative with estimate, cAbs
+    have bound3 := realLe.mul_left_of_nonnegative with bound1, cAbs
+    have bound4 := realLe.mul_right_of_nonnegative with
+      (realLess.implies_le with εSmall), hAbs
+    have regroup : R[complexAbs(complexConj(ℂ[H(z) - H(ℂ[0])])) *
+        (ε * (2 * abs(h)))] =
+      R[2 * complexAbs(complexConj(ℂ[H(z) - H(ℂ[0])])) * ε * abs(h)] by ring
+    linarith
+  have halfPi := realHalfPi.positive
+  have endpoints := HasDerivativeAt.constant_of_zero at diskPath(H,
+    complexConj(ℂ[H(z) - H(ℂ[0])]), z), R[0], realHalfPi with halfPi, flat
+  have zeroReal : R[0] ∈ ℝ by typecheck
+  have halfPiReal : realHalfPi ∈ ℝ by typecheck
+  rw [(diskPath.value at H, complexConj(ℂ[H(z) - H(ℂ[0])]), z, R[0] with
+    values, cMember, hz, zeroReal), (diskPath.value at H,
+    complexConj(ℂ[H(z) - H(ℂ[0])]), z, realHalfPi with values, cMember, hz,
+    halfPiReal), realSin.zero, realSin.half_pi, complexOfReal.zero,
+    complexOfReal.one] at endpoints
+  have atZero : ℂ[0 * z] = ℂ[0] by ring
+  have atOne : ℂ[1 * z] = z by ring
+  rw [atZero, atOne] at endpoints
+  have first : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) * H(z)] ∈ ℂ by typecheck
+  have second : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) * H(ℂ[0])] ∈ ℂ by typecheck
+  have difference := complexRe.sub with first, second
+  have shape : ℂ[complexConj(ℂ[H(z) - H(ℂ[0])]) * H(z) -
+      complexConj(ℂ[H(z) - H(ℂ[0])]) * H(ℂ[0])] =
+    ℂ[(H(z) - H(ℂ[0])) * complexConj(ℂ[H(z) - H(ℂ[0])])] by ring
+  rw [shape, (complexConj.mul_self with u), complexOfReal.re,
+    ← (complexAbs.square with u)] at difference
+  have firstReal := complexRe.real with first
+  have secondReal := complexRe.real with second
+  have squareZero : R[complexAbs(ℂ[H(z) - H(ℂ[0])]) *
+    complexAbs(ℂ[H(z) - H(ℂ[0])])] = R[0] by linarith
+  have uAbs := complexAbs.nonnegative with u
+  have uAbsReal := complexAbs.real with u
+  have absZero : complexAbs(ℂ[H(z) - H(ℂ[0])]) = R[0]
+    have sign := realLess.trichotomy at R[0], complexAbs(ℂ[H(z) - H(ℂ[0])])
+    rcases sign with positive | same | negative
+    . have square := realMulValue.positive with positive, positive
+      linarith
+    . symm at same
+      exact same
+    . linarith
+  have vanish := (complexAbs.zero_iff with u).forward with absZero
+  linear_combination vanish
+
+-- Section: The logarithmic series
+-- The coefficients 1/n of Σ zⁿ/n; at n = 0 the coefficient is 1/0 = 0.
+defgraph logSeriesCoefficients (n ∈ ℕ) : complexCarrier :=
+    complexOfReal(realInvValue(realNat(n)))
+proof
+  have nNat := nat.omega.backward with member
+  exact complexOfReal.mem at realInvValue(realNat(n))
+
+theorem logSeriesCoefficients.sequence
+  shows ComplexSequence(logSeriesCoefficients)
+proof
+  have function := logSeriesCoefficients.function
+  exact function
+
+theorem logSeriesCoefficients.zero
+  shows logSeriesCoefficients((0:N)) = ℂ[0]
+proof
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  rw [(logSeriesCoefficients.value with zeroMember), realNat.zero,
+    realInvValue.zero, complexOfReal.zero]
+
+theorem logSeriesCoefficients.abs_le (n : Nat)
+  shows complexAbs(logSeriesCoefficients(n)) ≤ R[1]
+proof
+  have nMember : n ∈ ℕ := nat.omega.forward at n with *
+  rw [(logSeriesCoefficients.value with nMember), complexAbs.of_real]
+  by_cases zero : n = (0:N)
+  . rw [zero, realNat.zero, realInvValue.zero, abs.zero]
+    linarith
+  . have atLeast : 1 ≤ n by arith
+    have large := realNat.one_le with atLeast
+    have nonzero : realNat(n) ≠ R[0] by linarith
+    have cancel := realInvValue.mul_right at realNat(n) with nonzero
+    have positive : R[0] < realNat(n) by linarith
+    have inverseReal := realInvValue.real at realNat(n)
+    have inverseNonnegative : R[0] ≤ realInvValue(realNat(n))
+      by_contra negative
+      have below : realInvValue(realNat(n)) < R[0] by linarith
+      have product := realLess.mul_left_of_positive with below, positive
+      have zeroProduct : R[realNat(n) * 0] = R[0] by ring
+      linarith
+    rw (abs.of_nonnegative with inverseNonnegative)
+    have scaled := realLe.mul_left_of_nonnegative with large,
+      inverseNonnegative
+    have commute : R[realInvValue(realNat(n)) * realNat(n)] =
+      R[realNat(n) * realInvValue(realNat(n))] by ring
+    have unit : R[realInvValue(realNat(n)) * 1] = realInvValue(realNat(n))
+      by ring
+    linarith
+
+theorem logSeriesCoefficients.radius
+  shows PowerSeriesRadiusAtLeast(logSeriesCoefficients, R[1])
+proof
+  have sequence := logSeriesCoefficients.sequence
+  have oneReal : R[1] ∈ ℝ by typecheck
+  unfold PowerSeriesRadiusAtLeast
+  refine ⟨sequence, oneReal, ?_⟩
+  intros ρ ρReal nonnegative below
+  refine ⟨R[1], oneReal, ?_⟩
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  have coefficient := logSeriesCoefficients.abs_le at n
+  have term := FunctionBetween.apply_closed with sequence, nMember
+  have coefficientAbs := complexAbs.nonnegative with term
+  have coefficientReal := complexAbs.real with term
+  have atMostOne : ρ ≤ R[1] by linarith
+  have power := realPow.le_one at ρ, n with nonnegative, atMostOne
+  have powerNonnegative := realPow.nonnegative at ρ, n with nonnegative
+  unfold realPow at power
+  unfold realPow at powerNonnegative
+  have powerReal : Real(R[ρ ^ n]) by typecheck
+  have scaled := realLe.mul_right_of_nonnegative with coefficient,
+    powerNonnegative
+  have unit : R[1 * ρ ^ n] = R[ρ ^ n] by ring
+  linarith
+
+-- The derived coefficients (n + 1) · 1/(n + 1) are all 1.
+theorem logSeriesCoefficients.derivative (n : Nat)
+  shows powerSeriesDerivCoefficients(logSeriesCoefficients)(n) = ℂ[1]
+proof
+  have sequence := logSeriesCoefficients.sequence
+  have nMember : n ∈ ℕ := nat.omega.forward at n with *
+  have succMember : succ(n) ∈ ℕ by typecheck
+  rw [(powerSeriesDerivCoefficients.value with sequence, nMember),
+    (logSeriesCoefficients.value with succMember), ← complexOfReal.mul]
+  have positive := realNat.positive_succ at n
+  have nonzero : realNat(succ(n)) ≠ R[0] by linarith
+  rw [(realInvValue.mul_right at realNat(succ(n)) with nonzero),
+    complexOfReal.one]
+
+-- Σ zⁿ = 1/(1 − z), as the sum S of the derived series: S − z S = 1.
+theorem logSeries.derivative_value (z : Set)
+  requires hz : z ∈ complexDisk(ℂ[0], R[1])
+  shows ℂ[powerSeriesSum(powerSeriesDerivCoefficients(logSeriesCoefficients),
+    ℂ[0], R[1])(z) * (1 - z)] = ℂ[1]
+proof
+  have radius := logSeriesCoefficients.radius
+  have derivedRadius := powerSeriesDerivCoefficients.radius with radius
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have sums := powerSeriesSum.sums with derivedRadius, zeroMember, hz
+  have sumMember := ComplexSumsTo.member with sums
+  have derivedSequence := powerSeriesDerivCoefficients.function at
+    logSeriesCoefficients with (logSeriesCoefficients.sequence)
+  have shifted := complexShift.sums with sums
+  have zeroSums := complexZeroSeries.sums
+  have zeroFunction := complexFunctionConst.function at ℂ[0], ℕ with
+    zeroMember
+  have zeroSequence : ComplexSequence(complexFunctionConst(ℂ[0], ℕ))
+    by exact zeroFunction
+  have terms := powerSeriesTerms.function at
+    powerSeriesDerivCoefficients(logSeriesCoefficients), ℂ[0], z with
+    derivedSequence, zeroMember, zMember
+  have termSequence : ComplexSequence(powerSeriesTerms(
+    powerSeriesDerivCoefficients(logSeriesCoefficients), ℂ[0], z))
+    by exact terms
+  have shiftFunction := complexShift.function with termSequence
+  have shiftSequence : ComplexSequence(complexShift(powerSeriesTerms(
+    powerSeriesDerivCoefficients(logSeriesCoefficients), ℂ[0], z)))
+    by exact shiftFunction
+  have negZ : ℂ[-z] ∈ ℂ by typecheck
+  have pattern : ∀ m ∈ ℕ, complexShift(powerSeriesTerms(
+      powerSeriesDerivCoefficients(logSeriesCoefficients), ℂ[0], z))(m) =
+      ℂ[complexFunctionConst(ℂ[0], ℕ)(m) - complexFunctionConst(ℂ[0], ℕ)(m) -
+        (-z) * powerSeriesTerms(powerSeriesDerivCoefficients(
+        logSeriesCoefficients), ℂ[0], z)(m)]
+    intros m mMember
+    have mNat := nat.omega.backward with mMember
+    have next : succ(m) ∈ ℕ by typecheck
+    have zShift : ℂ[z - 0] ∈ ℂ by typecheck
+    have power := complexPow.member at ℂ[z - 0], m with zShift
+    rw [(complexShift.value with termSequence, mMember),
+      (powerSeriesTerms.value with derivedSequence, zeroMember, zMember, next),
+      (powerSeriesTerms.value with derivedSequence, zeroMember, zMember,
+      mMember), (complexFunctionConst.value with zeroMember, mMember),
+      logSeriesCoefficients.derivative, logSeriesCoefficients.derivative]
+    have ring := complexes.comm_ring
+    have ordinary := IsCommRing.ring with ring
+    have monoid := IsRing.multiplicative with ordinary
+    rw monoidPow.succ
+    ring
+  have scaled := ComplexSumsTo.combination with zeroSums, zeroSums, sums,
+    negZ, shiftSequence, pattern
+  have same := ComplexSumsTo.unique with shifted, scaled
+  have zeroIndex : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  rw [(powerSeriesTerms.value with derivedSequence, zeroMember, zMember,
+    zeroIndex), logSeriesCoefficients.derivative] at same
+  have first : ℂ[1 * (z - 0) ^ (0:N)] = ℂ[1] by ring
+  rw first at same
+  linear_combination same
+
+-- log 1 = 0.
+theorem complexLog.one
+  shows complexLog(ℂ[1]) = ℂ[0]
+proof
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have pi := realPi.positive
+  have imaginary : complexIm(ℂ[0]) = R[0]
+    rw [← complexOfReal.zero, complexOfReal.im]
+  have lower : R[-realPi] < complexIm(ℂ[0]) by linarith
+  have upper : complexIm(ℂ[0]) ≤ realPi by linarith
+  have logExp := complexLog.of_exp with zeroMember, lower, upper
+  rw complexExp.zero at logExp
+  exact logExp
+
+-- At z = 0 the logarithmic series sums to 0.
+theorem logSeries.at_zero
+  shows powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(ℂ[0]) = ℂ[0]
+proof
+  have radius := logSeriesCoefficients.radius
+  have sequence := logSeriesCoefficients.sequence
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  have zeroDisk := complexDisk.center with zeroMember, oneReal, onePositive
+  have sums := powerSeriesSum.sums with radius, zeroMember, zeroDisk
+  have terms := powerSeriesTerms.function at logSeriesCoefficients, ℂ[0],
+    ℂ[0] with sequence, zeroMember, zeroMember
+  have termSequence : ComplexSequence(powerSeriesTerms(logSeriesCoefficients,
+    ℂ[0], ℂ[0])) by exact terms
+  have vanishing : ∀ n ∈ ℕ, (0:N) < n →
+      powerSeriesTerms(logSeriesCoefficients, ℂ[0], ℂ[0])(n) = ℂ[0]
+    intros n nMember positive
+    have nNat := nat.omega.backward with nMember
+    have term := FunctionBetween.apply_closed with sequence, nMember
+    have atLeast : 1 ≤ n by arith
+    obtain ⟨m, mNat, shape⟩ := LessEqual.exists_add with atLeast
+    have succShape : 1 + m = succ(m) by arith
+    rw (powerSeriesTerms.value with sequence, zeroMember, zeroMember, nMember)
+    rw [shape, succShape]
+    have ring := complexes.comm_ring
+    have ordinary := IsCommRing.ring with ring
+    have monoid := IsRing.multiplicative with ordinary
+    have base : ℂ[0 - 0] ∈ ℂ by typecheck
+    have power := complexPow.member at ℂ[0 - 0], m with base
+    rw monoidPow.succ
+    ring
+  have first := ComplexSumsTo.first_only with termSequence, vanishing
+  have zeroIndex : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  rw [(powerSeriesTerms.value with sequence, zeroMember, zeroMember,
+    zeroIndex), logSeriesCoefficients.zero] at first
+  have value : ℂ[0 * (0 - 0) ^ (0:N)] = ℂ[0] by ring
+  rw value at first
+  exact ComplexSumsTo.unique with sums, first
+
+-- log(1 − z) = −Σ_{n≥1} zⁿ/n on the unit disk: both sides vanish at 0 and
+-- have the derivative −1/(1 − z).
+theorem logSeries.log (z : Set)
+  requires hz : z ∈ complexDisk(ℂ[0], R[1])
+  shows complexLog(ℂ[1 - z]) =
+    ℂ[-powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(z)]
+proof
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have one := complexOne.member
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  have isOpen := complexDisk.open with zeroMember, oneReal
+  have inside := ComplexOpen.subset with isOpen
+  have zeroDisk := complexDisk.center with zeroMember, oneReal, onePositive
+  have radius := logSeriesCoefficients.radius
+  -- the map w ↦ 1 − w on the disk, and where it goes
+  have constantAt := HasComplexDerivativeAt.const with isOpen, zeroDisk, one
+  have identityAt := HasComplexDerivativeAt.id with isOpen, zeroDisk
+  have negatedAt := HasComplexDerivativeAt.neg with identityAt
+  obtain ⟨_, _, _, valuesConstant, _⟩ := constantAt
+  obtain ⟨_, _, _, valuesNegated, _⟩ := negatedAt
+  have affineValue : ∀ w ∈ complexDisk(ℂ[0], R[1]),
+      complexFunctionAdd(complexFunctionConst(ℂ[1], complexDisk(ℂ[0], R[1])),
+        complexFunctionNeg(complexFunctionId(complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1])), complexDisk(ℂ[0], R[1]))(w) = ℂ[1 - w]
+    intros w hw
+    have wMember := inside with w, hw
+    obtain ⟨_, _, _, valuesId, _⟩ := HasComplexDerivativeAt.id with isOpen, hw
+    rw [(complexFunctionAdd.value with valuesConstant, valuesNegated, hw),
+      (complexFunctionConst.value with one, hw),
+      (complexFunctionNeg.value with valuesId, hw),
+      (complexFunctionId.value with inside, hw)]
+    ring
+  have maps : ∀ w ∈ complexDisk(ℂ[0], R[1]),
+      complexFunctionAdd(complexFunctionConst(ℂ[1], complexDisk(ℂ[0], R[1])),
+        complexFunctionNeg(complexFunctionId(complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1])), complexDisk(ℂ[0], R[1]))(w) ∈ slitPlane
+    intros w hw
+    obtain ⟨wMember, near⟩ := complexDisk.membership.forward with hw
+    have shiftW : ℂ[w - 0] = w by ring
+    rw shiftW at near
+    rw (affineValue with w, hw)
+    have point : ℂ[1 - w] ∈ ℂ by typecheck
+    apply slitPlane.membership.backward
+    refine ⟨point, ?_⟩
+    intro onSlit
+    obtain ⟨_, nonpositive⟩ := onSlit
+    have reBound := complexAbs.re_le with wMember
+    have upper := abs.upper at complexRe(w)
+    have reW := complexRe.real with wMember
+    rw [(complexRe.sub with one, wMember), ← complexOfReal.one,
+      complexOfReal.re] at nonpositive
+    linarith
+  have logValues : ∀ w ∈ complexDisk(ℂ[0], R[1]),
+      complexLog(complexFunctionAdd(complexFunctionConst(ℂ[1],
+        complexDisk(ℂ[0], R[1])), complexFunctionNeg(complexFunctionId(
+        complexDisk(ℂ[0], R[1])), complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1]))(w)) ∈ ℂ
+    intros w hw
+    rw (affineValue with w, hw)
+    have wMember := inside with w, hw
+    have point : ℂ[1 - w] ∈ ℂ by typecheck
+    exact complexLog.member with point
+  -- H = Σ zⁿ/n + log(1 − z) has derivative 0
+  have flat : ∀ a ∈ complexDisk(ℂ[0], R[1]),
+      HasComplexDerivativeAt(complexFunctionAdd(
+        powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1]),
+        complexFunctionComp(complexLog, complexFunctionAdd(
+        complexFunctionConst(ℂ[1], complexDisk(ℂ[0], R[1])),
+        complexFunctionNeg(complexFunctionId(complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1])), complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1])), complexDisk(ℂ[0], R[1])),
+        complexDisk(ℂ[0], R[1]), ℂ[0], a)
+    intros a ha
+    have aMember := inside with a, ha
+    have constant := HasComplexDerivativeAt.const with isOpen, ha, one
+    have identity := HasComplexDerivativeAt.id with isOpen, ha
+    have negated := HasComplexDerivativeAt.neg with identity
+    have affine := HasComplexDerivativeAt.add with constant, negated
+    have logDerivative := complexLog.has_derivative with (maps with a, ha)
+    have composite := HasComplexDerivativeAt.comp with affine, logDerivative,
+      maps
+    have series := powerSeriesSum.derivative with radius, zeroMember, ha
+    have total := HasComplexDerivativeAt.add with series, composite
+    rw (affineValue with a, ha) at total
+    have value := logSeries.derivative_value with ha
+    have difference : ℂ[1 - a] ∈ ℂ by typecheck
+    have nonzero : ℂ[1 - a] ≠ ℂ[0]
+      intro vanish
+      have inSlit := maps with a, ha
+      rw [(affineValue with a, ha), vanish] at inSlit
+      obtain ⟨_, notSlit⟩ := slitPlane.membership.forward with inSlit
+      apply notSlit
+      have imaginary : complexIm(ℂ[0]) = R[0]
+        rw [← complexOfReal.zero, complexOfReal.im]
+      have real : complexRe(ℂ[0]) = R[0]
+        rw [← complexOfReal.zero, complexOfReal.re]
+      rw [imaginary, real]
+      constructor
+      . rfl
+      . linarith
+    have cancel := complexInv.mul_cancel with difference, nonzero
+    have derivedMember := FunctionBetween.apply_closed with
+      (powerSeriesSum.function at powerSeriesDerivCoefficients(
+      logSeriesCoefficients), ℂ[0], R[1] with (powerSeriesDerivCoefficients.radius
+      with radius), zeroMember), ha
+    have inverse := complexInv.member with difference
+    have zeroValue : ℂ[powerSeriesSum(powerSeriesDerivCoefficients(
+        logSeriesCoefficients), ℂ[0], R[1])(a) + complexInv(ℂ[1 - a]) *
+        (0 + -1)] = ℂ[0]
+      linear_combination complexInv(ℂ[1 - a]) * value -
+        powerSeriesSum(powerSeriesDerivCoefficients(logSeriesCoefficients),
+        ℂ[0], R[1])(a) * cancel
+    rw zeroValue at total
+    exact total
+  have constant := complexDisk.constant_of_zero_derivative with flat, hz
+  obtain ⟨_, _, _, valuesSeries, _⟩ := powerSeriesSum.derivative with radius,
+    zeroMember, zeroDisk
+  obtain ⟨_, _, _, valuesComposite, _⟩ := HasComplexDerivativeAt.comp with
+    (HasComplexDerivativeAt.add with
+    (HasComplexDerivativeAt.const with isOpen, zeroDisk, one),
+    (HasComplexDerivativeAt.neg with
+    (HasComplexDerivativeAt.id with isOpen, zeroDisk))),
+    (complexLog.has_derivative with (maps with ℂ[0], zeroDisk)), maps
+  rw [(complexFunctionAdd.value with valuesSeries, valuesComposite, hz),
+    (complexFunctionAdd.value with valuesSeries, valuesComposite, zeroDisk),
+    (complexFunctionComp.value with logValues, hz),
+    (complexFunctionComp.value with logValues, zeroDisk),
+    (affineValue with z, hz), (affineValue with ℂ[0], zeroDisk),
+    logSeries.at_zero] at constant
+  have oneShape : ℂ[1 - 0] = ℂ[1] by ring
+  rw [oneShape, complexLog.one] at constant
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have seriesValue := valuesSeries with z, hz
+  have point : ℂ[1 - z] ∈ ℂ by typecheck
+  have logValue := complexLog.member with point
+  linear_combination constant
+
+-- |1 − z| = e^(−Re Σ zⁿ/n) on the unit disk.
+theorem logSeries.abs (z : Set)
+  requires hz : z ∈ complexDisk(ℂ[0], R[1])
+  shows complexAbs(ℂ[1 - z]) = realExp(R[-complexRe(
+    powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(z))])
+proof
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have radius := logSeriesCoefficients.radius
+  obtain ⟨zMember, near⟩ := complexDisk.membership.forward with hz
+  have shiftZ : ℂ[z - 0] = z by ring
+  rw shiftZ at near
+  have point : ℂ[1 - z] ∈ ℂ by typecheck
+  have one := complexOne.member
+  have nonzero : ℂ[1 - z] ≠ ℂ[0]
+    intro vanish
+    have same : z = ℂ[1] by linear_combination -vanish
+    rw [same, complexAbs.one] at near
+    linarith
+  have exp := complexLog.exp with point, nonzero
+  rw (logSeries.log with hz) at exp
+  have sum := powerSeriesSum.sums with radius, zeroMember, hz
+  have sumMember := ComplexSumsTo.member with sum
+  have negative : ℂ[-powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(z)]
+    ∈ ℂ by typecheck
+  rw [← exp, (complexExp.abs with negative), (complexRe.neg with sumMember)]
+
+-- The real parts of a convergent series sum to the real part of its sum.
+theorem ComplexSumsTo.re (u S : Set)
+  requires sums : ComplexSumsTo(u, S)
+  shows SumsTo(complexSequenceX(u), complexRe(S))
+proof
+  have sMember := ComplexSumsTo.member with sums
+  obtain ⟨sequence, converges⟩ := sums
+  obtain ⟨prefixSequence, _, xConverges, _⟩ := converges
+  have xSequence := complexSequenceX.sequence with sequence
+  have prefixes := prefixSums.sequence with xSequence
+  have xPrefixes := complexSequenceX.sequence with prefixSequence
+  have same : prefixSums(complexSequenceX(u)) =
+      complexSequenceX(complexPrefixSums(u))
+    apply FunctionBetween.ext with prefixes, xPrefixes
+    intros n nMember
+    have nNat := nat.omega.backward with nMember
+    rw [(prefixSums.value with xSequence, nMember), complexSequenceX.value,
+      (complexPrefixSums.value with sequence, nMember),
+      (complexPartialSum.x with sequence)]
+  rw [← same, (complexRe.x with sMember)] at xConverges
+  exact SumsTo.of_converges with xSequence, xConverges
+
+-- e^(3A + 4B + C) = (e^A)³ (e^B)⁴ e^C.
+theorem realExp.three_four_one (A B C : Real)
+  shows realExp(R[3 * A + 4 * B + C]) =
+    R[realExp(A) ^ 3 * realExp(B) ^ 4 * realExp(C)]
+proof
+  have shape : R[3 * A + 4 * B + C] = R[A + A + A + B + B + B + B + C] by ring
+  have expA := realExp.real at A
+  have expB := realExp.real at B
+  have expC := realExp.real at C
+  rw [shape, realExp.add, realExp.add, realExp.add, realExp.add, realExp.add,
+    realExp.add, realExp.add]
+  ring
+
+-- The term-wise inequality behind 3 + 4 cos θ + cos 2θ ≥ 0: for |u| = 1,
+-- 3 + 4 re u + re u² ≥ 0.
+theorem complexRe.three_four_one (u : Set)
+  requires hu : u ∈ ℂ
+  requires unit : complexAbs(u) = R[1]
+  shows R[0] ≤ R[3 + 4 * complexRe(u) + complexRe(ℂ[u * u])]
+proof
+  have square := complexAbs.square with hu
+  rw [unit, (complexNormSquared.parts with hu)] at square
+  rw (complexRe.mul with hu, hu)
+  have reReal := complexRe.real with hu
+  have imReal : complexIm(u) ∈ ℝ by typecheck
+  have shifted := realMulValue.square_nonnegative at R[1 + complexRe(u)]
+  have expand : R[(1 + complexRe(u)) * (1 + complexRe(u))] =
+    R[1 + 2 * complexRe(u) + complexRe(u) * complexRe(u)] by ring
+  have unitSquare : R[1 * 1] = R[1] by ring
+  linarith
+
+-- Mertens' inequality for one prime: for 0 ≤ x < 1 and |w| = 1,
+-- |1 − x|³ |1 − x w|⁴ |1 − x w²| ≤ 1, as the logarithm of the left side is
+-- −Σ xⁿ/n (3 + 4 re wⁿ + re w²ⁿ).
+theorem logSeries.three_four_one (x w : Set)
+  requires hx : x ∈ ℝ
+  requires nonnegative : R[0] ≤ x
+  requires below : x < R[1]
+  requires hw : w ∈ ℂ
+  requires unit : complexAbs(w) = R[1]
+  shows R[complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+    complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+    complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])] ≤ R[1]
+proof
+  have xReal : Real(x) by exact hx
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have radius := logSeriesCoefficients.radius
+  have sequence := logSeriesCoefficients.sequence
+  have xMember := complexOfReal.mem at x
+  have xAbs : complexAbs(complexOfReal(x)) = x
+    rw [complexAbs.of_real, (abs.of_nonnegative with nonnegative)]
+  have inDisk : ∀ v ∈ ℂ, complexAbs(v) = R[1] →
+      ℂ[complexOfReal(x) * v] ∈ complexDisk(ℂ[0], R[1])
+    intros v vMember vUnit
+    have point : ℂ[complexOfReal(x) * v] ∈ ℂ by typecheck
+    apply complexDisk.membership.backward
+    refine ⟨point, ?_⟩
+    have shift : ℂ[complexOfReal(x) * v - 0] = ℂ[complexOfReal(x) * v] by ring
+    rw [shift, (complexAbs.mul with xMember, vMember), xAbs, vUnit]
+    have unitX : R[x * 1] = x by ring
+    linarith
+  have one := complexOne.member
+  have ww : ℂ[w * w] ∈ ℂ by typecheck
+  have wwUnit : complexAbs(ℂ[w * w]) = R[1]
+    rw [(complexAbs.mul with hw, hw), unit]
+    ring
+  have diskOne := inDisk with ℂ[1], one, complexAbs.one
+  have diskW := inDisk with w, hw, unit
+  have diskWW := inDisk with ℂ[w * w], ww, wwUnit
+  have xShape : ℂ[complexOfReal(x) * 1] = complexOfReal(x) by ring
+  rw xShape at diskOne
+  rw [(logSeries.abs with diskOne), (logSeries.abs with diskW),
+    (logSeries.abs with diskWW)]
+  -- the three real series
+  have sumsOne := ComplexSumsTo.re with (powerSeriesSum.sums with radius,
+    zeroMember, diskOne)
+  have sumsW := ComplexSumsTo.re with (powerSeriesSum.sums with radius,
+    zeroMember, diskW)
+  have sumsWW := ComplexSumsTo.re with (powerSeriesSum.sums with radius,
+    zeroMember, diskWW)
+  have reOne := complexRe.real with (ComplexSumsTo.member with
+    (powerSeriesSum.sums with radius, zeroMember, diskOne))
+  have reW := complexRe.real with (ComplexSumsTo.member with
+    (powerSeriesSum.sums with radius, zeroMember, diskW))
+  have reWW := complexRe.real with (ComplexSumsTo.member with
+    (powerSeriesSum.sums with radius, zeroMember, diskWW))
+  have scaledOne := SumsTo.scale at complexSequenceX(powerSeriesTerms(
+    logSeriesCoefficients, ℂ[0], complexOfReal(x))), complexRe(
+    powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(complexOfReal(x))),
+    R[3] with sumsOne
+  have scaledW := SumsTo.scale at complexSequenceX(powerSeriesTerms(
+    logSeriesCoefficients, ℂ[0], ℂ[complexOfReal(x) * w])), complexRe(
+    powerSeriesSum(logSeriesCoefficients, ℂ[0], R[1])(ℂ[complexOfReal(x) *
+    w])), R[4] with sumsW
+  have pair := SumsTo.add with scaledOne, scaledW
+  have total := SumsTo.add with pair, sumsWW
+  have termsNonnegative : NonnegativeTerms(addSequence(addSequence(
+      mulSequence(constantSequence(R[3]), complexSequenceX(powerSeriesTerms(
+      logSeriesCoefficients, ℂ[0], complexOfReal(x)))),
+      mulSequence(constantSequence(R[4]), complexSequenceX(powerSeriesTerms(
+      logSeriesCoefficients, ℂ[0], ℂ[complexOfReal(x) * w])))),
+      complexSequenceX(powerSeriesTerms(logSeriesCoefficients, ℂ[0],
+      ℂ[complexOfReal(x) * (w * w)]))))
+    unfold NonnegativeTerms
+    intros n nMember
+    have nNat := nat.omega.backward with nMember
+    have point : ℂ[complexOfReal(x) * w] ∈ ℂ by typecheck
+    have pointWW : ℂ[complexOfReal(x) * (w * w)] ∈ ℂ by typecheck
+    have termsOne := powerSeriesTerms.function at logSeriesCoefficients,
+      ℂ[0], complexOfReal(x) with sequence, zeroMember, xMember
+    have termsW := powerSeriesTerms.function at logSeriesCoefficients,
+      ℂ[0], ℂ[complexOfReal(x) * w] with sequence, zeroMember, point
+    have termsWW := powerSeriesTerms.function at logSeriesCoefficients,
+      ℂ[0], ℂ[complexOfReal(x) * (w * w)] with sequence, zeroMember, pointWW
+    have seqOne : ComplexSequence(powerSeriesTerms(logSeriesCoefficients,
+      ℂ[0], complexOfReal(x))) by exact termsOne
+    have seqW : ComplexSequence(powerSeriesTerms(logSeriesCoefficients,
+      ℂ[0], ℂ[complexOfReal(x) * w])) by exact termsW
+    have seqWW : ComplexSequence(powerSeriesTerms(logSeriesCoefficients,
+      ℂ[0], ℂ[complexOfReal(x) * (w * w)])) by exact termsWW
+    have xOne := complexSequenceX.sequence with seqOne
+    have xW := complexSequenceX.sequence with seqW
+    have xWW := complexSequenceX.sequence with seqWW
+    have three := constantSequence.sequence at R[3]
+    have four := constantSequence.sequence at R[4]
+    -- the values
+    have power := complexPow.member at w, n with hw
+    have xPower := realPow.real at x, n
+    unfold realPow at xPower
+    have inverse := realInvValue.real at realNat(n)
+    have weightValue : ℂ[logSeriesCoefficients(n) * complexOfReal(x) ^ n] =
+        complexOfReal(R[realInvValue(realNat(n)) * x ^ n])
+      rw [(logSeriesCoefficients.value with nMember), complexOfReal.mul,
+        complexOfReal.pow]
+    have weightMember := complexOfReal.mem at R[realInvValue(realNat(n)) *
+      x ^ n]
+    have valueOne : complexSequenceX(powerSeriesTerms(logSeriesCoefficients,
+        ℂ[0], complexOfReal(x)))(n) = R[realInvValue(realNat(n)) * x ^ n]
+      rw [complexSequenceX.value, (powerSeriesTerms.value with sequence,
+        zeroMember, xMember, nMember)]
+      have shift : ℂ[complexOfReal(x) - 0] = complexOfReal(x) by ring
+      rw [shift, weightValue]
+      have member := complexOfReal.mem at R[realInvValue(realNat(n)) * x ^ n]
+      rw [(complexRe.x with member), complexOfReal.re]
+    have valueW : complexSequenceX(powerSeriesTerms(logSeriesCoefficients,
+        ℂ[0], ℂ[complexOfReal(x) * w]))(n) =
+        R[realInvValue(realNat(n)) * x ^ n * complexRe(ℂ[w ^ n])]
+      rw [complexSequenceX.value, (powerSeriesTerms.value with sequence,
+        zeroMember, point, nMember)]
+      have shift : ℂ[complexOfReal(x) * w - 0] = ℂ[complexOfReal(x) * w]
+        by ring
+      have coefficient := FunctionBetween.apply_closed with sequence, nMember
+      rw [shift, (complexPow.mul_base with xMember, hw)]
+      have regroup : ℂ[logSeriesCoefficients(n) * (complexOfReal(x) ^ n *
+          w ^ n)] = ℂ[(logSeriesCoefficients(n) * complexOfReal(x) ^ n) *
+          w ^ n] by ring
+      have member : ℂ[logSeriesCoefficients(n) * (complexOfReal(x) ^ n *
+        w ^ n)] ∈ ℂ by typecheck
+      rw [(complexRe.x with member), regroup, weightValue,
+        (complexRe.mul with weightMember, power), complexOfReal.re,
+        complexOfReal.im]
+      ring
+    have valueWW : complexSequenceX(powerSeriesTerms(logSeriesCoefficients,
+        ℂ[0], ℂ[complexOfReal(x) * (w * w)]))(n) =
+        R[realInvValue(realNat(n)) * x ^ n * complexRe(ℂ[w ^ n * w ^ n])]
+      rw [complexSequenceX.value, (powerSeriesTerms.value with sequence,
+        zeroMember, pointWW, nMember)]
+      have shift : ℂ[complexOfReal(x) * (w * w) - 0] =
+        ℂ[complexOfReal(x) * (w * w)] by ring
+      have coefficient := FunctionBetween.apply_closed with sequence, nMember
+      rw [shift, (complexPow.mul_base with xMember, ww),
+        (complexPow.mul_base with hw, hw)]
+      have regroup : ℂ[logSeriesCoefficients(n) * (complexOfReal(x) ^ n *
+          (w ^ n * w ^ n))] = ℂ[(logSeriesCoefficients(n) *
+          complexOfReal(x) ^ n) * (w ^ n * w ^ n)] by ring
+      have member : ℂ[logSeriesCoefficients(n) * (complexOfReal(x) ^ n *
+        (w ^ n * w ^ n))] ∈ ℂ by typecheck
+      have powerSquare : ℂ[w ^ n * w ^ n] ∈ ℂ by typecheck
+      rw [(complexRe.x with member), regroup, weightValue,
+        (complexRe.mul with weightMember, powerSquare), complexOfReal.re,
+        complexOfReal.im]
+      ring
+    have oneReal : Real(complexSequenceX(powerSeriesTerms(
+      logSeriesCoefficients, ℂ[0], complexOfReal(x)))(n)) by
+      rw valueOne
+      typecheck
+    have wReal : Real(complexSequenceX(powerSeriesTerms(
+      logSeriesCoefficients, ℂ[0], ℂ[complexOfReal(x) * w]))(n)) by
+      rw valueW
+      typecheck
+    have wwReal : Real(complexSequenceX(powerSeriesTerms(
+      logSeriesCoefficients, ℂ[0], ℂ[complexOfReal(x) * (w * w)]))(n)) by
+      rw valueWW
+      typecheck
+    have threeValue := constantSequence.value at R[3], n
+    have fourValue := constantSequence.value at R[4], n
+    have threeReal : Real(constantSequence(R[3])(n)) by
+      rw threeValue
+      typecheck
+    have fourReal : Real(constantSequence(R[4])(n)) by
+      rw fourValue
+      typecheck
+    have m3 := mulSequence.value at constantSequence(R[3]),
+      complexSequenceX(powerSeriesTerms(logSeriesCoefficients, ℂ[0],
+      complexOfReal(x))), n with three, xOne, threeReal, oneReal
+    have m4 := mulSequence.value at constantSequence(R[4]),
+      complexSequenceX(powerSeriesTerms(logSeriesCoefficients, ℂ[0],
+      ℂ[complexOfReal(x) * w])), n with four, xW, fourReal, wReal
+    have m3Sequence := mulSequence.sequence with three, xOne
+    have m4Sequence := mulSequence.sequence with four, xW
+    have m3Real : Real(mulSequence(constantSequence(R[3]), complexSequenceX(
+      powerSeriesTerms(logSeriesCoefficients, ℂ[0], complexOfReal(x))))(n))
+      by
+      rw m3
+      typecheck
+    have m4Real : Real(mulSequence(constantSequence(R[4]), complexSequenceX(
+      powerSeriesTerms(logSeriesCoefficients, ℂ[0], ℂ[complexOfReal(x) *
+      w])))(n)) by
+      rw m4
+      typecheck
+    have a34 := addSequence.value with m3Sequence, m4Sequence, m3Real, m4Real
+    have a34Sequence := addSequence.sequence with m3Sequence, m4Sequence
+    have a34Real : Real(addSequence(mulSequence(constantSequence(R[3]),
+      complexSequenceX(powerSeriesTerms(logSeriesCoefficients, ℂ[0],
+      complexOfReal(x)))), mulSequence(constantSequence(R[4]),
+      complexSequenceX(powerSeriesTerms(logSeriesCoefficients, ℂ[0],
+      ℂ[complexOfReal(x) * w]))))(n)) by
+      rw a34
+      typecheck
+    have aTotal := addSequence.value with a34Sequence, xWW, a34Real, wwReal
+    rw [aTotal, a34, m3, m4, threeValue, fourValue, valueOne, valueW, valueWW]
+    have unitPower : complexAbs(ℂ[w ^ n]) = R[1]
+      rw [(complexAbs.pow with hw), unit]
+      have onePower := realPow.one at n
+      unfold realPow at onePower
+      exact onePower
+    have bracket := complexRe.three_four_one with power, unitPower
+    have weightNonnegative : R[0] ≤ R[realInvValue(realNat(n)) * x ^ n]
+      have xPowerNonnegative := realPow.nonnegative at x, n with nonnegative
+      unfold realPow at xPowerNonnegative
+      by_cases zero : n = (0:N)
+      . rw [zero, realNat.zero, realInvValue.zero]
+        have vanish : R[0 * x ^ (0:N)] = R[0] by ring
+        rw vanish
+        linarith
+      . have atLeast : 1 ≤ n by arith
+        have large := realNat.one_le with atLeast
+        have nonzero : realNat(n) ≠ R[0] by linarith
+        have cancel := realInvValue.mul_right at realNat(n) with nonzero
+        have positive : R[0] < realNat(n) by linarith
+        have inverseNonnegative : R[0] ≤ realInvValue(realNat(n))
+          by_contra negative
+          have belowZero : realInvValue(realNat(n)) < R[0] by linarith
+          have product := realLess.mul_left_of_positive with belowZero,
+            positive
+          have zeroProduct : R[realNat(n) * 0] = R[0] by ring
+          linarith
+        exact realMulValue.nonnegative with inverseNonnegative,
+          xPowerNonnegative
+    have product := realMulValue.nonnegative with weightNonnegative, bracket
+    have rePower := complexRe.real with power
+    have rePowerSquare : complexRe(ℂ[w ^ n * w ^ n]) ∈ ℝ by typecheck
+    have expand : R[realInvValue(realNat(n)) * x ^ n *
+        (3 + 4 * complexRe(ℂ[w ^ n]) + complexRe(ℂ[w ^ n * w ^ n]))] =
+      R[3 * (realInvValue(realNat(n)) * x ^ n) + 4 * (realInvValue(realNat(n))
+        * x ^ n * complexRe(ℂ[w ^ n])) + realInvValue(realNat(n)) * x ^ n *
+        complexRe(ℂ[w ^ n * w ^ n])] by ring
+    rw ← expand
+    exact realLe.characterization.forward with product
+  have sumNonnegative := SumsTo.nonnegative with total, termsNonnegative
+  rw ← realExp.three_four_one
+  have exponent : R[3 * -complexRe(powerSeriesSum(logSeriesCoefficients,
+      ℂ[0], R[1])(complexOfReal(x))) + 4 * -complexRe(powerSeriesSum(
+      logSeriesCoefficients, ℂ[0], R[1])(ℂ[complexOfReal(x) * w])) +
+      -complexRe(powerSeriesSum(logSeriesCoefficients, ℂ[0],
+      R[1])(ℂ[complexOfReal(x) * (w * w)]))] ≤ R[0] by linarith
+  have monotone := (realExp.le_iff at R[3 * -complexRe(powerSeriesSum(
+    logSeriesCoefficients, ℂ[0], R[1])(complexOfReal(x))) + 4 *
+    -complexRe(powerSeriesSum(logSeriesCoefficients, ℂ[0],
+    R[1])(ℂ[complexOfReal(x) * w])) + -complexRe(powerSeriesSum(
+    logSeriesCoefficients, ℂ[0], R[1])(ℂ[complexOfReal(x) * (w * w)]))],
+    R[0]).backward with exponent
+  rw realExp.zero at monotone
+  exact monotone
+
+-- Section: The 3–4–1 inequality
+-- For one prime, in squared norms: (1 − x)⁻³ (1 − x w)⁻⁴ (1 − x w²)⁻¹ has
+-- |·|² ≥ 1.
+theorem eulerFactor.three_four_one (x w : Set)
+  requires hx : x ∈ ℝ
+  requires nonnegative : R[0] ≤ x
+  requires below : x < R[1]
+  requires hw : w ∈ ℂ
+  requires unit : complexAbs(w) = R[1]
+  shows R[1] ≤ R[complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) ^ 3 *
+    complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) ^ 4 *
+    complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)]))]
+proof
+  have xReal : Real(x) by exact hx
+  have bound := logSeries.three_four_one with hx, nonnegative, below, hw, unit
+  have xMember := complexOfReal.mem at x
+  have xAbs : complexAbs(complexOfReal(x)) = x
+    rw [complexAbs.of_real, (abs.of_nonnegative with nonnegative)]
+  have one := complexOne.member
+  have ww : ℂ[w * w] ∈ ℂ by typecheck
+  have wwUnit : complexAbs(ℂ[w * w]) = R[1]
+    rw [(complexAbs.mul with hw, hw), unit]
+    ring
+  -- 1 − x v ≠ 0 for |v| = 1
+  have away : ∀ v ∈ ℂ, complexAbs(v) = R[1] →
+      ℂ[1 - complexOfReal(x) * v] ≠ ℂ[0]
+    intros v vMember vUnit vanish
+    have same : ℂ[complexOfReal(x) * v] = ℂ[1] by linear_combination -vanish
+    have size := complexAbs.mul with xMember, vMember
+    rw [same, complexAbs.one, xAbs, vUnit] at size
+    have unitX : R[x * 1] = x by ring
+    linarith
+  have g1 : ℂ[1 - complexOfReal(x)] ∈ ℂ by typecheck
+  have g2 : ℂ[1 - complexOfReal(x) * w] ∈ ℂ by typecheck
+  have g3 : ℂ[1 - complexOfReal(x) * (w * w)] ∈ ℂ by typecheck
+  have nonzero1 : ℂ[1 - complexOfReal(x)] ≠ ℂ[0]
+    have shape : ℂ[1 - complexOfReal(x)] = ℂ[1 - complexOfReal(x) * 1]
+      by ring
+    rw shape
+    exact away with ℂ[1], one, complexAbs.one
+  have nonzero2 := away with w, hw, unit
+  have nonzero3 := away with ℂ[w * w], ww, wwUnit
+  have f1 := complexInv.member with g1
+  have f2 := complexInv.member with g2
+  have f3 := complexInv.member with g3
+  have cancel1 := complexInv.mul_cancel with g1, nonzero1
+  have cancel2 := complexInv.mul_cancel with g2, nonzero2
+  have cancel3 := complexInv.mul_cancel with g3, nonzero3
+  have product : ∀ g ∈ ℂ, ℂ[g * complexInv(g)] = ℂ[1] →
+      R[complexNormSquared(complexInv(g)) * (complexAbs(g) * complexAbs(g))] =
+        R[1]
+    intros g gMember cancel
+    have inverse := complexInv.member with gMember
+    rw [(complexAbs.square with gMember), ← (complexNormSquared.mul with
+      inverse, gMember)]
+    have swap : ℂ[complexInv(g) * g] = ℂ[1] by linear_combination cancel
+    rw [swap, complexNormSquared.one]
+  have e1 := product with ℂ[1 - complexOfReal(x)], g1, cancel1
+  have e2 := product with ℂ[1 - complexOfReal(x) * w], g2, cancel2
+  have e3 := product with ℂ[1 - complexOfReal(x) * (w * w)], g3, cancel3
+  have n1 := complexNormSquared.nonnegative with f1
+  have n2 := complexNormSquared.nonnegative with f2
+  have n3 := complexNormSquared.nonnegative with f3
+  have r1 := complexNormSquared.real with f1
+  have r2 := complexNormSquared.real with f2
+  have r3 := complexNormSquared.real with f3
+  have a1 := complexAbs.nonnegative with g1
+  have a2 := complexAbs.nonnegative with g2
+  have a3 := complexAbs.nonnegative with g3
+  have b1 := complexAbs.real with g1
+  have b2 := complexAbs.real with g2
+  have b3 := complexAbs.real with g3
+  have identity : R[(complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) ^ 3 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) ^ 4 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)]))) *
+      ((complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])) *
+      (complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])))] = R[1]
+    have shape : R[(complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) ^ 3 *
+        complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) ^ 4 *
+        complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)]))) *
+        ((complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+        complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+        complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])) *
+        (complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+        complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+        complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])))] =
+      R[(complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) *
+        (complexAbs(ℂ[1 - complexOfReal(x)]) *
+        complexAbs(ℂ[1 - complexOfReal(x)]))) ^ 3 *
+        (complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) *
+        (complexAbs(ℂ[1 - complexOfReal(x) * w]) *
+        complexAbs(ℂ[1 - complexOfReal(x) * w]))) ^ 4 *
+        (complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)])) *
+        (complexAbs(ℂ[1 - complexOfReal(x) * (w * w)]) *
+        complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])))] by ring
+    rw [shape, e1, e2, e3]
+    ring
+  have q3 := realPow.nonnegative at complexNormSquared(complexInv(ℂ[1 -
+    complexOfReal(x)])), 3 with n1
+  have q4 := realPow.nonnegative at complexNormSquared(complexInv(ℂ[1 -
+    complexOfReal(x) * w])), 4 with n2
+  unfold realPow at q3
+  unfold realPow at q4
+  have q34 := realMulValue.nonnegative with q3, q4
+  have qNonnegative := realMulValue.nonnegative with q34, n3
+  have p3 := realPow.nonnegative at complexAbs(ℂ[1 - complexOfReal(x)]), 3
+    with a1
+  have p4 := realPow.nonnegative at complexAbs(ℂ[1 - complexOfReal(x) * w]),
+    4 with a2
+  unfold realPow at p3
+  unfold realPow at p4
+  have p34 := realMulValue.nonnegative with p3, p4
+  have pNonnegative := realMulValue.nonnegative with p34, a3
+  have square := realLe.mul_left_of_nonnegative with bound, pNonnegative
+  have unitP : R[complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)]) * 1] =
+    R[complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])] by ring
+  have pSquareLe : R[(complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)])) *
+      (complexAbs(ℂ[1 - complexOfReal(x)]) ^ 3 *
+      complexAbs(ℂ[1 - complexOfReal(x) * w]) ^ 4 *
+      complexAbs(ℂ[1 - complexOfReal(x) * (w * w)]))] ≤ R[1] by linarith
+  have scaled := realLe.mul_left_of_nonnegative with pSquareLe, qNonnegative
+  have unitQ : R[(complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) ^ 3 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) ^ 4 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)]))) * 1] =
+    R[complexNormSquared(complexInv(ℂ[1 - complexOfReal(x)])) ^ 3 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * w])) ^ 4 *
+      complexNormSquared(complexInv(ℂ[1 - complexOfReal(x) * (w * w)]))]
+    by ring
+  linarith
+
+-- The partial products: when every step multiplies by factors whose
+-- combination has |·|² ≥ 1, so do the products.
+theorem eulerProducts.three_four_one_partial (E1 E2 E3 : Set) (n : Nat)
+  requires start1 : E1((0:N)) = ℂ[1]
+  requires start2 : E2((0:N)) = ℂ[1]
+  requires start3 : E3((0:N)) = ℂ[1]
+  requires step : ∀ k ∈ ℕ, ∃ f1 ∈ ℂ, ∃ f2 ∈ ℂ, ∃ f3 ∈ ℂ,
+    E1(k + 1) = ℂ[E1(k) * f1] ∧ E2(k + 1) = ℂ[E2(k) * f2] ∧
+    E3(k + 1) = ℂ[E3(k) * f3] ∧
+    R[1] ≤ R[complexNormSquared(f1) ^ 3 * complexNormSquared(f2) ^ 4 *
+      complexNormSquared(f3)]
+  requires values : ∀ k ∈ ℕ, E1(k) ∈ ℂ ∧ E2(k) ∈ ℂ ∧ E3(k) ∈ ℂ
+  shows R[1] ≤ R[complexNormSquared(E1(n)) ^ 3 *
+    complexNormSquared(E2(n)) ^ 4 * complexNormSquared(E3(n))]
+proof
+  induction n
+  | zero =>
+    rw [start1, start2, start3, complexNormSquared.one]
+    have unit : R[1 ^ 3 * 1 ^ 4 * 1] = R[1] by ring
+    rw unit
+    exact realLe.reflexive at R[1]
+  | succ(k) using ih =>
+    have kMember : k ∈ ℕ := nat.omega.forward at k with *
+    obtain ⟨f1, f1Member, f2, f2Member, f3, f3Member, e1, e2, e3, bound⟩ :=
+      step with k, kMember
+    obtain ⟨v1, v2, v3⟩ := values with k, kMember
+    have index : succ(k) = k + 1 by arith
+    rw [index, e1, e2, e3, (complexNormSquared.mul with v1, f1Member),
+      (complexNormSquared.mul with v2, f2Member),
+      (complexNormSquared.mul with v3, f3Member)]
+    have r1 := complexNormSquared.real with v1
+    have r2 := complexNormSquared.real with v2
+    have r3 := complexNormSquared.real with v3
+    have s1 := complexNormSquared.real with f1Member
+    have s2 := complexNormSquared.real with f2Member
+    have s3 := complexNormSquared.real with f3Member
+    have shape : R[(complexNormSquared(E1(k)) * complexNormSquared(f1)) ^ 3 *
+        (complexNormSquared(E2(k)) * complexNormSquared(f2)) ^ 4 *
+        (complexNormSquared(E3(k)) * complexNormSquared(f3))] =
+      R[(complexNormSquared(E1(k)) ^ 3 * complexNormSquared(E2(k)) ^ 4 *
+        complexNormSquared(E3(k))) * (complexNormSquared(f1) ^ 3 *
+        complexNormSquared(f2) ^ 4 * complexNormSquared(f3))] by ring
+    rw shape
+    have earlier : R[0] ≤ R[complexNormSquared(E1(k)) ^ 3 *
+      complexNormSquared(E2(k)) ^ 4 * complexNormSquared(E3(k))] by linarith
+    have excess : R[0] ≤ R[complexNormSquared(f1) ^ 3 *
+      complexNormSquared(f2) ^ 4 * complexNormSquared(f3) - 1] by linarith
+    have growth := realMulValue.nonnegative with earlier, excess
+    have expand : R[(complexNormSquared(E1(k)) ^ 3 *
+        complexNormSquared(E2(k)) ^ 4 * complexNormSquared(E3(k))) *
+        (complexNormSquared(f1) ^ 3 * complexNormSquared(f2) ^ 4 *
+        complexNormSquared(f3) - 1)] =
+      R[(complexNormSquared(E1(k)) ^ 3 * complexNormSquared(E2(k)) ^ 4 *
+        complexNormSquared(E3(k))) * (complexNormSquared(f1) ^ 3 *
+        complexNormSquared(f2) ^ 4 * complexNormSquared(f3)) -
+        complexNormSquared(E1(k)) ^ 3 * complexNormSquared(E2(k)) ^ 4 *
+        complexNormSquared(E3(k))] by ring
+    linarith
+
+-- And their limits.
+theorem eulerProducts.three_four_one_limit (E1 E2 E3 L1 L2 L3 : Set)
+  requires converges1 : ComplexConvergesTo(E1, L1)
+  requires converges2 : ComplexConvergesTo(E2, L2)
+  requires converges3 : ComplexConvergesTo(E3, L3)
+  requires bound : ∀ n ∈ ℕ, R[1] ≤ R[complexNormSquared(E1(n)) ^ 3 *
+    complexNormSquared(E2(n)) ^ 4 * complexNormSquared(E3(n))]
+  shows R[1] ≤ R[complexNormSquared(L1) ^ 3 * complexNormSquared(L2) ^ 4 *
+    complexNormSquared(L3)]
+proof
+  have c1 := converges1
+  have c2 := converges2
+  have c3 := converges3
+  obtain ⟨sequence1, l1, _, _⟩ := c1
+  obtain ⟨sequence2, l2, _, _⟩ := c2
+  obtain ⟨sequence3, l3, _, _⟩ := c3
+  have norm1 := ComplexConvergesTo.norm_squared with converges1
+  have norm2 := ComplexConvergesTo.norm_squared with converges2
+  have norm3 := ComplexConvergesTo.norm_squared with converges3
+  have power1 := ConvergesTo.pow at complexNormSequence(E1),
+    complexNormSquared(L1), 3 with norm1
+  have power2 := ConvergesTo.pow at complexNormSequence(E2),
+    complexNormSquared(L2), 4 with norm2
+  have pair := ConvergesTo.mul with power1, power2
+  have total := ConvergesTo.mul with pair, norm3
+  unfold realPow at total
+  apply ConvergesTo.ge_constant with total
+  unfold BoundedBelowBy
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  have f1 : E1 : ℕ → ℂ by exact sequence1
+  have f2 : E2 : ℕ → ℂ by exact sequence2
+  have f3 : E3 : ℕ → ℂ by exact sequence3
+  have v1 := FunctionBetween.apply_closed with f1, nMember
+  have v2 := FunctionBetween.apply_closed with f2, nMember
+  have v3 := FunctionBetween.apply_closed with f3, nMember
+  have normSeq1 := complexNormSequence.function with sequence1
+  have normSeq2 := complexNormSequence.function with sequence2
+  have normSeq3 := complexNormSequence.function with sequence3
+  have real1 : RealSequence(complexNormSequence(E1)) by exact normSeq1
+  have real2 : RealSequence(complexNormSequence(E2)) by exact normSeq2
+  have real3 : RealSequence(complexNormSequence(E3)) by exact normSeq3
+  have pow1 := powSequence.sequence at complexNormSequence(E1), 3 with real1
+  have pow2 := powSequence.sequence at complexNormSequence(E2), 4 with real2
+  have value1 := complexNormSequence.value with sequence1, nMember
+  have value2 := complexNormSequence.value with sequence2, nMember
+  have value3 := complexNormSequence.value with sequence3, nMember
+  have powValue1 := powSequence.value at complexNormSequence(E1), 3, n with
+    real1
+  have powValue2 := powSequence.value at complexNormSequence(E2), 4, n with
+    real2
+  rw value1 at powValue1
+  rw value2 at powValue2
+  have n1 := complexNormSquared.real with v1
+  have n2 := complexNormSquared.real with v2
+  have n3 := complexNormSquared.real with v3
+  have powReal1 : Real(powSequence(complexNormSequence(E1), 3)(n)) by
+    rw powValue1
+    typecheck
+  have powReal2 : Real(powSequence(complexNormSequence(E2), 4)(n)) by
+    rw powValue2
+    typecheck
+  have pairValue := mulSequence.value with pow1, pow2, powReal1, powReal2
+  have pairSequence := mulSequence.sequence with pow1, pow2
+  have pairReal : Real(mulSequence(powSequence(complexNormSequence(E1), 3),
+    powSequence(complexNormSequence(E2), 4))(n)) by
+    rw pairValue
+    typecheck
+  have normReal3 : Real(complexNormSequence(E3)(n)) by
+    rw value3
+    typecheck
+  have totalValue := mulSequence.value with pairSequence, real3, pairReal,
+    normReal3
+  rw [totalValue, pairValue, powValue1, powValue2, value3]
+  unfold realPow
+  exact realLe.characterization.forward with (bound with n, nMember)
+
+-- For re s = 1 and e > 0: |ζ(1 + e)|⁶ |ζ(s + e)|⁸ |ζ(2s − 1 + e)|² ≥ 1,
+-- from the Euler products at the three points.
+theorem zeta.three_four_one (s : Set) (e : Real)
+  requires hs : s ∈ ℂ
+  requires onLine : complexRe(s) = R[1]
+  requires positive : R[0] < e
+  shows R[1] ≤ R[complexNormSquared(riemannZeta(complexOfReal(R[1 + e]))) ^ 3 *
+    complexNormSquared(riemannZeta(ℂ[s + complexOfReal(e)])) ^ 4 *
+    complexNormSquared(riemannZeta(ℂ[s + s - 1 + complexOfReal(e)]))]
+proof
+  have eMember := complexOfReal.mem at e
+  have aMember := complexOfReal.mem at R[1 + e]
+  have bMember : ℂ[s + complexOfReal(e)] ∈ ℂ by typecheck
+  have cMember : ℂ[s + s - 1 + complexOfReal(e)] ∈ ℂ by typecheck
+  have one := complexOne.member
+  have reOne : complexRe(ℂ[1]) = R[1]
+    rw [← complexOfReal.one, complexOfReal.re]
+  have reA : realOne < complexRe(complexOfReal(R[1 + e]))
+    rw complexOfReal.re
+    linarith
+  have reB : realOne < complexRe(ℂ[s + complexOfReal(e)])
+    rw [(complexRe.add with hs, eMember), onLine, complexOfReal.re]
+    linarith
+  have twoS : ℂ[s + s] ∈ ℂ by typecheck
+  have twoSMinus : ℂ[s + s - 1] ∈ ℂ by typecheck
+  have reC : realOne < complexRe(ℂ[s + s - 1 + complexOfReal(e)])
+    rw [(complexRe.add with twoSMinus, eMember), (complexRe.sub with twoS, one),
+      (complexRe.add with hs, hs), onLine, reOne, complexOfReal.re]
+    linarith
+  have euler1 := zeta.euler_product with aMember, reA
+  have euler2 := zeta.euler_product with bMember, reB
+  have euler3 := zeta.euler_product with cMember, reC
+  apply eulerProducts.three_four_one_limit with euler1, euler2, euler3
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have start1 : zetaEulerProducts(complexOfReal(R[1 + e]))((0:N)) = ℂ[1]
+    rw [(zetaEulerProducts.value with aMember, zeroMember), zetaEulerProduct]
+  have start2 : zetaEulerProducts(ℂ[s + complexOfReal(e)])((0:N)) = ℂ[1]
+    rw [(zetaEulerProducts.value with bMember, zeroMember), zetaEulerProduct]
+  have start3 : zetaEulerProducts(ℂ[s + s - 1 + complexOfReal(e)])((0:N)) =
+      ℂ[1]
+    rw [(zetaEulerProducts.value with cMember, zeroMember), zetaEulerProduct]
+  have values : ∀ k ∈ ℕ, zetaEulerProducts(complexOfReal(R[1 + e]))(k) ∈ ℂ ∧
+      zetaEulerProducts(ℂ[s + complexOfReal(e)])(k) ∈ ℂ ∧
+      zetaEulerProducts(ℂ[s + s - 1 + complexOfReal(e)])(k) ∈ ℂ
+    intros k kMember
+    have p1 := zetaEulerProducts.function with aMember
+    have p2 := zetaEulerProducts.function with bMember
+    have p3 := zetaEulerProducts.function with cMember
+    exact ⟨(FunctionBetween.apply_closed with p1, kMember),
+      (FunctionBetween.apply_closed with p2, kMember),
+      (FunctionBetween.apply_closed with p3, kMember)⟩
+  have step : ∀ k ∈ ℕ, ∃ f1 ∈ ℂ, ∃ f2 ∈ ℂ, ∃ f3 ∈ ℂ,
+      zetaEulerProducts(complexOfReal(R[1 + e]))(k + 1) =
+        ℂ[zetaEulerProducts(complexOfReal(R[1 + e]))(k) * f1] ∧
+      zetaEulerProducts(ℂ[s + complexOfReal(e)])(k + 1) =
+        ℂ[zetaEulerProducts(ℂ[s + complexOfReal(e)])(k) * f2] ∧
+      zetaEulerProducts(ℂ[s + s - 1 + complexOfReal(e)])(k + 1) =
+        ℂ[zetaEulerProducts(ℂ[s + s - 1 + complexOfReal(e)])(k) * f3] ∧
+      R[1] ≤ R[complexNormSquared(f1) ^ 3 * complexNormSquared(f2) ^ 4 *
+        complexNormSquared(f3)]
+    intros k kMember
+    have kNat := nat.omega.backward with kMember
+    have next : k + 1 ∈ ℕ by typecheck
+    have index : k + 1 = succ(k) by arith
+    obtain ⟨factor1, prime1, other1⟩ := zetaEulerFactor.selected at
+      complexOfReal(R[1 + e]), k with aMember
+    obtain ⟨factor2, prime2, other2⟩ := zetaEulerFactor.selected at
+      ℂ[s + complexOfReal(e)], k with bMember
+    obtain ⟨factor3, prime3, other3⟩ := zetaEulerFactor.selected at
+      ℂ[s + s - 1 + complexOfReal(e)], k with cMember
+    refine ⟨zetaEulerFactor(complexOfReal(R[1 + e]), k), factor1,
+      zetaEulerFactor(ℂ[s + complexOfReal(e)], k), factor2,
+      zetaEulerFactor(ℂ[s + s - 1 + complexOfReal(e)], k), factor3, ?_, ?_,
+      ?_, ?_⟩
+    . rw [(zetaEulerProducts.value with aMember, next),
+        (zetaEulerProducts.value with aMember, kMember), index,
+        zetaEulerProduct]
+    . rw [(zetaEulerProducts.value with bMember, next),
+        (zetaEulerProducts.value with bMember, kMember), index,
+        zetaEulerProduct]
+    . rw [(zetaEulerProducts.value with cMember, next),
+        (zetaEulerProducts.value with cMember, kMember), index,
+        zetaEulerProduct]
+    . by_cases prime : Prime(k)
+      . rw [(prime1 with prime), (prime2 with prime), (prime3 with prime)]
+        have above := Prime.greater_than_one with prime
+        have base := realNat.lt_of_lt with above
+        rw realNat.one at base
+        have basePositive : R[0] < realNat(k) by linarith
+        have negA : ℂ[-complexOfReal(R[1 + e])] ∈ ℂ by typecheck
+        have shift : ℂ[-(s - 1)] ∈ ℂ by typecheck
+        have negAShift : ℂ[-complexOfReal(R[1 + e]) + -(s - 1)] ∈ ℂ
+          by typecheck
+        have powerA : realCpow(realNat(k), ℂ[-complexOfReal(R[1 + e])]) =
+            complexOfReal(realRpow(realNat(k), R[-(1 + e)]))
+          rw [← complexOfReal.neg, realCpow.of_real]
+        have exponentB : ℂ[-(s + complexOfReal(e))] =
+            ℂ[-complexOfReal(R[1 + e]) + -(s - 1)]
+          rw [complexOfReal.add, complexOfReal.one]
+          ring
+        have exponentC : ℂ[-(s + s - 1 + complexOfReal(e))] =
+            ℂ[-complexOfReal(R[1 + e]) + -(s - 1) + -(s - 1)]
+          rw [complexOfReal.add, complexOfReal.one]
+          ring
+        have wMember := realCpow.member at realNat(k), ℂ[-(s - 1)] with shift
+        rw [exponentB, exponentC, (realCpow.add with negAShift, shift),
+          (realCpow.add with negA, shift), powerA]
+        have regroup : ℂ[complexOfReal(realRpow(realNat(k), R[-(1 + e)])) *
+            realCpow(realNat(k), ℂ[-(s - 1)]) *
+            realCpow(realNat(k), ℂ[-(s - 1)])] =
+          ℂ[complexOfReal(realRpow(realNat(k), R[-(1 + e)])) *
+            (realCpow(realNat(k), ℂ[-(s - 1)]) *
+            realCpow(realNat(k), ℂ[-(s - 1)]))] by ring
+        rw regroup
+        have xReal := realRpow.real at realNat(k), R[-(1 + e)]
+        have xPositive := realRpow.positive at realNat(k), R[-(1 + e)]
+        have xNonnegative : R[0] ≤ realRpow(realNat(k), R[-(1 + e)]) by
+          linarith
+        have exponent : R[-(1 + e)] < R[0] by linarith
+        have smaller := realRpow.lt_of_exponent with base, exponent
+        rw realRpow.zero at smaller
+        have xMember : realRpow(realNat(k), R[-(1 + e)]) ∈ ℝ by typecheck
+        have unit : complexAbs(realCpow(realNat(k), ℂ[-(s - 1)])) = R[1]
+          have sMinus : ℂ[s - 1] ∈ ℂ by typecheck
+          rw [(realCpow.abs with basePositive, shift), (complexRe.neg with
+            sMinus), (complexRe.sub with hs, one), onLine, reOne]
+          have zero : R[-(1 - 1)] = R[0] by ring
+          rw [zero, realRpow.zero]
+        exact eulerFactor.three_four_one with xMember, xNonnegative, smaller,
+          wMember, unit
+      . rw [(other1 with prime), (other2 with prime), (other3 with prime),
+          complexNormSquared.one]
+        have unit : R[1 ^ 3 * 1 ^ 4 * 1] = R[1] by ring
+        rw unit
+        exact realLe.reflexive at R[1]
+  exact eulerProducts.three_four_one_partial at
+    zetaEulerProducts(complexOfReal(R[1 + e])),
+    zetaEulerProducts(ℂ[s + complexOfReal(e)]),
+    zetaEulerProducts(ℂ[s + s - 1 + complexOfReal(e)]), n with start1,
+    start2, start3, step, values
+
+-- The orders at the three points: if A e ≤ P, B ≤ K e, C ≤ M and
+-- (A²)³ (B²)⁴ C² ≥ 1 for some e > 0, then P⁶ K⁸ M² e² ≥ 1.
+theorem real.three_four_one_orders (A B C P K M e : Real)
+  requires nonnegativeA : R[0] ≤ A
+  requires nonnegativeB : R[0] ≤ B
+  requires nonnegativeC : R[0] ≤ C
+  requires positive : R[0] < e
+  requires pole : R[A * e] ≤ P
+  requires zero : B ≤ R[K * e]
+  requires bounded : C ≤ M
+  requires product : R[1] ≤ R[(A * A) ^ 3 * (B * B) ^ 4 * (C * C)]
+  shows R[1] ≤ R[(P * P) * (P * P) * (P * P) * (K * K * (K * K)) *
+    (K * K * (K * K)) * (M * M) * (e * e)]
+proof
+  have eNonnegative : R[0] ≤ e by linarith
+  have aeNonnegative := realMulValue.nonnegative with nonnegativeA,
+    eNonnegative
+  have aeSquare := realLe.mul_left_of_nonnegative with pole, aeNonnegative
+  have aeSquareNonnegative := realMulValue.nonnegative with aeNonnegative,
+    aeNonnegative
+  have pNonnegative : R[0] ≤ P by linarith
+  have aeSecond := realLe.mul_right_of_nonnegative with pole, pNonnegative
+  have aeSquareBound : R[(A * e) * (A * e)] ≤ R[P * P] by linarith
+  have cube := realPow.base_monotone at R[(A * e) * (A * e)], R[P * P], 3 with
+    aeSquareNonnegative, aeSquareBound
+  unfold realPow at cube
+  have keNonnegative : R[0] ≤ R[K * e] by linarith
+  have bFirst := realLe.mul_left_of_nonnegative with zero, nonnegativeB
+  have bSecond := realLe.mul_right_of_nonnegative with zero, keNonnegative
+  have bSquareNonnegative := realMulValue.nonnegative with nonnegativeB,
+    nonnegativeB
+  have bSquareBound : R[B * B] ≤ R[(K * e) * (K * e)] by linarith
+  have fourth := realPow.base_monotone at R[B * B], R[(K * e) * (K * e)], 4
+    with bSquareNonnegative, bSquareBound
+  unfold realPow at fourth
+  have mNonnegative : R[0] ≤ M by linarith
+  have cFirst := realLe.mul_left_of_nonnegative with bounded, nonnegativeC
+  have cSecond := realLe.mul_right_of_nonnegative with bounded, mNonnegative
+  have cSquareNonnegative := realMulValue.nonnegative with nonnegativeC,
+    nonnegativeC
+  have cSquareBound : R[C * C] ≤ R[M * M] by linarith
+  have cubeNonnegative := realPow.nonnegative at R[(A * e) * (A * e)], 3 with
+    aeSquareNonnegative
+  have fourthNonnegative := realPow.nonnegative at R[B * B], 4 with
+    bSquareNonnegative
+  unfold realPow at cubeNonnegative
+  unfold realPow at fourthNonnegative
+  have keFourthNonnegative := realPow.nonnegative at R[(K * e) * (K * e)], 4
+    with (realMulValue.nonnegative with keNonnegative, keNonnegative)
+  unfold realPow at keFourthNonnegative
+  -- ((Ae)²)³ (B²)⁴ C² ≤ 64 ((Ke)²)⁴ M²
+  have step1 := realLe.mul_right_of_nonnegative with cube, fourthNonnegative
+  have cubeValue : R[(P * P) ^ 3] = R[(P * P) * (P * P) * (P * P)] by ring
+  rw cubeValue at step1
+  have pSquare := realMulValue.nonnegative with pNonnegative, pNonnegative
+  have pFourth := realMulValue.nonnegative with pSquare, pSquare
+  have sixtyFour := realMulValue.nonnegative with pFourth, pSquare
+  have step2 := realLe.mul_left_of_nonnegative with fourth, sixtyFour
+  have pairNonnegative := realMulValue.nonnegative with cubeNonnegative,
+    fourthNonnegative
+  have step3 := realLe.mul_left_of_nonnegative with cSquareBound,
+    pairNonnegative
+  have upperPairNonnegative := realMulValue.nonnegative with sixtyFour,
+    keFourthNonnegative
+  have step4 := realLe.mul_right_of_nonnegative with
+    (realLe.transitive with step1, step2), (realMulValue.nonnegative with
+    mNonnegative, mNonnegative)
+  -- e⁶ ≤ e⁶ P
+  have square := realMulValue.positive with positive, positive
+  have quartic := realMulValue.positive with square, square
+  have sixth := realMulValue.positive with quartic, square
+  have sixthNonnegative : R[0] ≤ R[(e * e) * (e * e) * (e * e)] by linarith
+  have scaled := realLe.mul_left_of_nonnegative with product, sixthNonnegative
+  have expand : R[(e * e) * (e * e) * (e * e) * ((A * A) ^ 3 * (B * B) ^ 4 *
+      (C * C))] = R[((A * e) * (A * e)) ^ 3 * (B * B) ^ 4 * (C * C)] by ring
+  have target : R[(P * P) * (P * P) * (P * P) * ((K * e) * (K * e)) ^ 4 *
+      (M * M)] =
+    R[((P * P) * (P * P) * (P * P) * (K * K * (K * K)) * (K * K * (K * K)) *
+      (M * M) * (e * e)) *
+      ((e * e) * (e * e) * (e * e))] by ring
+  have unit : R[(e * e) * (e * e) * (e * e) * 1] =
+    R[1 * ((e * e) * (e * e) * (e * e))] by ring
+  have chain : R[1 * ((e * e) * (e * e) * (e * e))] ≤
+      R[((P * P) * (P * P) * (P * P) * (K * K * (K * K)) * (K * K * (K * K)) *
+      (M * M) * (e * e)) * ((e * e) * (e * e) * (e * e))] by
+    linarith
+  exact realLe.mul_right_cancel_positive with sixth, chain
+
+-- The last step: W e² ≥ 1 is impossible when W g < 1 and e ≤ min(g, 1).
+theorem real.three_four_one_small (W e g : Real)
+  requires weight : R[0] ≤ W
+  requires positive : R[0] < e
+  requires atMostOne : e ≤ R[1]
+  requires below : e ≤ g
+  requires small : R[W * g] < R[1]
+  requires large : R[1] ≤ R[W * (e * e)]
+  shows false
+proof
+  have eNonnegative : R[0] ≤ e by linarith
+  have first := realLe.mul_left_of_nonnegative with below, weight
+  have weightE := realMulValue.nonnegative with weight, eNonnegative
+  have second := realLe.mul_left_of_nonnegative with atMostOne, weightE
+  have regroup : R[W * (e * e)] = R[W * e * e] by ring
+  have unit : R[W * e * 1] = R[W * e] by ring
+  linarith
 
 -- No zero on the line re s = 1 either (Hadamard, de la Vallée Poussin).
 theorem zeta.nonzero_re_ge_one (s : Set)
@@ -484,6 +2744,192 @@ theorem zeta.nonzero_re_ge_one (s : Set)
   requires notOne : s ≠ ℂ[1]
   shows riemannZeta(s) ≠ ℂ[0]
 proof
-  sorry
+  have reReal := complexRe.real with hs
+  by_cases strict : realOne < complexRe(s)
+  . exact zeta.nonzero_re_gt_one with hs, strict
+  have onLine : complexRe(s) = R[1] by linarith
+  intro vanish
+  have one := complexOne.member
+  have holomorphic := zeta.holomorphic
+  have sU : s ∈ complexCarrier ∖ {ℂ[1]}
+    refine ⟨hs, ?_⟩
+    intro single
+    exact notOne with ((singleton.membership at s, ℂ[1]).forward with single)
+  have c0 : ℂ[s + s - 1] ∈ ℂ by typecheck
+  have c0U : ℂ[s + s - 1] ∈ complexCarrier ∖ {ℂ[1]}
+    refine ⟨c0, ?_⟩
+    intro single
+    have same := (singleton.membership at ℂ[s + s - 1], ℂ[1]).forward with
+      single
+    have two : ℂ[2] ∈ ℂ by typecheck
+    have twoNonzero : ℂ[2] ≠ ℂ[0]
+      intro twoVanish
+      have re := complexOfReal.re at R[2]
+      rw [complexOfReal.two, twoVanish, ← complexOfReal.zero, complexOfReal.re]
+        at re
+      linarith
+    have cancel := complexInv.mul_cancel with two, twoNonzero
+    have half := complexInv.member with two
+    apply notOne
+    linear_combination complexInv(ℂ[2]) * same - (s - 1) * cancel
+  -- ζ vanishes to first order at s, is bounded near 2s − 1, and has a
+  -- simple pole at 1
+  obtain ⟨D1, d1Member, derivative1⟩ := HolomorphicOn.differentiable with
+    holomorphic, sU
+  obtain ⟨r1, r1Real, r1Positive, lipschitz1⟩ :=
+    HasComplexDerivativeAt.lipschitz with derivative1
+  obtain ⟨D2, d2Member, derivative2⟩ := HolomorphicOn.differentiable with
+    holomorphic, c0U
+  obtain ⟨r2, r2Real, r2Positive, lipschitz2⟩ :=
+    HasComplexDerivativeAt.lipschitz with derivative2
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  obtain ⟨r3, r3Real, r3Positive, pole⟩ := zeta.residue with R[1], oneReal,
+    onePositive
+  have d1Abs := complexAbs.nonnegative with d1Member
+  have d1Real := complexAbs.real with d1Member
+  have d2Abs := complexAbs.nonnegative with d2Member
+  have d2Real := complexAbs.real with d2Member
+  have zetaC0 := riemannZeta.member with c0
+  have c0Abs := complexAbs.nonnegative with zetaC0
+  have c0Real := complexAbs.real with zetaC0
+  have kNonnegative : R[0] ≤ R[1 + complexAbs(D1)] by linarith
+  have mNonnegative : R[0] ≤ R[complexAbs(riemannZeta(ℂ[s + s - 1])) + (1 +
+    complexAbs(D2))] by linarith
+  have k2 := realMulValue.nonnegative with kNonnegative, kNonnegative
+  have k4 := realMulValue.nonnegative with k2, k2
+  have m2 := realMulValue.nonnegative with mNonnegative, mNonnegative
+  have twoReal : R[0] ≤ R[2] by linarith
+  have twoSquare := realMulValue.nonnegative with twoReal, twoReal
+  have twoFourth := realMulValue.nonnegative with twoSquare, twoSquare
+  have sixtyFour := realMulValue.nonnegative with twoFourth, twoSquare
+  have weight1 := realMulValue.nonnegative with sixtyFour, k4
+  have weight2 := realMulValue.nonnegative with weight1, k4
+  have weight := realMulValue.nonnegative with weight2, m2
+  obtain ⟨g, gReal, gPositive, gSmall⟩ := real.small_multiple with weight,
+    onePositive
+  obtain ⟨q1, q1Real, q1Positive, q1r1, q1r2⟩ := positiveRadius.common with
+    r1Positive, r2Positive
+  obtain ⟨q2, q2Real, q2Positive, q2q1, q2r3⟩ := positiveRadius.common with
+    q1Positive, r3Positive
+  obtain ⟨q3, q3Real, q3Positive, q3q2, q3g⟩ := positiveRadius.common with
+    q2Positive, gPositive
+  obtain ⟨q4, q4Real, q4Positive, q4q3, q4One⟩ := positiveRadius.common with
+    q3Positive, onePositive
+  have twoNonnegative : R[0] ≤ R[2] by linarith
+  obtain ⟨e, eReal, ePositive, eSmall⟩ := real.small_multiple with
+    twoNonnegative, q4Positive
+  have eTyped : Real(e) by typecheck
+  have eBelow : e < q4 by linarith
+  -- the three points
+  have eMember := complexOfReal.mem at e
+  have aMember := complexOfReal.mem at R[1 + e]
+  have bMember : ℂ[s + complexOfReal(e)] ∈ ℂ by typecheck
+  have cMember : ℂ[s + s - 1 + complexOfReal(e)] ∈ ℂ by typecheck
+  have main := zeta.three_four_one with hs, onLine, ePositive
+  have zetaA := riemannZeta.member with aMember
+  have zetaB := riemannZeta.member with bMember
+  have zetaC := riemannZeta.member with cMember
+  rw [← (complexAbs.square with zetaA), ← (complexAbs.square with zetaB),
+    ← (complexAbs.square with zetaC)] at main
+  have eAbs : complexAbs(complexOfReal(e)) = e
+    rw [complexAbs.of_real, (abs.of_nonnegative with
+      (realLess.implies_le with ePositive))]
+  -- the pole: e |ζ(1 + e)| ≤ 2
+  have aShift : ℂ[complexOfReal(R[1 + e]) - 1] = complexOfReal(e)
+    rw [complexOfReal.add, complexOfReal.one]
+    ring
+  have aNotOne : complexOfReal(R[1 + e]) ≠ ℂ[1]
+    intro same
+    have re := complexOfReal.re at R[1 + e]
+    rw [same, ← complexOfReal.one, complexOfReal.re] at re
+    linarith
+  have aClose : complexAbs(ℂ[complexOfReal(R[1 + e]) - 1]) < r3
+    rw [aShift, eAbs]
+    linarith
+  have poleBound := pole with complexOfReal(R[1 + e]), aMember, aNotOne, aClose
+  rw aShift at poleBound
+  have scaledZeta : ℂ[complexOfReal(e) * riemannZeta(complexOfReal(R[1 + e]))]
+    ∈ ℂ by typecheck
+  have poleShape : ℂ[complexOfReal(e) * riemannZeta(complexOfReal(R[1 + e]))
+      - 1 + 1] = ℂ[complexOfReal(e) * riemannZeta(complexOfReal(R[1 + e]))]
+    by ring
+  have difference : ℂ[complexOfReal(e) * riemannZeta(complexOfReal(R[1 + e]))
+    - 1] ∈ ℂ by typecheck
+  have poleTriangle := complexAbs.triangle with difference, one
+  rw [poleShape, complexAbs.one, (complexAbs.mul with eMember, zetaA), eAbs]
+    at poleTriangle
+  have aAbs := complexAbs.nonnegative with zetaA
+  have aReal := complexAbs.real with zetaA
+  have differenceReal := complexAbs.real with difference
+  have commute : R[e * complexAbs(riemannZeta(complexOfReal(R[1 + e])))] =
+    R[complexAbs(riemannZeta(complexOfReal(R[1 + e]))) * e] by ring
+  have poleOrder : R[complexAbs(riemannZeta(complexOfReal(R[1 + e]))) * e] ≤
+    R[2] by linarith
+  -- the zero: |ζ(s + e)| ≤ (1 + |ζ'(s)|) e
+  have bShift : ℂ[ℂ[s + complexOfReal(e)] - s] = complexOfReal(e) by ring
+  have bU : ℂ[s + complexOfReal(e)] ∈ complexCarrier ∖ {ℂ[1]}
+    refine ⟨bMember, ?_⟩
+    intro single
+    have same := (singleton.membership at ℂ[s + complexOfReal(e)],
+      ℂ[1]).forward with single
+    have re := complexRe.add with hs, eMember
+    rw [same, ← complexOfReal.one, complexOfReal.re, onLine,
+      complexOfReal.re] at re
+    linarith
+  have bClose : complexAbs(ℂ[ℂ[s + complexOfReal(e)] - s]) < r1
+    rw [bShift, eAbs]
+    linarith
+  have zeroBound := lipschitz1 with ℂ[s + complexOfReal(e)], bU, bClose
+  rw [bShift, eAbs, (riemannZetaMap.apply with bMember),
+    (riemannZetaMap.apply with hs), vanish] at zeroBound
+  have bValue : ℂ[riemannZeta(ℂ[s + complexOfReal(e)]) - 0] =
+    riemannZeta(ℂ[s + complexOfReal(e)]) by ring
+  rw bValue at zeroBound
+  -- the bounded factor: |ζ(2s − 1 + e)| ≤ |ζ(2s − 1)| + (1 + |ζ'(2s − 1)|)
+  have cShift : ℂ[ℂ[s + s - 1 + complexOfReal(e)] - ℂ[s + s - 1]] =
+    complexOfReal(e) by ring
+  have cU : ℂ[s + s - 1 + complexOfReal(e)] ∈ complexCarrier ∖ {ℂ[1]}
+    refine ⟨cMember, ?_⟩
+    intro single
+    have same := (singleton.membership at ℂ[s + s - 1 + complexOfReal(e)],
+      ℂ[1]).forward with single
+    have twoS : ℂ[s + s] ∈ ℂ by typecheck
+    have re := complexRe.add with c0, eMember
+    rw [same, (complexRe.sub with twoS, one), (complexRe.add with hs, hs),
+      ← complexOfReal.one, complexOfReal.re, onLine, complexOfReal.re] at re
+    linarith
+  have cClose : complexAbs(ℂ[ℂ[s + s - 1 + complexOfReal(e)] -
+      ℂ[s + s - 1]]) < r2
+    rw [cShift, eAbs]
+    linarith
+  have boundedChange := lipschitz2 with ℂ[s + s - 1 + complexOfReal(e)], cU,
+    cClose
+  rw [cShift, eAbs, (riemannZetaMap.apply with cMember),
+    (riemannZetaMap.apply with c0)] at boundedChange
+  have change : ℂ[riemannZeta(ℂ[s + s - 1 + complexOfReal(e)]) -
+    riemannZeta(ℂ[s + s - 1])] ∈ ℂ by typecheck
+  have cTriangle := complexAbs.triangle with change, zetaC0
+  have cShape : ℂ[riemannZeta(ℂ[s + s - 1 + complexOfReal(e)]) -
+      riemannZeta(ℂ[s + s - 1]) + riemannZeta(ℂ[s + s - 1])] =
+    riemannZeta(ℂ[s + s - 1 + complexOfReal(e)]) by ring
+  rw cShape at cTriangle
+  have eAtMostOne : e ≤ R[1] by linarith
+  have kd2 : R[0] ≤ R[1 + complexAbs(D2)] by linarith
+  have kd2e := realLe.mul_left_of_nonnegative with eAtMostOne, kd2
+  have unitK : R[(1 + complexAbs(D2)) * 1] = R[1 + complexAbs(D2)] by ring
+  have changeReal := complexAbs.real with change
+  have cAbs := complexAbs.nonnegative with zetaC
+  have cReal := complexAbs.real with zetaC
+  have boundedOrder : complexAbs(riemannZeta(ℂ[s + s - 1 +
+      complexOfReal(e)])) ≤ R[complexAbs(riemannZeta(ℂ[s + s - 1])) +
+      (1 + complexAbs(D2))] by linarith
+  -- combine
+  have bAbs := complexAbs.nonnegative with zetaB
+  have orders := real.three_four_one_orders with aAbs, bAbs, cAbs, ePositive,
+    poleOrder, zeroBound, boundedOrder, main
+  have eg : e ≤ g by linarith
+  exact real.three_four_one_small with weight, ePositive, eAtMostOne, eg,
+    gSmall, orders
 
 end Zeta
