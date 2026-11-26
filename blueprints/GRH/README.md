@@ -234,8 +234,8 @@ graph TD
 | GRH.Integral | 127 | 125 | 2 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
-| GRH.Zeta | 38 | 35 | 3 |
-| GRH.LFunction | 68 | 63 | 5 |
+| GRH.Zeta | 98 | 98 | 0 |
+| GRH.LFunction | 90 | 89 | 1 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **1424** | **1403** | **21** |
+| **total** | **1506** | **1492** | **14** |
 <!-- /blueprint-status -->
