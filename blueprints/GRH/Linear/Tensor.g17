@@ -1,0 +1,703 @@
+-- Tensor products of modules over a commutative ring, constructed as the
+-- quotient of the free module on pairs by the bilinearity relations: pure
+-- tensors and their laws, the universal property for bilinear maps,
+-- functoriality (TensorProduct.map, lTensor, rTensor), the unit,
+-- commutativity, and associativity isomorphisms, right exactness, bases
+-- and ranks; base change along an algebra with its universal property
+-- (LinearMap.liftBaseChange); and the tensor product of commutative
+-- algebras with its inclusions and product map.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Module/TensorProduct.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Linear.Tensor
+import GRH.Linear.Dual
+import Grace.Cumulus.Algebra.Algebras.Basic
+
+-- Section: The construction
+-- The free module R^(M × N) on the pairs, the generator [m, n] of a pair,
+-- and the relators [m + m', n] − [m, n] − [m', n],
+-- [m, n + n'] − [m, n] − [m, n'], [r m, n] − r [m, n], [m, r n] − r [m, n].
+def pairModule (M R N : Set) : Set :=
+  freeModule(R, Module.carrier(M) × Module.carrier(N))
+
+def pairGenerator (M R N m n : Set) : Set :=
+  unitVector(R, Module.carrier(M) × Module.carrier(N), (m, n))
+
+-- a − b − c and a − r • b in the free module on pairs.
+def pairDifference (M R N a b c : Set) : Set :=
+  call2(Module.add(pairModule(M, R, N)),
+    call2(Module.add(pairModule(M, R, N)), a,
+      apply(Module.neg(pairModule(M, R, N)), b)),
+    apply(Module.neg(pairModule(M, R, N)), c))
+
+def pairScaledDifference (M R N a r b : Set) : Set :=
+  call2(Module.add(pairModule(M, R, N)), a,
+    apply(Module.neg(pairModule(M, R, N)),
+      call2(Module.smul(pairModule(M, R, N)), r, b)))
+
+def tensorRelators (M R N : Set) : Set :=
+  { z ∈ finitelySupported(R, Module.carrier(M) × Module.carrier(N)) |
+    (∃ m m2 ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      z = pairDifference(M, R, N,
+        pairGenerator(M, R, N, call2(Module.add(M), m, m2), n),
+        pairGenerator(M, R, N, m, n), pairGenerator(M, R, N, m2, n))) ∨
+    (∃ m ∈ Module.carrier(M), ∃ n n2 ∈ Module.carrier(N),
+      z = pairDifference(M, R, N,
+        pairGenerator(M, R, N, m, call2(Module.add(N), n, n2)),
+        pairGenerator(M, R, N, m, n), pairGenerator(M, R, N, m, n2))) ∨
+    (∃ r ∈ Ring.carrier(R), ∃ m ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      z = pairScaledDifference(M, R, N,
+        pairGenerator(M, R, N, call2(Module.smul(M), r, m), n), r,
+        pairGenerator(M, R, N, m, n))) ∨
+    (∃ r ∈ Ring.carrier(R), ∃ m ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      z = pairScaledDifference(M, R, N,
+        pairGenerator(M, R, N, m, call2(Module.smul(N), r, n)), r,
+        pairGenerator(M, R, N, m, n))) }
+
+def tensorRelations (M R N : Set) : Set :=
+  moduleSpan(pairModule(M, R, N), R, tensorRelators(M, R, N))
+
+-- M ⊗[R] N, the pure tensor m ⊗ n, and the bilinear map (m, n) ↦ m ⊗ n
+-- (Mathlib's TensorProduct, TensorProduct.tmul, TensorProduct.mk).
+def tensorProduct (M R N : Set) : Set :=
+  quotientModule(pairModule(M, R, N), R, tensorRelations(M, R, N))
+
+def tmul (M R N m n : Set) : Set :=
+  quotientModuleMap(pairModule(M, R, N), tensorRelations(M, R, N))(
+    pairGenerator(M, R, N, m, n))
+
+def tensorMk (M R N : Set) : Set :=
+  { p ∈ (Module.carrier(M) × Module.carrier(N)) ×
+      Module.carrier(tensorProduct(M, R, N)) |
+    ∃ m ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      p = ((m, n), tmul(M, R, N, m, n)) }
+
+-- The families i ↦ (u(i), w(i)) and (i, j) ↦ (v(i), w(j)) of pairs.
+def pairFamily (k X Y u w : Set) : Set :=
+  { p ∈ k × (X × Y) | ∃ i ∈ k, p = (i, (u(i), w(i))) }
+
+def productFamily (I J X Y v w : Set) : Set :=
+  { p ∈ (I × J) × (X × Y) | ∃ i ∈ I, ∃ j ∈ J, p = ((i, j), (v(i), w(j))) }
+
+-- The linear map M ⊗ N → P of a bilinear map B : M × N → P,
+-- m ⊗ n ↦ B(m, n) (TensorProduct.lift): the free extension of B to the
+-- pairs, through the quotient.
+def tensorLift (M R N P B : Set) : Set :=
+  quotientLift(freeLift(P, R, Module.carrier(M) × Module.carrier(N), B),
+    pairModule(M, R, N), tensorRelations(M, R, N), P)
+
+-- f ⊗ g : M ⊗ N → M' ⊗ N', m ⊗ n ↦ f(m) ⊗ g(n) (TensorProduct.map),
+-- and its one-sided cases lTensor (id ⊗ g) and rTensor (f ⊗ id).
+def tensorMapPairs (f g M N M2 R N2 : Set) : Set :=
+  { p ∈ (Module.carrier(M) × Module.carrier(N)) ×
+      Module.carrier(tensorProduct(M2, R, N2)) |
+    ∃ m ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      p = ((m, n), tmul(M2, R, N2, f(m), g(n))) }
+
+def tensorMap (f g M N M2 R N2 : Set) : Set :=
+  tensorLift(M, R, N, tensorProduct(M2, R, N2),
+    tensorMapPairs(f, g, M, N, M2, R, N2))
+
+def leftTensor (M R N N2 g : Set) : Set :=
+  tensorMap(identity(Module.carrier(M)), g, M, N, M, R, N2)
+
+def rightTensor (M R N M2 f : Set) : Set :=
+  tensorMap(f, identity(Module.carrier(N)), M, N, M2, R, N)
+
+-- R ⊗ M → M, r ⊗ m ↦ r m (TensorProduct.lid), and M ⊗ N → N ⊗ M,
+-- m ⊗ n ↦ n ⊗ m (TensorProduct.comm).
+def scalarTensorMap (M R : Set) : Set :=
+  tensorLift(selfModule(R), R, M, M, Module.smul(M))
+
+def tensorSwapPairs (M R N : Set) : Set :=
+  { p ∈ (Module.carrier(M) × Module.carrier(N)) ×
+      Module.carrier(tensorProduct(N, R, M)) |
+    ∃ m ∈ Module.carrier(M), ∃ n ∈ Module.carrier(N),
+      p = ((m, n), tmul(N, R, M, n, m)) }
+
+def tensorSwap (M R N : Set) : Set :=
+  tensorLift(M, R, N, tensorProduct(N, R, M), tensorSwapPairs(M, R, N))
+
+-- Section: Base change
+-- A commutative R-algebra A (Cumulus's Algebra, base R) as an R-module,
+-- a ↦ r a acting through the structure map, and an A-module N as an
+-- R-module by restriction of scalars.
+def algebraAction (A : Set) : Set :=
+  { p ∈ (Ring.carrier(Algebra.base(A)) × algebraCarrier(A)) × algebraCarrier(A) |
+    ∃ r ∈ Ring.carrier(Algebra.base(A)), ∃ a ∈ algebraCarrier(A),
+      p = ((r, a), call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(r), a)) }
+
+def algebraModule (A : Set) : Set :=
+  Module.mk(algebraCarrier(A), Ring.add(Algebra.ring(A)),
+    Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), algebraAction(A))
+
+def restrictedAction (A N : Set) : Set :=
+  { p ∈ (Ring.carrier(Algebra.base(A)) × Module.carrier(N)) × Module.carrier(N) |
+    ∃ r ∈ Ring.carrier(Algebra.base(A)), ∃ x ∈ Module.carrier(N),
+      p = ((r, x), call2(Module.smul(N), Algebra.map(A)(r), x)) }
+
+def restrictedModule (A N : Set) : Set :=
+  Module.mk(Module.carrier(N), Module.add(N), Module.zero(N), Module.neg(N),
+    restrictedAction(A, N))
+
+-- Multiplication by a ∈ A as an R-linear map of A.
+def algebraMultiplication (A a : Set) : Set :=
+  { p ∈ algebraCarrier(A) × algebraCarrier(A) | ∃ b ∈ algebraCarrier(A),
+    p = (b, call2(Ring.mul(Algebra.ring(A)), a, b)) }
+
+-- A ⊗[R] M as an A-module, a (b ⊗ m) = (a b) ⊗ m (Mathlib's
+-- TensorProduct.leftModule on A ⊗ M, the base change of M).
+def baseChangeAction (A M : Set) : Set :=
+  { p ∈ (algebraCarrier(A) ×
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A), M))) ×
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A), M)) |
+    ∃ a ∈ algebraCarrier(A),
+    ∃ t ∈ Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A), M)),
+      p = ((a, t), rightTensor(algebraModule(A), Algebra.base(A), M,
+        algebraModule(A), algebraMultiplication(A, a))(t)) }
+
+def baseChange (A M : Set) : Set :=
+  Module.mk(
+    Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A), M)),
+    Module.add(tensorProduct(algebraModule(A), Algebra.base(A), M)),
+    Module.zero(tensorProduct(algebraModule(A), Algebra.base(A), M)),
+    Module.neg(tensorProduct(algebraModule(A), Algebra.base(A), M)),
+    baseChangeAction(A, M))
+
+-- m ↦ 1 ⊗ m, the R-linear map M → A ⊗ M.
+def baseChangeUnit (A M : Set) : Set :=
+  { p ∈ Module.carrier(M) ×
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A), M)) |
+    ∃ m ∈ Module.carrier(M), p = (m, tmul(algebraModule(A), Algebra.base(A),
+      M, Ring.one(Algebra.ring(A)), m)) }
+
+-- For an A-module N and an R-linear f : M → N, the A-linear map
+-- A ⊗ M → N, a ⊗ m ↦ a f(m) (LinearMap.liftBaseChange).
+def liftBaseChangePairs (A M N f : Set) : Set :=
+  { p ∈ (algebraCarrier(A) × Module.carrier(M)) × Module.carrier(N) |
+    ∃ a ∈ algebraCarrier(A), ∃ m ∈ Module.carrier(M),
+      p = ((a, m), call2(Module.smul(N), a, f(m))) }
+
+def liftBaseChange (A M N f : Set) : Set :=
+  tensorLift(algebraModule(A), Algebra.base(A), M, restrictedModule(A, N),
+    liftBaseChangePairs(A, M, N, f))
+
+-- Section: Tensor products of algebras
+-- For commutative R-algebras A and B, the multiplication of A ⊗ B: the
+-- unique map T × T → T, bilinear for the R-module structure, with
+-- (a ⊗ b)(a' ⊗ b') = (a a') ⊗ (b b') (Algebra.TensorProduct.mul).
+defunique algebraTensorMultiplication (A B : Set)
+    (μ ∈ functionSpace(
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A),
+        algebraModule(B))) ×
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A),
+        algebraModule(B))),
+      Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A),
+        algebraModule(B))))) :=
+  BilinearMap(μ, tensorProduct(algebraModule(A), Algebra.base(A),
+      algebraModule(B)),
+    tensorProduct(algebraModule(A), Algebra.base(A), algebraModule(B)),
+    tensorProduct(algebraModule(A), Algebra.base(A), algebraModule(B)),
+    Algebra.base(A)) ∧
+  (∀ a a2 ∈ algebraCarrier(A), ∀ b b2 ∈ algebraCarrier(B),
+    μ((tmul(algebraModule(A), Algebra.base(A), algebraModule(B), a, b),
+       tmul(algebraModule(A), Algebra.base(A), algebraModule(B), a2, b2))) =
+    tmul(algebraModule(A), Algebra.base(A), algebraModule(B),
+      call2(Ring.mul(Algebra.ring(A)), a, a2),
+      call2(Ring.mul(Algebra.ring(B)), b, b2)))
+requires algebraA : Algebra(A)
+requires algebraB : Algebra(B)
+requires sameBase : Algebra.base(A) = Algebra.base(B)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- The ring A ⊗ B, with one 1 ⊗ 1, and the R-algebra with structure map
+-- r ↦ (r · 1) ⊗ 1.
+def algebraTensorRing (A B : Set) : Set :=
+  Ring.mk(
+    Module.carrier(tensorProduct(algebraModule(A), Algebra.base(A),
+      algebraModule(B))),
+    Module.add(tensorProduct(algebraModule(A), Algebra.base(A),
+      algebraModule(B))),
+    Module.zero(tensorProduct(algebraModule(A), Algebra.base(A),
+      algebraModule(B))),
+    Module.neg(tensorProduct(algebraModule(A), Algebra.base(A),
+      algebraModule(B))),
+    algebraTensorMultiplication(A, B),
+    tmul(algebraModule(A), Algebra.base(A), algebraModule(B),
+      Ring.one(Algebra.ring(A)), Ring.one(Algebra.ring(B))))
+
+def algebraTensorMap (A B : Set) : Set :=
+  { p ∈ Ring.carrier(Algebra.base(A)) × Ring.carrier(algebraTensorRing(A, B)) |
+    ∃ r ∈ Ring.carrier(Algebra.base(A)),
+      p = (r, tmul(algebraModule(A), Algebra.base(A), algebraModule(B),
+        Algebra.map(A)(r), Ring.one(Algebra.ring(B)))) }
+
+def algebraTensor (A B : Set) : Set :=
+  Algebra.mk(Algebra.base(A), algebraTensorRing(A, B), algebraTensorMap(A, B))
+
+-- a ↦ a ⊗ 1 and b ↦ 1 ⊗ b (Algebra.TensorProduct.includeLeft,
+-- includeRight).
+def includeLeft (A B : Set) : Set :=
+  { p ∈ algebraCarrier(A) × Ring.carrier(algebraTensorRing(A, B)) |
+    ∃ a ∈ algebraCarrier(A), p = (a, tmul(algebraModule(A), Algebra.base(A),
+      algebraModule(B), a, Ring.one(Algebra.ring(B)))) }
+
+def includeRight (A B : Set) : Set :=
+  { p ∈ algebraCarrier(B) × Ring.carrier(algebraTensorRing(A, B)) |
+    ∃ b ∈ algebraCarrier(B), p = (b, tmul(algebraModule(A), Algebra.base(A),
+      algebraModule(B), Ring.one(Algebra.ring(A)), b)) }
+
+-- For algebra maps f : A → C and g : B → C, the algebra map A ⊗ B → C,
+-- a ⊗ b ↦ f(a) g(b) (Algebra.TensorProduct.productMap).
+def productMapPairs (A B C f g : Set) : Set :=
+  { p ∈ (algebraCarrier(A) × algebraCarrier(B)) × algebraCarrier(C) |
+    ∃ a ∈ algebraCarrier(A), ∃ b ∈ algebraCarrier(B),
+      p = ((a, b), call2(Ring.mul(Algebra.ring(C)), f(a), g(b))) }
+
+def productMap (A B C f g : Set) : Set :=
+  tensorLift(algebraModule(A), Algebra.base(A), algebraModule(B),
+    algebraModule(C), productMapPairs(A, B, C, f, g))
+
+-- Section: Laws of tensor products
+section Tensors
+variable (R M N : Set)
+hypothesis ring : CommRing(R)
+hypothesis moduleM : Module(M, R)
+hypothesis moduleN : Module(N, R)
+
+theorem tensorRelations.submodule
+  shows SubmoduleOf(tensorRelations(M, R, N), pairModule(M, R, N), R)
+proof
+  sorry
+
+theorem tensorProduct.module
+  shows Module(tensorProduct(M, R, N), R)
+proof
+  sorry
+
+theorem tmul.mem (m : M) (n : N)
+  shows tmul(M, R, N, m, n) ∈ Module.carrier(tensorProduct(M, R, N))
+proof
+  sorry
+
+-- TensorProduct.add_tmul and tmul_add.
+theorem tmul.add_left (m m2 : M) (n : N)
+  shows tmul(M, R, N, m + m2, n) = call2(Module.add(tensorProduct(M, R, N)),
+    tmul(M, R, N, m, n), tmul(M, R, N, m2, n))
+proof
+  sorry
+
+theorem tmul.add_right (m : M) (n n2 : N)
+  shows tmul(M, R, N, m, n + n2) = call2(Module.add(tensorProduct(M, R, N)),
+    tmul(M, R, N, m, n), tmul(M, R, N, m, n2))
+proof
+  sorry
+
+-- TensorProduct.smul_tmul' and smul_tmul: r (m ⊗ n) = (r m) ⊗ n =
+-- m ⊗ (r n).
+theorem tmul.smul_left (r : R) (m : M) (n : N)
+  shows tmul(M, R, N, r • m, n) = call2(Module.smul(tensorProduct(M, R, N)),
+    r, tmul(M, R, N, m, n))
+proof
+  sorry
+
+theorem tmul.smul_right (r : R) (m : M) (n : N)
+  shows tmul(M, R, N, m, r • n) = tmul(M, R, N, r • m, n)
+proof
+  sorry
+
+theorem tmul.zero_left (n : N)
+  shows tmul(M, R, N, M.zero, n) = Module.zero(tensorProduct(M, R, N))
+proof
+  sorry
+
+theorem tmul.zero_right (m : M)
+  shows tmul(M, R, N, m, N.zero) = Module.zero(tensorProduct(M, R, N))
+proof
+  sorry
+
+-- TensorProduct.tmul_sub and neg_tmul.
+theorem tmul.neg_left (m : M) (n : N)
+  shows tmul(M, R, N, -m, n) =
+    apply(Module.neg(tensorProduct(M, R, N)), tmul(M, R, N, m, n))
+proof
+  sorry
+
+theorem tmul.neg_right (m : M) (n : N)
+  shows tmul(M, R, N, m, -n) =
+    apply(Module.neg(tensorProduct(M, R, N)), tmul(M, R, N, m, n))
+proof
+  sorry
+
+-- TensorProduct.mk is bilinear.
+theorem tensorMk.bilinear
+  shows BilinearMap(tensorMk(M, R, N), M, N, tensorProduct(M, R, N), R)
+proof
+  sorry
+
+theorem tensorMk.apply (m : M) (n : N)
+  shows tensorMk(M, R, N)((m, n)) = tmul(M, R, N, m, n)
+proof
+  sorry
+
+-- TensorProduct.span_tmul_eq_top and induction_on: the pure tensors span.
+theorem tensorProduct.span_pure
+  shows moduleSpan(tensorProduct(M, R, N), R,
+      functionImage(tensorMk(M, R, N), M.carrier × N.carrier,
+        Module.carrier(tensorProduct(M, R, N)))) =
+    Module.carrier(tensorProduct(M, R, N))
+proof
+  sorry
+
+-- Every element is a finite sum of pure tensors.
+theorem tensorProduct.finite_sum (t : Set)
+  requires member : t ∈ Module.carrier(tensorProduct(M, R, N))
+  shows ∃ k, Nat(k) ∧ ∃ u, ∃ w, (u : k → M.carrier) ∧ (w : k → N.carrier) ∧
+    t = moduleSum(tensorProduct(M, R, N), k,
+      compose(tensorMk(M, R, N), pairFamily(k, M.carrier, N.carrier, u, w), k, M.carrier × N.carrier,
+        Module.carrier(tensorProduct(M, R, N))))
+proof
+  sorry
+
+-- TensorProduct.lift: the universal property.
+theorem tensorLift.linear (P B : Set)
+  requires bilinear : BilinearMap(B, M, N, P, R)
+  shows LinearMap(tensorLift(M, R, N, P, B), tensorProduct(M, R, N), R, P)
+proof
+  sorry
+
+theorem tensorLift.tmul (P B : Set) (m : M) (n : N)
+  requires bilinear : BilinearMap(B, M, N, P, R)
+  shows tensorLift(M, R, N, P, B)(tmul(M, R, N, m, n)) = B((m, n))
+proof
+  sorry
+
+-- TensorProduct.ext': linear maps out of M ⊗ N agreeing on pure tensors
+-- are equal.
+theorem tensorProduct.ext (P f g : Set)
+  requires first : LinearMap(f, tensorProduct(M, R, N), R, P)
+  requires second : LinearMap(g, tensorProduct(M, R, N), R, P)
+  requires agree : ∀ m ∈ M.carrier, ∀ n ∈ N.carrier,
+    f(tmul(M, R, N, m, n)) = g(tmul(M, R, N, m, n))
+  shows f = g
+proof
+  sorry
+
+theorem tensorLift.unique (P B f : Set)
+  requires bilinear : BilinearMap(B, M, N, P, R)
+  requires linear : LinearMap(f, tensorProduct(M, R, N), R, P)
+  requires agree : ∀ m ∈ M.carrier, ∀ n ∈ N.carrier,
+    f(tmul(M, R, N, m, n)) = B((m, n))
+  shows f = tensorLift(M, R, N, P, B)
+proof
+  sorry
+
+-- TensorProduct.map and its laws.
+theorem tensorMap.linear (M2 N2 f g : Set)
+  requires first : LinearMap(f, M, R, M2)
+  requires second : LinearMap(g, N, R, N2)
+  shows LinearMap(tensorMap(f, g, M, N, M2, R, N2), tensorProduct(M, R, N), R,
+    tensorProduct(M2, R, N2))
+proof
+  sorry
+
+theorem tensorMap.tmul (M2 N2 f g : Set) (m : M) (n : N)
+  requires first : LinearMap(f, M, R, M2)
+  requires second : LinearMap(g, N, R, N2)
+  shows tensorMap(f, g, M, N, M2, R, N2)(tmul(M, R, N, m, n)) =
+    tmul(M2, R, N2, f(m), g(n))
+proof
+  sorry
+
+theorem tensorMap.identity
+  shows tensorMap(identity(M.carrier), identity(N.carrier), M, N, M, R, N) =
+    identity(Module.carrier(tensorProduct(M, R, N)))
+proof
+  sorry
+
+theorem tensorMap.compose (M2 N2 M3 N3 f g f2 g2 : Set)
+  requires first : LinearMap(f, M, R, M2)
+  requires second : LinearMap(g, N, R, N2)
+  requires third : LinearMap(f2, M2, R, M3)
+  requires fourth : LinearMap(g2, N2, R, N3)
+  shows compose(tensorMap(f2, g2, M2, N2, M3, R, N3),
+      tensorMap(f, g, M, N, M2, R, N2),
+      Module.carrier(tensorProduct(M, R, N)),
+      Module.carrier(tensorProduct(M2, R, N2)),
+      Module.carrier(tensorProduct(M3, R, N3))) =
+    tensorMap(compose(f2, f, M.carrier, Module.carrier(M2), Module.carrier(M3)),
+      compose(g2, g, N.carrier, Module.carrier(N2), Module.carrier(N3)),
+      M, N, M3, R, N3)
+proof
+  sorry
+
+-- LinearMap.lTensor_surjective and rTensor_surjective.
+theorem leftTensor.surjective (N2 g : Set)
+  requires linear : LinearMap(g, N, R, N2)
+  requires surjective : SurjectiveBetween(g, N.carrier, Module.carrier(N2))
+  shows SurjectiveBetween(leftTensor(M, R, N, N2, g),
+    Module.carrier(tensorProduct(M, R, N)), Module.carrier(tensorProduct(M, R, N2)))
+proof
+  sorry
+
+theorem rightTensor.surjective (M2 f : Set)
+  requires linear : LinearMap(f, M, R, M2)
+  requires surjective : SurjectiveBetween(f, M.carrier, Module.carrier(M2))
+  shows SurjectiveBetween(rightTensor(M, R, N, M2, f),
+    Module.carrier(tensorProduct(M, R, N)), Module.carrier(tensorProduct(M2, R, N)))
+proof
+  sorry
+
+-- lTensor_exact: tensoring with M is right exact. For N1 →f N →g N2 → 0
+-- exact, M ⊗ N1 → M ⊗ N → M ⊗ N2 → 0 is exact.
+theorem leftTensor.exact (N1 N2 f g : Set)
+  requires first : LinearMap(f, N1, R, N)
+  requires second : LinearMap(g, N, R, N2)
+  requires exact : ExactPair(f, g, N1, N, N2)
+  requires surjective : SurjectiveBetween(g, N.carrier, Module.carrier(N2))
+  shows ExactPair(leftTensor(M, R, N1, N, f), leftTensor(M, R, N, N2, g),
+    tensorProduct(M, R, N1), tensorProduct(M, R, N), tensorProduct(M, R, N2))
+proof
+  sorry
+
+theorem rightTensor.exact (M1 M2 f g : Set)
+  requires first : LinearMap(f, M1, R, M)
+  requires second : LinearMap(g, M, R, M2)
+  requires exact : ExactPair(f, g, M1, M, M2)
+  requires surjective : SurjectiveBetween(g, M.carrier, Module.carrier(M2))
+  shows ExactPair(rightTensor(M1, R, N, M, f), rightTensor(M, R, N, M2, g),
+    tensorProduct(M1, R, N), tensorProduct(M, R, N), tensorProduct(M2, R, N))
+proof
+  sorry
+
+-- TensorProduct.comm.
+theorem tensorSwap.equiv
+  shows LinearEquiv(tensorSwap(M, R, N), tensorProduct(M, R, N), R,
+    tensorProduct(N, R, M))
+proof
+  sorry
+
+theorem tensorSwap.tmul (m : M) (n : N)
+  shows tensorSwap(M, R, N)(tmul(M, R, N, m, n)) = tmul(N, R, M, n, m)
+proof
+  sorry
+
+-- TensorProduct.assoc: (M ⊗ N) ⊗ P ≅ M ⊗ (N ⊗ P).
+theorem tensorProduct.assoc (P : Set)
+  requires moduleP : Module(P, R)
+  shows ∃ e, LinearEquiv(e, tensorProduct(tensorProduct(M, R, N), R, P), R,
+      tensorProduct(M, R, tensorProduct(N, R, P))) ∧
+    (∀ m ∈ M.carrier, ∀ n ∈ N.carrier, ∀ p ∈ P.carrier,
+      e(tmul(tensorProduct(M, R, N), R, P, tmul(M, R, N, m, n), p)) =
+        tmul(M, R, tensorProduct(N, R, P), m, tmul(N, R, P, n, p)))
+proof
+  sorry
+
+-- Basis.tensorProduct: pure tensors of basis vectors form a basis, so the
+-- rank is multiplicative (Module.finrank_tensorProduct).
+theorem tensorProduct.basis (I J v w : Set)
+  requires first : ModuleBasis(M, R, I, v)
+  requires second : ModuleBasis(N, R, J, w)
+  shows ModuleBasis(tensorProduct(M, R, N), R, I × J,
+    compose(tensorMk(M, R, N), productFamily(I, J, M.carrier, N.carrier, v, w), I × J,
+      M.carrier × N.carrier, Module.carrier(tensorProduct(M, R, N))))
+proof
+  sorry
+
+theorem tensorProduct.finrank
+  requires nontrivial : R.zero ≠ R.one
+  requires freeM : FiniteFreeModule(M, R)
+  requires freeN : FiniteFreeModule(N, R)
+  shows FiniteFreeModule(tensorProduct(M, R, N), R) ∧
+    finrank(tensorProduct(M, R, N), R) = finrank(M, R) * finrank(N, R)
+proof
+  sorry
+
+end Tensors
+
+section Unit
+variable (R M : Set)
+hypothesis ring : CommRing(R)
+hypothesis module : Module(M, R)
+
+-- TensorProduct.lid: R ⊗ M ≅ M.
+theorem scalarTensorMap.equiv
+  shows LinearEquiv(scalarTensorMap(M, R), tensorProduct(selfModule(R), R, M),
+    R, M)
+proof
+  sorry
+
+theorem scalarTensorMap.tmul (r : R) (m : M)
+  shows scalarTensorMap(M, R)(tmul(selfModule(R), R, M, r, m)) = r • m
+proof
+  sorry
+
+-- Rᴵ ⊗ M ≅ Mᴵ for finite I.
+theorem tensorProduct.coordinate (I : Set)
+  requires finite : Finite(I)
+  shows ModuleIsomorphic(tensorProduct(coordinateModule(R, I), R, M), R,
+    functionModule(R, I, M))
+proof
+  sorry
+
+end Unit
+
+-- Section: Laws of base change
+section BaseChange
+variable (A M : Set)
+hypothesis algebra : Algebra(A)
+hypothesis module : Module(M, Algebra.base(A))
+
+theorem algebraModule.module
+  shows Module(algebraModule(A), Algebra.base(A))
+proof
+  sorry
+
+theorem restrictedModule.module (N : Set)
+  requires moduleN : Module(N, Algebra.ring(A))
+  shows Module(restrictedModule(A, N), Algebra.base(A))
+proof
+  sorry
+
+theorem baseChange.module
+  shows Module(baseChange(A, M), Algebra.ring(A))
+proof
+  sorry
+
+-- a (b ⊗ m) = (a b) ⊗ m.
+theorem baseChange.smul_tmul (a b m : Set)
+  requires first : a ∈ algebraCarrier(A)
+  requires second : b ∈ algebraCarrier(A)
+  requires vector : m ∈ M.carrier
+  shows call2(Module.smul(baseChange(A, M)), a,
+      tmul(algebraModule(A), Algebra.base(A), M, b, m)) =
+    tmul(algebraModule(A), Algebra.base(A), M,
+      call2(Ring.mul(Algebra.ring(A)), a, b), m)
+proof
+  sorry
+
+-- A basis v of M gives the basis 1 ⊗ v of A ⊗ M over A
+-- (Basis.baseChange).
+theorem baseChange.basis (I v : Set)
+  requires basis : ModuleBasis(M, Algebra.base(A), I, v)
+  shows ModuleBasis(baseChange(A, M), Algebra.ring(A), I,
+    compose(baseChangeUnit(A, M), v, I, M.carrier,
+      Module.carrier(baseChange(A, M))))
+proof
+  sorry
+
+-- LinearMap.liftBaseChange.
+theorem liftBaseChange.linear (N f : Set)
+  requires moduleN : Module(N, Algebra.ring(A))
+  requires linear : LinearMap(f, M, Algebra.base(A), restrictedModule(A, N))
+  shows LinearMap(liftBaseChange(A, M, N, f), baseChange(A, M), Algebra.ring(A), N)
+proof
+  sorry
+
+theorem liftBaseChange.tmul (N f a m : Set)
+  requires moduleN : Module(N, Algebra.ring(A))
+  requires linear : LinearMap(f, M, Algebra.base(A), restrictedModule(A, N))
+  requires scalar : a ∈ algebraCarrier(A)
+  requires vector : m ∈ M.carrier
+  shows liftBaseChange(A, M, N, f)(tmul(algebraModule(A), Algebra.base(A), M,
+    a, m)) = call2(Module.smul(N), a, f(m))
+proof
+  sorry
+
+-- LinearMap.liftBaseChangeEquiv: A-linear maps A ⊗ M → N are the R-linear
+-- maps M → N, by g ↦ (m ↦ g(1 ⊗ m)) with inverse liftBaseChange.
+theorem liftBaseChange.unique (N f g : Set)
+  requires moduleN : Module(N, Algebra.ring(A))
+  requires linear : LinearMap(f, M, Algebra.base(A), restrictedModule(A, N))
+  requires other : LinearMap(g, baseChange(A, M), Algebra.ring(A), N)
+  requires agree : ∀ m ∈ M.carrier,
+    g(tmul(algebraModule(A), Algebra.base(A), M, Ring.one(Algebra.ring(A)), m)) =
+      f(m)
+  shows g = liftBaseChange(A, M, N, f)
+proof
+  sorry
+
+theorem liftBaseChange.restrict (N g : Set)
+  requires moduleN : Module(N, Algebra.ring(A))
+  requires linear : LinearMap(g, baseChange(A, M), Algebra.ring(A), N)
+  shows LinearMap(compose(g, baseChangeUnit(A, M), M.carrier,
+      Module.carrier(baseChange(A, M)), N.carrier),
+    M, Algebra.base(A), restrictedModule(A, N))
+proof
+  sorry
+
+end BaseChange
+
+-- Section: Laws of tensor products of algebras
+section AlgebraTensor
+variable (A B : Set)
+hypothesis algebraA : Algebra(A)
+hypothesis algebraB : Algebra(B)
+hypothesis sameBase : Algebra.base(A) = Algebra.base(B)
+
+theorem algebraTensor.algebra
+  shows Algebra(algebraTensor(A, B))
+proof
+  sorry
+
+theorem algebraTensor.mul_tmul (a a2 b b2 : Set)
+  requires firstA : a ∈ algebraCarrier(A)
+  requires secondA : a2 ∈ algebraCarrier(A)
+  requires firstB : b ∈ algebraCarrier(B)
+  requires secondB : b2 ∈ algebraCarrier(B)
+  shows call2(Ring.mul(algebraTensorRing(A, B)),
+      tmul(algebraModule(A), Algebra.base(A), algebraModule(B), a, b),
+      tmul(algebraModule(A), Algebra.base(A), algebraModule(B), a2, b2)) =
+    tmul(algebraModule(A), Algebra.base(A), algebraModule(B),
+      call2(Ring.mul(Algebra.ring(A)), a, a2),
+      call2(Ring.mul(Algebra.ring(B)), b, b2))
+proof
+  sorry
+
+theorem includeLeft.hom
+  shows AlgebraHom(includeLeft(A, B), A, algebraTensor(A, B))
+proof
+  sorry
+
+theorem includeRight.hom
+  shows AlgebraHom(includeRight(A, B), B, algebraTensor(A, B))
+proof
+  sorry
+
+-- Algebra.TensorProduct.productMap: algebra maps f : A → C and g : B → C
+-- give the algebra map a ⊗ b ↦ f(a) g(b), the unique one restricting to
+-- f and g.
+theorem productMap.hom (C f g : Set)
+  requires first : AlgebraHom(f, A, C)
+  requires second : AlgebraHom(g, B, C)
+  shows AlgebraHom(productMap(A, B, C, f, g), algebraTensor(A, B), C)
+proof
+  sorry
+
+theorem productMap.tmul (C f g a b : Set)
+  requires first : AlgebraHom(f, A, C)
+  requires second : AlgebraHom(g, B, C)
+  requires memberA : a ∈ algebraCarrier(A)
+  requires memberB : b ∈ algebraCarrier(B)
+  shows productMap(A, B, C, f, g)(tmul(algebraModule(A), Algebra.base(A),
+    algebraModule(B), a, b)) = call2(Ring.mul(Algebra.ring(C)), f(a), g(b))
+proof
+  sorry
+
+theorem productMap.unique (C f g h : Set)
+  requires first : AlgebraHom(f, A, C)
+  requires second : AlgebraHom(g, B, C)
+  requires hom : AlgebraHom(h, algebraTensor(A, B), C)
+  requires left : ∀ a ∈ algebraCarrier(A), h(includeLeft(A, B)(a)) = f(a)
+  requires right : ∀ b ∈ algebraCarrier(B), h(includeRight(A, B)(b)) = g(b)
+  shows h = productMap(A, B, C, f, g)
+proof
+  sorry
+
+end AlgebraTensor

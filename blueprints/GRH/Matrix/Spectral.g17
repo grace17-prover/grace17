@@ -1,0 +1,483 @@
+-- Spectral facts: the characteristic polynomial det(X·1 − A) of a square
+-- matrix on a finite index set (Cumulus's characteristic polynomial), its
+-- coefficients (monic of degree |n|, trace and determinant), its value at
+-- a point, its image under a ring map (charpoly over a subring), its
+-- invariance under similarity and transpose, Cayley–Hamilton for
+-- polynomial evaluation at a matrix; eigenvalues, eigenspaces, and
+-- generalized eigenspaces of endomorphisms and of matrices, independence
+-- of eigenvectors for distinct eigenvalues, the roots of the
+-- characteristic polynomial; diagonalisation when there are |n| distinct
+-- eigenvalues; and a common eigenvector of commuting endomorphisms over
+-- an algebraically closed field.
+-- Part of the GRH blueprint.
+-- Planned home: LinearAlgebra/Matrix/Spectral.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Matrix.Spectral
+import GRH.Matrix.Determinant
+import Grace.Cumulus.Algebra.Ring.CayleyHamilton
+import Grace.Cumulus.Algebra.Polynomial.BundledEvaluation
+import Grace.Cumulus.Algebra.Polynomial.BundledNullstellensatz
+
+-- Section: The characteristic polynomial
+-- charpoly A = det(X·1 − A) ∈ R[X], R[X] being polynomialRing(R, {0}) with
+-- the variable X_0 (Matrix.charpoly).
+def matCharpoly (R n A : Set) : Set :=
+  characteristicPolynomial(n, {0}, Ring.carrier(R), Ring.add(R), Ring.zero(R),
+    Ring.neg(R), Ring.mul(R), Ring.one(R), A, 0)
+
+-- The coefficient of X^k of a univariate polynomial p (the value of p at
+-- the monomial 0 ↦ k), and the value p(x) at x ∈ R (Polynomial.eval).
+def polyCoeff (p : Set, k : Nat) : Set := p({(0, k)})
+
+def polyEval (R p x : Set) : Set :=
+  evaluationAt(R, {0}, constantFunction({0}, Ring.carrier(R), x))(p)
+
+-- The degrees with nonzero coefficient.
+def polyDegrees (R p : Set) : Set :=
+  { k ∈ ℕ | p({(0, k)}) ≠ Ring.zero(R) }
+
+-- Matrix powers and the value p(A) = Σ_k c_k A^k of a polynomial at a
+-- square matrix (Polynomial.aeval A p).
+def matPow (R n A : Set, k : Nat) → Set
+  | R, n, A, zero => matOne(R, n)
+  | R, n, A, succ(j) => matMul(R, n, n, n, matPow(R, n, A, j), A)
+
+def matPolyTerms (R n A p : Set) : Set :=
+  { q ∈ ℕ × matrixSpace(R, n, n) | ∃ k ∈ ℕ,
+    q = (k, matSmul(R, n, n, p({(0, k)}), matPow(R, n, A, k))) }
+
+def matPolyEval (R n A p : Set) : Set :=
+  moduleSum(matrixModule(R, n, n), polyDegrees(R, p),
+    restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p)))
+
+def matPolyEvalMap (R n A : Set) : Set :=
+  { q ∈ Ring.carrier(polynomialRing(R, {0})) × matrixSpace(R, n, n) |
+    ∃ p ∈ Ring.carrier(polynomialRing(R, {0})), q = (p, matPolyEval(R, n, A, p)) }
+
+-- Section: Eigenvalues and eigenspaces
+-- The eigenspace {v : f(v) = a v} of an endomorphism, eigenvalues
+-- (Module.End.eigenspace, HasEigenvalue), the shifted map f − a, its
+-- powers, and the generalized eigenspace ker (f − a)^k
+-- (Module.End.genEigenspace).
+def eigenspace (M R f a : Set) : Set :=
+  { v ∈ Module.carrier(M) | f(v) = call2(Module.smul(M), a, v) }
+
+predicate HasEigenvalue (M R f a : Set) :=
+  a ∈ Ring.carrier(R) ∧ (∃ v ∈ eigenspace(M, R, f, a), v ≠ Module.zero(M))
+
+def shiftedMap (M f a : Set) : Set :=
+  { p ∈ Module.carrier(M) × Module.carrier(M) | ∃ v ∈ Module.carrier(M),
+    p = (v, call2(Module.add(M), f(v),
+      apply(Module.neg(M), call2(Module.smul(M), a, v)))) }
+
+def mapPower (M g : Set, k : Nat) → Set
+  | M, g, zero => identity(Module.carrier(M))
+  | M, g, succ(j) => compose(g, mapPower(M, g, j), Module.carrier(M),
+      Module.carrier(M), Module.carrier(M))
+
+def generalizedEigenspace (M R f a : Set, k : Nat) : Set :=
+  linearKernel(mapPower(M, shiftedMap(M, f, a), k), M, M)
+
+-- For matrices: {v ∈ Rⁿ : A v = a v}, and the eigenvalues of A.
+def matEigenspace (R n A a : Set) : Set :=
+  { v ∈ functionSpace(n, Ring.carrier(R)) | mulVec(R, n, n, A, v) = vecSmul(R, n, a, v) }
+
+def matEigenvalues (R n A : Set) : Set :=
+  { a ∈ Ring.carrier(R) | ∃ v ∈ matEigenspace(R, n, A, a),
+    v ≠ constantFunction(n, Ring.carrier(R), Ring.zero(R)) }
+
+-- A is diagonalisable: P⁻¹ A P is diagonal for an invertible P.
+predicate Diagonalizable (R n A : Set) :=
+  ∃ P ∈ matrixSpace(R, n, n), InvertibleMatrix(R, n, P) ∧
+    (∃ d ∈ functionSpace(n, Ring.carrier(R)),
+      matMul(R, n, n, n, matInverse(R, n, P), matMul(R, n, n, n, A, P)) =
+        matDiagonal(R, n, d))
+
+-- A has |n| distinct eigenvalues: an injective λ : n → R with each λ(i)
+-- an eigenvalue (over a field, the characteristic polynomial splits with
+-- simple roots).
+predicate SimpleSpectrum (R n A λ : Set) :=
+  InjectiveBetween(λ, n, Ring.carrier(R)) ∧
+  (∀ i ∈ n, λ(i) ∈ matEigenvalues(R, n, A))
+
+-- The linear factors X − λ(i) and their product Π (X − λ(i)) in R[X].
+def linearFactors (R n λ : Set) : Set :=
+  { q ∈ n × Ring.carrier(polynomialRing(R, {0})) | ∃ i ∈ n, q = (i,
+    Ring.sub(polynomialRing(R, {0}), X(R, {0}, 0),
+      polynomialConstant(R, {0})(λ(i)))) }
+
+def linearFactorProduct (R n λ : Set) : Set :=
+  finiteRingProduct(n, Ring.carrier(polynomialRing(R, {0})),
+    Ring.add(polynomialRing(R, {0})), Ring.zero(polynomialRing(R, {0})),
+    Ring.neg(polynomialRing(R, {0})), Ring.mul(polynomialRing(R, {0})),
+    Ring.one(polynomialRing(R, {0})), linearFactors(R, n, λ))
+
+-- Section: Laws of the characteristic polynomial
+section Charpoly
+variable (R n : Set)
+hypothesis ring : CommRing(R)
+hypothesis finite : Finite(n)
+
+theorem matCharpoly.mem (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matCharpoly(R, n, A) ∈ Ring.carrier(polynomialRing(R, {0}))
+proof
+  sorry
+
+-- On n = {0, …, n − 1} it is Cumulus's charpoly.
+theorem matCharpoly.nat (m : Nat) (A : Set)
+  requires matrix : A : R ^ m × m
+  shows matCharpoly(R, m, A) = charpoly(A)
+proof
+  sorry
+
+-- Matrix.charpoly_monic and charpoly_natDegree_eq_dim.
+theorem matCharpoly.monic (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows polyCoeff(matCharpoly(R, n, A), cardinality(n)) = R.one ∧
+    (∀ k ∈ ℕ, cardinality(n) < k → polyCoeff(matCharpoly(R, n, A), k) = R.zero)
+proof
+  sorry
+
+-- Matrix.trace_eq_neg_charpoly_coeff: the coefficient of X^(|n| − 1) is
+-- −trace A.
+theorem matCharpoly.coeff_trace (A : Set) (k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires size : succ(k) = cardinality(n)
+  shows polyCoeff(matCharpoly(R, n, A), k) = -matTrace(R, n, A)
+proof
+  sorry
+
+-- Matrix.det_eq_sign_charpoly_coeff: the constant coefficient is
+-- (−1)^|n| det A.
+theorem matCharpoly.coeff_zero (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows polyCoeff(matCharpoly(R, n, A), 0) =
+    monoidPow(R.mul, R.one, -R.one, cardinality(n)) * matDet(R, n, A)
+proof
+  sorry
+
+-- Matrix.eval_charpoly: charpoly A (x) = det(x·1 − A).
+theorem matCharpoly.eval (A x : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires point : x ∈ R.carrier
+  shows polyEval(R, matCharpoly(R, n, A), x) =
+    matDet(R, n, matAdd(R, n, n, matScalar(R, n, x), matNeg(R, n, n, A)))
+proof
+  sorry
+
+-- Matrix.charpoly_map: a ring map f carries the coefficients of charpoly A
+-- to those of charpoly f(A); in particular the characteristic polynomial
+-- of a matrix with entries in a subring is computed in the subring.
+theorem matCharpoly.map (S f A : Set) (k : Nat)
+  requires target : CommRing(S)
+  requires hom : RingHom(f, R, S)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows f(polyCoeff(matCharpoly(R, n, A), k)) =
+    polyCoeff(matCharpoly(S, n, matMap(S, n, n, f, A)), k)
+proof
+  sorry
+
+-- Similar matrices, and a matrix and its transpose, have the same
+-- characteristic polynomial (Matrix.charpoly_transpose).
+theorem matCharpoly.similar (A P : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires invertible : InvertibleMatrix(R, n, P)
+  shows matCharpoly(R, n, matMul(R, n, n, n, matInverse(R, n, P),
+    matMul(R, n, n, n, A, P))) = matCharpoly(R, n, A)
+proof
+  sorry
+
+theorem matCharpoly.transpose (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matCharpoly(R, n, matTranspose(R, n, n, A)) = matCharpoly(R, n, A)
+proof
+  sorry
+
+theorem matCharpoly.reindex (n2 e A : Set)
+  requires bijective : BijectiveBetween(e, n2, n)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matCharpoly(R, n2, submatrix(R, n2, n2, A, e, e)) = matCharpoly(R, n, A)
+proof
+  sorry
+
+-- Matrix.charpoly_diagonal: for a diagonal matrix, Π (X − d(i)).
+theorem matCharpoly.diagonal (d : Set)
+  requires vector : d ∈ functionSpace(n, R.carrier)
+  shows matCharpoly(R, n, matDiagonal(R, n, d)) = linearFactorProduct(R, n, d)
+proof
+  sorry
+
+theorem matPow.mem (A : Set) (k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPow(R, n, A, k) ∈ matrixSpace(R, n, n)
+proof
+  sorry
+
+theorem matPow.add (A : Set) (j k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPow(R, n, A, j + k) =
+    matMul(R, n, n, n, matPow(R, n, A, j), matPow(R, n, A, k))
+proof
+  sorry
+
+-- Matrix.aeval_self_charpoly: Cayley–Hamilton.
+theorem matCharpoly.cayley_hamilton (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPolyEval(R, n, A, matCharpoly(R, n, A)) = matZero(R, n, n)
+proof
+  sorry
+
+-- p ↦ p(A) is a ring map R[X] → Mₙ(R) sending X to A and the constants to
+-- the scalar matrices (Polynomial.aeval).
+theorem matPolyEval.hom (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows RingHom(matPolyEvalMap(R, n, A), polynomialRing(R, {0}),
+    squareMatrixRing(R, n))
+proof
+  sorry
+
+theorem matPolyEval.variable (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPolyEval(R, n, A, X(R, {0}, 0)) = A
+proof
+  sorry
+
+theorem matPolyEval.constant (A a : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires scalar : a ∈ R.carrier
+  shows matPolyEval(R, n, A, polynomialConstant(R, {0})(a)) = matScalar(R, n, a)
+proof
+  sorry
+
+end Charpoly
+
+-- Section: Laws of eigenspaces
+section Eigen
+variable (R M : Set)
+hypothesis ring : CommRing(R)
+hypothesis module : Module(M, R)
+
+theorem eigenspace.submodule (f a : Set)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  shows SubmoduleOf(eigenspace(M, R, f, a), M, R)
+proof
+  sorry
+
+theorem eigenspace.kernel (f a : Set)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  shows eigenspace(M, R, f, a) = linearKernel(shiftedMap(M, f, a), M, M)
+proof
+  sorry
+
+theorem shiftedMap.linear (f a : Set)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  shows LinearMap(shiftedMap(M, f, a), M, R, M)
+proof
+  sorry
+
+theorem generalizedEigenspace.submodule (f a : Set) (k : Nat)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  shows SubmoduleOf(generalizedEigenspace(M, R, f, a, k), M, R)
+proof
+  sorry
+
+theorem generalizedEigenspace.one (f a : Set)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  shows generalizedEigenspace(M, R, f, a, 1) = eigenspace(M, R, f, a)
+proof
+  sorry
+
+theorem generalizedEigenspace.mono (f a : Set) (j k : Nat)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalar : a ∈ R.carrier
+  requires le : j ≤ k
+  shows generalizedEigenspace(M, R, f, a, j) ⊆ generalizedEigenspace(M, R, f, a, k)
+proof
+  sorry
+
+-- A map commuting with f preserves its eigenspaces
+-- (Module.End.mapsTo_eigenspace_of_comm).
+theorem eigenspace.invariant (f g a v : Set)
+  requires first : LinearMap(f, M, R, M)
+  requires second : LinearMap(g, M, R, M)
+  requires commute : ∀ w ∈ M.carrier, f(g(w)) = g(f(w))
+  requires scalar : a ∈ R.carrier
+  requires member : v ∈ eigenspace(M, R, f, a)
+  shows g(v) ∈ eigenspace(M, R, f, a)
+proof
+  sorry
+
+-- Module.End.eigenvectors_linearIndependent: over a field (or a domain),
+-- eigenvectors for distinct eigenvalues are independent.
+theorem eigenspace.independent (f I λ v : Set)
+  requires field : Field(R)
+  requires linear : LinearMap(f, M, R, M)
+  requires distinct : InjectiveBetween(λ, I, R.carrier)
+  requires vectors : v : I → M.carrier
+  requires eigen : ∀ i ∈ I, v(i) ∈ eigenspace(M, R, f, λ(i)) ∧ v(i) ≠ M.zero
+  shows LinearIndependent(M, R, I, v)
+proof
+  sorry
+
+-- For an endomorphism of a finite free module, the eigenvalues are the
+-- roots of the characteristic polynomial of its matrix in any basis
+-- (Module.End.hasEigenvalue_iff_isRoot_charpoly), over a field.
+theorem HasEigenvalue.iff_root (f I b a : Set)
+  requires field : Field(R)
+  requires linear : LinearMap(f, M, R, M)
+  requires finite : Finite(I)
+  requires basis : ModuleBasis(M, R, I, b)
+  requires scalar : a ∈ R.carrier
+  shows HasEigenvalue(M, R, f, a) ↔
+    polyEval(R, matCharpoly(R, I, linearToMatrix(M, R, M, I, b, I, b, f)), a) = R.zero
+proof
+  sorry
+
+end Eigen
+
+-- Section: Eigenvalues of matrices over a field
+section MatrixEigen
+variable (K n : Set)
+hypothesis field : Field(K)
+hypothesis finite : Finite(n)
+
+theorem matEigenspace.eq_eigenspace (A a : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires scalar : a ∈ K.carrier
+  shows matEigenspace(K, n, A, a) =
+    eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), a)
+proof
+  sorry
+
+-- Matrix.hasEigenvalue_iff_isRoot: a is an eigenvalue iff charpoly A (a)
+-- = 0 iff det(a·1 − A) = 0.
+theorem matEigenvalues.iff_root (A a : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires scalar : a ∈ K.carrier
+  shows a ∈ matEigenvalues(K, n, A) ↔ polyEval(K, matCharpoly(K, n, A), a) = K.zero
+proof
+  sorry
+
+theorem matEigenvalues.iff_det (A a : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires scalar : a ∈ K.carrier
+  shows a ∈ matEigenvalues(K, n, A) ↔
+    matDet(K, n, matAdd(K, n, n, matScalar(K, n, a), matNeg(K, n, n, A))) = K.zero
+proof
+  sorry
+
+-- At most |n| eigenvalues.
+theorem matEigenvalues.card_le (A : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  shows Finite(matEigenvalues(K, n, A)) ∧
+    cardinality(matEigenvalues(K, n, A)) ≤ cardinality(n)
+proof
+  sorry
+
+-- Over an algebraically closed field every square matrix on a nonempty
+-- index set has an eigenvalue.
+theorem matEigenvalues.nonempty (A : Set)
+  requires closed : AlgebraicallyClosed(K)
+  requires nonempty : n ≠ ∅
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  shows ∃ a, a ∈ matEigenvalues(K, n, A)
+proof
+  sorry
+
+-- Simple spectrum: |n| distinct eigenvalues make charpoly the product of
+-- the X − λ(i), an eigenvector basis, and A diagonalisable, with
+-- P⁻¹ A P = diag λ for P the matrix of eigenvectors.
+theorem SimpleSpectrum.charpoly (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows matCharpoly(K, n, A) = linearFactorProduct(K, n, λ)
+proof
+  sorry
+
+theorem SimpleSpectrum.eigenvector_basis (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows ∃ v, ModuleBasis(coordinateModule(K, n), K, n, v) ∧
+    (∀ i ∈ n, v(i) ∈ matEigenspace(K, n, A, λ(i)))
+proof
+  sorry
+
+theorem SimpleSpectrum.diagonalize (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows ∃ P ∈ matrixSpace(K, n, n), InvertibleMatrix(K, n, P) ∧
+    matMul(K, n, n, n, matInverse(K, n, P), matMul(K, n, n, n, A, P)) =
+      matDiagonal(K, n, λ)
+proof
+  sorry
+
+theorem SimpleSpectrum.diagonalizable (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows Diagonalizable(K, n, A)
+proof
+  sorry
+
+-- With simple spectrum each eigenspace is a line.
+theorem SimpleSpectrum.eigenspace_line (A λ i : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  requires index : i ∈ n
+  shows FiniteDimensional(submoduleModule(coordinateModule(K, n), K,
+      matEigenspace(K, n, A, λ(i))), K) ∧
+    finrank(submoduleModule(coordinateModule(K, n), K,
+      matEigenspace(K, n, A, λ(i))), K) = 1
+proof
+  sorry
+
+-- The trace is the sum and the determinant the product of the
+-- eigenvalues.
+theorem SimpleSpectrum.trace_det (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows matTrace(K, n, A) = finiteRingSum(n, K.carrier, K.add, K.zero, K.neg,
+      K.mul, K.one, λ) ∧
+    matDet(K, n, A) = finiteRingProduct(n, K.carrier, K.add, K.zero, K.neg,
+      K.mul, K.one, λ)
+proof
+  sorry
+
+-- A matrix commuting with A of simple spectrum is diagonal in the same
+-- eigenvector basis: it preserves each eigenline.
+theorem SimpleSpectrum.commuting (A B λ i v : Set)
+  requires matrixA : A ∈ matrixSpace(K, n, n)
+  requires matrixB : B ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  requires commute : matMul(K, n, n, n, A, B) = matMul(K, n, n, n, B, A)
+  requires index : i ∈ n
+  requires eigen : v ∈ matEigenspace(K, n, A, λ(i))
+  shows ∃ b ∈ K.carrier, mulVec(K, n, n, B, v) = vecSmul(K, n, b, v)
+proof
+  sorry
+
+end MatrixEigen
+
+-- Section: Common eigenvectors
+-- Commuting endomorphisms of a nonzero finite-dimensional space over an
+-- algebraically closed field have a common eigenvector (the source's
+-- CommonEigenvectors: Module.End.exists_hasEigenvalue_of_commute).
+theorem eigenspace.common (K V F : Set)
+  requires closed : AlgebraicallyClosed(K)
+  requires module : Module(V, K)
+  requires finiteDimensional : FiniteDimensional(V, K)
+  requires nonzero : ∃ v ∈ Module.carrier(V), v ≠ Module.zero(V)
+  requires linear : ∀ f ∈ F, LinearMap(f, V, K, V)
+  requires commute : ∀ f ∈ F, ∀ g ∈ F, ∀ w ∈ Module.carrier(V), f(g(w)) = g(f(w))
+  shows ∃ v ∈ Module.carrier(V), v ≠ Module.zero(V) ∧
+    (∀ f ∈ F, ∃ a ∈ Ring.carrier(K), v ∈ eigenspace(V, K, f, a))
+proof
+  sorry
