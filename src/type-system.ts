@@ -69,16 +69,23 @@ function ruleVisible(rule: TypeRule, visibility: ScopeVisibility | undefined): b
 }
 
 // The visible rules of a bucket, counted once per scope. Buckets only grow,
-// so a count is recomputed when its bucket has grown since.
+// and a bucket's arrivals are logged in the order they came, so a count is
+// extended by the rules that arrived since it was taken.
 const visibleRuleCounts = new WeakMap<readonly TypeRule[], WeakMap<ScopeVisibility, { readonly length: number; readonly count: number }>>();
+const bucketArrivals = new WeakMap<readonly TypeRule[], TypeRule[]>();
 function visibleRuleCount(rules: readonly TypeRule[], visibility: ScopeVisibility | undefined): number {
   if (visibility === undefined) return rules.length;
   let byVisibility = visibleRuleCounts.get(rules);
   if (!byVisibility) { byVisibility = new WeakMap(); visibleRuleCounts.set(rules, byVisibility); }
   const cached = byVisibility.get(visibility);
   if (cached && cached.length === rules.length) return cached.count;
-  let count = 0;
-  for (const rule of rules) if (ruleVisible(rule, visibility)) count += 1;
+  const arrivals = bucketArrivals.get(rules);
+  const extend = cached !== undefined && arrivals !== undefined && arrivals.length === rules.length;
+  let count = extend ? cached.count : 0;
+  const scanned = extend ? arrivals : rules;
+  for (let index = extend ? cached.length : 0; index < scanned.length; index += 1) {
+    if (ruleVisible(scanned[index]!, visibility)) count += 1;
+  }
   byVisibility.set(visibility, { length: rules.length, count });
   return count;
 }
@@ -466,9 +473,21 @@ function headIndexedCandidates(index: TypeIndex): RuleCandidates {
     if (!best) return all;
     if (!best.exact && best.wildcard.size === 0) return [];
     if ((best.exact?.size ?? 0) + best.wildcard.size === all.length) return all;
-    return all.filter(rule => best!.wildcard.has(rule) || best!.exact?.has(rule) === true);
+    // A head's rules are filtered from the bucket once; the head sets grow
+    // only with the bucket, so the selection stands while the bucket is unchanged.
+    let byExact = headSelections.get(best.wildcard);
+    if (!byExact) { byExact = new Map(); headSelections.set(best.wildcard, byExact); }
+    const cached = byExact.get(best.exact);
+    if (cached && cached.bucket === all && cached.length === all.length) return cached.rules;
+    const { exact, wildcard } = best;
+    const rules = all.filter(rule => wildcard.has(rule) || exact?.has(rule) === true);
+    byExact.set(exact, { bucket: all, length: all.length, rules });
+    return rules;
   };
 }
+
+const headSelections = new WeakMap<ReadonlySet<TypeRule>, Map<ReadonlySet<TypeRule> | undefined,
+  { readonly bucket: readonly TypeRule[]; readonly length: number; readonly rules: readonly TypeRule[] }>>();
 
 function indexRuleHeads(heads: Map<string, readonly HeadIndexPosition[] | null>, rule: TypeRule): void {
   const existing = heads.get(rule.predicate);
@@ -778,6 +797,12 @@ function prepareRuleProver(
   // budget's rather than the goal's.
   let negatives = new GoalTable<true>();
   let exhausted = false;
+  // The goals of whole queries that ran out of budget, with the stamp of the
+  // rules they searched. Asked again of the same rules, such a goal fails at
+  // once instead of spending another budget from where the memo left it, so
+  // the answer does not depend on how often it was asked; overload
+  // resolution asks one goal for every expression that mentions its term.
+  const exhaustedQueries = new GoalTable<string>();
   const outputMemo = new Map<string, InstanceSynthesisResult | false>();
   const active = new GoalTable<true>();
   const limits = {
@@ -826,6 +851,20 @@ function prepareRuleProver(
     if (!mixed) return rules;
     return rules.map((rule, index) => ({ rule, index, rigid: rigidArguments(rule) }))
       .sort((left, right) => right.rigid - left.rigid || left.index - right.index).map(item => item.rule);
+  };
+  // The visible candidates of a rule list in specificity order, kept per
+  // list and scope while the list is unchanged; a bucket grows in place, so
+  // its length is part of the key.
+  const orderedCandidates = (rules: readonly TypeRule[]): readonly TypeRule[] => {
+    if (rejectAmbiguity) return bySpecificity(rules);
+    const scope = visibility ?? everyScope;
+    let byScope = orderedCandidateLists.get(rules);
+    if (!byScope) { byScope = new WeakMap(); orderedCandidateLists.set(rules, byScope); }
+    const cached = byScope.get(scope);
+    if (cached && cached.length === rules.length) return cached.rules;
+    const ordered = bySpecificity(selectRules(rules));
+    byScope.set(scope, { length: rules.length, rules: ordered });
+    return ordered;
   };
   const solve = (wantedArguments: readonly Term[], wantedPredicate: string, depth = 0): Proof | undefined => {
     const key = goalKeys(wantedPredicate, wantedArguments);
@@ -948,7 +987,7 @@ function prepareRuleProver(
       }
       const solutions: { readonly name: string; readonly proof: Proof }[] = [];
       const bucket = rulesByPredicate.get(wantedPredicate) ?? [];
-      const candidates = bySpecificity(selectRules(candidateRules?.(wantedPredicate, wantedArguments) ?? bucket));
+      const candidates = orderedCandidates(candidateRules?.(wantedPredicate, wantedArguments) ?? bucket);
       // The rules the head index leaves out would have been scanned and
       // rejected; charging them keeps the search budget, and so the point at
       // which a search gives up, the same as a full scan's. Only the rules
@@ -1121,8 +1160,15 @@ function prepareRuleProver(
     // A prepared refinement prover answers many queries for one tactic; the
     // search budget is per query, while the memo of solved goals is shared.
     prove: (term: Term, predicate: string, parameters: readonly Term[] = []) => {
-      if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false; }
-      return solve([...parameters, term], predicate);
+      const goal = [...parameters, term];
+      if (rejectAmbiguity) return solve(goal, predicate);
+      counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false;
+      const key = goalKeys(predicate, goal);
+      const stamp = indices.get(kernel)?.stamp;
+      if (stamp !== undefined && exhaustedQueries.get(key) === stamp) { counters.memoHits += 1; return undefined; }
+      const proof = solve(goal, predicate);
+      if (!proof && exhausted && stamp !== undefined && indices.get(kernel)?.stamp === stamp) exhaustedQueries.set(key, stamp);
+      return proof;
     },
     complete: (predicate: string, arguments_: readonly (Term | undefined)[]) => {
       if (!rejectAmbiguity) { counters.goalsVisited = 0; counters.rulesConsidered = 0; negatives = new GoalTable<true>(); exhausted = false; }
@@ -1154,6 +1200,9 @@ function prepareRuleProver(
   };
   return Object.freeze(prover) as RefinementProver | InstanceProver;
 }
+
+const everyScope: object = {};
+const orderedCandidateLists = new WeakMap<readonly TypeRule[], WeakMap<object, { readonly length: number; readonly rules: readonly TypeRule[] }>>();
 
 function instantiateRuleTerm(term: Term, substitution: ReadonlyMap<string, Term>): Term | undefined {
   // Simultaneous substitution: caller variables inside a replacement must
@@ -1348,7 +1397,7 @@ function typeIndex(kernel: Kernel): TypeIndex {
       return;
     }
     index!.byName.set(rule.name, rule);
-    // Insert at the sorted position; the bucket is replaced, never mutated.
+    // Insert at the sorted position, and log the arrival for the visible-rule counts.
     let bucket = index!.byPredicate.get(rule.predicate) as TypeRule[] | undefined;
     if (!bucket) { bucket = []; index!.byPredicate.set(rule.predicate, bucket); }
     let low = 0;
@@ -1357,7 +1406,10 @@ function typeIndex(kernel: Kernel): TypeIndex {
       const middle = (low + high) >> 1;
       if (bucket[middle]!.name.localeCompare(rule.name) < 0) low = middle + 1; else high = middle;
     }
+    let arrivals = bucketArrivals.get(bucket);
+    if (!arrivals) { arrivals = [...bucket]; bucketArrivals.set(bucket, arrivals); }
     bucket.splice(low, 0, rule);
+    arrivals.push(rule);
     indexRuleHeads(index!.heads, rule);
   };
   const add = (name: string, proof: Proof, origin: string): void => {
