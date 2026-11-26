@@ -7,6 +7,7 @@ import { MachineOp, type ProofMachineModuleProgram } from "./machine.ts";
 import { KernelError, type Kernel, type KernelAdmissionEvent } from "./kernel.ts";
 import { formatFormula } from "./pretty.ts";
 import type { Proof } from "./proof.ts";
+import { largeCardinalOccurrences, throughDefinitions, type LargeCardinalHypothesis } from "./large-cardinals.ts";
 
 export interface AxiomAudit {
   readonly theorem: string;
@@ -20,6 +21,28 @@ export interface AxiomAudit {
   readonly unavailable: readonly { name: string; path: readonly string[] }[];
   readonly classicalLogic: boolean;
   readonly visited: number;
+  /** The registered large cardinal hypotheses (`register largecardinal`) of the theorem, over its whole proof. */
+  readonly largeCardinals: LargeCardinalAudit;
+}
+
+/**
+ * `reliesOn`: the hypotheses the theorem relies on, through its statement or
+ * any lemma or definition its proof uses, each with where the reliance
+ * starts: `path` runs to the declaration whose statement relies on it
+ * (`via: "premise"`), or to the one that uses a lemma about it, `lemma`,
+ * without a premise of its own that supplies it (`via: "supplied"`).
+ * `about`: those the statement is about and the proof relies on nowhere,
+ * as in a theorem about every inaccessible κ. `mentions`: those that occur
+ * only as what the theorem proves.
+ */
+export interface LargeCardinalAudit {
+  readonly reliesOn: readonly (LargeCardinalHypothesis & {
+    readonly via: "premise" | "supplied";
+    readonly path: readonly string[];
+    readonly lemma?: string;
+  })[];
+  readonly about: readonly LargeCardinalHypothesis[];
+  readonly mentions: readonly LargeCardinalHypothesis[];
 }
 
 type Ref = { kind: "theorem" | "definition"; name: string };
@@ -53,7 +76,12 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
     for (let cursor: Ref | undefined = ref; cursor; cursor = parents.get(key(cursor))) result.push(label(cursor));
     return result.reverse();
   };
+  // Every theorem and definition a declaration's proof refers to, for
+  // closing the large cardinal classification over the proof.
+  const uses = new Map<string, Ref[]>();
   const enqueue = (ref: Ref, parent: Ref): void => {
+    const edges = uses.get(key(parent));
+    if (edges) edges.push(ref); else uses.set(key(parent), [ref]);
     if (parents.has(key(ref))) return;
     parents.set(key(ref), parent);
     queue.push(ref);
@@ -159,5 +187,86 @@ export function auditTheoremAxioms(kernel: Kernel, theorem: string): AxiomAudit 
       direct: direct.has(name), path: [...path(axioms.get(name)!), `axiom ${name}`] })),
     mechanisms: mechanisms.sort((a, b) => a.name.localeCompare(b.name)),
     unavailable, classicalLogic, visited: queue.length,
+    largeCardinals: largeCardinalAudit(kernel, root, queue, uses, path),
+  };
+}
+
+/**
+ * The large cardinal hypotheses a theorem relies on over its whole proof.
+ * A declaration relies on what its statement relies on, on what the
+ * declarations it uses rely on, and on what they are about that its own
+ * statement does not mention: it supplied that premise from elsewhere.
+ */
+function largeCardinalAudit(
+  kernel: Kernel, root: Ref, order: readonly Ref[], uses: ReadonlyMap<string, readonly Ref[]>, path: (ref: Ref) => string[],
+): LargeCardinalAudit {
+  const own = largeCardinalOccurrences(kernel, kernel.theorems.get(root.name)!);
+  const hypotheses = new Map<string, LargeCardinalHypothesis>();
+  const statements = new Map<string, { readonly relies: ReadonlySet<string>; readonly about: ReadonlySet<string>; readonly mentions: ReadonlySet<string> }>();
+  const statement = (ref: Ref) => {
+    let known = statements.get(key(ref));
+    if (!known) {
+      const formula = ref.kind === "theorem" ? kernel.theorems.get(ref.name) : undefined;
+      const found = formula ? largeCardinalOccurrences(kernel, formula) : undefined;
+      for (const item of [...found?.reliesOn ?? [], ...found?.about ?? []]) hypotheses.set(item.predicate, item);
+      known = {
+        relies: new Set(found?.reliesOn.map(item => item.predicate)),
+        about: new Set(found?.about.map(item => item.predicate)),
+        mentions: throughDefinitions(kernel, [found?.reliesOn ?? [], found?.about ?? [], found?.mentions ?? []].flat().map(item => item.predicate)),
+      };
+      statements.set(key(ref), known);
+    }
+    return known;
+  };
+  // Children before parents: a depth-first post-order over the uses. Proofs
+  // form no cycles; were one met, the declaration on the stack counts as
+  // relying on nothing yet.
+  const postorder: Ref[] = [];
+  const entered = new Set<string>();
+  const stack: { readonly ref: Ref; next: number }[] = [{ ref: root, next: 0 }];
+  entered.add(key(root));
+  while (stack.length) {
+    const top = stack[stack.length - 1]!;
+    const children = uses.get(key(top.ref)) ?? [];
+    if (top.next < children.length) {
+      const child = children[top.next++]!;
+      if (!entered.has(key(child))) { entered.add(key(child)); stack.push({ ref: child, next: 0 }); }
+    } else { stack.pop(); postorder.push(top.ref); }
+  }
+  const relies = new Map<string, Set<string>>();
+  const about = new Map<string, Set<string>>();
+  const supplied = new Map<string, Map<string, Ref>>();
+  for (const ref of postorder) {
+    const own = statement(ref);
+    const result = new Set(own.relies);
+    const lemmas = new Map<string, Ref>();
+    for (const child of uses.get(key(ref)) ?? []) {
+      for (const name of relies.get(key(child)) ?? []) result.add(name);
+      for (const name of about.get(key(child)) ?? []) {
+        // A statement that mentions the hypothesis anywhere can supply it
+        // from its own premises or quantifiers; one that never mentions it
+        // obtained it elsewhere.
+        if (own.about.has(name) || own.relies.has(name) || own.mentions.has(name)) continue;
+        result.add(name);
+        if (!lemmas.has(name)) lemmas.set(name, child);
+      }
+    }
+    relies.set(key(ref), result);
+    about.set(key(ref), new Set([...own.about].filter(name => !result.has(name))));
+    supplied.set(key(ref), lemmas);
+  }
+  const reliesOn = [...relies.get(key(root)) ?? []].sort().map(name => {
+    // The nearest declaration where the reliance starts.
+    for (const ref of order) {
+      if (statement(ref).relies.has(name)) return { ...hypotheses.get(name)!, via: "premise" as const, path: path(ref) };
+      const lemma = supplied.get(key(ref))?.get(name);
+      if (lemma) return { ...hypotheses.get(name)!, via: "supplied" as const, path: path(ref), lemma: label(lemma) };
+    }
+    return { ...hypotheses.get(name)!, via: "premise" as const, path: [root.name] };
+  });
+  return {
+    reliesOn,
+    about: own.about.filter(item => !relies.get(key(root))?.has(item.predicate)),
+    mentions: own.mentions.filter(item => !relies.get(key(root))?.has(item.predicate)),
   };
 }

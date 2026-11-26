@@ -241,7 +241,11 @@ The shape:
   the state `before` and `after`, and, for a query tactic, `info` (see
   `suggest`). `dependencies` lists the axioms, theorems, and definitions
   the proof uses; `sorries` the admissions it contains; `proofMap` the
-  authored headings; `audit` the axiom audit when requested. `scope` lists
+  authored headings; `audit` the axiom audit when requested;
+  `largeCardinals`, present when the statement relies on a registered
+  large cardinal hypothesis, each one's `predicate` and `label`; the axiom
+  audit follows the proof as well (see
+  [axiom audits](axiom-audit.md#large-cardinal-hypotheses)). `scope` lists
   the names the proof can use without naming a declaration, each with its
   `kind` (`section variable`, `section hypothesis`, `binder`, or
   `premise`), the one-based `line` that binds it, and for a variable or

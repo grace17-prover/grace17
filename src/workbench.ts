@@ -4,6 +4,7 @@
 // Authors: Grant Passmore
 
 import { auditTheoremAxioms } from "./axiom-audit.ts";
+import { largeCardinalOccurrences } from "./large-cardinals.ts";
 import { performance } from "node:perf_hooks";
 import { projectRoot } from "./project-root.ts";
 import { relative, resolve } from "node:path";
@@ -109,6 +110,12 @@ export interface WorkbenchTheorem {
   /** The names bound outside the proof that its lines can refer to, with their binding lines. */
   readonly scope?: readonly TacticScopeEntry[];
   readonly steps: readonly WorkbenchStep[];
+  /**
+   * The large cardinal hypotheses (`register largecardinal`) the statement
+   * relies on; absent when it relies on none. The axiom audit follows the
+   * proof as well.
+   */
+  readonly largeCardinals?: readonly { readonly predicate: string; readonly label: string }[];
   readonly kernel: readonly {
     readonly id: number;
     readonly proofNode: number;
@@ -1172,6 +1179,8 @@ function renderTheorem(
     ? { axioms: [], theorems: [], definitions: [] } as const
     : theoremDependencies(kernel, name);
   const theoremSorries = sorries.filter(sorry => dependencies.axioms.includes(sorry.axiom));
+  const assumed = largeCardinalOccurrences(kernel, statement).reliesOn;
+  const largeCardinals = assumed.length ? { largeCardinals: assumed.map(item => ({ predicate: item.predicate, label: item.label })) } : {};
   const uses = options.includeDirectDependencies ? { uses: directTheoremUses(kernel, name) } : {};
   const steps: WorkbenchStep[] = tactics?.steps.map(step => ({
     line: step.line,
@@ -1195,6 +1204,7 @@ function renderTheorem(
     ...(tactics ? { initial: displayState(tactics.initial, display) } : {}),
     ...(tactics?.scope ? { scope: tactics.scope } : {}),
     steps,
+    ...largeCardinals,
     kernel: [],
   };
   const exported = exportTheoremBody(kernel, name);
@@ -1211,6 +1221,7 @@ function renderTheorem(
     ...(tactics ? { initial: displayState(tactics.initial, display) } : {}),
     ...(tactics?.scope ? { scope: tactics.scope } : {}),
     steps,
+    ...largeCardinals,
     kernel: exported.trace.nodes.map((node, id) => {
       const payload = exported.proof.nodes[node.proofNode]!.payload as Record<string, unknown>;
       const presentation = kernelRulePresentation(payload);
