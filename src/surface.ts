@@ -17138,7 +17138,7 @@ function scopeVisibility(kernel: Kernel, scope: SurfaceScope): ScopeVisibility |
     module: visibleModule,
     declaration: name => {
       let visible = declarations.get(name);
-      if (visible === undefined) { visible = visibleModule(resolution.owner(name)); declarations.set(name, visible); }
+      if (visible === undefined) { visible = visibleModule(declarationOwner(resolution, name)); declarations.set(name, visible); }
       return visible;
     },
   };
@@ -17235,6 +17235,18 @@ function surfaceVisibilityCache(kernel: Kernel, environment: SurfaceEnvironment)
   };
   surfaceVisibilityCaches.set(kernel, fresh);
   return fresh;
+}
+
+/**
+ * The module that declares a name. The axiom `sorry.T.line.n` admitting a
+ * goal of theorem T belongs to T's module, so its typing rules reach only
+ * the modules that see T.
+ */
+function declarationOwner(resolution: NameResolutionIndex, name: string): string | undefined {
+  const owner = resolution.owner(name);
+  if (owner !== undefined || !name.startsWith("sorry.")) return owner;
+  const admission = /^sorry\.(.+)\.\d+\.\d+$/.exec(name);
+  return admission ? resolution.owner(admission[1]!) : undefined;
 }
 
 function scopeVisibilityKey(scope: SurfaceScope): string {

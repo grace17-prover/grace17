@@ -68,6 +68,21 @@ function ruleVisible(rule: TypeRule, visibility: ScopeVisibility | undefined): b
   return visibility === undefined || rule.origin === undefined || visibility.declaration(rule.origin);
 }
 
+// The visible rules of a bucket, counted once per scope. Buckets only grow,
+// so a count is recomputed when its bucket has grown since.
+const visibleRuleCounts = new WeakMap<readonly TypeRule[], WeakMap<ScopeVisibility, { readonly length: number; readonly count: number }>>();
+function visibleRuleCount(rules: readonly TypeRule[], visibility: ScopeVisibility | undefined): number {
+  if (visibility === undefined) return rules.length;
+  let byVisibility = visibleRuleCounts.get(rules);
+  if (!byVisibility) { byVisibility = new WeakMap(); visibleRuleCounts.set(rules, byVisibility); }
+  const cached = byVisibility.get(visibility);
+  if (cached && cached.length === rules.length) return cached.count;
+  let count = 0;
+  for (const rule of rules) if (ruleVisible(rule, visibility)) count += 1;
+  byVisibility.set(visibility, { length: rules.length, count });
+  return count;
+}
+
 // Rules are immutable once indexed. Reuse their pattern-variable sets and
 // rigid-argument counts across candidate matching and refinement contexts.
 const ruleVariableSets = new WeakMap<TypeRule, ReadonlySet<string>>();
@@ -936,8 +951,10 @@ function prepareRuleProver(
       const candidates = bySpecificity(selectRules(candidateRules?.(wantedPredicate, wantedArguments) ?? bucket));
       // The rules the head index leaves out would have been scanned and
       // rejected; charging them keeps the search budget, and so the point at
-      // which a search gives up, the same as a full scan's.
-      if (!rejectAmbiguity) counters.rulesConsidered += Math.max(0, bucket.length - candidates.length);
+      // which a search gives up, the same as a full scan's. Only the rules
+      // the scope sees are charged: the rules of modules it does not import
+      // must not spend its budget.
+      if (!rejectAmbiguity) counters.rulesConsidered += Math.max(0, visibleRuleCount(bucket, visibility) - candidates.length);
       for (const rule of [...(localRules.get(wantedPredicate) ?? []), ...candidates]) {
         if (!rejectAmbiguity && counters.rulesConsidered >= 100_000) { exhausted = true; return undefined; }
         counters.rulesConsidered += 1;
