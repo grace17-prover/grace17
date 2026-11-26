@@ -77,39 +77,65 @@ certificate.
 ## Plan
 
 The work proceeds in layers, each a set of blueprint modules that check as
-they stand. A layer's statements are written before its proofs; a module
-is proved and promoted before the modules that import it are proved.
+they stand. A layer's statements are written, and reviewed for
+faithfulness, before its proofs. Statements are then frozen: a module's
+proofs may go ahead against the admitted statements of the modules it
+imports, a change to another module's statement is an explicit request to
+its owner, and promotion into Cumulus follows the import order.
 
-1. **The statements.** The functions ζ and L(s, χ) on the whole complex
-   plane, the five theorems stated, and the facts that pin the definitions
-   down. Described in detail below; this layer is self-contained and
-   useful on its own.
-2. **Foundations the proof shares with the statements.** Measure and
-   integration (Lebesgue measure on ℝ and ℝⁿ, the integral of
-   complex-valued functions, Fubini), normed spaces, Fourier analysis on ℝ
-   and on finite abelian groups, holomorphic functions with the identity
-   theorem and the argument principle.
-3. **Algebra and number theory.** Number fields and their rings of
-   integers, places and completions, the different and discriminant,
-   cyclotomic fields, class groups; p-adic numbers; matrix groups GLₙ and
-   unitary groups over local and global fields; representations of finite
-   and compact groups.
-4. **`src/Lib`, area by area**, in the order its imports allow: class field
-   theory (`ClassField`, `Cyclotomic`, `CM`), adelic analysis (`Adelic`,
-   `LocalGL`, `GLn`, `DiscreteSeries`), the Weil representation and theta
-   correspondence (`Weil`, `SiegelWeil`), Galois representations
-   (`GaloisRep`, `PadicHodge`, `PadicComparison`), cohomology
-   (`Cohomology`, under the large cardinal hypothesis as above), and
-   Shimura varieties (`Shimura`).
-5. **`src/New`, the argument**, in the order of the source's `GUIDE.md`:
-   `Main` and `Endgame` stated first, then `Data`, then the parts serving
-   its three main theorems A (short forms), B (enough forms), and C
-   (integral forms are long), and the main inequality `star_inequality`
-   that combines them.
+1. **The statements** (complete; see [Layer 1](#layer-1-the-statements)).
+2. **Analysis and general foundations**, in four independent tracks:
+   A, linear algebra (modules, bases and dimension, duals, tensor products,
+   exterior powers; matrices, determinants, GLₙ, SLₙ, unitary and
+   symplectic groups, spectral facts); B, topology and analysis (filters and
+   limits, compactness, topological groups, unconditional sums; normed,
+   Banach and inner-product spaces; derivatives in several variables,
+   analyticity, special functions); C, measure (σ-algebras, Lebesgue measure
+   on ℝⁿ, the integral of nonnegative and of complex- and Banach-valued
+   functions, dominated convergence, Fubini, change of variables; Haar
+   measure; Fourier analysis on finite abelian groups, ℝⁿ and the torus);
+   D, the L-series facts the proof uses about ζ and L(s, χ) (Euler
+   products, nonvanishing on re s = 1, the von Mangoldt series, completed
+   L-functions), proved for Layer 1's definitions.
+3. **Algebra and number theory**, beside Layer 2: commutative algebra
+   (ideals, local rings, finiteness, integral closure, DVRs, completions,
+   flat and étale algebras), polynomials and power series, Galois theory and
+   finite fields, cyclotomic fields and multiplicative characters, number
+   fields (rings of integers, Dedekind domains, discriminants, places, CM
+   fields, adeles), p-adic numbers, valuations, ℂ_p, Witt vectors and tilts,
+   representations; and, for the cohomology region and Shimura varieties
+   only, categories, abelian categories, Ext, and schemes.
+4. **`src/Lib`.** Its folders import one another in cycles, so it is ported
+   not by folder but in 83 module groups, each a set of source files whose
+   imports form no cycle, built in stages S1 to S4 of the source's import
+   order.
+5. **`src/New`, the argument**, in 49 groups: `Main` and `Endgame` stated
+   first, then the definitions (`Data`, `Seesaw.IndexTypes`,
+   `Trace.GoodIdempotent`), then the groups serving the three main theorems
+   A (short forms), B (enough forms), and C (integral forms are long), and
+   the main inequality `star_inequality` that combines them. `Data` is a
+   hypothesis bundle whose existence is proved once. The last step
+   connects `New.grh` to `LFunction.nonzero_right_of_half`.
 
-Layer 1 is planned module by module below. Each later layer is planned the
-same way, from the source and the declarations it uses, when the layer
-before it is in place.
+The module groups, their imports, the declarations each layer-2/3 theory is
+used through, and the risks are recorded in the planning notes kept beside
+the source measurement (`grh/plan/layers-2-5.md` in the campaign's scratch
+directory). Estimated size: about 650,000 lines of Grace17 (450,000 to
+1,100,000), from the measured 76,000 lines of Lean and the 182,000 lines of
+Mathlib background Cumulus lacks.
+
+### Universes
+
+The cohomology region (`Lib/Cohomology`, `Lib/PadicComparison`,
+`Lib/General/Geometry`, about 8,400 lines of Lean) works with categories
+of test rings, which in Lean are full subcategories of all rings and so
+live one universe up. The rest of the proof uses the region through one
+theorem whose statement involves no universe. The region is written over
+an admissible set S of test rings, a section hypothesis: closed under the
+operations the region performs, set-sized, and so a ZFC object. S is first
+obtained from `TarskiGrothendieck()`, then constructed in ZFC by closing a
+starting set of rings under those operations along ω, which replaces one
+module and leaves a certificate from ZFC alone.
 
 ## Layer 1: the statements
 
