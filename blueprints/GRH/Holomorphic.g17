@@ -508,6 +508,185 @@ proof
   have cn := FunctionBetween.apply_closed with coefficients, successor
   typecheck
 
+-- Section: Series manipulations
+-- The series with its first term removed.
+defgraph complexShift (u : Set) (n ∈ ℕ) : complexCarrier := u(succ(n))
+requires sequence : ComplexSequence(u)
+proof
+  have nNat := nat.omega.backward at n with member
+  have next : succ(n) ∈ ℕ by typecheck
+  exact FunctionBetween.apply_closed with sequence, next
+
+-- The prefix sums of a series converge to S exactly when
+-- |Σ_{k<n} u(k) − S| is eventually small.
+theorem ComplexSumsTo.iff_partial (u S : Set)
+  requires sequence : ComplexSequence(u)
+  requires hS : S ∈ ℂ
+  shows ComplexSumsTo(u, S) ↔ (∀ e ∈ ℝ, R[0] < e → ∃ N ∈ ℕ, ∀ n ∈ ℕ,
+    N ≤ n → complexAbs(ℂ[complexPartialSum(u, n) - S]) < e)
+proof
+  have prefixes : ComplexSequence(complexPrefixSums(u)) by
+    exact complexPrefixSums.function with sequence
+  have form := ComplexConvergesTo.iff_abs with prefixes, hS
+  constructor
+  . intro sums
+    obtain ⟨_, converges⟩ := sums
+    intros e he positive
+    obtain ⟨N, hN, tail⟩ := form.forward with converges, e, he, positive
+    refine ⟨N, hN, ?_⟩
+    intros n hn above
+    have near := tail with n, hn, above
+    rw (complexPrefixSums.value with hn, sequence) at near
+    exact near
+  . intro small
+    refine ⟨sequence, ?_⟩
+    apply form.backward
+    intros e he positive
+    obtain ⟨N, hN, tail⟩ := small with e, he, positive
+    refine ⟨N, hN, ?_⟩
+    intros n hn above
+    rw (complexPrefixSums.value with hn, sequence)
+    exact tail with n, hn, above
+
+theorem complexShift.sums (u S : Set)
+  requires sums : ComplexSumsTo(u, S)
+  shows ComplexSumsTo(complexShift(u), ℂ[S - u((0:N))])
+proof
+  have hS := ComplexSumsTo.member with sums
+  obtain ⟨sequence, _⟩ := sums
+  have shifted : ComplexSequence(complexShift(u)) by
+    exact complexShift.function with sequence
+  have zeroIn : (0:N) ∈ ℕ by typecheck
+  have first := FunctionBetween.apply_closed with sequence, zeroIn
+  have target : ℂ[S - u((0:N))] ∈ ℂ by typecheck
+  have tail := (ComplexSumsTo.iff_partial with sequence, hS).forward with sums
+  apply (ComplexSumsTo.iff_partial with shifted, target).backward
+  intros e he positive
+  obtain ⟨N, hN, near⟩ := tail with e, he, positive
+  refine ⟨N, hN, ?_⟩
+  intros n hn above
+  have nNat := nat.omega.backward at n with hn
+  have next : succ(n) ∈ ℕ by typecheck
+  have aboveNext : N ≤ succ(n) by arith
+  have close := near with succ(n), next, aboveNext
+  have values : ∀ j ∈ ℕ, j < n → complexShift(u)(j) = u(succ(j))
+    intros j hj below
+    exact complexShift.value with sequence, hj
+  have split := complexPartialSum.shift_first at u, complexShift(u), n with
+    sequence, shifted, values
+  rw split at close
+  have partial := complexPartialSum.member at complexShift(u), n with shifted
+  have same : ℂ[u((0:N)) + complexPartialSum(complexShift(u), n) - S] =
+      ℂ[complexPartialSum(complexShift(u), n) - (S - u((0:N)))] by ring
+  rw same at close
+  exact close
+
+-- A combination u − v − k w of convergent series converges to the same
+-- combination of the sums.
+theorem complexPartialSum.combination (u v w h k : Set) (n : Nat)
+  requires sequenceU : ComplexSequence(u)
+  requires sequenceV : ComplexSequence(v)
+  requires sequenceW : ComplexSequence(w)
+  requires hk : k ∈ ℂ
+  requires terms : ∀ m ∈ ℕ, h(m) = ℂ[u(m) - v(m) - k * w(m)]
+  shows complexPartialSum(h, n) = ℂ[complexPartialSum(u, n) -
+    complexPartialSum(v, n) - k * complexPartialSum(w, n)]
+proof
+  induction n
+  | zero =>
+    rw [complexPartialSum.zero, complexPartialSum.zero, complexPartialSum.zero,
+      complexPartialSum.zero]
+    ring
+  | succ(m) using ih =>
+    have mNat : Nat(m) by typecheck
+    have mIn : m ∈ ℕ by typecheck
+    have um := FunctionBetween.apply_closed with sequenceU, mIn
+    have vm := FunctionBetween.apply_closed with sequenceV, mIn
+    have wm := FunctionBetween.apply_closed with sequenceW, mIn
+    have pu := complexPartialSum.member at u, m with sequenceU
+    have pv := complexPartialSum.member at v, m with sequenceV
+    have pw := complexPartialSum.member at w, m with sequenceW
+    rw [complexPartialSum.succ, complexPartialSum.succ, complexPartialSum.succ,
+      complexPartialSum.succ, ih, (terms with m, mIn)]
+    ring
+
+theorem ComplexSumsTo.combination (u v w h k S T W : Set)
+  requires sumsU : ComplexSumsTo(u, S)
+  requires sumsV : ComplexSumsTo(v, T)
+  requires sumsW : ComplexSumsTo(w, W)
+  requires hk : k ∈ ℂ
+  requires sequenceH : ComplexSequence(h)
+  requires terms : ∀ m ∈ ℕ, h(m) = ℂ[u(m) - v(m) - k * w(m)]
+  shows ComplexSumsTo(h, ℂ[S - T - k * W])
+proof
+  have hS := ComplexSumsTo.member with sumsU
+  have hT := ComplexSumsTo.member with sumsV
+  have hW := ComplexSumsTo.member with sumsW
+  obtain ⟨sequenceU, _⟩ := sumsU
+  obtain ⟨sequenceV, _⟩ := sumsV
+  obtain ⟨sequenceW, _⟩ := sumsW
+  have tailU := (ComplexSumsTo.iff_partial with sequenceU, hS).forward with
+    sumsU
+  have tailV := (ComplexSumsTo.iff_partial with sequenceV, hT).forward with
+    sumsV
+  have tailW := (ComplexSumsTo.iff_partial with sequenceW, hW).forward with
+    sumsW
+  have target : ℂ[S - T - k * W] ∈ ℂ by typecheck
+  apply (ComplexSumsTo.iff_partial with sequenceH, target).backward
+  intros e he positive
+  have kNonnegative := complexAbs.nonnegative with hk
+  have scaleReal : R[2 + complexAbs(k)] ∈ ℝ by typecheck
+  have scaleNonnegative : R[0] ≤ R[2 + complexAbs(k)] by linarith
+  obtain ⟨ε, hε, εPositive, absorb, _⟩ := realScale.absorb with scaleReal, he,
+    scaleNonnegative, positive
+  obtain ⟨N1, hN1, near1⟩ := tailU with ε, hε, εPositive
+  obtain ⟨N2, hN2, near2⟩ := tailV with ε, hε, εPositive
+  obtain ⟨N3, hN3, near3⟩ := tailW with ε, hε, εPositive
+  have N1Nat := nat.omega.backward at N1 with hN1
+  have N2Nat := nat.omega.backward at N2 with hN2
+  have N3Nat := nat.omega.backward at N3 with hN3
+  have sumIn : N1 + N2 + N3 ∈ ℕ by typecheck
+  refine ⟨N1 + N2 + N3, sumIn, ?_⟩
+  intros n hn above
+  have nNat := nat.omega.backward at n with hn
+  have above1 : N1 ≤ n by arith
+  have above2 : N2 ≤ n by arith
+  have above3 : N3 ≤ n by arith
+  have close1 := near1 with n, hn, above1
+  have close2 := near2 with n, hn, above2
+  have close3 := near3 with n, hn, above3
+  rw (complexPartialSum.combination at u, v, w, h, k, n with sequenceU,
+    sequenceV, sequenceW, hk, terms)
+  have pu := complexPartialSum.member at u, n with sequenceU
+  have pv := complexPartialSum.member at v, n with sequenceV
+  have pw := complexPartialSum.member at w, n with sequenceW
+  have differenceU : ℂ[complexPartialSum(u, n) - S] ∈ ℂ by typecheck
+  have differenceV : ℂ[complexPartialSum(v, n) - T] ∈ ℂ by typecheck
+  have differenceW : ℂ[complexPartialSum(w, n) - W] ∈ ℂ by typecheck
+  have scaledW : ℂ[k * (complexPartialSum(w, n) - W)] ∈ ℂ by typecheck
+  have twoTerms : ℂ[(complexPartialSum(u, n) - S) -
+    (complexPartialSum(v, n) - T)] ∈ ℂ by typecheck
+  have same : ℂ[(complexPartialSum(u, n) - complexPartialSum(v, n) -
+      k * complexPartialSum(w, n)) - (S - T - k * W)] =
+      ℂ[((complexPartialSum(u, n) - S) - (complexPartialSum(v, n) - T)) -
+      k * (complexPartialSum(w, n) - W)] by ring
+  rw same
+  have outer := complexAbs.sub_le with twoTerms, scaledW
+  have inner := complexAbs.sub_le with differenceU, differenceV
+  rw (complexAbs.mul with hk, differenceW) at outer
+  have scaled := realLe.mul_left_of_nonnegative with
+    (realLess.implies_le with close3), kNonnegative
+  have r1 : complexAbs(ℂ[complexPartialSum(u, n) - S]) ∈ ℝ by typecheck
+  have r2 : complexAbs(ℂ[complexPartialSum(v, n) - T]) ∈ ℝ by typecheck
+  have r3 : R[complexAbs(k) * complexAbs(ℂ[complexPartialSum(w, n) - W])] ∈ ℝ
+    by typecheck
+  have r4 : R[complexAbs(k) * ε] ∈ ℝ by typecheck
+  have r5 : complexAbs(ℂ[(complexPartialSum(u, n) - S) -
+    (complexPartialSum(v, n) - T)]) ∈ ℝ by typecheck
+  have expand : R[(2 + complexAbs(k)) * ε] = R[2 * ε + complexAbs(k) * ε] by
+    ring
+  linarith
+
 -- Section: Uniform convergence
 predicate ComplexUniformlyConvergesOn (F f K : Set) :=
   ∀ e ∈ ℝ, realZero < e → ∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n → ∀ z ∈ K,
