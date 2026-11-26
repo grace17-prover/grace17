@@ -12,6 +12,7 @@
 
 module GRH.Gamma
 import GRH.Hurwitz
+import Grace.Cumulus.Real.Analysis.TriangularSeries
 
 section Gamma
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
@@ -1187,6 +1188,253 @@ proof
       complexAbs(reciprocalGammaTerms(s)((0:N)))] by ring
   rw distribute at spread
   linarith
+
+-- The terms of Gauss's sequence as functions of s, and their successive
+-- differences.
+defgraph gaussMap (n : Nat) (z ∈ complexCarrier) : complexCarrier :=
+    reciprocalGammaTerms(z)(n)
+proof
+  exact reciprocalGammaTerms.member at z, n with member
+
+defgraph gaussDifference (n : Nat) (z ∈ complexCarrier) : complexCarrier :=
+    ℂ[reciprocalGammaTerms(z)(n + 1) - reciprocalGammaTerms(z)(n)]
+proof
+  have next := reciprocalGammaTerms.member at z, n + 1 with member
+  have this := reciprocalGammaTerms.member at z, n with member
+  typecheck
+
+defgraph gaussDifferences (n ∈ ℕ) : 𝒫(complexCarrier × complexCarrier) :=
+    gaussDifference(n)
+proof
+  have nNat := nat.omega.backward with member
+  obtain ⟨relation, _⟩ := gaussDifference.function at n
+  exact powerset.membership_iff.backward with relation
+
+theorem gaussMap.holomorphic (n : Nat)
+  shows HolomorphicOn(gaussMap(n), complexCarrier)
+proof
+  have isOpen := ComplexOpen.whole
+  have inside := ComplexOpen.subset with isOpen
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  have minusOne : ℂ[-1] ∈ ℂ by typecheck
+  have power := affinePower.holomorphic at realNat(n + 1), ℂ[0], ℂ[-1],
+    complexCarrier with zero, minusOne, isOpen, inside
+  have rising := risingMap.holomorphic at n + 2, complexCarrier with isOpen
+  have scale := complexOfReal.mem at R[1 / factorial(n + 1)]
+  have constant := HolomorphicOn.const with isOpen, scale
+  have product := HolomorphicOn.mul with power, rising
+  obtain ⟨_, valuesPower, _⟩ := power
+  obtain ⟨_, valuesRising, _⟩ := rising
+  obtain ⟨_, valuesConstant, _⟩ := constant
+  apply HolomorphicOn.mul_formula with product, constant
+  intros z hz
+  have nMember : n ∈ ℕ by typecheck
+  have exponent : ℂ[0 + -1 * z] = ℂ[-z] by ring
+  rw [(gaussMap.value with hz), (reciprocalGammaTerms.value with hz, nMember),
+    (complexFunctionMul.value with valuesPower, valuesRising, hz),
+    (affinePower.value with zero, minusOne, hz), (risingMap.value with hz),
+    (complexFunctionConst.value with scale, hz), exponent]
+
+theorem gaussDifference.holomorphic (n : Nat)
+  shows HolomorphicOn(gaussDifference(n), complexCarrier)
+proof
+  have next := gaussMap.holomorphic at n + 1
+  have this := gaussMap.holomorphic at n
+  have negated := HolomorphicOn.neg with this
+  obtain ⟨_, valuesThis, _⟩ := this
+  apply HolomorphicOn.add_formula with next, negated
+  intros z hz
+  rw [(gaussDifference.value with hz),
+    (complexFunctionNeg.value with valuesThis, hz), (gaussMap.value with hz),
+    (gaussMap.value with hz)]
+  have first := reciprocalGammaTerms.member at z, n + 1 with hz
+  have second := reciprocalGammaTerms.member at z, n with hz
+  ring
+
+-- 1/(n + 1) − 1/(n + 2) is at most the n-th triangular reciprocal
+-- 2/((n + 1)(n + 2)).
+theorem gaussGap.le_triangular (n : Nat)
+  shows R[1 / realNat(n + 1) - 1 / realNat(n + 2)] ≤
+    (triangularReciprocals(n):R)
+proof
+  have nMember : n ∈ ℕ by typecheck
+  obtain ⟨cPositive, ch, _, _, product⟩ := gaussGap.facts at n
+  have successor : realNat(n + 1) = R[realNat(n) + 1]
+    rw [realNat.add, realNat.one]
+  have zeroLe := realNat.zero_le at n
+  have aNonzero : R[realNat(n) + 1] ≠ R[0] by linarith
+  have bNonzero : R[realNat(n) + 2] ≠ R[0] by linarith
+  have triangular : (triangularReciprocals(n):R) =
+      R[2 * ((1 / realNat(n + 1)) * (1 / realNat(n + 2)))]
+    rw [(triangularReciprocals.value with nMember), successor, realNat.add_two,
+      realDiv.eq_mul_inv, realDiv.eq_mul_inv, realDiv.eq_mul_inv,
+      (realInvValue.mul with aNonzero, bNonzero)]
+    ring
+  rw [triangular, product]
+  linarith
+
+-- On a compact set the differences are dominated by a summable sequence.
+theorem gaussDifferences.dominated (K : Set)
+  requires inside : K ⊆ ℂ
+  requires compact : ComplexCompact(K)
+  shows ∃ M, Summable(M) ∧
+    (∀ n ∈ ℕ, ∀ z ∈ K, complexAbs(gaussDifferences(n)(z)) ≤ M(n))
+proof
+  have isOpen := ComplexOpen.whole
+  have whole := Subset.reflexive at complexCarrier
+  have identity := HolomorphicOn.id with isOpen
+  have continuous := HolomorphicOn.continuous with identity
+  have continuousK := ComplexContinuousOn.mono with continuous, inside
+  obtain ⟨B0, hB0, bound⟩ := ComplexContinuousOn.abs_bounded with
+    continuousK, compact
+  have absB0 := abs.upper at B0
+  have BNonnegative := abs.nonnegative at B0
+  have zBound : ∀ z ∈ K, complexAbs(z) ≤ abs(B0)
+    intros z hz
+    have zMember := inside with z, hz
+    have value := bound with z, hz
+    rw (complexFunctionId.value with whole, zMember) at value
+    linarith
+  have KNonnegative := gaussConstant.nonnegative with BNonnegative
+  have expPositive := realExp.positive at gaussConstant(abs(B0))
+  have BB : R[0] ≤ R[abs(B0) * (abs(B0) + 1)]
+    have shifted : R[0] ≤ R[abs(B0) + 1] by linarith
+    exact realMulValue.nonnegative with BNonnegative, shifted
+  have expNonnegative : R[0] ≤ realExp(gaussConstant(abs(B0))) by linarith
+  have BBE := realMulValue.nonnegative with BB, expNonnegative
+  have CNonnegative := realMulValue.nonnegative with BBE, KNonnegative
+  have CReal : R[abs(B0) * (abs(B0) + 1) * realExp(gaussConstant(abs(B0))) *
+    gaussConstant(abs(B0))] ∈ ℝ by typecheck
+  have triangularSummable := SumsTo.summable with
+    triangularReciprocals.sums_to
+  have summable := Summable.scale at triangularReciprocals,
+    R[abs(B0) * (abs(B0) + 1) * realExp(gaussConstant(abs(B0))) *
+    gaussConstant(abs(B0))] with triangularSummable
+  refine ⟨mulSequence(constantSequence(R[abs(B0) * (abs(B0) + 1) *
+    realExp(gaussConstant(abs(B0))) * gaussConstant(abs(B0))]),
+    triangularReciprocals), summable, ?_⟩
+  intros n hn z hz
+  have nNat := nat.omega.backward at n with hn
+  have zMember := inside with z, hz
+  have constantSeq := constantSequence.sequence at R[abs(B0) * (abs(B0) + 1) *
+    realExp(gaussConstant(abs(B0))) * gaussConstant(abs(B0))]
+  have triangularSeq := triangularReciprocals.sequence
+  have constantValue := constantSequence.value at R[abs(B0) * (abs(B0) + 1) *
+    realExp(gaussConstant(abs(B0))) * gaussConstant(abs(B0))], n
+  have triangularReal : Real(triangularReciprocals(n)) by typecheck
+  rw [(gaussDifferences.value with hn), (gaussDifference.value with zMember),
+    (mulSequence.value at constantSequence(R[abs(B0) * (abs(B0) + 1) *
+      realExp(gaussConstant(abs(B0))) * gaussConstant(abs(B0))]),
+      triangularReciprocals, n with constantSeq, triangularSeq), constantValue]
+  have zB := zBound with z, hz
+  have step := reciprocalGammaTerms.step_bound at z, abs(B0), n with zMember, zB
+  have termBound := reciprocalGammaTerms.bound at z, abs(B0), n with zMember, zB
+  obtain ⟨_, ch, _, _, _⟩ := gaussGap.facts at n
+  have gapNonnegative : R[0] ≤ R[1 / realNat(n + 1) - 1 / realNat(n + 2)] by
+    linarith
+  have xNonnegative := realMulValue.nonnegative with KNonnegative,
+    gapNonnegative
+  have scaled := realLe.mul_right_of_nonnegative with termBound, xNonnegative
+  have triangular := gaussGap.le_triangular at n
+  have widened := realLe.mul_left_of_nonnegative with triangular, CNonnegative
+  have regroup : R[(abs(B0) * (abs(B0) + 1) * realExp(gaussConstant(abs(B0))))
+      * (gaussConstant(abs(B0)) * (1 / realNat(n + 1) - 1 / realNat(n + 2)))] =
+      R[(abs(B0) * (abs(B0) + 1) * realExp(gaussConstant(abs(B0))) *
+      gaussConstant(abs(B0))) * (1 / realNat(n + 1) - 1 / realNat(n + 2))] by
+    ring
+  rw regroup at scaled
+  linarith
+
+-- The series of differences converges, locally uniformly, to a function
+-- holomorphic on ℂ.
+theorem gaussDifferences.series
+  shows (∀ z ∈ ℂ, ComplexSummable(complexValueSequence(gaussDifferences, z)))
+    ∧ HolomorphicOn(complexFunctionSeries(gaussDifferences, complexCarrier),
+      complexCarrier)
+proof
+  have holomorphic : ∀ n ∈ ℕ, HolomorphicOn(gaussDifferences(n), complexCarrier)
+    intros n hn
+    have nNat := nat.omega.backward at n with hn
+    rw (gaussDifferences.value with hn)
+    exact gaussDifference.holomorphic at n
+  have dominated : ∀ K, K ⊆ ℂ → ComplexCompact(K) →
+      (∃ M, Summable(M) ∧
+        (∀ n ∈ ℕ, ∀ z ∈ K, complexAbs(gaussDifferences(n)(z)) ≤ M(n)))
+    intros K inside compact
+    exact gaussDifferences.dominated with inside, compact
+  exact HolomorphicOn.series with holomorphic, dominated
+
+-- The partial sums of the differences telescope.
+theorem gaussDifferences.partial (z : Set) (n : Nat)
+  requires hz : z ∈ ℂ
+  shows complexPartialSum(complexValueSequence(gaussDifferences, z), n) =
+    ℂ[reciprocalGammaTerms(z)(n) - reciprocalGammaTerms(z)((0:N))]
+proof
+  induction n
+  | zero =>
+    have zero := reciprocalGammaTerms.member at z, (0:N) with hz
+    rw complexPartialSum.zero
+    ring
+  | succ(k) using ih =>
+    have values : ∀ m ∈ ℕ, gaussDifferences(m)(z) ∈ ℂ
+      intros m hm
+      have mNat := nat.omega.backward at m with hm
+      rw [(gaussDifferences.value with hm), (gaussDifference.value with hz)]
+      have next := reciprocalGammaTerms.member at z, m + 1 with hz
+      have this := reciprocalGammaTerms.member at z, m with hz
+      typecheck
+    have zero := reciprocalGammaTerms.member at z, (0:N) with hz
+    have kMember : k ∈ ℕ by typecheck
+    have e1 := add.right_one at k
+    rw [complexPartialSum.succ, ih, (complexValueSequence.value with values,
+      kMember), (gaussDifferences.value with kMember),
+      (gaussDifference.value with hz), e1]
+    have next := reciprocalGammaTerms.member at z, succ(k) with hz
+    have this := reciprocalGammaTerms.member at z, k with hz
+    ring
+
+-- Gauss's sequence converges to u(0) + Σ (u(n + 1) − u(n)).
+theorem reciprocalGammaTerms.converges (s : Set)
+  requires hs : s ∈ ℂ
+  shows ComplexConvergesTo(reciprocalGammaTerms(s),
+    ℂ[reciprocalGammaTerms(s)((0:N)) +
+      complexFunctionSeries(gaussDifferences, complexCarrier)(s)])
+proof
+  obtain ⟨summable, _⟩ := gaussDifferences.series
+  have summableS := summable with s, hs
+  have values : ∀ m ∈ ℕ, gaussDifferences(m)(s) ∈ ℂ
+    intros m hm
+    have mNat := nat.omega.backward at m with hm
+    rw [(gaussDifferences.value with hm), (gaussDifference.value with hs)]
+    have next := reciprocalGammaTerms.member at s, m + 1 with hs
+    have this := reciprocalGammaTerms.member at s, m with hs
+    typecheck
+  have sequenceV := complexValueSequence.function with values
+  rw (complexFunctionSeries.value with summable, hs)
+  obtain ⟨sumMember, sums⟩ := complexSeriesSum.selected with summableS
+  have close := (ComplexSumsTo.iff_partial with sequenceV, sumMember).forward
+    with sums
+  have zero := reciprocalGammaTerms.member at s, (0:N) with hs
+  have limitMember : ℂ[reciprocalGammaTerms(s)((0:N)) +
+    complexSeriesSum(complexValueSequence(gaussDifferences, s))] ∈ ℂ by
+    typecheck
+  have sequence : ComplexSequence(reciprocalGammaTerms(s)) by
+    exact reciprocalGammaTerms.function with hs
+  apply (ComplexConvergesTo.iff_abs with sequence, limitMember).backward
+  intros e he ePositive
+  obtain ⟨N, hN, after⟩ := close with e, he, ePositive
+  refine ⟨N, hN, ?_⟩
+  intros n hn le
+  have nNat := nat.omega.backward at n with hn
+  have near := after with n, hn, le
+  rw (gaussDifferences.partial at s, n with hs) at near
+  have term := reciprocalGammaTerms.member at s, n with hs
+  have same : ℂ[(reciprocalGammaTerms(s)(n) - reciprocalGammaTerms(s)((0:N))) -
+      complexSeriesSum(complexValueSequence(gaussDifferences, s))] =
+      ℂ[reciprocalGammaTerms(s)(n) - (reciprocalGammaTerms(s)((0:N)) +
+      complexSeriesSum(complexValueSequence(gaussDifferences, s)))] by ring
+  rw same at near
+  exact near
 
 -- Section: The reciprocal Gamma function
 theorem reciprocalGamma.member (s : Set)
