@@ -230,12 +230,12 @@ graph TD
 | GRH.Exp | 217 | 217 | 0 |
 | GRH.Trig | 132 | 132 | 0 |
 | GRH.Log | 108 | 108 | 0 |
-| GRH.Holomorphic | 189 | 184 | 5 |
+| GRH.Holomorphic | 515 | 515 | 0 |
 | GRH.Integral | 127 | 125 | 2 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
 | GRH.Zeta | 38 | 35 | 3 |
 | GRH.LFunction | 68 | 63 | 5 |
 | GRH.Statements | 7 | 4 | 3 |
-| **total** | **1424** | **1403** | **21** |
+| **total** | **1750** | **1734** | **16** |
 <!-- /blueprint-status -->
