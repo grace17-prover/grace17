@@ -1,43 +1,65 @@
 # Large cardinals
 
-Set theory has a ceiling it cannot see past. Above every stage of the
-cumulative hierarchy there is another, and ZFC proves that each one exists.
-But some stages are so large that, standing on one, you would find a whole
-universe of set theory below your feet, complete with its own hierarchy,
-its own ordinals, and its own model of every axiom. ZFC cannot prove such a
-stage exists. Large cardinals are the axioms that say it does, and they
-form one of the most beautiful structures in mathematics: a single ladder
-of ever stronger principles, ordered by consistency strength, rising toward
-an inconsistency at the top.
+In set theory, a *large cardinal property* is a property of infinite
+cardinals such that the existence of a cardinal with the property cannot be
+proved in ZFC, assuming ZFC is consistent, and such that ZFC together with
+its existence proves the consistency of ZFC. A *large cardinal axiom*
+asserts that a cardinal with a given large cardinal property exists.
 
-Grace17 adds no large cardinal axiom. A theorem that needs one takes it as
-a hypothesis, the certificate is a ZFC certificate of the implication, and
-the axiom audit shows exactly which results rely on it. This page explains
-what the hypotheses mean, how Cumulus states them, and how Grace17 keeps
-track of them.
+Large cardinal axioms are compared by *consistency strength*. A theory T is
+at most as strong as a theory T′ when ZFC proves Con(T′) → Con(T). The large
+cardinal axioms that arise in practice are, as far as is known, linearly
+ordered by this relation, and each of them proves the consistency of the
+ones below it. The hierarchy begins with the inaccessible cardinals and
+ends, under the axiom of Choice, below the Reinhardt cardinals, which Kunen
+showed to be inconsistent with ZFC.
 
-## A universe inside the universe
+Grace17 adds no large cardinal axiom to any of its foundations. A theorem
+that needs one takes it as a hypothesis: its certificate is a certificate,
+in the chosen foundation, of the implication from the hypothesis, and the
+axiom audit records every result that relies on one. This page gives the
+definitions, states what Cumulus proves about them, and describes how
+Grace17 tracks them.
 
-![An inaccessible cardinal κ: the stage V_κ of the cumulative hierarchy is itself a model of ZFC, a whole universe of sets inside V](images/large-cardinals-inaccessible.svg "An inaccessible κ. Everything below the curve is a model of ZFC in its own right.")
+## Inaccessible cardinals
 
-A cardinal κ is inaccessible when it is uncountable, cannot be reached from
-below by a smaller number of smaller steps, and is closed under taking power
-sets. At such a κ the stage V_κ is closed under everything ZFC can do. Its
-members form a model of all the axioms, so the existence of κ proves that
-ZFC is consistent. By Gödel's second incompleteness theorem, ZFC cannot
-prove that, and so ZFC cannot prove that an inaccessible exists.
+![An inaccessible cardinal κ: the stage V_κ of the cumulative hierarchy is itself a model of ZFC](images/large-cardinals-inaccessible.svg "The stage V_κ at an inaccessible κ is a model of ZFC.")
 
-I find this one of the loveliest facts in logic. The universe of sets
-contains, if it is large enough, perfect copies of itself.
+An infinite cardinal κ is *regular* if its cofinality is κ, that is, if κ is
+not the supremum of fewer than κ smaller ordinals. It is a *strong limit*
+if 2^λ < κ for every cardinal λ < κ. It is *(strongly) inaccessible* if it
+is uncountable, regular, and a strong limit.
+
+**Theorem.** If κ is inaccessible, then (V_κ, ∈) is a model of ZFC.
+
+Since ZFC + "an inaccessible cardinal exists" therefore proves Con(ZFC), by
+Gödel's second incompleteness theorem ZFC does not prove that an
+inaccessible cardinal exists, unless ZFC is inconsistent. If κ is the least
+inaccessible cardinal, then V_κ is a model of ZFC in which there is no
+inaccessible cardinal, so ZFC + "there is no inaccessible cardinal" is
+consistent relative to ZFC + "an inaccessible cardinal exists".
 
 ## Grothendieck universes
 
-![A Grothendieck universe U: a transitive set containing ω and closed under pairs, power sets, and unions of families indexed by its members](images/large-cardinals-universe.svg "A Grothendieck universe. Every construction of ordinary mathematics, applied to members of U, gives members of U.")
+![A Grothendieck universe U: a transitive set containing ω and closed under pairs, power sets, and unions of families indexed by its members](images/large-cardinals-universe.svg "A Grothendieck universe: closed under pairs, power sets, and unions of families indexed by its members.")
 
-Grothendieck needed universes to make category theory work: a category of
-all groups, or all rings, is too large to be a set, but the category of all
-groups inside a universe is a set, and nothing a working mathematician does
-leaves it. Cumulus defines a Grothendieck universe directly, in
+A *Grothendieck universe* is a set U such that
+
+1. U is transitive: if x ∈ U and y ∈ x, then y ∈ U;
+2. if x, y ∈ U, then {x, y} ∈ U;
+3. if x ∈ U, then 𝒫(x) ∈ U;
+4. if I ∈ U and f : I → U, then ⋃_{i ∈ I} f(i) ∈ U.
+
+The sets ∅ and V_ω satisfy these conditions. Cumulus excludes them by also
+requiring ω ∈ U. Universes were introduced by Grothendieck to give
+category theory a set-theoretic foundation: for a universe U, the
+U-small groups, rings, or schemes form a set, and the constructions of
+ordinary mathematics applied to members of U yield members of U.
+
+**Theorem.** A set U is a Grothendieck universe with ω ∈ U if and only if
+U = V_κ for some strongly inaccessible cardinal κ. (ZFC)
+
+Cumulus states the definition in
 [`Grace.Cumulus.LargeCardinal.Universe`](../lib/Grace/Cumulus/LargeCardinal/Universe.g17):
 
 ```g17 fragment
@@ -47,29 +69,33 @@ predicate GrothendieckUniverse (U : Set) :=
   (∀ I ∈ U, ∀ f, FunctionBetween(f, I, U) → ⋃(functionImage(f, I, U)) ∈ U)
 ```
 
-From these five clauses the module proves that U contains every natural
-number, every ordered pair, product, function space, image, union,
-intersection, and difference of its members. The two notions are one:
-Williamson's theorem, `GrothendieckUniverse.eq_V`, says that every
-Grothendieck universe is a stage V(κ), and
-`GrothendieckUniverse.inaccessible` that the κ is inaccessible. Both are
-proved under ZF, without Choice. Cumulus defines `Inaccessible(κ)` as an
-ordinal κ above ω whose stage V(κ) is a universe; under ZFC this is
-equivalent to the usual definition, which the module notes but does not
-prove.
+and proves, without Choice, that a universe is closed under ordered pairs,
+products, function spaces, images, unions, intersections, and differences of
+its members and contains every natural number. In
+[`Grace.Cumulus.LargeCardinal.Inaccessible`](../lib/Grace/Cumulus/LargeCardinal/Inaccessible.g17)
+it defines `Inaccessible(κ)` as: κ is an ordinal, ω ∈ κ, and V_κ is a
+Grothendieck universe. It proves in ZF that every universe U equals V_κ for
+κ the set of ordinals in U (`GrothendieckUniverse.eq_V`), and that this κ is
+inaccessible in that sense (`GrothendieckUniverse.inaccessible`). Under ZFC,
+`Inaccessible(κ)` is equivalent to κ being strongly inaccessible; that
+equivalence is not proved in Cumulus.
 
-## Universes all the way up
+## The Tarski–Grothendieck axiom
 
-![The Tarski–Grothendieck axiom: every set lies in some Grothendieck universe, so the universes climb without end through V, each inaccessible a member of the next universe](images/large-cardinals-tower.svg "Every set lies in a universe. Each universe is a member of a larger one, and the tower never ends.")
+![The Tarski–Grothendieck axiom: every set lies in some Grothendieck universe, so the universes V_κ₀ ⊂ V_κ₁ ⊂ V_κ₂ ⊂ … are unbounded in V](images/large-cardinals-tower.svg "Under the Tarski–Grothendieck axiom every set lies in a universe, and the universes are unbounded.")
 
-The Tarski–Grothendieck axiom says that every set lies in some universe.
-It is the foundation of Mizar, and it is what mathematicians reach for when
-they want to talk about the category of all small categories, and then the
-category of those. Mario Carneiro's thesis gives Lean's type theory a model
-in ZFC together with, for each n, the existence of n inaccessible cardinals;
-each type universe is read as a stage V_κ.
+The *Tarski–Grothendieck axiom* states that every set is a member of some
+Grothendieck universe. Over ZFC it is equivalent to the assertion that the
+inaccessible cardinals form a proper class. Tarski–Grothendieck set theory,
+ZFC together with this axiom (Tarski's axiom A, 1938), is the foundation of
+the Mizar system. Type theories with a hierarchy of universes have
+set-theoretic models of the same kind: Carneiro (2019) gives Lean's type
+theory a model in ZFC together with, for each natural number n, the
+existence of n inaccessible cardinals, interpreting each type universe as a
+stage V_κ.
 
-In Cumulus the axiom is a sentence, written applied to no arguments:
+Cumulus states the axiom, and the existence of an inaccessible cardinal, as
+sentences:
 
 ```g17 fragment
 predicate TarskiGrothendieck := ∀ x, ∃ U, GrothendieckUniverse(U) ∧ x ∈ U
@@ -79,40 +105,52 @@ predicate ExistsInaccessible := ∃ κ, Inaccessible(κ)
 register largecardinal ExistsInaccessible "an inaccessible cardinal exists"
 ```
 
-From it [`Grace.Cumulus.LargeCardinal.Axioms`](../lib/Grace/Cumulus/LargeCardinal/Axioms.g17)
-proves that every set lies in V(κ) for some inaccessible κ, so the
-inaccessibles are unbounded, and that `ExistsInaccessible()` is equivalent
-in ZF to the existence of a single universe.
+[`Grace.Cumulus.LargeCardinal.Axioms`](../lib/Grace/Cumulus/LargeCardinal/Axioms.g17)
+proves that `ExistsInaccessible()` is equivalent in ZF to the existence of
+a single universe, and that under `TarskiGrothendieck()` every set lies in
+V_κ for some inaccessible κ, so that the inaccessible cardinals are
+unbounded.
 
-## The ladder
+## Stronger large cardinals
 
-![The large cardinal hierarchy by consistency strength, from ZFC through inaccessible, Mahlo, weakly compact, measurable, Woodin, supercompact, huge, and rank-into-rank cardinals, up to Kunen's inconsistency of Reinhardt cardinals with Choice](images/large-cardinals-ladder.svg "The large cardinal hierarchy. Each rung proves the consistency of the rungs below it.")
+![The large cardinal hierarchy by consistency strength, from ZFC through inaccessible, Mahlo, weakly compact, measurable, Woodin, supercompact, huge, and rank-into-rank cardinals, up to Kunen's inconsistency of Reinhardt cardinals with Choice](images/large-cardinals-ladder.svg "Some large cardinal axioms in increasing order of consistency strength.")
 
-Inaccessibles are the first rung. Above them the hypotheses grow stranger
-and stronger. A Mahlo cardinal has so many inaccessibles below it that they
-form a stationary set. A weakly compact cardinal has a Ramsey property for
-colorings of pairs. A measurable cardinal carries a two-valued measure,
-equivalently an elementary embedding j of the universe V into an inner
-model M, and Dana Scott showed that one already contradicts V = L. Woodin
-cardinals give determinacy for projective sets of reals, and with it a
-coherent theory of the real line that ZFC alone cannot settle.
-Supercompact, huge, and rank-into-rank cardinals ask for embeddings with
-ever more of V preserved, until at the top Kunen's theorem stops the
-climb: with the axiom of Choice there is no nontrivial embedding of V into
-itself.
+The following properties are listed in increasing order of consistency
+strength. Many of the stronger ones are defined by elementary embeddings
+j : V → M of the universe into a transitive inner model M; the least
+ordinal moved by j is its *critical point*.
 
-What astonishes me is that these principles, invented for different
-reasons by different people, line up in a single order. Each rung proves
-the consistency of the ones below it, and the natural hypotheses found so
-far have always turned out to compare.
+- **Mahlo.** κ is inaccessible and the inaccessible cardinals below κ form
+  a stationary subset of κ.
+- **Weakly compact.** κ is uncountable and κ → (κ)²₂: every partition of the
+  two-element subsets of κ into two classes has a homogeneous set of size κ.
+- **Measurable.** There is a nonprincipal κ-complete ultrafilter on κ;
+  equivalently, there is an elementary embedding j : V → M with critical
+  point κ. Scott (1961) showed that if a measurable cardinal exists, then
+  V ≠ L.
+- **Woodin.** A property defined by elementary embeddings that reflect
+  subsets of κ. If there are infinitely many Woodin cardinals, every
+  projective set of reals is determined (Martin and Steel, 1989).
+- **Supercompact.** For every λ ≥ κ there is j : V → M with critical point
+  κ, j(κ) > λ, and M closed under sequences of length λ.
+- **Huge.** There is j : V → M with critical point κ and M closed under
+  sequences of length j(κ).
+- **Rank-into-rank.** For some λ there is a nontrivial elementary embedding
+  j : V_λ → V_λ.
 
-Grace17 states the first rung today. The others can be stated the same way
-when a development needs them.
+A *Reinhardt cardinal* would be the critical point of a nontrivial
+elementary embedding j : V → V. Kunen (1971) proved that no such embedding
+exists in ZFC; the rank-into-rank axioms are among the strongest not known
+to be inconsistent with ZFC.
 
-## Hypotheses, never axioms
+Cumulus currently states the first rung, inaccessible cardinals and
+universes. The others can be added as registered hypotheses in the same
+way.
 
-A large cardinal enters a Grace17 proof as a premise. The usual form is a
-section hypothesis, so every theorem in the section takes it:
+## Large cardinal hypotheses in Grace17
+
+A large cardinal hypothesis enters a proof as a premise, usually as a
+section hypothesis so that every theorem of the section takes it:
 
 ```g17 fragment
 import Grace.Cumulus.LargeCardinal.Axioms
@@ -130,33 +168,35 @@ proof
 end WithUniverses
 ```
 
-The kernel checks this from the axioms of the chosen foundation, and the
-certificate the independent checkers replay is a certificate of
-`TarskiGrothendieck() → ∀ x, …`. Nothing in the kernel, the certificate
-formats, or the checkers changes. The theorem holds in every model of the
-foundation in which the hypothesis holds.
+The theorem the kernel records is `TarskiGrothendieck() → ∀ x, …`, a
+theorem of the chosen foundation; the independent checkers replay its
+certificate unchanged. It holds in every model of the foundation in which
+the hypothesis holds. No kernel rule, axiom, certificate format, or checker
+is involved.
 
-A module registers a predicate as a large cardinal hypothesis with
-`register largecardinal`, as above. The registration changes no statement
-and no proof. It tells the audit and the Workbench what to look for.
+A module declares that a predicate states a large cardinal hypothesis with
+`register largecardinal`, as in the declarations above. The registration
+changes no statement and no proof; it directs the axiom audit and the
+Workbench.
 
-## What the audit says
+## Reliance in the axiom audit
 
-![How the axiom audit tracks a large cardinal hypothesis: reliance flows up the dependency graph from a lemma that assumes it, while a theorem about universes relies on nothing](images/large-cardinals-reliance.svg "Reliance flows up the proof. A lemma about universes is a fact of ZF and stays one.")
+![How the axiom audit tracks a large cardinal hypothesis: reliance flows up the dependency graph from a lemma that assumes it, while a theorem about universes relies on nothing](images/large-cardinals-reliance.svg "Reliance on a hypothesis propagates up a proof; a theorem about universes relies on none.")
 
-The audit reports every registered hypothesis a result relies on, through
-its statement or its proof:
+The audit reports a registered hypothesis H as relied on by a theorem when
 
-- a premise that is a sentence such as `TarskiGrothendieck()`, or a property
-  of something the conclusion does not mention: `Inaccessible(κ) → φ` with κ
-  not in φ says that φ holds if some inaccessible exists;
-- a lemma the proof uses that relies on one, through any number of steps;
-- a lemma about inaccessibles or universes, used by a proof whose own
-  statement never mentions them: the proof produced one from elsewhere.
+- H occurs as a premise of the statement in a form that asserts existence:
+  a sentence such as `TarskiGrothendieck()`, or a property H(κ) of a
+  variable κ that the conclusion does not mention, since ∀κ (H(κ) → φ) with
+  κ not free in φ is equivalent to (∃κ H(κ)) → φ;
+- a theorem the proof uses relies on H; or
+- the proof uses a theorem with a premise H(t) while its own statement does
+  not mention H, so that it obtained an instance of H from elsewhere.
 
-A theorem whose premise is about something its conclusion mentions, such as
-Williamson's theorem about every universe U, is a fact of ZF and relies on
-nothing. On the command line:
+A theorem whose premise H(κ) concerns a variable its conclusion mentions,
+such as `GrothendieckUniverse.eq_V`, is a theorem of ZF about objects with
+property H and relies on no hypothesis; so is an equivalence between two
+hypotheses. From the command line:
 
 ```text
 $ g17 axiom-audit lib/Grace/Cumulus/LargeCardinal/Axioms.g17 \
@@ -169,19 +209,21 @@ Relies on a large cardinal hypothesis: every set lies in a Grothendieck universe
   Grace.Cumulus.LargeCardinal.Axioms.TarskiGrothendieck.inaccessible_containing
 ```
 
-In the Workbench a completed proof that relies on a hypothesis carries a
-violet badge naming it, and the audit panel lists each hypothesis with the
-path to where the reliance starts. The JSON interface reports the same as
-`largeCardinals`. The details are in [axiom audits](axiom-audit.md#large-cardinal-hypotheses).
+The Workbench marks a completed proof that relies on a hypothesis with a
+badge naming it and lists each hypothesis, with the path to where the
+reliance begins, in the audit panel. The JSON interface reports the same
+information as `largeCardinals`. See
+[axiom audits](axiom-audit.md#large-cardinal-hypotheses).
 
-## Large cardinals in the GRH port
+## Universes in the GRH port
 
-The Lean proof of the Generalized Riemann Hypothesis that Grace17 is porting
-uses Lean's universes in one region, its étale and Hodge cohomology, where
-spaces are functors on the category of all rings. I expected that region to
-need a universe. It does not. Every ring it builds has fewer than ℶ_ω
-elements, and nothing in it ranges over a proper class. So the port writes
-it over the rings whose elements lie in V(ω·2), a stage of the hierarchy
-that ZFC proves exists. The certificate of GRH is meant to be a certificate
-from ZFC alone, and if any large cardinal crept in, the audit would show it
-all the way to the final theorem.
+The Lean proof of the Generalized Riemann Hypothesis for Dirichlet
+L-functions that Grace17 is porting uses universe levels in one region, its
+étale and Hodge cohomology, where spaces are functors on the category of
+all commutative rings. The constructions in that region are bounded: every
+ring it forms has cardinality less than ℶ_ω, and no product, colimit, or
+sheafification ranges over a proper class. The region is therefore
+formulated over the set of rings whose carriers lie in V_{ω·2}, a stage of
+the cumulative hierarchy whose existence ZFC proves and which is a model of
+Zermelo set theory. The port uses no large cardinal hypothesis, and its
+certificate is to be a certificate from ZFC alone.
