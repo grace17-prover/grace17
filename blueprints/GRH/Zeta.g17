@@ -11,7 +11,7 @@
 
 module GRH.Zeta
 import GRH.Hurwitz
-import Grace.Cumulus.NumberTheory.Prime
+import Grace.Cumulus.NumberTheory.Factorization
 
 section Zeta
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
@@ -462,20 +462,733 @@ proof
     (realLess.implies_le with close), cAbs
   linarith
 
+-- Section: The sieve
+-- m has no prime factor p < n lying in P.
+predicate SieveRough (P : Set, n m : Nat) :=
+  ∀ p, Prime(p) → p ∈ P → p < n → ¬(p ∣ m)
+
+theorem SieveRough.zero (P : Set) (m : Nat)
+  shows SieveRough(P, 0, m)
+proof
+  unfold SieveRough
+  intros p prime inP below divides
+  have pNat := Prime.natural with prime
+  arith
+
+theorem SieveRough.one (P : Set) (n : Nat)
+  shows SieveRough(P, n, 1)
+proof
+  unfold SieveRough
+  intros p prime inP below divides
+  have pNat := Prime.natural with prime
+  have above := Prime.greater_than_one with prime
+  have oneNonzero : (1:N) ≠ (0:N) by arith
+  have bound := divides.le with divides, oneNonzero
+  arith
+
+-- Passing n adds the one condition that n does not divide m.
+theorem SieveRough.succ (P : Set) (n m : Nat)
+  shows SieveRough(P, n + 1, m) ↔
+    SieveRough(P, n, m) ∧ (Prime(n) → n ∈ P → ¬(n ∣ m))
+proof
+  constructor
+  . intro rough
+    constructor
+    . unfold SieveRough
+      intros p prime inP below
+      have pNat := Prime.natural with prime
+      have wider : p < n + 1 by arith
+      exact rough with p, prime, inP, wider
+    . intros prime inP
+      have below : n < n + 1 by arith
+      exact rough with n, prime, inP, below
+  . intro both
+    obtain ⟨rough, last⟩ := both
+    unfold SieveRough
+    intros p prime inP below
+    have pNat := Prime.natural with prime
+    by_cases same : p = n
+    . rw same at prime
+      rw same at inP
+      rw same
+      exact last with prime, inP
+    . have less : p < n by arith
+      exact rough with p, prime, inP, less
+
+-- Below a prime q, q m has the prime factors of m.
+theorem SieveRough.prime_mul (P : Set) (q m : Nat)
+  requires prime : Prime(q)
+  shows SieveRough(P, q, q * m) ↔ SieveRough(P, q, m)
+proof
+  constructor
+  . intro rough
+    unfold SieveRough
+    intros p primeP inP below divides
+    have pNat := Prime.natural with primeP
+    have more := divides.multiply_left at p, m, q with *
+    exact rough with p, primeP, inP, below, more
+  . intro rough
+    unfold SieveRough
+    intros p primeP inP below divides
+    have pNat := Prime.natural with primeP
+    have split := Prime.divides_mul with primeP, divides
+    cases split with first | second
+    . have same := Prime.divides_prime with primeP, prime, first
+      rw same at below
+      arith
+    . exact rough with p, primeP, inP, below, second
+
+-- q does not divide M q + j for 0 < j < q.
+theorem divides.not_offset (q M j : Nat)
+  requires positive : 0 < j
+  requires below : j < q
+  shows ¬(q ∣ M * q + j)
+proof
+  intro divides
+  have self := divides.reflexive at q
+  have multiple := divides.multiply_left at q, q, M with *
+  have rest := divides.add_cancel_left with multiple, divides
+  have nonzero : j ≠ (0:N) by arith
+  have bound := divides.le with rest, nonzero
+  arith
+
+-- The sieved terms: t(k) when k + 1 has no prime factor below n in P,
+-- and 0 otherwise.
+defunique sieveTerm (t P : Set, n k : Nat) (w ∈ complexCarrier) :=
+  (SieveRough(P, n, k + 1) → w = t(k)) ∧
+  (¬SieveRough(P, n, k + 1) → w = ℂ[0])
+requires sequence : ComplexSequence(t)
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  have function : t : ℕ → complexCarrier by exact sequence
+  have term := FunctionBetween.apply_closed with function, kMember
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  by_cases rough : SieveRough(P, n, k + 1)
+  . witness t(k)
+    refine ⟨term, ?_, ?_⟩
+    . intro yes
+      rfl
+    . intro no
+      exfalso
+      exact no with rough
+  . witness ℂ[0]
+    refine ⟨zero, ?_, ?_⟩
+    . intro yes
+      exfalso
+      exact rough with yes
+    . intro no
+      rfl
+uniqueness
+  intros w wMember wValue v vMember vValue
+  obtain ⟨wYes, wNo⟩ := wValue
+  obtain ⟨vYes, vNo⟩ := vValue
+  by_cases rough : SieveRough(P, n, k + 1)
+  . rw [(wYes with rough), (vYes with rough)]
+  . rw [(wNo with rough), (vNo with rough)]
+
+defgraph sieveTerms (t P : Set, n : Nat) (k ∈ ℕ) : complexCarrier :=
+    sieveTerm(t, P, n, k)
+requires sequence : ComplexSequence(t)
+proof
+  have kNat := nat.omega.backward with member
+  obtain ⟨value, _⟩ := sieveTerm.selected at t, P, n, k with sequence
+  exact value
+
+theorem sieveTerms.rough (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  requires rough : SieveRough(P, n, k + 1)
+  shows sieveTerms(t, P, n)(k) = t(k)
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  obtain ⟨_, yes, _⟩ := sieveTerm.selected at t, P, n, k with sequence
+  rw (sieveTerms.value at t, P, n, k with sequence, kMember)
+  exact yes with rough
+
+theorem sieveTerms.sifted (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  requires sifted : ¬SieveRough(P, n, k + 1)
+  shows sieveTerms(t, P, n)(k) = ℂ[0]
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  obtain ⟨_, _, no⟩ := sieveTerm.selected at t, P, n, k with sequence
+  rw (sieveTerms.value at t, P, n, k with sequence, kMember)
+  exact no with sifted
+
+theorem sieveTerms.abs_le (t P : Set) (n k : Nat)
+  requires sequence : ComplexSequence(t)
+  shows complexAbs(sieveTerms(t, P, n)(k)) ≤ complexAbs(t(k))
+proof
+  have kMember : k ∈ ℕ := nat.omega.forward at k with *
+  have function : t : ℕ → complexCarrier by exact sequence
+  have term := FunctionBetween.apply_closed with function, kMember
+  have absReal := complexAbs.real with term
+  have nonnegative := complexAbs.nonnegative with term
+  by_cases rough : SieveRough(P, n, k + 1)
+  . rw (sieveTerms.rough with sequence, rough)
+    linarith
+  . rw (sieveTerms.sifted with sequence, rough)
+    have zero : ℂ[0] ∈ ℂ by typecheck
+    have absZero : complexAbs(ℂ[0]) = R[0]
+      apply (complexAbs.zero_iff with zero).backward
+      rfl
+    rw absZero
+    exact nonnegative
+
+theorem sieveTerms.absolute (t P : Set) (n : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  shows ComplexAbsolutelySummable(sieveTerms(t, P, n))
+proof
+  obtain ⟨sequence, summable⟩ := absolute
+  have terms := sieveTerms.function at t, P, n with sequence
+  have sieved : ComplexSequence(sieveTerms(t, P, n)) by exact terms
+  apply ComplexAbsolutelySummable.of_bound with sieved, summable
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  rw (complexAbsSequence.value with sequence, kMember)
+  exact sieveTerms.abs_le with sequence
+
+-- Nothing is sifted at stage 0.
+theorem sieveTerms.start (t P : Set)
+  requires sequence : ComplexSequence(t)
+  shows sieveTerms(t, P, 0) = t
+proof
+  have terms := sieveTerms.function at t, P, 0 with sequence
+  have function : t : ℕ → complexCarrier by exact sequence
+  apply FunctionBetween.ext with terms, function
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  have rough := SieveRough.zero at P, k + 1
+  exact sieveTerms.rough with sequence, rough
+
+-- A stage at a number that is not a prime of P changes nothing.
+theorem sieveTerms.skip (t P : Set) (n : Nat)
+  requires sequence : ComplexSequence(t)
+  requires skip : ¬(Prime(n) ∧ n ∈ P)
+  shows sieveTerms(t, P, n + 1) = sieveTerms(t, P, n)
+proof
+  have next := sieveTerms.function at t, P, n + 1 with sequence
+  have this := sieveTerms.function at t, P, n with sequence
+  apply FunctionBetween.ext with next, this
+  intros k kMember
+  have kNat := nat.omega.backward with kMember
+  have step := SieveRough.succ at P, n, k + 1
+  by_cases rough : SieveRough(P, n, k + 1)
+  . have vacuous : Prime(n) → n ∈ P → ¬(n ∣ k + 1)
+      intros prime inP
+      exfalso
+      exact skip with ⟨prime, inP⟩
+    have roughNext := step.backward with ⟨rough, vacuous⟩
+    rw [(sieveTerms.rough with sequence, roughNext),
+      (sieveTerms.rough with sequence, rough)]
+  . have siftedNext : ¬SieveRough(P, n + 1, k + 1)
+      intro roughNext
+      obtain ⟨roughHere, _⟩ := step.forward with roughNext
+      exact rough with roughHere
+    rw [(sieveTerms.sifted with sequence, siftedNext),
+      (sieveTerms.sifted with sequence, rough)]
+
+-- What the stage at q = r + 1 removes.
+defgraph sieveRemoved (t P : Set, n : Nat) (k ∈ ℕ) : complexCarrier :=
+  ℂ[sieveTerms(t, P, n)(k) - sieveTerms(t, P, n + 1)(k)]
+requires sequence : ComplexSequence(t)
+proof
+  have first := FunctionBetween.apply_closed with
+    (sieveTerms.function at t, P, n with sequence), member
+  have second := FunctionBetween.apply_closed with
+    (sieveTerms.function at t, P, n + 1 with sequence), member
+  typecheck
+
+-- The stage at a prime q = r + 1 of P multiplies the sum by 1 − t(r),
+-- when t(q m − 1) = t(q − 1) t(m − 1).
+theorem sieveTerms.step (t P D : Set) (r : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires prime : Prime(r + 1)
+  requires inP : r + 1 ∈ P
+  requires multiplicative : ∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)]
+  requires sums : ComplexSumsTo(sieveTerms(t, P, r + 1), D)
+  shows ComplexSumsTo(sieveTerms(t, P, r + 1 + 1), ℂ[(1 - t(r)) * D])
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, _⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have rMember : r ∈ ℕ := nat.omega.forward at r with *
+  have tr := FunctionBetween.apply_closed with function, rMember
+  have dMember := ComplexSumsTo.member with sums
+  have nextAbsolute := sieveTerms.absolute at t, P, r + 1 + 1 with absolute
+  have nextSummable := ComplexAbsolutelySummable.summable with nextAbsolute
+  obtain ⟨T, tMember, nextSums⟩ := nextSummable
+  have removedFunction := sieveRemoved.function at t, P, r + 1 with sequence
+  have removedSequence : ComplexSequence(sieveRemoved(t, P, r + 1))
+    by exact removedFunction
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  have zeroSums := complexZeroSeries.sums
+  have zeroFunction := complexFunctionConst.function at ℂ[0], ℕ with zero
+  have thisFunction := sieveTerms.function at t, P, r + 1 with sequence
+  have nextFunction := sieveTerms.function at t, P, r + 1 + 1 with sequence
+  have terms : ∀ m ∈ ℕ, sieveRemoved(t, P, r + 1)(m) =
+      ℂ[sieveTerms(t, P, r + 1)(m) - sieveTerms(t, P, r + 1 + 1)(m) -
+        0 * complexFunctionConst(ℂ[0], ℕ)(m)]
+    intros m mMember
+    have first := FunctionBetween.apply_closed with thisFunction, mMember
+    have second := FunctionBetween.apply_closed with nextFunction, mMember
+    rw [(sieveRemoved.value with sequence, mMember),
+      (complexFunctionConst.value with zero, mMember)]
+    ring
+  have difference := ComplexSumsTo.combination with sums, nextSums, zeroSums,
+    zero, removedSequence, terms
+  have removedSummable : ComplexSummable(sieveRemoved(t, P, r + 1))
+    have total : ℂ[D - T - 0 * 0] ∈ ℂ by typecheck
+    exact ⟨ℂ[D - T - 0 * 0], total, difference⟩
+  -- the removed terms sit at the multiples of q
+  have placed : ∀ j ∈ ℕ, sieveRemoved(t, P, r + 1)((r + 1) * j + r) =
+      ℂ[t(r) * sieveTerms(t, P, r + 1)(j)]
+    intros j jMember
+    have jNat := nat.omega.backward with jMember
+    have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+    have position : (r + 1) * j + r ∈ ℕ by typecheck
+    have divides : r + 1 ∣ (r + 1) * (j + 1)
+      have self := divides.reflexive at r + 1
+      exact divides.multiply_right with self
+    have siftedNext : ¬SieveRough(P, r + 1 + 1, (r + 1) * j + r + 1)
+      intro roughNext
+      obtain ⟨_, last⟩ := (SieveRough.succ at P, r + 1,
+        (r + 1) * j + r + 1).forward with roughNext
+      rw index at last
+      exact last with prime, inP, divides
+    have mulRough := SieveRough.prime_mul at P, r + 1, j + 1 with prime
+    rw [(sieveRemoved.value with sequence, position),
+      (sieveTerms.sifted with sequence, siftedNext)]
+    by_cases rough : SieveRough(P, r + 1, j + 1)
+    . have roughHere : SieveRough(P, r + 1, (r + 1) * j + r + 1)
+        rw index
+        exact mulRough.backward with rough
+      rw [(sieveTerms.rough with sequence, roughHere),
+        (sieveTerms.rough with sequence, rough), (multiplicative with j,
+        jMember)]
+      have tj := FunctionBetween.apply_closed with function, jMember
+      ring
+    . have siftedHere : ¬SieveRough(P, r + 1, (r + 1) * j + r + 1)
+        rw index
+        intro roughProduct
+        exact rough with (mulRough.forward with roughProduct)
+      rw [(sieveTerms.sifted with sequence, siftedHere),
+        (sieveTerms.sifted with sequence, rough)]
+      ring
+  -- and vanish elsewhere
+  have elsewhere : ∀ M ∈ ℕ, ∀ k ∈ ℕ, k < r →
+      sieveRemoved(t, P, r + 1)(M * (r + 1) + k) = ℂ[0]
+    intros M mMember k kMember below
+    have mNat := nat.omega.backward with mMember
+    have kNat := nat.omega.backward with kMember
+    have position : M * (r + 1) + k ∈ ℕ by typecheck
+    have index : M * (r + 1) + k + 1 = M * (r + 1) + (k + 1) by arith
+    have positiveK : 0 < k + 1 by arith
+    have belowQ : k + 1 < r + 1 by arith
+    have notDivides := divides.not_offset at r + 1, M, k + 1 with positiveK,
+      belowQ
+    have step := SieveRough.succ at P, r + 1, M * (r + 1) + k + 1
+    rw (sieveRemoved.value with sequence, position)
+    by_cases rough : SieveRough(P, r + 1, M * (r + 1) + k + 1)
+    . have extra : Prime(r + 1) → r + 1 ∈ P →
+          ¬(r + 1 ∣ M * (r + 1) + k + 1)
+        intros _ unused
+        rw index
+        exact notDivides
+      have roughNext := step.backward with ⟨rough, extra⟩
+      rw [(sieveTerms.rough with sequence, rough),
+        (sieveTerms.rough with sequence, roughNext)]
+      have term := FunctionBetween.apply_closed with function, position
+      ring
+    . have siftedNext : ¬SieveRough(P, r + 1 + 1, M * (r + 1) + k + 1)
+        intro roughNext
+        obtain ⟨roughHere, _⟩ := step.forward with roughNext
+        exact rough with roughHere
+      rw [(sieveTerms.sifted with sequence, rough),
+        (sieveTerms.sifted with sequence, siftedNext)]
+      ring
+  have spread := ComplexSumsTo.spread with sums, tr, removedSummable,
+    removedSequence, placed, elsewhere
+  have same := ComplexSumsTo.unique with difference, spread
+  have value : T = ℂ[(1 - t(r)) * D]
+    linear_combination -same
+  rw ← value
+  exact nextSums
+
+-- Sifting by every prime below n multiplies the sum by the inverse of the
+-- n-th partial Euler product E(n), when t(0) = 1 and t is multiplicative
+-- at the primes.
+theorem sieveTerms.euler_stage (t E D : Set) (n : Nat)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires sums : ComplexSumsTo(t, D)
+  requires multiplicative : ∀ r ∈ ℕ, Prime(r + 1) →
+    (∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)])
+  requires notOne : ∀ r ∈ ℕ, Prime(r + 1) → t(r) ≠ ℂ[1]
+  requires sequenceE : ComplexSequence(E)
+  requires start : E((0:N)) = ℂ[1]
+  requires primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+    E(r + 1 + 1) = ℂ[E(r + 1) * complexInv(ℂ[1 - t(r)])]
+  requires otherStep : ∀ k ∈ ℕ, ¬Prime(k) → E(k + 1) = E(k)
+  shows ∃ Q ∈ ℂ, ℂ[E(n) * Q] = ℂ[1] ∧
+    ComplexSumsTo(sieveTerms(t, ℕ, n), ℂ[D * Q])
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, _⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have functionE : E : ℕ → complexCarrier by exact sequenceE
+  induction n
+  | zero =>
+    have dMember := ComplexSumsTo.member with sums
+    have one : ℂ[1] ∈ ℂ by typecheck
+    refine ⟨ℂ[1], one, ?_, ?_⟩
+    . rw start
+      ring
+    . rw (sieveTerms.start with sequence)
+      have same : ℂ[D * 1] = D by ring
+      rw same
+      exact sums
+  | succ(k) using ih =>
+    obtain ⟨Q, qMember, inverse, stage⟩ := ih
+    have dMember := ComplexSumsTo.member with sums
+    have kMember : k ∈ ℕ := nat.omega.forward at k with *
+    have eK := FunctionBetween.apply_closed with functionE, kMember
+    by_cases prime : Prime(k)
+    . have above := Prime.greater_than_one with prime
+      have atLeast : 1 ≤ k by arith
+      obtain ⟨r, rNat, split⟩ := LessEqual.exists_add with atLeast
+      have shape : k = r + 1 by arith
+      have next : succ(k) = r + 1 + 1 by arith
+      rw shape at prime
+      rw shape at stage
+      rw shape at inverse
+      rw next
+      have rMember : r ∈ ℕ := nat.omega.forward at r with *
+      have tr := FunctionBetween.apply_closed with function, rMember
+      have inP : r + 1 ∈ ℕ := nat.omega.forward at r + 1 with *
+      have product : ℂ[D * Q] ∈ ℂ by typecheck
+      have step := sieveTerms.step at t, ℕ, ℂ[D * Q], r with absolute, prime,
+        inP, (multiplicative with r, rMember, prime), stage
+      have factor : ℂ[1 - t(r)] ∈ ℂ by typecheck
+      have nonzero : ℂ[1 - t(r)] ≠ ℂ[0]
+        intro zero
+        apply notOne with r, rMember, prime
+        linear_combination -zero
+      have cancel := complexInv.mul_cancel with factor, nonzero
+      have inverseFactor := complexInv.member with factor
+      have newQ : ℂ[Q * (1 - t(r))] ∈ ℂ by typecheck
+      refine ⟨ℂ[Q * (1 - t(r))], newQ, ?_, ?_⟩
+      . rw (primeStep with r, rMember, prime)
+        have eR := FunctionBetween.apply_closed with functionE, inP
+        linear_combination (1 - t(r)) * complexInv(ℂ[1 - t(r)]) * inverse +
+          cancel
+      . have same : ℂ[D * (Q * (1 - t(r)))] = ℂ[(1 - t(r)) * (D * Q)] by ring
+        rw same
+        exact step
+    . have skip : ¬(Prime(k) ∧ k ∈ ℕ)
+        intro both
+        obtain ⟨isPrime, _⟩ := both
+        exact prime with isPrime
+      have index : succ(k) = k + 1 by arith
+      rw [index, (sieveTerms.skip with sequence, skip), (otherStep with k,
+        kMember, prime)]
+      exact ⟨Q, qMember, inverse, stage⟩
+
+-- Below n, only the first term survives the sieve by every prime.
+theorem sieveTerms.first_only (t : Set) (n i : Nat)
+  requires sequence : ComplexSequence(t)
+  requires first : t((0:N)) = ℂ[1]
+  shows i + 1 < n → complexPartialSum(sieveTerms(t, ℕ, n), i + 1) = ℂ[1]
+proof
+  have terms := sieveTerms.function at t, ℕ, n with sequence
+  induction i
+  | zero =>
+    intro below
+    have rough := SieveRough.one at ℕ, n
+    rw [natural.zero_add_one, natural.one_succ, complexPartialSum.succ,
+      complexPartialSum.zero]
+    rw ← natural.zero_add_one at rough
+    rw [(sieveTerms.rough with sequence, rough), first]
+    ring
+  | succ(j) using ih =>
+    intro below
+    have succNat : Nat(succ(j)) by typecheck
+    have earlier : j + 1 < n by arith
+    have index : succ(j) + 1 = succ(j + 1) by arith
+    rw [index, complexPartialSum.succ, (ih with earlier)]
+    have above : 1 < j + 1 + 1 by arith
+    obtain ⟨p, prime, divides⟩ := natural.exists_prime_divisor at j + 1 + 1
+      with above
+    have pNat := Prime.natural with prime
+    have nonzero : j + 1 + 1 ≠ (0:N) by arith
+    have bound := divides.le with divides, nonzero
+    have sifted : ¬SieveRough(ℕ, n, j + 1 + 1)
+      intro rough
+      have pMember : p ∈ ℕ := nat.omega.forward at p with *
+      have less : p < n by arith
+      exact rough with p, prime, pMember, less, divides
+    rw (sieveTerms.sifted with sequence, sifted)
+    ring
+
+-- The Euler product by the sieve. Let t be absolutely summable with sum
+-- D, t(0) = 1, t(q j + q − 1) = t(q − 1) t(j) for every prime q, and
+-- t(q − 1) ≠ 1; let E(n) be the partial products of (1 − t(q − 1))⁻¹ over
+-- the primes q < n. Then E(n) → D and D ≠ 0: the sieved sum
+-- D / E(n) differs from t(0) = 1 by at most the tail Σ_{k ≥ n−1} |t(k)|.
+theorem ComplexConvergesTo.euler_sieve (t E D : Set)
+  requires absolute : ComplexAbsolutelySummable(t)
+  requires sums : ComplexSumsTo(t, D)
+  requires first : t((0:N)) = ℂ[1]
+  requires multiplicative : ∀ r ∈ ℕ, Prime(r + 1) →
+    (∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)])
+  requires notOne : ∀ r ∈ ℕ, Prime(r + 1) → t(r) ≠ ℂ[1]
+  requires sequenceE : ComplexSequence(E)
+  requires start : E((0:N)) = ℂ[1]
+  requires primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+    E(r + 1 + 1) = ℂ[E(r + 1) * complexInv(ℂ[1 - t(r)])]
+  requires otherStep : ∀ k ∈ ℕ, ¬Prime(k) → E(k + 1) = E(k)
+  shows ComplexConvergesTo(E, D) ∧ D ≠ ℂ[0]
+proof
+  have absoluteCopy := absolute
+  obtain ⟨sequence, absSummable⟩ := absoluteCopy
+  have function : t : ℕ → complexCarrier by exact sequence
+  have functionE : E : ℕ → complexCarrier by exact sequenceE
+  have dMember := ComplexSumsTo.member with sums
+  have one : ℂ[1] ∈ ℂ by typecheck
+  obtain ⟨A, aReal, absSums⟩ := absSummable
+  have absConverges := SumsTo.converges with absSums
+  obtain ⟨_, absNear⟩ := absConverges
+  have absFunction := complexAbsSequence.function with sequence
+  have absSequence : RealSequence(complexAbsSequence(t)) by exact absFunction
+  -- The sum of the sieved terms at stage n is within any e of 1 for n
+  -- large.
+  have near : ∀ e ∈ ℝ, R[0] < e → ∃ n0 ∈ ℕ, ∀ n ∈ ℕ, n0 ≤ n → ∀ T ∈ ℂ,
+      ComplexSumsTo(sieveTerms(t, ℕ, n), T) → complexAbs(ℂ[T - 1]) ≤ e
+    intros e eMember ePositive
+    have two : R[0] ≤ R[2] by linarith
+    obtain ⟨d, dReal, dPositive, dSmall⟩ := real.small_multiple with two,
+      ePositive
+    obtain ⟨K, kMember, close⟩ := absNear with d, dReal, dPositive
+    have kNat := nat.omega.backward with kMember
+    have n0Member : K + 1 + 1 ∈ ℕ by typecheck
+    refine ⟨K + 1 + 1, n0Member, ?_⟩
+    intros n nMember later T tMember sieved
+    have nNat := nat.omega.backward with nMember
+    have sievedCopy := sieved
+    obtain ⟨sievedSequence, converges⟩ := sievedCopy
+    apply ComplexConvergesTo.abs_le at complexPrefixSums(sieveTerms(t, ℕ, n)),
+      T, ℂ[1], e, K + 1 with converges, one
+    intros M mMember atLeast
+    have mNat := nat.omega.backward with mMember
+    obtain ⟨B, bNat, mSplit⟩ := LessEqual.exists_add with atLeast
+    have below : K + 1 < n by arith
+    have prefix := sieveTerms.first_only at t, n, K with sequence, first
+    have prefixOne := prefix with below
+    rw [(complexPrefixSums.value with sievedSequence, mMember), mSplit,
+      (complexPartialSum.block with sievedSequence), prefixOne]
+    have blockFunction := complexBlock.function at sieveTerms(t, ℕ, n),
+      K + 1 with sievedSequence
+    have blockSequence : ComplexSequence(complexBlock(sieveTerms(t, ℕ, n),
+      K + 1)) by exact blockFunction
+    have blockSum := complexPartialSum.member at
+      complexBlock(sieveTerms(t, ℕ, n), K + 1), B with blockSequence
+    have shape : ℂ[1 + complexPartialSum(complexBlock(sieveTerms(t, ℕ, n),
+        K + 1), B) - 1] =
+      complexPartialSum(complexBlock(sieveTerms(t, ℕ, n), K + 1), B) by ring
+    rw shape
+    have shifted := shiftedRealSequence.sequence at complexAbsSequence(t),
+      K + 1 with absSequence
+    have bound := complexPartialSum.abs_le at
+      complexBlock(sieveTerms(t, ℕ, n), K + 1),
+      shiftedRealSequence(complexAbsSequence(t), K + 1), B with
+      blockSequence, shifted
+    have termwise : ∀ k ∈ ℕ, k < B →
+        complexAbs(complexBlock(sieveTerms(t, ℕ, n), K + 1)(k)) ≤
+        (shiftedRealSequence(complexAbsSequence(t), K + 1)[k]:R)
+      intros k kIn kBelow
+      have kNatural := nat.omega.backward with kIn
+      have position : K + 1 + k ∈ ℕ by typecheck
+      rw [(complexBlock.value with sievedSequence, kIn),
+        (shiftedRealSequence.value at complexAbsSequence(t), K + 1, k with
+        absSequence, kIn), (complexAbsSequence.value with sequence,
+        position)]
+      exact sieveTerms.abs_le with sequence
+    have estimate := bound with termwise
+    have tail := realPartialSum.tail at complexAbsSequence(t), K + 1, B with
+      absSequence
+    rw tail at estimate
+    have far : K ≤ K + 1 + B by arith
+    have farMember : K + 1 + B ∈ ℕ by typecheck
+    have nearMember : K + 1 ∈ ℕ by typecheck
+    have nearK : K ≤ K + 1 by arith
+    have farBall := close with K + 1 + B, farMember, far
+    have nearBall := close with K + 1, nearMember, nearK
+    rw (prefixSums.value with absSequence, farMember) at farBall
+    rw (prefixSums.value with absSequence, nearMember) at nearBall
+    obtain ⟨farLow, farHigh⟩ := openBall.order_characterization.forward with
+      farBall
+    obtain ⟨nearLow, nearHigh⟩ := openBall.order_characterization.forward
+      with nearBall
+    linarith
+  -- D ≠ 0, since the sieved sums D / E(n) tend to 1.
+  have oneLess : R[0] < R[1] by linarith
+  have two : R[0] ≤ R[2] by linarith
+  obtain ⟨h, hReal, hPositive, hSmall⟩ := real.small_multiple with two,
+    oneLess
+  have nonzero : D ≠ ℂ[0]
+    intro zero
+    obtain ⟨n0, n0Member, eventually⟩ := near with h, hReal, hPositive
+    have n0Nat := nat.omega.backward with n0Member
+    obtain ⟨Q, qMember, inverse, stage⟩ := sieveTerms.euler_stage at t, E, D,
+      n0 with absolute, sums, multiplicative, notOne, sequenceE, start,
+      primeStep, otherStep
+    have reflexive : n0 ≤ n0 by arith
+    have product : ℂ[D * Q] ∈ ℂ by typecheck
+    have bound := eventually with n0, n0Member, reflexive, ℂ[D * Q], product,
+      stage
+    rw zero at bound
+    have value : ℂ[0 * Q - 1] = ℂ[-1] by ring
+    rw [value, (complexAbs.neg with one), complexAbs.one] at bound
+    linarith
+  refine ⟨?_, nonzero⟩
+  -- E(n) − D = −E(n)(D/E(n) − 1), and |E(n)| ≤ 2|D| once D/E(n) is near 1.
+  apply (ComplexConvergesTo.iff_abs with sequenceE, dMember).backward
+  intros e eMember ePositive
+  have dAbs := complexAbs.nonnegative with dMember
+  have dAbsReal := complexAbs.real with dMember
+  have weight : R[0] ≤ R[2 * complexAbs(D)] by linarith
+  obtain ⟨g, gReal, gPositive, gSmall⟩ := real.small_multiple with weight,
+    ePositive
+  obtain ⟨c, cReal, cPositive, belowH, belowG⟩ := positiveRadius.common with
+    hPositive, gPositive
+  obtain ⟨n0, n0Member, eventually⟩ := near with c, cReal, cPositive
+  refine ⟨n0, n0Member, ?_⟩
+  intros n nMember later
+  have nNat := nat.omega.backward with nMember
+  obtain ⟨Q, qMember, inverse, stage⟩ := sieveTerms.euler_stage at t, E, D, n
+    with absolute, sums, multiplicative, notOne, sequenceE, start, primeStep,
+    otherStep
+  have product : ℂ[D * Q] ∈ ℂ by typecheck
+  have close := eventually with n, nMember, later, ℂ[D * Q], product, stage
+  have eN := FunctionBetween.apply_closed with functionE, nMember
+  have shape : ℂ[E(n) - D] = ℂ[-(E(n) * (D * Q - 1))]
+    linear_combination D * inverse
+  have diff : ℂ[D * Q - 1] ∈ ℂ by typecheck
+  have scaled : ℂ[E(n) * (D * Q - 1)] ∈ ℂ by typecheck
+  rw [shape, (complexAbs.neg with scaled), (complexAbs.mul with eN, diff)]
+  have modulus : R[complexAbs(E(n)) * complexAbs(ℂ[D * Q])] = complexAbs(D)
+    rw ← (complexAbs.mul with eN, product)
+    have same : ℂ[E(n) * (D * Q)] = D
+      linear_combination D * inverse
+    rw same
+  have negDiff : ℂ[-(D * Q - 1)] ∈ ℂ by typecheck
+  have triangle := complexAbs.triangle with product, negDiff
+  have oneShape : ℂ[D * Q + -(D * Q - 1)] = ℂ[1] by ring
+  rw [oneShape, complexAbs.one, (complexAbs.neg with diff)] at triangle
+  have eAbs := complexAbs.nonnegative with eN
+  have eAbsReal := complexAbs.real with eN
+  have productAbsReal := complexAbs.real with product
+  have diffAbsReal := complexAbs.real with diff
+  have lower : R[1] ≤ R[2 * complexAbs(ℂ[D * Q])] by linarith
+  have scaledLower := realLe.mul_left_of_nonnegative with lower, eAbs
+  have expand : R[complexAbs(E(n)) * (2 * complexAbs(ℂ[D * Q]))] =
+    R[2 * (complexAbs(E(n)) * complexAbs(ℂ[D * Q]))] by ring
+  have unit : R[complexAbs(E(n)) * 1] = complexAbs(E(n)) by ring
+  have eBound : complexAbs(E(n)) ≤ R[2 * complexAbs(D)] by linarith
+  have step1 := realLe.mul_left_of_nonnegative with close, eAbs
+  have cNonnegative : R[0] ≤ c by linarith
+  have step2 := realLe.mul_right_of_nonnegative with eBound, cNonnegative
+  have step3 := realLe.mul_left_of_nonnegative with belowG, weight
+  linarith
+
+-- The hypotheses of the sieve for ζ: t(n) = (n + 1)^(−s).
+theorem zeta.euler_sieve (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexConvergesTo(zetaEulerProducts(s), riemannZeta(s)) ∧
+    riemannZeta(s) ≠ ℂ[0]
+proof
+  obtain ⟨sums, absolute⟩ := zeta.series with hs, halfPlane
+  have products := zetaEulerProducts.function with hs
+  have sequenceE : ComplexSequence(zetaEulerProducts(s)) by exact products
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first : zetaSeriesTerms(s)((0:N)) = ℂ[1]
+    rw [(zetaSeriesTerms.value with hs, zeroMember), natural.zero_add_one,
+      (realCpow.nat_neg_one with hs)]
+  have multiplicative : ∀ r ∈ ℕ, Prime(r + 1) → (∀ j ∈ ℕ,
+      zetaSeriesTerms(s)((r + 1) * j + r) =
+        ℂ[zetaSeriesTerms(s)(r) * zetaSeriesTerms(s)(j)])
+    intros r rMember prime j jMember
+    have rNat := nat.omega.backward with rMember
+    have jNat := nat.omega.backward with jMember
+    have position : (r + 1) * j + r ∈ ℕ by typecheck
+    have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+    have positiveR : 1 ≤ r + 1 by arith
+    have positiveJ : 1 ≤ j + 1 by arith
+    rw [(zetaSeriesTerms.value with hs, position),
+      (zetaSeriesTerms.value with hs, rMember),
+      (zetaSeriesTerms.value with hs, jMember), index,
+      (realCpow.nat_neg_mul with positiveR, positiveJ, hs)]
+  have notOne : ∀ r ∈ ℕ, Prime(r + 1) → zetaSeriesTerms(s)(r) ≠ ℂ[1]
+    intros r rMember prime isOne
+    have rNat := nat.omega.backward with rMember
+    have above := Prime.greater_than_one with prime
+    have positive : 1 ≤ r + 1 by arith
+    rw (zetaSeriesTerms.value with hs, rMember) at isOne
+    have size := realCpow.nat_neg_abs at r + 1, s with positive, hs
+    rw [isOne, complexAbs.one] at size
+    have base := realNat.lt_of_lt with above
+    rw realNat.one at base
+    have reS : Real(complexRe(s)) by typecheck
+    have exponent : R[-complexRe(s)] < R[0] by linarith
+    have smaller := realRpow.lt_of_exponent with base, exponent
+    rw realRpow.zero at smaller
+    linarith
+  have start : zetaEulerProducts(s)((0:N)) = ℂ[1]
+    rw [(zetaEulerProducts.value with hs, zeroMember), zetaEulerProduct]
+  have primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+      zetaEulerProducts(s)(r + 1 + 1) = ℂ[zetaEulerProducts(s)(r + 1) *
+        complexInv(ℂ[1 - zetaSeriesTerms(s)(r)])]
+    intros r rMember prime
+    have rNat := nat.omega.backward with rMember
+    have here : r + 1 ∈ ℕ by typecheck
+    have next : r + 1 + 1 ∈ ℕ by typecheck
+    obtain ⟨_, primeValue, _⟩ := zetaEulerFactor.selected at s, r + 1 with hs
+    have index : r + 1 + 1 = succ(r + 1) by arith
+    rw [(zetaEulerProducts.value with hs, next),
+      (zetaEulerProducts.value with hs, here),
+      (zetaSeriesTerms.value with hs, rMember), index, zetaEulerProduct,
+      (primeValue with prime)]
+  have otherStep : ∀ k ∈ ℕ, ¬Prime(k) →
+      zetaEulerProducts(s)(k + 1) = zetaEulerProducts(s)(k)
+    intros k kMember notPrime
+    have kNat := nat.omega.backward with kMember
+    have next : k + 1 ∈ ℕ by typecheck
+    obtain ⟨_, _, otherValue⟩ := zetaEulerFactor.selected at s, k with hs
+    have index : k + 1 = succ(k) by arith
+    have product := zetaEulerProduct.member at s, k with hs
+    rw [(zetaEulerProducts.value with hs, next),
+      (zetaEulerProducts.value with hs, kMember), index, zetaEulerProduct,
+      (otherValue with notPrime)]
+    ring
+  exact ComplexConvergesTo.euler_sieve with absolute, sums, first,
+    multiplicative, notOne, sequenceE, start, primeStep, otherStep
+
 -- The Euler product: for re s > 1, ∏_{p < n} (1 − p^(−s))⁻¹ → ζ(s).
 theorem zeta.euler_product (s : Set)
   requires hs : s ∈ ℂ
   requires halfPlane : realOne < complexRe(s)
   shows ComplexConvergesTo(zetaEulerProducts(s), riemannZeta(s))
 proof
-  sorry
+  obtain ⟨converges, _⟩ := zeta.euler_sieve with hs, halfPlane
+  exact converges
 
 theorem zeta.nonzero_re_gt_one (s : Set)
   requires hs : s ∈ ℂ
   requires halfPlane : realOne < complexRe(s)
   shows riemannZeta(s) ≠ ℂ[0]
 proof
-  sorry
+  obtain ⟨_, nonzero⟩ := zeta.euler_sieve with hs, halfPlane
+  exact nonzero
 
 -- No zero on the line re s = 1 either (Hadamard, de la Vallée Poussin).
 theorem zeta.nonzero_re_ge_one (s : Set)
