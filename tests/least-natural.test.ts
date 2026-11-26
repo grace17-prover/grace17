@@ -45,11 +45,11 @@ test("the migrated compactness and integration laws have complete hereditary aud
     assert.equal(audit.complete, true, name);
     assert.deepEqual(audit.hereditary.filter(a => /choice/i.test(a)), [], name);
   }
+  // The indefinite integral, once reached the global selector only through
+  // chosen mean-value tags; it now uses no choice at all.
   const integral = auditTheoremAxioms(kernel,
     "Grace.Cumulus.Real.Analysis.Integration.IndefiniteIntegral.integralValue.selected");
   assert.equal(integral.complete, true);
-  assert.ok(integral.hereditary.includes("set.globalChoice"));
-  assert.ok(integral.axioms.find(a => a.name === "set.globalChoice")!.path.every(
-    name => !name.includes("monotoneIndex") && !name.includes("refinementIndex")));
+  assert.deepEqual(integral.hereditary.filter(a => /choice/i.test(a)), []);
 
 });
