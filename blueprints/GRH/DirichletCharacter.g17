@@ -1406,6 +1406,109 @@ proof
   unfold PrimitiveCharacter
   arith
 
+-- Coprime to two moduli is coprime to their product.
+theorem IntegerCoprime.mul_right (x m n : Set)
+  requires xInteger : x ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires nInteger : n ∈ ℤ
+  requires first : IntegerCoprime(x, m)
+  requires second : IntegerCoprime(x, n)
+  shows IntegerCoprime(x, integerMulValue(m, n))
+proof
+  obtain ⟨u, uInteger, p, pInteger, left⟩ := IntegerCoprime.modular_inverse
+    with first
+  obtain ⟨w, wInteger, q, qInteger, right⟩ := IntegerCoprime.modular_inverse
+    with second
+  apply IntegerCoprime.of_bezout at x, integerMulValue(m, n),
+    u * x * w - u * n * q - m * p * w, p * q
+  linear_combination (n * q - x * w) * left - right
+
+-- A residue a coprime to c lifts to an integer congruent to a modulo c and
+-- coprime to any given positive M: strip from M the common factors with c,
+-- which a avoids, and solve the remaining congruence by the Chinese
+-- remainder theorem.
+theorem IntegerCoprime.lift_bounded (c K : Nat) (a : Set)
+  requires aInteger : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(c))
+  shows ∀ M ∈ ℕ, 0 < M → M ≤ K → ∃ x ∈ ℤ,
+    IntegerCongruent(integerOfNat(c), x, a) ∧ IntegerCoprime(x, integerOfNat(M))
+proof
+  induction K
+  | zero =>
+    intros M member positive bound
+    have mNat := nat.omega.backward with member
+    exfalso
+    arith
+  | succ(k) using ih =>
+    intros M member positive bound
+    have mNat := nat.omega.backward with member
+    have modulus : integerOfNat(M) ∈ ℤ by typecheck
+    have level : integerOfNat(c) ∈ ℤ by typecheck
+    by_cases unit : gcd(c, M) = 1
+    . -- Chinese remainder: x = a + c u (1 − a) with c u ≡ 1 modulo M.
+      have integerUnit : IntegerCoprime(integerOfNat(c), integerOfNat(M))
+        unfold IntegerCoprime
+        rw integerGCD.ofNat
+        exact unit
+      obtain ⟨u, uInteger, v, vInteger, identity⟩ := IntegerCoprime.bezout
+        with integerUnit
+      have lifted : a + integerOfNat(c) * (u * (integerOne - a)) ∈ ℤ
+        by typecheck
+      refine ⟨a + integerOfNat(c) * (u * (integerOne - a)), lifted, ?_, ?_⟩
+      . witness u * (integerOne - a)
+        ring
+      . apply IntegerCoprime.of_modular_inverse
+          at a + integerOfNat(c) * (u * (integerOne - a)), integerOfNat(M),
+            integerOne
+        witness (a - integerOne) * v
+        linear_combination (a - integerOne) * identity
+    . have positiveGcd : gcd(c, M) ≠ 0
+        intro zero
+        have both := gcd.zero_iff.forward at c, M with zero
+        have mZero := both.right
+        arith
+      have divides := gcd.divides_right at c, M
+      obtain ⟨r, rNat, product⟩ := divides
+      have rPositive : 0 < r
+        by_contra notPositive
+        have rZero : r = 0 by arith
+        rw rZero at product
+        have vanishing : mul(gcd(c, M), 0) = 0 by arith
+        rw vanishing at product
+        arith
+      have atLeastTwo : 2 ≤ gcd(c, M) by arith
+      have doubled := LessEqual.mul_right at 2, gcd(c, M), r with atLeastTwo
+      have smaller : r ≤ k by arith
+      have rMember : r ∈ ℕ by typecheck
+      obtain ⟨x, xMember, congruent, partCoprime⟩ := ih with r, rMember,
+        rPositive, smaller
+      have xInteger : x ∈ ℤ by exact xMember
+      have reverse := IntegerCongruent.symmetric with congruent
+      have xCoprime := IntegerCoprime.of_congruent with aInteger, xInteger,
+        level, reverse, coprime
+      have commonDivides := gcd.divides_left at c, M
+      have commonInteger := IntegerDivides.of_natural with commonDivides
+      have common : integerOfNat(gcd(c, M)) ∈ ℤ by typecheck
+      have commonCoprime := IntegerCoprime.of_divides with xInteger, level,
+        common, commonInteger, xCoprime
+      have partInteger : integerOfNat(r) ∈ ℤ by typecheck
+      have whole := IntegerCoprime.mul_right with xInteger, common,
+        partInteger, commonCoprime, partCoprime
+      rw [← integerOfNat.mul, product] at whole
+      exact ⟨x, xMember, congruent, whole⟩
+
+theorem IntegerCoprime.lift (c M : Nat) (a : Set)
+  requires aInteger : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(c))
+  requires positive : 0 < M
+  shows ∃ x ∈ ℤ, IntegerCongruent(integerOfNat(c), x, a) ∧
+    IntegerCoprime(x, integerOfNat(M))
+proof
+  have all := IntegerCoprime.lift_bounded at c, M, a with aInteger, coprime
+  have member : M ∈ ℕ by typecheck
+  have bound : M ≤ M by arith
+  exact all with M, member, positive, bound
+
 theorem DirichletCharacter.primitive_induced_unique (N : Nat) (χ ψ ρ : Set)
   requires character : DirichletCharacter(N, χ)
   requires positive : 0 < N
@@ -1415,7 +1518,32 @@ theorem DirichletCharacter.primitive_induced_unique (N : Nat) (χ ψ ρ : Set)
   requires secondInduces : χ = changeLevel(N, ρ)
   shows ψ = ρ
 proof
-  sorry
+  have natural := conductor.natural with character
+  have firstFunction := DirichletCharacter.function with first
+  have secondFunction := DirichletCharacter.function with second
+  apply FunctionBetween.ext at ψ, ρ, ℤ, complexCarrier with firstFunction, secondFunction
+  intros a integer
+  by_cases coprime : IntegerCoprime(a, integerOfNat(conductor(N, χ)))
+  . obtain ⟨x, xMember, congruent, xCoprime⟩ := IntegerCoprime.lift
+      at conductor(N, χ), N, a with integer, coprime, positive
+    have xInteger : x ∈ ℤ by exact xMember
+    have firstSame := DirichletCharacter.congruent with first, xInteger,
+      integer, congruent
+    have secondSame := DirichletCharacter.congruent with second, xInteger,
+      integer, congruent
+    have firstValue := DirichletCharacter.value with first, xInteger
+    have secondValue := DirichletCharacter.value with second, xInteger
+    have firstLevel := changeLevel.coprime_of_value with xInteger, xCoprime,
+      firstValue
+    have secondLevel := changeLevel.coprime_of_value with xInteger, xCoprime,
+      secondValue
+    rw [← firstSame, ← secondSame, ← firstLevel, ← secondLevel,
+      ← firstInduces, ← secondInduces]
+  . have firstZero := DirichletCharacter.not_coprime with first, integer,
+      coprime
+    have secondZero := DirichletCharacter.not_coprime with second, integer,
+      coprime
+    rw [firstZero, secondZero]
 
 -- The only primitive character modulo 1 is the principal one; no principal
 -- character modulo N > 1 is primitive.
