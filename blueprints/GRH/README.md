@@ -58,21 +58,17 @@ differentiation, and no measure theory.
 ## Universes and large cardinals
 
 All of `src/New` uses ordinary sets only. The Lean proof relies on universe
-levels in one region: the functor-of-points étale and Hodge cohomology of
+levels in one region, the functor-of-points étale and Hodge cohomology of
 `src/Lib/Cohomology`, `src/Lib/PadicComparison`, and parts of
-`src/Lib/General` (about 5,000 lines), where spaces are functors into
-`Type 1` and Ext groups live a level higher. Schemes in `src/Lib/Shimura`
-are used at the lowest level.
+`src/Lib/General`, where spaces are functors on the category of all rings
+and Ext groups live a level higher. Schemes in `src/Lib/Shimura` are used at
+the lowest level.
 
-Where the port needs universes, it takes the hypothesis
-`TarskiGrothendieck()` of `Grace.Cumulus.LargeCardinal.Axioms` as a section
-hypothesis. The axiom audit reports every result that relies on it,
-through its statement or its proof (`docs/axiom-audit.md`), so the reliance
-stays visible all the way to the main theorems. The aim is a certificate
-from ZFC alone: the source already works over small categories of test
-rings in places, and the cohomology can be rebuilt over them. Until it is,
-the main theorems read `TarskiGrothendieck() → …`, which is still a ZFC
-certificate.
+The port needs no large cardinal: the region is written over a set of rings
+that ZFC proves exists, as [Universes](#universes) below describes. The
+certificate of GRH is meant to be a certificate from ZFC alone, and the
+axiom audit (`docs/axiom-audit.md`) would show any reliance on a large
+cardinal hypothesis all the way to the main theorems.
 
 ## Plan
 
@@ -126,16 +122,45 @@ Mathlib background Cumulus lacks.
 
 ### Universes
 
-The cohomology region (`Lib/Cohomology`, `Lib/PadicComparison`,
-`Lib/General/Geometry`, about 8,400 lines of Lean) works with categories
-of test rings, which in Lean are full subcategories of all rings and so
-live one universe up. The rest of the proof uses the region through one
-theorem whose statement involves no universe. The region is written over
-an admissible set S of test rings, a section hypothesis: closed under the
-operations the region performs, set-sized, and so a ZFC object. S is first
-obtained from `TarskiGrothendieck()`, then constructed in ZFC by closing a
-starting set of rings under those operations along ω, which replaces one
-module and leaves a certificate from ZFC alone.
+The cohomology region (`Lib/Cohomology`, `Lib/PadicComparison`, and the
+parts of `Lib/General` they use, about 11,400 lines of Lean) works with
+categories of rings and of algebras, which in Lean are categories of all
+rings and so live one universe up. No construction in the region needs a
+universe: there is no product, colimit, or sheafification over a proper
+class, and every ring it builds has fewer than ℶ_ω elements. The rest of
+the proof uses the region through theorems whose statements mention no
+universe, chiefly `Model.exists_galois_rep`.
+
+The port therefore needs no large cardinal. The region is written over the
+set 𝒰 of rings whose carrier lies in V(ω·2), a stage of the cumulative
+hierarchy that ZFC proves exists and in which Zermelo set theory holds.
+Every category the region uses is cut from 𝒰: the test rings and their
+over-categories, the Hodge, crystalline, and perfectoid test sites, and
+the base rings (ℤ, ℚ̄, ℂ, ℂ_p, O_C, A_inf, A_max, B_cris). 𝒰 is closed under
+the constructions the region performs, on the nose where they preserve
+rank and up to isomorphism where they preserve only size: quotients,
+localizations, residue fields, polynomial, Laurent, and monoid algebras,
+finite and étale algebras, tensor products, products over sets built from
+the inputs, subrings and unions of chains of subrings, algebraic closures,
+valuation subrings and Galois hulls, p-adic completion and ultrapowers over
+ℕ, Witt vectors, tilts, perfect closures and period thickenings,
+square-zero extensions, rings of locally constant functions, and bounded
+filtered colimits.
+
+Writing the region over 𝒰 asks for a few changes to the Lean text: the
+continuity condition ranges over diagrams of bounded size, as every use of
+it already does; the ω-branching index type of the test envelopes is
+encoded as a set of bounded rank; the `tangent` field of `Model` is
+restated in terms of points rather than a functor category; one Zorn
+argument over perfect algebras is bounded so that its chain lives in a set;
+and Ext, defined by projective resolutions in functor categories on 𝒰,
+comes with the comparison theorem, the horseshoe lemma, and enough
+injectives. The read-only audit behind this paragraph, with file and line
+references, is in the campaign's planning notes (`grh/plan/universe-audit.md`).
+
+`Grace.Cumulus.LargeCardinal` remains available, and the audit would
+report any reliance on its hypotheses, but the GRH certificate is meant to
+use none.
 
 ## Layer 1: the statements
 
