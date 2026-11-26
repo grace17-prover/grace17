@@ -1373,6 +1373,372 @@ proof
     rw shape
     linarith
 
+-- Section: Integrable functions are bounded
+-- Two sequences that agree off the index i have prefix sums differing by
+-- the difference at i.
+theorem realPartialSum.single_difference (u v : Set, i n : Nat)
+  requires sequenceU : RealSequence(u)
+  requires sequenceV : RealSequence(v)
+  requires agree : ∀ k ∈ ℕ, k ≠ i → u[k] = v[k]
+  shows i < n → R[(∑ k < n, u(k)) - (∑ k < n, v(k))] = R[u[i] - v[i]]
+proof
+  induction n
+  | zero =>
+    intro below
+    exfalso
+    arith
+  | succ(m) using ih =>
+    intro below
+    have um := RealSequence.value at u, m with sequenceU
+    have vm := RealSequence.value at v, m with sequenceV
+    have ui := RealSequence.value at u, i with sequenceU
+    have vi := RealSequence.value at v, i with sequenceV
+    have sumU := realPartialSum.real at u, m with sequenceU
+    have sumV := realPartialSum.real at v, m with sequenceV
+    have naturalM := nat.omega.forward at m with assumption
+    rw [realPartialSum.succ, realPartialSum.succ]
+    by_cases earlier : i < m
+    . have previous := ih with earlier
+      have different : m ≠ i by arith
+      have same := agree with m, naturalM, different
+      rw same
+      linarith
+    . have equal : i = m by arith
+      have prefix : ∑ k < m, u(k) = ∑ k < m, v(k)
+        apply realPartialSum.eq_prefix with sequenceU, sequenceV
+        intros k naturalK beforeM
+        have typedK := nat.omega.backward with naturalK
+        have different : k ≠ i by arith
+        exact agree with k, naturalK, different
+      rw [prefix, equal]
+      ring
+
+-- t with its i-th entry replaced by x.
+def retagSequence (t : Set, i : Nat, x : Real) : Set :=
+  switchSequence(t, switchSequence(constantSequence(x), t, succ(i)), i)
+
+theorem retagSequence.sequence (t : Set, i : Nat, x : Real)
+  requires tags : RealSequence(t)
+  shows RealSequence(retagSequence(t, i, x))
+proof
+  have constant := constantSequence.sequence at x
+  have inner := switchSequence.sequence at constantSequence(x), t, succ(i)
+    with constant, tags
+  unfold retagSequence
+  exact switchSequence.sequence with tags, inner
+
+theorem retagSequence.value (t : Set, i k : Nat, x : Real)
+  requires tags : RealSequence(t)
+  shows (k = i → retagSequence(t, i, x)[k] = x) ∧
+    (k ≠ i → retagSequence(t, i, x)[k] = t[k])
+proof
+  have constant := constantSequence.sequence at x
+  have inner := switchSequence.sequence at constantSequence(x), t, succ(i)
+    with constant, tags
+  constructor
+  . intro same
+    have later : i ≤ k by arith
+    have earlier : k < succ(i) by arith
+    unfold retagSequence
+    rw [(switchSequence.after with tags, inner, later),
+      (switchSequence.before with constant, tags, earlier),
+      constantSequence.value]
+  . intro different
+    by_cases earlier : k < i
+    . unfold retagSequence
+      exact switchSequence.before with tags, inner, earlier
+    . have later : i ≤ k by arith
+      have beyond : succ(i) ≤ k by arith
+      unfold retagSequence
+      rw [(switchSequence.after with tags, inner, later),
+        (switchSequence.after with constant, tags, beyond)]
+
+-- Moving the tag of cell i to another point x of the cell.
+theorem riemannSum.retag (f p t : Set) (A B X : Real, N i : Nat)
+  requires function : f : ℝ → ℝ
+  requires tagged : TaggedPartition(p, t, A, B, N)
+  requires beforeEnd : i < N
+  requires inside : X ∈ closedInterval(p[i], p[succ(i)])
+  shows TaggedPartition(p, retagSequence(t, i, X), A, B, N) ∧
+    riemannSum(f, p, retagSequence(t, i, X), N) =
+      R[riemannSum(f, p, t, N) +
+        (f(X) - f(t[i])) * realSubValue(p[succ(i)], p[i])]
+proof
+  obtain ⟨partition, tags, cells⟩ := tagged
+  have points : RealSequence(p)
+    obtain ⟨points, _, _, _⟩ := partition
+    exact points
+  have retagged := retagSequence.sequence at t, i, X with tags
+  constructor
+  . refine ⟨partition, retagged, ?_⟩
+    intros k naturalK below
+    have typedK := nat.omega.backward with naturalK
+    obtain ⟨atI, elsewhere⟩ := retagSequence.value at t, i, k, X with tags
+    by_cases same : k = i
+    . rw [(atI with same), same]
+      exact inside
+    . rw (elsewhere with same)
+      exact cells with k, naturalK, below
+  . have termsNew : RealSequence(riemannTerms(f, p, retagSequence(t, i, X)))
+      unfold RealSequence
+      exact riemannTerms.function with function, points, retagged
+    have termsOld : RealSequence(riemannTerms(f, p, t))
+      unfold RealSequence
+      exact riemannTerms.function with function, points, tags
+    have agree : ∀ k ∈ ℕ, k ≠ i →
+        riemannTerms(f, p, retagSequence(t, i, X))[k] = riemannTerms(f, p, t)[k]
+      intros k naturalK different
+      have typedK := nat.omega.backward with naturalK
+      obtain ⟨_, elsewhere⟩ := retagSequence.value at t, i, k, X with tags
+      rw [(riemannTerms.value at f, p, retagSequence(t, i, X), k with function,
+          points, retagged),
+        (riemannTerms.value at f, p, t, k with function, points, tags),
+        (elsewhere with different)]
+    have difference := realPartialSum.single_difference at
+      riemannTerms(f, p, retagSequence(t, i, X)), riemannTerms(f, p, t), i, N
+      with termsNew, termsOld, agree
+    have atCell := difference with beforeEnd
+    obtain ⟨atI, _⟩ := retagSequence.value at t, i, i, X with tags
+    have reflexive : i = i by rfl
+    rw [(riemannTerms.value at f, p, retagSequence(t, i, X), i with function,
+        points, retagged),
+      (riemannTerms.value at f, p, t, i with function, points, tags),
+      (atI with reflexive)] at atCell
+    have sumNew := riemannSum.real at f, p, retagSequence(t, i, X), N with
+      function, points, retagged
+    have sumOld := riemannSum.real at f, p, t, N with function, points, tags
+    have xMember : X ∈ ℝ
+      obtain ⟨xMember, _, _⟩ := closedInterval.membership.forward with inside
+      exact xMember
+    have tagI := RealSequence.value at t, i with tags
+    have tagMember : t[i] ∈ ℝ by exact tagI
+    have valueX := FunctionBetween.apply_closed with function, xMember
+    have valueT := FunctionBetween.apply_closed with function, tagMember
+    have realX : Real(f(X)) by exact valueX
+    have realT : Real(f(t[i])) by exact valueT
+    have pointI := RealSequence.value at p, i with points
+    have pointNext := RealSequence.value at p, succ(i) with points
+    have widthReal := realSubValue.real with pointNext, pointI
+    rw [realMulValue.eq_mul, realMulValue.eq_mul] at atCell
+    unfold riemannSum at sumNew
+    unfold riemannSum at sumOld
+    unfold riemannSum
+    have product : R[(f(X) - f(t[i])) * realSubValue(p[succ(i)], p[i])] =
+      R[f(X) * realSubValue(p[succ(i)], p[i]) -
+        f(t[i]) * realSubValue(p[succ(i)], p[i])] by ring
+    rw product
+    linarith
+
+-- |x| ≤ M from −M ≤ x ≤ M.
+theorem abs.le_of_bounds (X M : Real)
+  requires lower : R[-M] ≤ X
+  requires upper : X ≤ M
+  shows abs(X) ≤ M
+proof
+  by_cases sign : R[0] ≤ X
+  . rw (abs.of_nonnegative with sign)
+    exact upper
+  . have nonpositive : X ≤ R[0]
+      have cases := realLess.trichotomy at X, R[0]
+      rcases cases with below | same | above
+      . exact realLess.implies_le with below
+      . rw same
+        exact realLe.reflexive with *
+      . exfalso
+        exact sign with (realLess.implies_le with above)
+    rw (abs.of_nonpositive with nonpositive)
+    linarith
+
+-- The values f(u₀), f(u₁), … and the inverse cell widths of a partition.
+defgraph composedSequence (f u : Set) (n ∈ ℕ) : ℝ := f(u[n])
+requires function : f : ℝ → ℝ
+requires sequence : RealSequence(u)
+proof
+  have typedN := nat.omega.backward with member
+  have value := RealSequence.value at u, n with sequence
+  have valueMember : u[n] ∈ ℝ by exact value
+  exact FunctionBetween.apply_closed with function, valueMember
+
+defgraph inverseCellWidths (p : Set) (n ∈ ℕ) : ℝ :=
+    realInvValue(realSubValue(p[succ(n)], p[n]))
+requires points : RealSequence(p)
+proof
+  have typedN := nat.omega.backward with member
+  have pointN := RealSequence.value at p, n with points
+  have pointNext := RealSequence.value at p, succ(n) with points
+  have width := realSubValue.real with pointNext, pointN
+  exact realInvValue.real with width
+
+-- A point of [A, B] is a vertex of a partition of [A, B] or lies strictly
+-- inside one of its cells.
+theorem IntervalPartition.locate (p : Set) (A B X : Real, N : Nat)
+  requires partition : IntervalPartition(p, A, B, N)
+  requires inside : X ∈ closedInterval(A, B)
+  shows (∃ j ∈ ℕ, j ≤ N ∧ p[j] = X) ∨
+    (∃ k ∈ ℕ, k < N ∧ (p[k]:R) < X ∧ X < (p[succ(k)]:R))
+proof
+  obtain ⟨_, lower, upper⟩ := closedInterval.membership.forward with inside
+  have partitionCopy : IntervalPartition(p, A, B, N) by exact partition
+  obtain ⟨_, start, finish, _⟩ := partitionCopy
+  have left := realLess.trichotomy at A, X
+  rcases left with above | atStart | beyond
+  . have right := realLess.trichotomy at X, B
+    rcases right with below | atEnd | outside
+    . exact IntervalPartition.locate_interior with partition, above, below
+    . left
+      have nMember : N ∈ ℕ by typecheck
+      have reflexive : N ≤ N by arith
+      refine ⟨N, nMember, reflexive, ?_⟩
+      rw [finish, atEnd]
+    . exfalso
+      linarith
+  . left
+    have zeroMember : (0:N) ∈ ℕ by typecheck
+    have zeroLe : (0:N) ≤ N by arith
+    refine ⟨(0:N), zeroMember, zeroLe, ?_⟩
+    rw [start, atStart]
+  . exfalso
+    linarith
+
+-- A Riemann integrable function is bounded on its interval.
+theorem RiemannIntegrable.bounded (f : Set) (A B : Real)
+  requires integrable : RiemannIntegrable(f, A, B)
+  shows ∃ M ∈ ℝ, ∀ X ∈ closedInterval(A, B), abs(f(X)) ≤ M
+proof
+  obtain ⟨I, iMember, integral⟩ := integrable
+  have iReal : Real(I) by exact iMember
+  obtain ⟨function, ordered, control⟩ := integral
+  have onePositive : R[0] < R[1] by linarith
+  have oneMember : R[1] ∈ ℝ by typecheck
+  obtain ⟨D, dMember, dPositive, estimate⟩ := control with R[1], oneMember,
+    onePositive
+  have cofinal := FineTaggedPartitionsExist.ordered_interval with ordered
+  obtain ⟨p, t, N, nMember, tagged, fine⟩ := cofinal with D, dMember, dPositive
+  have typedN := nat.omega.backward with nMember
+  have taggedCopy : TaggedPartition(p, t, A, B, N) by exact tagged
+  obtain ⟨partition, tags, _⟩ := taggedCopy
+  have partitionCopy : IntervalPartition(p, A, B, N) by exact partition
+  obtain ⟨points, _, _, _⟩ := partitionCopy
+  have valuesT : RealSequence(composedSequence(f, t))
+    unfold RealSequence
+    exact composedSequence.function with function, tags
+  have valuesP : RealSequence(composedSequence(f, p))
+    unfold RealSequence
+    exact composedSequence.function with function, points
+  have inverses : RealSequence(inverseCellWidths(p))
+    unfold RealSequence
+    exact inverseCellWidths.function with points
+  obtain ⟨M1, m1Member, m1Nonnegative, bound1⟩ := RealSequence.prefix_bounded
+    at composedSequence(f, t), N with valuesT
+  obtain ⟨M2, m2Member, m2Nonnegative, bound2⟩ := RealSequence.prefix_bounded
+    at composedSequence(f, p), succ(N) with valuesP
+  obtain ⟨M3, m3Member, m3Nonnegative, bound3⟩ := RealSequence.prefix_bounded
+    at inverseCellWidths(p), N with inverses
+  have m1Real : Real(M1) by exact m1Member
+  have m2Real : Real(M2) by exact m2Member
+  have m3Real : Real(M3) by exact m3Member
+  have sumMember : R[M1 + M2 + (M3 + M3 + M3)] ∈ ℝ by typecheck
+  refine ⟨R[M1 + M2 + (M3 + M3 + M3)], sumMember, ?_⟩
+  intros X inside
+  obtain ⟨xMember, _, _⟩ := closedInterval.membership.forward with inside
+  have xReal : Real(X) by exact xMember
+  have located := IntervalPartition.locate with partition, inside
+  have valueX := FunctionBetween.apply_closed with function, xMember
+  have realX : Real(f(X)) by exact valueX
+  rcases located with vertex | interior
+  . obtain ⟨j, naturalJ, bounded, same⟩ := vertex
+    have typedJ := nat.omega.backward with naturalJ
+    have below : j < succ(N) by arith
+    have atVertex := bound2 with j, naturalJ, below
+    rw [(composedSequence.value with function, points, naturalJ), same]
+      at atVertex
+    linarith
+  . obtain ⟨k, naturalK, beforeEnd, lower, upper⟩ := interior
+    have typedK := nat.omega.backward with naturalK
+    have lowerLe := realLess.implies_le with lower
+    have upperLe := realLess.implies_le with upper
+    have cell : X ∈ closedInterval(p[k], p[succ(k)])
+      exact closedInterval.membership.backward with ⟨xMember, lowerLe, upperLe⟩
+    obtain ⟨retagged, sumNew⟩ := riemannSum.retag at f, p, t, A, B, X, N, k
+      with function, tagged, beforeEnd, cell
+    have nearOld := estimate with p, t, N, nMember, tagged, fine
+    have nearNew := estimate with p, retagSequence(t, k, X), N, nMember,
+      retagged, fine
+    have retags := retagSequence.sequence at t, k, X with tags
+    have sumOld := riemannSum.real at f, p, t, N with function, points, tags
+    have sumRetag := riemannSum.real at f, p, retagSequence(t, k, X), N with
+      function, points, retags
+    unfold dist at nearOld
+    unfold dist at nearNew
+    unfold realSubValue at nearOld
+    unfold realSubValue at nearNew
+    have oldUpper := abs.upper at R[riemannSum(f, p, t, N) - I]
+    have oldLower := abs.upper_neg at R[riemannSum(f, p, t, N) - I]
+    have newUpper := abs.upper at
+      R[riemannSum(f, p, retagSequence(t, k, X), N) - I]
+    have newLower := abs.upper_neg at
+      R[riemannSum(f, p, retagSequence(t, k, X), N) - I]
+    have tagK := RealSequence.value at t, k with tags
+    have tagMember : t[k] ∈ ℝ by exact tagK
+    have valueT := FunctionBetween.apply_closed with function, tagMember
+    have realT : Real(f(t[k])) by exact valueT
+    have pointK := RealSequence.value at p, k with points
+    have pointNext := RealSequence.value at p, succ(k) with points
+    have widthReal := realSubValue.real with pointNext, pointK
+    have widthPositive := IntervalPartition.positive_width with partition,
+      beforeEnd
+    have positive : R[0] < realSubValue(p[succ(k)], p[k]) by exact widthPositive
+    have inverseReal := realInvValue.real at realSubValue(p[succ(k)], p[k])
+    have inversePositive := realInvValue.positive with positive
+    have nonzero : realSubValue(p[succ(k)], p[k]) ≠ R[0]
+      intro zero
+      rw zero at positive
+      linarith
+    have cancel := realInvValue.mul_left with nonzero
+    -- |(f(X) − f(tₖ)) w| < 2, so |f(X) − f(tₖ)| < 2/w.
+    have productUpper : R[(f(X) - f(t[k])) * realSubValue(p[succ(k)], p[k])]
+        < R[2] by linarith
+    have negated : R[(f(t[k]) - f(X)) * realSubValue(p[succ(k)], p[k])] =
+      R[-((f(X) - f(t[k])) * realSubValue(p[succ(k)], p[k]))] by ring
+    have productLower : R[(f(t[k]) - f(X)) * realSubValue(p[succ(k)], p[k])]
+        < R[2] by linarith
+    have scaledUpper := realLess.mul_right_of_positive with productUpper,
+      inversePositive
+    have scaledLower := realLess.mul_right_of_positive with productLower,
+      inversePositive
+    have shape : R[((f(X) - f(t[k])) * realSubValue(p[succ(k)], p[k])) *
+        realInvValue(realSubValue(p[succ(k)], p[k]))] = R[f(X) - f(t[k])]
+      have regroup : R[((f(X) - f(t[k])) * realSubValue(p[succ(k)], p[k])) *
+          realInvValue(realSubValue(p[succ(k)], p[k]))] =
+        R[(f(X) - f(t[k])) * (realInvValue(realSubValue(p[succ(k)], p[k])) *
+          realSubValue(p[succ(k)], p[k]))] by ring
+      rw [regroup, cancel]
+      ring
+    have shapeLower : R[((f(t[k]) - f(X)) * realSubValue(p[succ(k)], p[k])) *
+        realInvValue(realSubValue(p[succ(k)], p[k]))] = R[f(t[k]) - f(X)]
+      have regroup : R[((f(t[k]) - f(X)) * realSubValue(p[succ(k)], p[k])) *
+          realInvValue(realSubValue(p[succ(k)], p[k]))] =
+        R[(f(t[k]) - f(X)) * (realInvValue(realSubValue(p[succ(k)], p[k])) *
+          realSubValue(p[succ(k)], p[k]))] by ring
+      rw [regroup, cancel]
+      ring
+    have inverseBound := bound3 with k, naturalK, beforeEnd
+    rw (inverseCellWidths.value with points, naturalK) at inverseBound
+    have inverseUpper := abs.upper at
+      realInvValue(realSubValue(p[succ(k)], p[k]))
+    have tagBound := bound1 with k, naturalK, beforeEnd
+    rw (composedSequence.value with function, tags, naturalK) at tagBound
+    have tagUpper := abs.upper at f(t[k])
+    have tagLower := abs.upper_neg at f(t[k])
+    have inverseLe : realInvValue(realSubValue(p[succ(k)], p[k])) ≤ M3
+      by linarith
+    have tagAbove : R[-M1] ≤ f(t[k]) by linarith
+    have lowerX : R[-(M1 + M3 + M3)] < f(X) by linarith
+    have upperX : f(X) < R[M1 + M3 + M3] by linarith
+    apply abs.le_of_bounds
+    . linarith
+    . linarith
+
 -- ∫_A^B g + ∫_B^C g = ∫_A^C g.
 theorem complexIntegral.add_interval (g : Set) (A B C : Real)
   requires first : A ≤ B
