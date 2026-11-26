@@ -243,7 +243,7 @@ graph TD
 | GRH.Gamma | 43 | 26 | 17 |
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
-| GRH.FunctionalEquation | 156 | 154 | 2 |
+| GRH.FunctionalEquation | 432 | 431 | 1 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **2272** | **2252** | **20** |
+| **total** | **2548** | **2529** | **19** |
 <!-- /blueprint-status -->
