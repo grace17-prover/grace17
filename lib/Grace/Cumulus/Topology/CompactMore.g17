@@ -11,35 +11,13 @@
 module Grace.Cumulus.Topology.CompactMore
 import Separation
 import Cardinal.FiniteUnion
-import Set.Choice
+import Cardinal.Counting
 
--- Finite sets are compact: pick one cover member through each point.
+-- Finite sets are compact: by induction on the finite set, add one cover
+-- member through each new point.
 
-def coverMembers (C a : Set) : Set := { U ∈ C | a ∈ U }
-
-defgraph coverChoice (C A : Set) (a ∈ A) : C := choose(coverMembers(C, a))
-requires covers : A ⊆ ⋃(C)
-proof
-  have covered := covers with a, member
-  obtain ⟨U, hU, haU⟩ := union.membership.forward with covered
-  have found : U ∈ coverMembers(C, a) := coverMembers.membership.backward with ⟨hU, haU⟩
-  have inhabited : Nonempty(coverMembers(C, a)) := ⟨U, found⟩
-  have chosen := choose.member with inhabited
-  have parts := coverMembers.membership.forward with chosen
-  exact parts.left
-
-theorem coverChoice.selected (C A a : Set)
-  requires covers : A ⊆ ⋃(C)
-  requires ha : a ∈ A
-  shows coverChoice(C, A)(a) ∈ coverMembers(C, a)
-proof
-  have value := coverChoice.value with covers, ha
-  rw value
-  have covered := covers with a, ha
-  obtain ⟨U, hU, haU⟩ := union.membership.forward with covered
-  have found : U ∈ coverMembers(C, a) := coverMembers.membership.backward with ⟨hU, haU⟩
-  have inhabited : Nonempty(coverMembers(C, a)) := ⟨U, found⟩
-  exact choose.member with inhabited
+def finitelyCoveredPoints (C A : Set) : Set :=
+  { B ∈ 𝒫(A) | ∃ H, H ⊆ C ∧ Finite(H) ∧ B ⊆ ⋃(H) }
 
 theorem IsCompact.finite (X T A : Set)
   requires finite : Finite(A)
@@ -50,14 +28,41 @@ proof
   . exact hA
   . intros C cover
     have covers := cover.right
-    have graph := coverChoice.function with covers
-    witness functionImage(coverChoice(C, A), A, C)
-    refine ⟨(functionImage.subset at coverChoice(C, A), A, C), (Finite.function_image with graph, finite, (Subset.reflexive at A)), ?_⟩
-    intros a ha
-    have selected := coverChoice.selected with covers, ha
-    have parts := coverMembers.membership.forward with selected
-    have imageMember := functionImage.value with graph, ha
-    exact union.contains with imageMember, parts.right
+    have base : ∅ ∈ finitelyCoveredPoints(C, A)
+      apply finitelyCoveredPoints.membership.backward
+      refine ⟨(powerset.membership_iff.backward with (empty.subset at A)), ∅,
+        (empty.subset at C), Finite.empty, (empty.subset at ⋃(∅))⟩
+    have step : ∀ B ⊆ A, Finite(B) → ∀ a ∈ A, a ∉ B →
+        B ∈ finitelyCoveredPoints(C, A) → B ∪ {a} ∈ finitelyCoveredPoints(C, A)
+      intros B hB finiteB a ha fresh covered
+      obtain ⟨_, H, hH, finiteH, coveredB⟩ :=
+        finitelyCoveredPoints.membership.forward with covered
+      obtain ⟨U, hU, haU⟩ := union.membership.forward with (covers with a, ha)
+      have bound : B ∪ {a} ⊆ A
+        intros b hb
+        cases (union2.membership.forward with hb) with inB | isA
+        . exact hB with b, inB
+        . rwa (singleton.membership.forward with isA)
+      apply finitelyCoveredPoints.membership.backward
+      refine ⟨(powerset.membership_iff.backward with bound), H ∪ {U}, ?_,
+        (Finite.union with finiteH, (Finite.singleton at U)), ?_⟩
+      . intros Z hZ
+        cases (union2.membership.forward with hZ) with inH | isU
+        . exact hH with Z, inH
+        . rwa (singleton.membership.forward with isU)
+      . intros b hb
+        cases (union2.membership.forward with hb) with inB | isA
+        . obtain ⟨Z, hZ, hbZ⟩ := union.membership.forward with
+            (coveredB with b, inB)
+          exact union.contains with (union2.left with hZ), hbZ
+        . rw (singleton.membership.forward with isA)
+          have member : U ∈ H ∪ {U} :=
+            union2.right with (singleton.membership.backward with rfl)
+          exact union.contains with member, haU
+    have all := Finite.induction with base, step
+    have member := all with A, (Subset.reflexive at A), finite
+    obtain ⟨_, rest⟩ := finitelyCoveredPoints.membership.forward with member
+    exact rest
 
 theorem IsCompact.whole_of_finite (X T : Set)
   requires finite : Finite(X)
@@ -65,40 +70,11 @@ theorem IsCompact.whole_of_finite (X T : Set)
 proof
   exact IsCompact.finite with finite, (Subset.reflexive at X)
 
--- A finite union of compact sets is compact: choose a finite subcover of
--- each member and take their union.
+-- A finite union of compact sets is compact: by induction on the finite
+-- family, join a finite subcover of each new member to the ones so far.
 
-def finiteSubcovers (C A : Set) : Set := { G ∈ 𝒫(C) | Finite(G) ∧ A ⊆ ⋃(G) }
-
-defgraph subcoverChoice (X T C F : Set) (A ∈ F) : 𝒫(C) := choose(finiteSubcovers(C, A))
-requires compact : ∀ B ∈ F, IsCompact(X, T, B)
-requires cover : OpenCover(T, ⋃(F), C)
-proof
-  have compactA := compact with A, member
-  have below := union.subset_of_member with member
-  have coverA : OpenCover(T, A, C) := ⟨cover.left, (Subset.transitive with below, cover.right)⟩
-  obtain ⟨G, hG, finiteG, covered⟩ := compactA.right with C, coverA
-  have found : G ∈ finiteSubcovers(C, A) := finiteSubcovers.membership.backward with ⟨(powerset.membership_iff.backward with hG), finiteG, covered⟩
-  have inhabited : Nonempty(finiteSubcovers(C, A)) := ⟨G, found⟩
-  have chosen := choose.member with inhabited
-  have parts := finiteSubcovers.membership.forward with chosen
-  exact parts.left
-
-theorem subcoverChoice.selected (X T C F A : Set)
-  requires compact : ∀ B ∈ F, IsCompact(X, T, B)
-  requires cover : OpenCover(T, ⋃(F), C)
-  requires hA : A ∈ F
-  shows subcoverChoice(X, T, C, F)(A) ∈ finiteSubcovers(C, A)
-proof
-  have value := subcoverChoice.value with compact, cover, hA
-  rw value
-  have compactA := compact with A, hA
-  have below := union.subset_of_member with hA
-  have coverA : OpenCover(T, A, C) := ⟨cover.left, (Subset.transitive with below, cover.right)⟩
-  obtain ⟨G, hG, finiteG, covered⟩ := compactA.right with C, coverA
-  have found : G ∈ finiteSubcovers(C, A) := finiteSubcovers.membership.backward with ⟨(powerset.membership_iff.backward with hG), finiteG, covered⟩
-  have inhabited : Nonempty(finiteSubcovers(C, A)) := ⟨G, found⟩
-  exact choose.member with inhabited
+def finitelyCoveredFamilies (C F : Set) : Set :=
+  { G ∈ 𝒫(F) | ∃ H, H ⊆ C ∧ Finite(H) ∧ ⋃(G) ⊆ ⋃(H) }
 
 theorem IsCompact.finite_union (X T F : Set)
   requires finite : Finite(F)
@@ -111,31 +87,50 @@ proof
     have compactB := compact with B, hB
     exact compactB.left
   . intros C cover
-    have graph := subcoverChoice.function with compact, cover
-    have imageFinite := Finite.function_image with graph, finite, (Subset.reflexive at F)
-    witness ⋃(functionImage(subcoverChoice(X, T, C, F), F, 𝒫(C)))
-    refine ⟨?_, ?_, ?_⟩
-    . apply union.subset
-      intros G hG
-      have inside := functionImage.subset at subcoverChoice(X, T, C, F), F, 𝒫(C)
-      exact powerset.membership_iff.forward with (inside with G, hG)
-    . apply Finite.big_union with imageFinite
-      intros G hG
-      simp [functionImage.membership] at hG
-      obtain ⟨hGP, B, hB, shape⟩ := hG
-      have selected := subcoverChoice.selected with compact, cover, hB
-      have parts := finiteSubcovers.membership.forward with selected
-      rw shape
-      exact parts.right.left
-    . intros x hx
-      obtain ⟨B, hB, hxB⟩ := union.membership.forward with hx
-      have selected := subcoverChoice.selected with compact, cover, hB
-      have parts := finiteSubcovers.membership.forward with selected
-      have covered := parts.right.right with x, hxB
-      obtain ⟨U, hU, hxU⟩ := union.membership.forward with covered
-      have imageMember := functionImage.value with graph, hB
-      have inUnion := union.contains with imageMember, hU
-      exact union.contains with inUnion, hxU
+    have base : ∅ ∈ finitelyCoveredFamilies(C, F)
+      apply finitelyCoveredFamilies.membership.backward
+      refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), ∅,
+        (empty.subset at C), Finite.empty, ?_⟩
+      rw union.empty
+      exact Subset.reflexive
+    have step : ∀ G ⊆ F, Finite(G) → ∀ B ∈ F, B ∉ G →
+        G ∈ finitelyCoveredFamilies(C, F) →
+          G ∪ {B} ∈ finitelyCoveredFamilies(C, F)
+      intros G hG finiteG B hB fresh covered
+      obtain ⟨_, H1, hH1, finiteH1, covered1⟩ :=
+        finitelyCoveredFamilies.membership.forward with covered
+      have compactB := compact with B, hB
+      have below := union.subset_of_member with hB
+      have coverB : OpenCover(T, B, C) :=
+        ⟨cover.left, (Subset.transitive with below, cover.right)⟩
+      obtain ⟨H2, hH2, finiteH2, covered2⟩ := compactB.right with C, coverB
+      have bound : G ∪ {B} ⊆ F
+        intros Z hZ
+        cases (union2.membership.forward with hZ) with inG | isB
+        . exact hG with Z, inG
+        . rwa (singleton.membership.forward with isB)
+      apply finitelyCoveredFamilies.membership.backward
+      refine ⟨(powerset.membership_iff.backward with bound), H1 ∪ H2, ?_,
+        (Finite.union with finiteH1, finiteH2), ?_⟩
+      . intros Z hZ
+        cases (union2.membership.forward with hZ) with inH1 | inH2
+        . exact hH1 with Z, inH1
+        . exact hH2 with Z, inH2
+      . intros x hx
+        obtain ⟨Z, hZ, hxZ⟩ := union.membership.forward with hx
+        cases (union2.membership.forward with hZ) with inG | isB
+        . obtain ⟨E, hE, hxE⟩ := union.membership.forward with
+            (covered1 with x, (union.contains with inG, hxZ))
+          exact union.contains with (union2.left with hE), hxE
+        . rw (singleton.membership.forward with isB) at hxZ
+          obtain ⟨E, hE, hxE⟩ := union.membership.forward with
+            (covered2 with x, hxZ)
+          exact union.contains with (union2.right with hE), hxE
+    have all := Finite.induction with base, step
+    have member := all with F, (Subset.reflexive at F), finite
+    obtain ⟨_, H, hH, finiteH, coveredF⟩ :=
+      finitelyCoveredFamilies.membership.forward with member
+    exact ⟨H, hH, finiteH, coveredF⟩
 
 -- A compact set meets a closed set in a compact set: add the complement
 -- of the closed set to a cover of the intersection.
@@ -204,25 +199,10 @@ proof
 def separators (T D U : Set) : Set := { V ∈ T | D ⊆ V ∧ Disjoint(U, V) }
 def separatingOpens (T D : Set) : Set := { U ∈ T | Nonempty(separators(T, D, U)) }
 
-defgraph separatorChoice (T D F : Set) (U ∈ F) : T := choose(separators(T, D, U))
-requires inside : F ⊆ separatingOpens(T, D)
-proof
-  have hU := inside with U, member
-  have parts := separatingOpens.membership.forward with hU
-  have chosen := choose.member with parts.right
-  have chosenParts := separators.membership.forward with chosen
-  exact chosenParts.left
-
-theorem separatorChoice.selected (T D F U : Set)
-  requires inside : F ⊆ separatingOpens(T, D)
-  requires hU : U ∈ F
-  shows separatorChoice(T, D, F)(U) ∈ separators(T, D, U)
-proof
-  have value := separatorChoice.value with inside, hU
-  rw value
-  have hU2 := inside with U, hU
-  have parts := separatingOpens.membership.forward with hU2
-  exact choose.member with parts.right
+-- The finite subfamilies G of F whose union has an open set around D
+-- disjoint from it.
+def separatedFamilies (X T D F : Set) : Set :=
+  { G ∈ 𝒫(F) | ∃ V ∈ T, D ⊆ V ∧ Disjoint(⋃(G), V) }
 
 theorem IsCompact.separate (X T K D : Set)
   requires topology : IsTopology(X, T)
@@ -243,42 +223,47 @@ proof
     have opens : U ∈ separatingOpens(T, D) := separatingOpens.membership.backward with ⟨hU, inhabited⟩
     exact union.contains with opens, hkU
   obtain ⟨F, hF, finiteF, coveredK⟩ := compact.right with separatingOpens(T, D), ⟨coverOpen, covers⟩
-  have split : Nonempty(F) ∨ ¬Nonempty(F) by tauto
-  cases split with inhabited | empty
-  . have graph := separatorChoice.function with hF
-    have openUnion := IsTopology.union with topology, (Subset.transitive with hF, coverOpen)
-    have imageInside := functionImage.subset at separatorChoice(T, D, F), F, T
-    have imageFinite := Finite.function_image with graph, finiteF, (Subset.reflexive at F)
-    obtain ⟨U0, hU0⟩ := inhabited
-    have firstMember := functionImage.value with graph, hU0
-    have imageInhabited : Nonempty(functionImage(separatorChoice(T, D, F), F, T)) := ⟨separatorChoice(T, D, F)(U0), firstMember⟩
-    have openMeet := IsTopology.finite_intersection with topology, imageFinite, imageInside, imageInhabited
-    refine ⟨⋃(F), openUnion, ⋂(functionImage(separatorChoice(T, D, F), F, T)), openMeet, coveredK, ?_, ?_⟩
-    . apply familyIntersection.greatest with imageInhabited
-      intros V hV
-      simp [functionImage.membership] at hV
-      obtain ⟨hVT, U, hU, shape⟩ := hV
-      have selected := separatorChoice.selected with hF, hU
-      have parts := separators.membership.forward with selected
-      rw shape
-      exact parts.right.left
+  have base : ∅ ∈ separatedFamilies(X, T, D, F)
+    apply separatedFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), X,
+      (IsTopology.whole with topology), hD, ?_⟩
+    rw union.empty
+    exact Disjoint.empty_left
+  have step : ∀ G ⊆ F, Finite(G) → ∀ U ∈ F, U ∉ G →
+      G ∈ separatedFamilies(X, T, D, F) →
+        G ∪ {U} ∈ separatedFamilies(X, T, D, F)
+    intros G hG finiteG U hU fresh known
+    obtain ⟨_, V1, hV1, inside1, disjoint1⟩ :=
+      separatedFamilies.membership.forward with known
+    have partsU := separatingOpens.membership.forward with (hF with U, hU)
+    obtain ⟨V2, hV2⟩ := partsU.right
+    obtain ⟨hV2T, inside2, disjoint2⟩ := separators.membership.forward with hV2
+    have bound : G ∪ {U} ⊆ F
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isU
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isU)
+    have absent1 := Disjoint.iff.forward with disjoint1
+    have absent2 := Disjoint.iff.forward with disjoint2
+    apply separatedFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), V1 ∩ V2,
+      (IsTopology.intersection2 with topology, hV1, hV2T), ?_, ?_⟩
+    . intros d hd
+      exact intersection.membership.backward with ⟨(inside1 with d, hd), (inside2 with d, hd)⟩
     . apply Disjoint.iff.backward
-      intros x hx hxMeet
-      obtain ⟨U, hU, hxU⟩ := union.membership.forward with hx
-      have meetParts := familyIntersection.membership.forward with hxMeet
-      have imageMember := functionImage.value with graph, hU
-      have hxV := meetParts.right with separatorChoice(T, D, F)(U), imageMember
-      have selected := separatorChoice.selected with hF, hU
-      have parts := separators.membership.forward with selected
-      have separatedUV := Disjoint.iff.forward with parts.right.right
-      exact separatedUV with x, hxU, hxV
-  . have equal : F = ∅
-      by_contra different
-      apply empty
-      exact Nonempty.of_ne_empty with different
-    rw [equal, union.empty] at coveredK
-    refine ⟨∅, (IsTopology.empty with topology), X, (IsTopology.whole with topology), coveredK, hD, ?_⟩
-    exact Disjoint.empty_left at X
+      intros x hx hxV
+      have both := intersection.membership.forward with hxV
+      obtain ⟨Z, hZ, hxZ⟩ := union.membership.forward with hx
+      cases (union2.membership.forward with hZ) with inG | isU
+      . exact absent1 with x, (union.contains with inG, hxZ), both.left
+      . rw (singleton.membership.forward with isU) at hxZ
+        exact absent2 with x, hxZ, both.right
+  have all := Finite.induction with base, step
+  have member := all with F, (Subset.reflexive at F), finiteF
+  obtain ⟨_, V, hV, inside, disjoint⟩ :=
+    separatedFamilies.membership.forward with member
+  have openUnion := IsTopology.union with topology, (Subset.transitive with hF, coverOpen)
+  exact ⟨⋃(F), openUnion, V, hV, coveredK, inside, disjoint⟩
 
 -- In a Hausdorff space a compact set and a point outside it have
 -- disjoint open neighbourhoods, so compact sets are closed.
@@ -298,8 +283,7 @@ proof
     have distinct : k ≠ x
       intro same
       apply away
-      rw ← same
-      exact hk
+      rwa ← same
     obtain ⟨U, hU, V, hV, hkU, hxV, disjoint⟩ := hausdorff with k, hkX, x, hx, distinct
     have inside : {x} ⊆ V := singleton.subset_iff.backward with hxV
     exact ⟨U, hU, V, hV, hkU, inside, disjoint⟩
@@ -468,7 +452,7 @@ proof
   have covers : X ⊆ ⋃(complements(X, S))
     have demorgan := complements.intersection at X, S with nonempty
     rw [← demorgan, empty, complement.empty]
-    exact Subset.reflexive at X
+    exact Subset.reflexive
   obtain ⟨G, hG, finiteG, coveredX⟩ := compact.right with complements(X, S), ⟨coverOpen, covers⟩
   have graph := complementMap.function at X, G
   have values : ∀ g ∈ G, complementMap(X, G)(g) ∈ S
@@ -496,8 +480,7 @@ proof
   obtain ⟨g0, hg0⟩ := inhabitedG
   have firstMember := functionImage.value with graphS, hg0
   have imageInhabited : Nonempty(functionImage(complementMap(X, G), G, S)) := ⟨complementMap(X, G)(g0), firstMember⟩
-  have meets := fip with functionImage(complementMap(X, G), G, S), imageInside, imageFinite, imageInhabited
-  obtain ⟨x, hx⟩ := meets
+  obtain ⟨x, hx⟩ := fip with functionImage(complementMap(X, G), G, S), imageInside, imageFinite, imageInhabited
   have meetParts := familyIntersection.membership.forward with hx
   have inFirst := meetParts.right with complementMap(X, G)(g0), firstMember
   have selected0 := complementMap.selected with inside, hG, hg0

@@ -879,12 +879,13 @@ several files reads its dependencies from disk each time.
 ### closure
 
 Request: `module`, a module name or a unique suffix of one such as
-`Topology.Tube`, or `file`, a `.g17` file; optionally `moduleRoots` as for
+`Topology.Real.PerfectSets`, or `file`, a `.g17` file; optionally `moduleRoots` as for
 a workspace, and `from`, a dependency named the same way.
 
 ```json
 {"id": 13, "method": "closure",
- "params": {"module": "Grace.Cumulus.Topology.Tube", "from": "Set.Choice"}}
+ "params": {"module": "Grace.Cumulus.Topology.Real.PerfectSets",
+            "from": "Set.ChoiceFunctions"}}
 ```
 
 Result: the import closure read from the sources without elaboration,
@@ -897,17 +898,20 @@ to that dependency, both included. A `from` outside the closure is
 `unknown_module`.
 
 ```json
-{"module": "Grace.Cumulus.Topology.Tube",
- "file": "lib/Grace/Cumulus/Topology/Tube.g17",
- "choiceFree": false, "count": 61, "choice": ["Grace.Cumulus.Set.Choice"],
+{"module": "Grace.Cumulus.Topology.Real.PerfectSets",
+ "file": "lib/Grace/Cumulus/Topology/Real/PerfectSets.g17",
+ "choiceFree": false, "count": 167,
+ "choice": ["Grace.Cumulus.Set.ChoiceFunctions"],
  "modules": [{"module": "Grace.Cumulus.Set.Basic",
    "file": "lib/Grace/Cumulus/Set/Basic.g17", "imports": [],
    "choiceFree": true}, ...],
- "from": "Grace.Cumulus.Set.Choice",
- "chain": ["Grace.Cumulus.Topology.Tube", "Grace.Cumulus.Set.Choice"]}
+ "from": "Grace.Cumulus.Set.ChoiceFunctions",
+ "chain": ["Grace.Cumulus.Topology.Real.PerfectSets",
+   "Grace.Cumulus.Topology.Real.NestedChoice",
+   "Grace.Cumulus.Set.ChoiceFunctions"]}
 ```
 
-`g17 closure Topology.Tube --from Set.Choice` prints it; `--text` prints
+`g17 closure Topology.Real.PerfectSets --from Set.ChoiceFunctions` prints it; `--text` prints
 one line per module, `choice-free` or `choice` first, and the chain.
 A module that is choice-free loads under `--foundation ZF`.
 
