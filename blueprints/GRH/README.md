@@ -334,9 +334,19 @@ graph TD
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 494 | 494 | 0 |
+| GRH.Fourier.FiniteAbelian | 29 | 0 | 29 |
+| GRH.Measure.Spaces | 145 | 5 | 140 |
+| GRH.Measure.Lebesgue | 96 | 0 | 96 |
+| GRH.Measure.LIntegral | 60 | 0 | 60 |
+| GRH.Measure.Bochner | 100 | 0 | 100 |
+| GRH.Measure.Product | 42 | 0 | 42 |
+| GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
+| GRH.Measure.Haar | 56 | 0 | 56 |
+| GRH.Fourier.Euclidean | 26 | 0 | 26 |
+| GRH.Fourier.Torus | 21 | 0 | 21 |
 | GRH.Matrix.Groups | 45 | 0 | 45 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.SpecialFunctions.More | 81 | 8 | 73 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **4784** | **2887** | **1897** |
+| **total** | **5389** | **2892** | **2497** |
 <!-- /blueprint-status -->
