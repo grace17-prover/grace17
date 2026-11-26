@@ -315,6 +315,18 @@ graph TD
 | GRH.Matrix.Determinant | 51 | 2 | 49 |
 | GRH.Matrix.Groups | 45 | 0 | 45 |
 | GRH.Matrix.Spectral | 39 | 0 | 39 |
+| GRH.Algebra.Divisibility | 94 | 0 | 94 |
+| GRH.Algebra.Ideals | 152 | 0 | 152 |
+| GRH.Algebra.Localization | 58 | 1 | 57 |
+| GRH.Algebra.LocalRings | 45 | 0 | 45 |
+| GRH.Polynomial.Univariate | 96 | 6 | 90 |
+| GRH.Polynomial.Multivariate | 69 | 1 | 68 |
+| GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Algebra.Finiteness | 76 | 1 | 75 |
+| GRH.Algebra.Integral | 37 | 0 | 37 |
+| GRH.Algebra.DVR | 37 | 1 | 36 |
+| GRH.Algebra.Completion | 37 | 0 | 37 |
+| GRH.Algebra.Flat | 31 | 0 | 31 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **3354** | **2844** | **510** |
+| **total** | **4157** | **2855** | **1302** |
 <!-- /blueprint-status -->
