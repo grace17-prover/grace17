@@ -225,5 +225,9 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| **total** | **0** | **0** | **0** |
+| GRH.Exp | 129 | 38 | 91 |
+| GRH.Trig | 81 | 16 | 65 |
+| GRH.Log | 91 | 16 | 75 |
+| GRH.Holomorphic | 125 | 51 | 74 |
+| **total** | **426** | **121** | **305** |
 <!-- /blueprint-status -->
