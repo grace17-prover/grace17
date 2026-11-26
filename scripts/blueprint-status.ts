@@ -24,8 +24,10 @@ function walk(directory: string): string[] {
 const files = walk(root);
 // A blueprint whose every module is promoted has nothing to check.
 const run = files.length === 0 ? { status: 0, stdout: "{}", stderr: "" }
-  : spawnSync("node", ["--disable-warning=ExperimentalWarning", "bin/g17.ts", "check", "--json", "--continue", "--quiet",
-    "--module-root", blueprintRoot, "--module-root", "lib", ...files], { encoding: "utf8", maxBuffer: 1 << 28 });
+  // The table needs each module's theorems and admissions, not the proof
+  // states, which for a large blueprint run to hundreds of megabytes.
+  : spawnSync("node", ["--disable-warning=ExperimentalWarning", "bin/g17.ts", "check", "--json", "--continue", "--quiet", "--no-states",
+    "--module-root", blueprintRoot, "--module-root", "lib", ...files], { encoding: "utf8", maxBuffer: 1 << 30 });
 if (run.status !== 0 && !run.stdout.trim().startsWith("{")) {
   console.error(run.stderr || run.stdout);
   process.exit(1);
