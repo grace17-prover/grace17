@@ -113,6 +113,17 @@ before it is in place.
 
 ## Layer 1: the statements
 
+Layer 1 is proved except for the half-plane form of GRH,
+`LFunction.nonzero_right_of_half`, which the later layers prove. Every
+other theorem of its modules is proved, from the exponential series through
+Cauchy's integral formula, Euler–Maclaurin summation, the Hurwitz and
+Riemann zeta functions, Γ, Dirichlet characters and their L-functions,
+Dirichlet's L(1, χ) ≠ 0, ζ(1 + it) ≠ 0, and the functional equations of ζ
+and of L(s, χ). The five theorems below follow from the half-plane form,
+and their audits list only the axioms of ZF and that one admission.
+`GRH.Statements` and its whole import closure check under
+`--foundation ZFC`.
+
 The five theorems, as the source's `src/Statements.lean` and
 `src/Main.lean` state them:
 
