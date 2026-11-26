@@ -732,6 +732,44 @@ proof
   unfold call2 at sum
   exact sum
 
+theorem complexMul.distribute_pair (c x y : Set)
+  requires scalar : c ∈ ℂ
+  requires first : x ∈ ℂ
+  requires second : y ∈ ℂ
+  shows complexAdd((complexMul((c, x)), complexMul((c, y)))) =
+    complexMul((c, complexAdd((x, y))))
+proof
+  have ring := complexes.comm_ring
+  have sum : ℂ[c * x + c * y] = ℂ[c * (x + y)] by ring
+  unfold call2 at sum
+  exact sum
+
+-- A value fixed by multiplication by c ≠ 1 is 0.
+theorem complexMul.fixed_zero (c z : Set)
+  requires scalar : c ∈ ℂ
+  requires member : z ∈ ℂ
+  requires different : c ≠ complexOne
+  requires fixed : complexMul((c, z)) = z
+  shows z = complexZero
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have noZero := IsField.no_zero_divisors at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne with field
+  have product : ℂ[c * z] = z
+    unfold call2
+    exact fixed
+  have factored : ℂ[(c - 1) * z] = complexZero
+    linear_combination product
+  have shifted : ℂ[c - 1] ∈ complexCarrier by typecheck
+  have zero := noZero with ℂ[c - 1], shifted, z, member, factored
+  cases zero with first | second
+  . exfalso
+    have same : c = complexOne
+      linear_combination first
+    exact different with same
+  . exact second
+
 theorem ringNat.complex (n : Nat)
   shows ringNat(complexAdd, complexZero, complexOne, n) ∈ complexCarrier
 proof
@@ -1478,6 +1516,183 @@ proof
       rw [other, value]
       exact complexAdd.zero_right with numeral
 
+-- The values χ(0), …, χ(N − 1) as a function on the residues N.
+defgraph residueValues (N : Nat, χ : Set) (j ∈ N) : complexCarrier :=
+  χ(integerOfNat(j))
+requires character : DirichletCharacter(N, χ)
+proof
+  have naturals := natural.member at N
+  have jNat := naturals with j, member
+  have integer : integerOfNat(j) ∈ ℤ by typecheck
+  exact DirichletCharacter.value with character, integer
+
+-- Multiplication by t on the residues modulo N.
+defgraph residueScale (N t : Nat) (j ∈ N) : N := (t * j) % N
+requires positive : 0 < N
+proof
+  have nonzero : N ≠ 0 by arith
+  have naturals := natural.member at N
+  have jNat := naturals with j, member
+  have below := mod.less at t * j, N with nonzero
+  exact membership.of_Less at (t * j) % N, N with below
+
+-- For t coprime to N, multiplication by t permutes the residues.
+theorem residueScale.bijective (N t : Nat)
+  requires positive : 0 < N
+  requires coprime : gcd(t, N) = 1
+  shows BijectiveBetween(residueScale(N, t), N, N)
+proof
+  have function := residueScale.function at N, t with positive
+  have nonzero : N ≠ 0 by arith
+  have naturals := natural.member at N
+  have integerCoprime : IntegerCoprime(integerOfNat(t), integerOfNat(N))
+    unfold IntegerCoprime
+    rw integerGCD.ofNat
+    exact coprime
+  have levelCoprime := IntegerCoprime.symmetric with integerCoprime
+  have injective : ∀ x ∈ N, ∀ y ∈ N, ∀ z ∈ N,
+      relates(residueScale(N, t), x, z) → relates(residueScale(N, t), y, z) →
+      x = y
+    intros x xMember y yMember z zMember xz yz
+    have xNat := naturals with x, xMember
+    have yNat := naturals with y, yMember
+    have xValue := FunctionBetween.apply_value with function, xMember, xz
+    have yValue := FunctionBetween.apply_value with function, yMember, yz
+    have xFormula := residueScale.value at N, t, x with positive, xMember
+    have yFormula := residueScale.value at N, t, y with positive, yMember
+    have same : CongruentMod(t * x, t * y, N)
+      unfold CongruentMod
+      rw [← xFormula, ← yFormula, xValue, yValue]
+    have lifted := IntegerCongruent.ofNat_iff.backward at N, t * x, t * y
+      with same
+    rw [integerOfNat.mul, integerOfNat.mul] at lifted
+    have cancelled := IntegerCongruent.cancel_coprime with levelCoprime,
+      lifted
+    have back := IntegerCongruent.ofNat_iff.forward at N, x, y
+      with cancelled
+    unfold CongruentMod at back
+    have xBelow := Less.of_membership at x, N with xMember
+    have yBelow := Less.of_membership at y, N with yMember
+    have xReduced := mod.of_less at N, x with xBelow
+    have yReduced := mod.of_less at N, y with yBelow
+    rw [xReduced, yReduced] at back
+    exact back
+  have surjective : ∀ y ∈ N, ∃ x ∈ N, relates(residueScale(N, t), x, y)
+    intros k kMember
+    have kNat := naturals with k, kMember
+    obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+      with integerCoprime
+    have vNat := integerMod.natural at u, N with positive
+    have uReduced := integerMod.congruent at u, N with positive
+    have jBelow := mod.less at integerMod(u, N) * k, N with nonzero
+    have jMember := membership.of_Less at (integerMod(u, N) * k) % N, N
+      with jBelow
+    refine ⟨(integerMod(u, N) * k) % N, jMember, ?_⟩
+    have related := residueScale.relates at N, t,
+      (integerMod(u, N) * k) % N with positive, jMember
+    have image : (t * ((integerMod(u, N) * k) % N)) % N = k
+      have reduction := CongruentMod.mod_right at integerMod(u, N) * k, N
+      have reductionLifted := IntegerCongruent.ofNat_iff.backward
+        at N, integerMod(u, N) * k, (integerMod(u, N) * k) % N
+        with reduction
+      obtain ⟨p, pInteger, first⟩ := reductionLifted
+      obtain ⟨q, qInteger, second⟩ := uReduced
+      obtain ⟨r, rInteger, third⟩ := inverse
+      have congruent : IntegerCongruent(integerOfNat(N),
+          integerOfNat(t * ((integerMod(u, N) * k) % N)), integerOfNat(k))
+        rw [integerOfNat.mul]
+        rw integerOfNat.mul at first
+        witness r * integerOfNat(k) - integerOfNat(t) * integerOfNat(k) * q -
+          integerOfNat(t) * p
+        linear_combination integerOfNat(k) * third -
+          integerOfNat(t) * integerOfNat(k) * second - integerOfNat(t) * first
+      have natural := IntegerCongruent.ofNat_iff.forward with congruent
+      unfold CongruentMod at natural
+      have kBelow := Less.of_membership at k, N with kMember
+      have kReduced := mod.of_less at N, k with kBelow
+      rw kReduced at natural
+      exact natural
+    rw image at related
+    exact related
+  exact ⟨⟨function, injective⟩, ⟨function, surjective⟩⟩
+
+-- Summing the residue values in their natural order gives the character
+-- sum.
+theorem residueValues.sum_identity (N : Nat) (χ : Set, m : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires bound : m ≤ N
+  shows indexedRingSum(residueValues(N, χ), identity(N), complexAdd,
+    complexZero, m) = characterSum(χ, m)
+proof
+  induction m
+  | zero =>
+    intro bound
+    rw [indexedRingSum, characterSum.zero]
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ N by arith
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    have previous := ih with smaller
+    have position := identity.apply at k, N with kMember
+    have value := residueValues.value at N, χ, k with character, kMember
+    rw [indexedRingSum, previous, position, value, characterSum.succ]
+    unfold call2
+    rfl
+
+-- Summing them in the order permuted by t gives χ(t) times the sum.
+theorem residueValues.sum_scaled (N t : Nat) (χ : Set, m : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires bound : m ≤ N
+  shows indexedRingSum(residueValues(N, χ), residueScale(N, t), complexAdd,
+    complexZero, m) = complexMul((χ(integerOfNat(t)), characterSum(χ, m)))
+proof
+  induction m
+  | zero =>
+    intro bound
+    have scalar : integerOfNat(t) ∈ ℤ by typecheck
+    have value := DirichletCharacter.value with character, scalar
+    rw [indexedRingSum, characterSum.zero]
+    have absorb := complexMul.zero_right with value
+    unfold call2 at absorb
+    rw absorb
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ N by arith
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    have previous := ih with smaller
+    have nonzero : N ≠ 0 by arith
+    have imageBelow := mod.less at t * k, N with nonzero
+    have imageMember := membership.of_Less at (t * k) % N, N with imageBelow
+    have position := residueScale.value at N, t, k with positive, kMember
+    have value := residueValues.value at N, χ, (t * k) % N with character,
+      imageMember
+    -- χ((t k) mod N) = χ(t) χ(k).
+    have reduction := CongruentMod.mod_right at t * k, N
+    have lifted := IntegerCongruent.ofNat_iff.backward at N, t * k,
+      (t * k) % N with reduction
+    have productInteger : integerOfNat(t * k) ∈ ℤ by typecheck
+    have reducedInteger : integerOfNat((t * k) % N) ∈ ℤ by typecheck
+    have same := DirichletCharacter.congruent with character, productInteger,
+      reducedInteger, lifted
+    have scalar : integerOfNat(t) ∈ ℤ by typecheck
+    have kInteger : integerOfNat(k) ∈ ℤ by typecheck
+    have multiplicative := DirichletCharacter.mul with character, scalar,
+      kInteger
+    rw ← integerOfNat.mul at multiplicative
+    unfold call2 at multiplicative
+    have scalarValue := DirichletCharacter.value with character, scalar
+    have kValue := DirichletCharacter.value with character, kInteger
+    have sum := characterSum.closed at N, χ, k with character
+    have distribute := complexMul.distribute_pair with scalarValue, sum,
+      kValue
+    rw [indexedRingSum, previous, position, value, ← same, multiplicative,
+      characterSum.succ]
+    unfold call2
+    exact distribute
+
 -- Orthogonality over the residues: the sum of χ over a full period is 0
 -- unless χ is principal, when it is φ(N).
 theorem characterSum.non_principal (N : Nat) (χ : Set)
@@ -1486,7 +1701,48 @@ theorem characterSum.non_principal (N : Nat) (χ : Set)
   requires nonPrincipal : χ ≠ principalCharacter(N)
   shows characterSum(χ, N) = complexZero
 proof
-  sorry
+  -- Some unit a has χ(a) ≠ 1.
+  have exists : ∃ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) ∧
+      χ(a) ≠ complexOne
+    by_contra none
+    apply nonPrincipal
+    apply principalCharacter.eq_iff.backward with character
+    intros a integer coprime
+    by_contra different
+    apply none
+    exact ⟨a, integer, coprime, different⟩
+  obtain ⟨a, integer, coprime, different⟩ := exists
+  have tNat := integerMod.natural at a, N with positive
+  have residue := DirichletCharacter.residue with character, integer,
+    positive
+  rw residue at different
+  have congruent := integerMod.congruent at a, N with positive
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have tInteger : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+  have tCoprime := IntegerCoprime.of_congruent with integer, tInteger,
+    modulus, congruent, coprime
+  unfold IntegerCoprime at tCoprime
+  rw integerGCD.ofNat at tCoprime
+  -- Reindex the sum by multiplication by t = a mod N.
+  have permutation := residueScale.bijective at N, integerMod(a, N)
+    with positive, tCoprime
+  have order := identity.bijective at N
+  have weights := residueValues.function at N, χ with character
+  have ring := complexes.comm_ring
+  have reindexed := indexedRingSum.reindex at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne, residueValues(N, χ), N,
+    identity(N), residueScale(N, integerMod(a, N)), N, N
+    with ring, weights, order, permutation
+  have full : N ≤ N by arith
+  have identitySum := residueValues.sum_identity at N, χ, N with character,
+    full
+  have scaledSum := residueValues.sum_scaled at N, integerMod(a, N), χ, N
+    with character, positive, full
+  rw [identitySum, scaledSum] at reindexed
+  symm at reindexed
+  have scalar := DirichletCharacter.value with character, tInteger
+  have sum := characterSum.closed at N, χ, N with character
+  exact complexMul.fixed_zero with scalar, sum, different, reindexed
 
 theorem characterSum.principal (N : Nat)
   requires positive : 0 < N
