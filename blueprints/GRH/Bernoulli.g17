@@ -15,6 +15,8 @@ import Grace.Cumulus.Real.Analysis.Integration
 import Grace.Cumulus.Real.Rationals
 import Grace.Cumulus.NumberTheory.Binomial
 import Grace.Cumulus.Real.Floor
+import Grace.Cumulus.Real.Analysis.ChainRule
+import Grace.Cumulus.Real.Analysis.Locality
 
 -- The Bernoulli numbers
 
@@ -2191,12 +2193,211 @@ proof
   have xReal : Real(x) by typecheck
   exact periodicBernoulli.bound at n, x
 
+-- x ↦ Bₙ(c + x) as a function ℝ → ℝ: P̃ₙ on each unit cell.
+def bernoulliTranslate (n : Nat, c : Real) : Set :=
+  compose(bernoulliFunction(n), translateBy(c), ℝ, ℝ, ℝ)
+
+theorem bernoulliTranslate.function (n : Nat, c : Real)
+  shows bernoulliTranslate(n, c) : ℝ → ℝ
+proof
+  have translated := translateBy.function at c
+  have function := bernoulliFunction.function at n
+  unfold bernoulliTranslate
+  exact compose.function at bernoulliFunction(n), translateBy(c), ℝ, ℝ, ℝ
+    with translated, function
+
+theorem bernoulliTranslate.value (n : Nat) (c y : Real)
+  shows bernoulliTranslate(n, c)(y) = bernoulliPolynomial(n, c + y)
+proof
+  have translated := translateBy.function at c
+  have function := bernoulliFunction.function at n
+  have yMember : y ∈ ℝ by typecheck
+  have applied := compose.apply with translated, function, yMember
+  have shifted : c + y ∈ ℝ by typecheck
+  have value := bernoulliFunction.value at n, c + y with shifted
+  unfold bernoulliTranslate
+  rw [applied, translateBy.value, value]
+
+theorem bernoulliTranslate.derivative (n : Nat) (c y : Real)
+  shows HasDerivativeAt(bernoulliTranslate(succ(n), c),
+    realNat(succ(n)) * bernoulliPolynomial(n, c + y), y)
+proof
+  have shifted : Real(c + y) by typecheck
+  have base := bernoulliFunction.derivative at n, c + y
+  have composite := HasDerivativeAt.comp_translate at
+    bernoulliFunction(succ(n)), realNat(succ(n)) * bernoulliPolynomial(n,
+    c + y), c, y with base
+  unfold bernoulliTranslate
+  exact composite
+
+theorem bernoulliTranslate.continuous (n : Nat, c : Real)
+  shows Continuous(bernoulliTranslate(n, c))
+proof
+  have function := bernoulliTranslate.function at n, c
+  refine ⟨function, ?_⟩
+  intros y yMember
+  have yReal : Real(y) by exact yMember
+  have shifted : Real(c + y) by typecheck
+  have base := bernoulliFunction.derivative_terms at n, c + y
+  have sum := realPartialSum.real at bernoulliDerivativeTerms(n, c + y),
+    succ(n) with (bernoulliDerivativeTerms.function at n, c + y)
+  have composite := HasDerivativeAt.comp_translate at bernoulliFunction(n),
+    ∑ k < succ(n), bernoulliDerivativeTerms(n, c + y)(k), c, y with base
+  have continuous := HasDerivativeAt.continuous_at with composite
+  unfold bernoulliTranslate
+  exact continuous
+
+-- On [k, k + 1), P̃ₙ(y) = Bₙ(y − k).
+theorem periodicBernoulli.eq_right (n : Nat) (k : Integer) (y : Real)
+  requires lower : realInt(k) ≤ y
+  requires upper : y < realInt(k) + 1
+  shows periodicBernoulli(n)(y) = bernoulliTranslate(n, -realInt(k))(y)
+proof
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have cell := periodicBernoulli.on_cell with lower, upper
+  have value := bernoulliTranslate.value at n, -realInt(k), y
+  have same : -realInt(k) + y = y - realInt(k) by ring
+  rw [cell, value, same]
+
+-- On (k − 1, k], for n ≠ 1, P̃ₙ(y) = Bₙ(y − k + 1), since Bₙ(1) = Bₙ(0).
+theorem periodicBernoulli.eq_left (n : Nat) (k : Integer) (y : Real)
+  requires notOne : n ≠ 1
+  requires lower : realInt(k) - 1 < y
+  requires upper : y ≤ realInt(k)
+  shows periodicBernoulli(n)(y) = bernoulliTranslate(n, 1 - realInt(k))(y)
+proof
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have value := bernoulliTranslate.value at n, 1 - realInt(k), y
+  rw value
+  have order := realLess.trichotomy at y, realInt(k)
+  rcases order with below | equal | above
+  . have oneInteger : Integer(integerOfNat(1)) by typecheck
+    have previous : Integer(k - integerOfNat(1)) by typecheck
+    have shift := realInt.sub at k, integerOfNat(1)
+    rw [realInt.nat, realNat.one] at shift
+    have cellLower : realInt(k - integerOfNat(1)) ≤ y
+      rw shift
+      linarith
+    have cellUpper : y < realInt(k - integerOfNat(1)) + 1
+      rw shift
+      linarith
+    have cell := periodicBernoulli.on_cell with cellLower, cellUpper
+    rw [cell, shift]
+    have same : y - (realInt(k) - 1) = 1 - realInt(k) + y by ring
+    rw same
+  . rw equal
+    have atInteger := periodicBernoulli.at_integer at n, k
+    have one : 1 - realInt(k) + realInt(k) = (1:R) by ring
+    have atOne := bernoulliPolynomial.at_one with notOne
+    rw [atInteger, one, atOne]
+  . exfalso
+    linarith
+
+-- A point strictly inside a unit cell is not an integer.
+theorem realInt.not_between (k : Integer) (x : Real)
+  requires lower : realInt(k) < x
+  requires upper : x < realInt(k) + 1
+  shows ∀ j ∈ ℤ, x ≠ realInt(j)
+proof
+  intros j jMember equal
+  have jInteger : Integer(j) by typecheck
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have weak : realInt(k) ≤ x by linarith
+  have floor := integerFloor.eq_of_bounds with weak, upper
+  have atJ := integerFloor.of_integer at j
+  rw ← equal at atJ
+  rw floor at atJ
+  rw atJ at lower
+  rw ← equal at lower
+  linarith
+
+-- Either x is an integer, or it lies strictly inside the cell of its floor.
+theorem integerFloor.cases (x : Real)
+  shows x = realInt(integerFloor(x)) ∨
+    (realInt(integerFloor(x)) < x ∧ x < realInt(integerFloor(x)) + 1)
+proof
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have lower := integerFloor.le at x
+  have upper := integerFloor.lt at x
+  have order := realLess.trichotomy at realInt(integerFloor(x)), x
+  rcases order with below | equal | above
+  . right
+    refine ⟨below, upper⟩
+  . left
+    rw equal
+  . exfalso
+    linarith
+
 -- P̃ₙ is continuous for n ≥ 2, since Bₙ(0) = Bₙ(1) there.
 theorem periodicBernoulli.continuous (n : Nat)
   requires large : 2 ≤ n
   shows Continuous(periodicBernoulli(n))
 proof
-  sorry
+  have function := periodicBernoulli.function at n
+  have notOne : n ≠ 1 by arith
+  refine ⟨function, ?_⟩
+  intros x xMember
+  have xReal : Real(x) by exact xMember
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have right : ∀ y ∈ ℝ, x ≤ y → y < realInt(integerFloor(x)) + 1 →
+      periodicBernoulli(n)(y) =
+        bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+    intros y yMember lower upper
+    have yReal : Real(y) by exact yMember
+    have floorLower := integerFloor.le at x
+    have cellLower : realInt(integerFloor(x)) ≤ y by linarith
+    exact periodicBernoulli.eq_right with cellLower, upper
+  have continuousRight := bernoulliTranslate.continuous at n,
+    -realInt(integerFloor(x))
+  have atRight := Continuous.at with continuousRight, xMember
+  have cases := integerFloor.cases at x
+  cases cases with integer | inside
+  . have continuousLeft := bernoulliTranslate.continuous at n,
+      1 - realInt(integerFloor(x))
+    have atLeft := Continuous.at with continuousLeft, xMember
+    have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) - 1 < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellUpper : y ≤ realInt(integerFloor(x)) by linarith
+      exact periodicBernoulli.eq_left with notOne, lower, cellUpper
+    have rightShifted : ∀ y ∈ ℝ, x ≤ y → y < x + 1 →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact right with y, yMember, lower, cellUpper
+    have leftShifted : ∀ y ∈ ℝ, x - 1 < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) - 1 < y by linarith
+      exact left with y, yMember, cellLower, upper
+    have below : x - 1 < x by linarith
+    have above : x < x + 1 by linarith
+    exact ContinuousAt.glue with atLeft, atRight, function, below, above,
+      leftShifted, rightShifted
+  . obtain ⟨lower, upper⟩ := inside
+    have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+      intros y yMember cellLower bound
+      have yReal : Real(y) by exact yMember
+      have weak : realInt(integerFloor(x)) ≤ y by linarith
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact periodicBernoulli.eq_right with weak, cellUpper
+    exact ContinuousAt.glue with atRight, atRight, function, lower, upper,
+      left, right
 
 -- Off the integers, P̃′ₙ₊₁ = (n + 1) P̃ₙ.
 theorem periodicBernoulli.derivative (n : Nat) (x : Real)
@@ -2204,7 +2405,48 @@ theorem periodicBernoulli.derivative (n : Nat) (x : Real)
   shows HasDerivativeAt(periodicBernoulli(succ(n)),
     realNat(succ(n)) * periodicBernoulli(n)(x), x)
 proof
-  sorry
+  have function := periodicBernoulli.function at succ(n)
+  have xMember : x ∈ ℝ by typecheck
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have weak := integerFloor.le at x
+  have upper := integerFloor.lt at x
+  have floorZ : integerFloor(x) ∈ ℤ by typecheck
+  have distinct := notInteger with integerFloor(x), floorZ
+  have lower : realInt(integerFloor(x)) < x
+    have order := realLess.trichotomy at realInt(integerFloor(x)), x
+    rcases order with below | equal | above
+    . exact below
+    . exfalso
+      have flipped : x = realInt(integerFloor(x)) by rw equal
+      exact distinct with flipped
+    . exfalso
+      linarith
+  have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) < y → y ≤ x →
+      periodicBernoulli(succ(n))(y) =
+        bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+    intros y yMember cellLower bound
+    have yReal : Real(y) by exact yMember
+    have cellWeak : realInt(integerFloor(x)) ≤ y by linarith
+    have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+    exact periodicBernoulli.eq_right with cellWeak, cellUpper
+  have right : ∀ y ∈ ℝ, x ≤ y → y < realInt(integerFloor(x)) + 1 →
+      periodicBernoulli(succ(n))(y) =
+        bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+    intros y yMember bound cellUpper
+    have yReal : Real(y) by exact yMember
+    have cellWeak : realInt(integerFloor(x)) ≤ y by linarith
+    exact periodicBernoulli.eq_right with cellWeak, cellUpper
+  have translated := bernoulliTranslate.derivative at n,
+    -realInt(integerFloor(x)), x
+  have glued := HasDerivativeAt.glue with translated, translated, function,
+    lower, upper, left, right
+  have here := periodicBernoulli.eq_right at n, integerFloor(x), x
+    with weak, upper
+  have value := bernoulliTranslate.value at n, -realInt(integerFloor(x)), x
+  rw [here, value]
+  exact glued
 
 -- From index 3 on, P̃′ₙ = n P̃ₙ₋₁ everywhere. (P̃₂ has corners at the
 -- integers, where P̃₁ jumps.)
@@ -2213,13 +2455,320 @@ theorem periodicBernoulli.derivative_everywhere (n : Nat) (x : Real)
   shows HasDerivativeAt(periodicBernoulli(succ(n)),
     realNat(succ(n)) * periodicBernoulli(n)(x), x)
 proof
-  sorry
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have cases := integerFloor.cases at x
+  cases cases with integer | inside
+  . have function := periodicBernoulli.function at succ(n)
+    have notOne : succ(n) ≠ 1 by arith
+    have nNotOne : n ≠ 1 by arith
+    have left : ∀ y ∈ ℝ, x - 1 < y → y ≤ x →
+        periodicBernoulli(succ(n))(y) =
+          bernoulliTranslate(succ(n), 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) - 1 < y by linarith
+      have cellUpper : y ≤ realInt(integerFloor(x)) by linarith
+      exact periodicBernoulli.eq_left with notOne, cellLower, cellUpper
+    have right : ∀ y ∈ ℝ, x ≤ y → y < x + 1 →
+        periodicBernoulli(succ(n))(y) =
+          bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) ≤ y by linarith
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact periodicBernoulli.eq_right with cellLower, cellUpper
+    have derivativeLeft := bernoulliTranslate.derivative at n,
+      1 - realInt(integerFloor(x)), x
+    have derivativeRight := bernoulliTranslate.derivative at n,
+      -realInt(integerFloor(x)), x
+    have argumentLeft : 1 - realInt(integerFloor(x)) + x = (1:R) by linarith
+    have argumentRight : -realInt(integerFloor(x)) + x = (0:R) by linarith
+    have atOne := bernoulliPolynomial.at_one with nNotOne
+    have atZero := bernoulliPolynomial.at_zero at n
+    rw [argumentLeft, atOne] at derivativeLeft
+    rw [argumentRight, atZero] at derivativeRight
+    have below : x - 1 < x by linarith
+    have above : x < x + 1 by linarith
+    have glued := HasDerivativeAt.glue with derivativeLeft, derivativeRight,
+      function, below, above, left, right
+    have atInteger := periodicBernoulli.at_integer at n, integerFloor(x)
+    rw ← integer at atInteger
+    rw atInteger
+    exact glued
+  . obtain ⟨lower, upper⟩ := inside
+    have notInteger := realInt.not_between at integerFloor(x), x
+      with lower, upper
+    exact periodicBernoulli.derivative with notInteger
+
+-- P̃ₙ₊₁/(n + 1), an antiderivative of P̃ₙ off the integers.
+def periodicBernoulliPrimitive (n : Nat) : Set :=
+  pointwiseMul(constantRealFunction(realInvValue(realNat(succ(n)))),
+    periodicBernoulli(succ(n)))
+
+theorem periodicBernoulliPrimitive.value (n : Nat) (y : Real)
+  shows periodicBernoulliPrimitive(n)(y) =
+    realInvValue(realNat(succ(n))) * periodicBernoulli(succ(n))(y)
+proof
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have constant := constantRealFunction.function
+    at realInvValue(realNat(succ(n)))
+  have function := periodicBernoulli.function at succ(n)
+  have yMember : y ∈ ℝ by typecheck
+  have constantValue := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), y
+  have constantReal : Real(constantRealFunction(realInvValue(
+      realNat(succ(n))))(y))
+    rw constantValue
+    exact inverse
+  have periodicMember := FunctionBetween.apply_closed with function, yMember
+  have periodicReal : Real(periodicBernoulli(succ(n))(y))
+    by exact periodicMember
+  have product := pointwiseMul.value at constantRealFunction(realInvValue(
+    realNat(succ(n)))), periodicBernoulli(succ(n)), y
+    with constant, function, constantReal, periodicReal
+  unfold periodicBernoulliPrimitive
+  rw [product, constantValue]
+
+theorem periodicBernoulliPrimitive.real (n : Nat) (y : Real)
+  shows Real(periodicBernoulliPrimitive(n)(y))
+proof
+  have inverse := realInvValue.real at realNat(succ(n))
+  have function := periodicBernoulli.function at succ(n)
+  have yMember : y ∈ ℝ by typecheck
+  have periodicMember := FunctionBetween.apply_closed with function, yMember
+  have periodicReal : Real(periodicBernoulli(succ(n))(y))
+    by exact periodicMember
+  rw periodicBernoulliPrimitive.value
+  typecheck
+
+theorem periodicBernoulliPrimitive.derivative (n : Nat) (x : Real)
+  requires notInteger : ∀ k ∈ ℤ, x ≠ realInt(k)
+  shows HasDerivativeAt(periodicBernoulliPrimitive(n),
+    periodicBernoulli(n)(x), x)
+proof
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have constantDerivative := constantRealFunction.has_derivative_at
+    at realInvValue(realNat(succ(n))), x
+  have function := periodicBernoulli.function at succ(n)
+  have lower := periodicBernoulli.function at n
+  have xMember : x ∈ ℝ by typecheck
+  have upperMember := FunctionBetween.apply_closed with function, xMember
+  have upperReal : Real(periodicBernoulli(succ(n))(x)) by exact upperMember
+  have lowerMember := FunctionBetween.apply_closed with lower, xMember
+  have lowerReal : Real(periodicBernoulli(n)(x)) by exact lowerMember
+  have periodicDerivative := periodicBernoulli.derivative with notInteger
+  have product := HasDerivativeAt.mul with constantDerivative,
+    periodicDerivative
+  have constantValue := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), x
+  rw constantValue at product
+  have value : realAddValue(realMulValue(realZero,
+      periodicBernoulli(succ(n))(x)), realMulValue(realInvValue(
+      realNat(succ(n))), realNat(succ(n)) * periodicBernoulli(n)(x))) =
+      periodicBernoulli(n)(x)
+    have expand : realAddValue(realMulValue(realZero,
+        periodicBernoulli(succ(n))(x)), realMulValue(realInvValue(
+        realNat(succ(n))), realNat(succ(n)) * periodicBernoulli(n)(x))) =
+        realInvValue(realNat(succ(n))) * realNat(succ(n)) *
+          periodicBernoulli(n)(x) by ring
+    rw expand
+    linear_combination periodicBernoulli(n)(x) * cancel
+  rw value at product
+  unfold periodicBernoulliPrimitive
+  exact product
+
+theorem periodicBernoulliPrimitive.continuous (n : Nat)
+  requires positive : 0 < n
+  shows Continuous(periodicBernoulliPrimitive(n))
+proof
+  have inverse := realInvValue.real at realNat(succ(n))
+  have constant := constantRealFunction.continuous
+    at realInvValue(realNat(succ(n)))
+  have large : 2 ≤ succ(n) by arith
+  have periodic := periodicBernoulli.continuous at succ(n) with large
+  unfold periodicBernoulliPrimitive
+  exact Continuous.mul with constant, periodic
+
+-- Within one unit cell, ∫_A^B P̃ₙ = F(B) − F(A) for F = P̃ₙ₊₁/(n + 1).
+theorem periodicBernoulli.cell_integral (n : Nat) (A B : Real)
+  requires positive : 0 < n
+  requires ordered : A ≤ B
+  requires within : B ≤ realInt(integerFloor(A)) + 1
+  shows HasRiemannIntegral(periodicBernoulli(n), A, B,
+    periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  have function := periodicBernoulli.function at n
+  have floorInteger := integerFloor.integer at A
+  have floorMember := realInt.real at integerFloor(A)
+  have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+  have floorLower := integerFloor.le at A
+  have interval := closedInterval.subset_reals at A, B
+  have translated := bernoulliTranslate.continuous at n,
+    -realInt(integerFloor(A))
+  have continuous := Continuous.continuous_on with translated, interval
+  have agree : ∀ x ∈ ℝ, A < x → x < B → periodicBernoulli(n)(x) =
+      bernoulliTranslate(n, -realInt(integerFloor(A)))(x)
+    intros x xMember lower upper
+    have xReal : Real(x) by exact xMember
+    have cellLower : realInt(integerFloor(A)) ≤ x by linarith
+    have cellUpper : x < realInt(integerFloor(A)) + 1 by linarith
+    exact periodicBernoulli.eq_right with cellLower, cellUpper
+  have integral := HasRiemannIntegral.of_continuous_interior
+    with function, ordered, continuous, agree
+  have primitive := periodicBernoulliPrimitive.continuous with positive
+  have primitiveOn := Continuous.continuous_on with primitive, interval
+  have derivative : ∀ X ∈ ℝ, A < X → X < B →
+      HasDerivativeAt(periodicBernoulliPrimitive(n),
+        periodicBernoulli(n)(X), X)
+    intros X xMember lower upper
+    have xReal : Real(X) by exact xMember
+    have cellLower : realInt(integerFloor(A)) < X by linarith
+    have cellUpper : X < realInt(integerFloor(A)) + 1 by linarith
+    have notInteger := realInt.not_between at integerFloor(A), X
+      with cellLower, cellUpper
+    exact periodicBernoulliPrimitive.derivative with notInteger
+  have value := HasRiemannIntegral.eq_endpoint_of_local_derivative
+    with primitiveOn, derivative, integral
+  rwa value at integral
+
+-- The same across ⌊A⌋ + m + 1, by adding one cell at a time.
+theorem periodicBernoulli.integral_cells (n m : Nat)
+  requires positive : 0 < n
+  shows ∀ A ∈ ℝ, ∀ B ∈ ℝ, A ≤ B →
+    B ≤ realInt(integerFloor(A)) + realNat(succ(m)) →
+    HasRiemannIntegral(periodicBernoulli(n), A, B,
+      periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  induction m
+  | zero =>
+    intros A aMember B bMember ordered within
+    have aReal : Real(A) by exact aMember
+    have bReal : Real(B) by exact bMember
+    have one : succ(0) = 1 by arith
+    rw [one, realNat.one] at within
+    exact periodicBernoulli.cell_integral with positive, ordered, within
+  | succ(j) using ih =>
+    intros A aMember B bMember ordered within
+    have aReal : Real(A) by exact aMember
+    have bReal : Real(B) by exact bMember
+    have floorInteger := integerFloor.integer at A
+    have floorMember := realInt.real at integerFloor(A)
+    have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+    have floorUpper := integerFloor.lt at A
+    have count := realNat.real at succ(j)
+    have alternatives : B ≤ realInt(integerFloor(A)) + 1 ∨
+        ¬(B ≤ realInt(integerFloor(A)) + 1) by tauto
+    cases alternatives with near | far
+    . exact periodicBernoulli.cell_integral with positive, ordered, near
+    have beyond := realLess.of_not_le with far
+    -- Split at C = ⌊A⌋ + 1.
+    have oneInteger : Integer(integerOfNat(1)) by typecheck
+    have nextInteger : Integer(integerFloor(A) + integerOfNat(1)) by typecheck
+    have next := realInt.add at integerFloor(A), integerOfNat(1)
+    rw [realInt.nat, realNat.one] at next
+    have middleReal : Real(realInt(integerFloor(A)) + 1) by typecheck
+    have middleMember : realInt(integerFloor(A)) + 1 ∈ ℝ by typecheck
+    have leftOrdered : A ≤ realInt(integerFloor(A)) + 1 by linarith
+    have leftWithin : realInt(integerFloor(A)) + 1 ≤
+      realInt(integerFloor(A)) + 1 by linarith
+    have leftPart := periodicBernoulli.cell_integral with positive,
+      leftOrdered, leftWithin
+    have floorNext := integerFloor.of_integer
+      at integerFloor(A) + integerOfNat(1)
+    rw next at floorNext
+    have rightOrdered : realInt(integerFloor(A)) + 1 ≤ B by linarith
+    have step := realNat.succ_add at succ(j)
+    have rightWithin : B ≤ realInt(integerFloor(realInt(integerFloor(A)) +
+        1)) + realNat(succ(j))
+      rw [floorNext, next]
+      linarith
+    have rightPart := ih with realInt(integerFloor(A)) + 1, middleMember, B,
+      bMember, rightOrdered, rightWithin
+    have bound : ∀ x ∈ closedInterval(A, B),
+        abs(periodicBernoulli(n)(x)) ≤ bernoulliBound(n)
+      intros x inside
+      obtain ⟨xMember, _, _⟩ := closedInterval.membership.forward with inside
+      have xReal : Real(x) by exact xMember
+      exact periodicBernoulli.bound at n, x
+    have bounds := bernoulliBoundTerms.function at n
+    have boundSequence : RealSequence(bernoulliBoundTerms(n)) by exact bounds
+    have boundTotal := realPartialSum.real at bernoulliBoundTerms(n), succ(n)
+      with boundSequence
+    have boundReal : Real(bernoulliBound(n))
+      unfold bernoulliBound
+      exact boundTotal
+    have sum := HasRiemannIntegral.add_adjacent with leftPart, rightPart,
+      bound
+    have primitiveA := periodicBernoulliPrimitive.real at n, A
+    have primitiveB := periodicBernoulliPrimitive.real at n, B
+    have primitiveC := periodicBernoulliPrimitive.real at n,
+      realInt(integerFloor(A)) + 1
+    have total : periodicBernoulliPrimitive(n)(realInt(integerFloor(A)) + 1) -
+        periodicBernoulliPrimitive(n)(A) + (periodicBernoulliPrimitive(n)(B) -
+        periodicBernoulliPrimitive(n)(realInt(integerFloor(A)) + 1)) =
+        periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A)
+      by ring
+    rwa total at sum
+
+-- For n ≥ 1, ∫_A^B P̃ₙ = F(B) − F(A) for F = P̃ₙ₊₁/(n + 1).
+theorem periodicBernoulli.has_integral (n : Nat) (A B : Real)
+  requires positive : 0 < n
+  requires ordered : A ≤ B
+  shows HasRiemannIntegral(periodicBernoulli(n), A, B,
+    periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  have floorInteger := integerFloor.integer at A
+  have floorMember := realInt.real at integerFloor(A)
+  have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+  obtain ⟨M, mNat, above⟩ := Real.below_natural
+    at B - realInt(integerFloor(A))
+  have count := realNat.real at M
+  have step := realNat.succ_add at M
+  have within : B ≤ realInt(integerFloor(A)) + realNat(succ(M)) by linarith
+  have cells := periodicBernoulli.integral_cells at n, M with positive
+  have aMember : A ∈ ℝ by typecheck
+  have bMember : B ∈ ℝ by typecheck
+  exact cells with A, aMember, B, bMember, ordered, within
 
 theorem periodicBernoulli.integrable (n : Nat) (A B : Real)
   requires ordered : A ≤ B
   shows RiemannIntegrable(periodicBernoulli(n), A, B)
 proof
-  sorry
+  have alternatives := natural.zero_or_successor at n
+  cases alternatives with zero | successor
+  . have function := periodicBernoulli.function at n
+    have one : Real((1:R)) by typecheck
+    have constant := constantRealFunction.continuous at (1:R)
+    have interval := closedInterval.subset_reals at A, B
+    have continuous := Continuous.continuous_on with constant, interval
+    have agree : ∀ x ∈ ℝ, A < x → x < B →
+        periodicBernoulli(n)(x) = constantRealFunction((1:R))(x)
+      intros x xMember lower upper
+      have xReal : Real(x) by exact xMember
+      have value := constantRealFunction.value at (1:R), x
+      rw [zero, value, periodicBernoulli.zero_index]
+    have integral := HasRiemannIntegral.of_continuous_interior
+      with function, ordered, continuous, agree
+    obtain ⟨member, _⟩ := riemannIntegral.selected
+      at constantRealFunction((1:R)), A, B
+    exact ⟨riemannIntegral(constantRealFunction((1:R)), A, B), member,
+      integral⟩
+  . obtain ⟨m, mNat, shape⟩ := successor
+    have positive : 0 < n by arith
+    have integral := periodicBernoulli.has_integral with positive, ordered
+    have primitiveA := periodicBernoulliPrimitive.real at n, A
+    have primitiveB := periodicBernoulliPrimitive.real at n, B
+    have member : periodicBernoulliPrimitive(n)(B) -
+      periodicBernoulliPrimitive(n)(A) ∈ ℝ by typecheck
+    exact ⟨periodicBernoulliPrimitive(n)(B) -
+      periodicBernoulliPrimitive(n)(A), member, integral⟩
 
 -- For n ≥ 1, (n + 1) ∫_A^B P̃ₙ = P̃ₙ₊₁(B) − P̃ₙ₊₁(A).
 theorem periodicBernoulli.integral (n : Nat) (A B : Real)
@@ -2228,11 +2777,47 @@ theorem periodicBernoulli.integral (n : Nat) (A B : Real)
   shows realNat(succ(n)) * riemannIntegral(periodicBernoulli(n), A, B) =
     periodicBernoulli(succ(n))(B) - periodicBernoulli(succ(n))(A)
 proof
-  sorry
+  have integral := periodicBernoulli.has_integral with positive, ordered
+  have value := riemannIntegral.eq_of_integral with integral
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_right with nonzero
+  have function := periodicBernoulli.function at succ(n)
+  have aMember : A ∈ ℝ by typecheck
+  have bMember : B ∈ ℝ by typecheck
+  have atA := FunctionBetween.apply_closed with function, aMember
+  have atB := FunctionBetween.apply_closed with function, bMember
+  have atAReal : Real(periodicBernoulli(succ(n))(A)) by exact atA
+  have atBReal : Real(periodicBernoulli(succ(n))(B)) by exact atB
+  rw [value, periodicBernoulliPrimitive.value, periodicBernoulliPrimitive.value]
+  linear_combination (periodicBernoulli(succ(n))(B) -
+    periodicBernoulli(succ(n))(A)) * cancel
 
 -- The integral of P̃ₙ over a period vanishes for n ≥ 1.
 theorem periodicBernoulli.integral_period (n : Nat) (A : Real)
   requires positive : 0 < n
   shows riemannIntegral(periodicBernoulli(n), A, A + (1:R)) = (0:R)
 proof
-  sorry
+  have ordered : A ≤ A + (1:R) by linarith
+  have integral := periodicBernoulli.integral with positive, ordered
+  have oneInteger : Integer(integerOfNat(1)) by typecheck
+  have periodic := periodicBernoulli.periodic at succ(n), A, integerOfNat(1)
+  rw [realInt.nat, realNat.one] at periodic
+  rw periodic at integral
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have function := periodicBernoulli.function at succ(n)
+  have aMember : A ∈ ℝ by typecheck
+  have atA := FunctionBetween.apply_closed with function, aMember
+  have atAReal : Real(periodicBernoulli(succ(n))(A)) by exact atA
+  obtain ⟨member, _⟩ := riemannIntegral.selected at periodicBernoulli(n), A,
+    A + (1:R)
+  have value : Real(riemannIntegral(periodicBernoulli(n), A, A + (1:R)))
+    by exact member
+  linear_combination realInvValue(realNat(succ(n))) * integral -
+    riemannIntegral(periodicBernoulli(n), A, A + (1:R)) * cancel
