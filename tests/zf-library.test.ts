@@ -22,6 +22,12 @@ test("the ordinary mathematics imports and every migrated selection law check un
     // Point-set topology through bases, the real line, Heine–Borel, and Cantor–Bendixson loads under ZF;
     // only the chosen originals of a cover (CompactImage, CompactMore, Tube) and what imports them select.
     "Topology/CantorBendixson", "Topology/Real/RationalBase", "Topology/HeineBorel",
+    // Real analysis through derivatives, the intermediate value theorem, and induction along an interval
+    // (boundedness, extreme values, uniform continuity on [A, B]) loads under ZF; the extreme value theorem's
+    // module also holds the countable-choice results on arbitrary sequentially compact sets, so it and what
+    // imports it need ZFC.
+    "Real/Analysis/RealInduction", "Real/Analysis/IntermediateValue", "Real/Analysis/Derivative",
+    "Real/Analysis/ChainRule", "Real/Analysis/Locality", "Real/Analysis/Examples",
   ].map(name => `lib/Grace/Cumulus/${name}.g17`), ["lib"]);
   assert.equal(kernel.axioms.has("set.globalChoice"), false);
   for (const name of [

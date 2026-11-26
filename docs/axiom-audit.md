@@ -112,6 +112,12 @@ check result's theorems carry the statement's hypotheses as
 
 The mathematical modules `Int`, `NumberTheory`, `Cardinal`, `Geometry`,
 `LinearAlgebra`, `GraphTheory`, the group theory up to Lagrange's and
-Sylow's theorems, and the finite combinatorics are checked under ZF by
-`tests/zf-library.test.ts` and `npm run compile:zf-library`. Selections in
-analysis import `Set.Choice`; uniquely determined values use `defunique`.
+Sylow's theorems, the finite combinatorics, and real analysis through
+derivatives, the intermediate value theorem, and induction along a closed
+interval are checked under ZF by `tests/zf-library.test.ts` and
+`npm run compile:zf-library`. Uniquely determined values use `defunique`.
+The extreme value, Heine–Cantor, Rolle, mean value, and integration theorems
+on closed intervals use no choice axiom; the theorems about an arbitrary
+sequentially compact set of reals in the same modules need countable choice
+and take it from `Set.ChoiceFunctions`, so `Real.Analysis` as a whole checks
+under ZFC. Other selections import `Set.Choice`.
