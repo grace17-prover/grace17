@@ -19,6 +19,8 @@ statements. Their membership laws fix the intended sets extensionally.
 
 ## Large cardinal hypotheses
 
+[Large cardinals](large-cardinals.md) explains the hypotheses, with pictures.
+
 No profile has a large cardinal axiom. `Grace.Cumulus.LargeCardinal`
 defines Grothendieck universes, inaccessible cardinals as the heights of
 universes (every universe is a stage `V(κ)`, checked under ZF), and the

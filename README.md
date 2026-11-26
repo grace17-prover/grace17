@@ -31,7 +31,7 @@ to everything you build next.
 Set theory gives mathematics a singular ontology, organized by the iterative
 conception: start from the empty set, form new sets from what is already
 there, and continue through the transfinite. That combination of
-unity and freedom is, to me, the gold standard foundation of classical
+unity and freedom is, to me, a gold standard foundation of classical
 mathematics. Grace17 is my personal research project, and the question I am
 investigating is: can set theory in first-order logic support a modern,
 efficient, ergonomic proof assistant for people and AI systems alike, for the
