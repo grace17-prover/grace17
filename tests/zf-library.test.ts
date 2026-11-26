@@ -19,9 +19,11 @@ test("the ordinary mathematics imports and every migrated selection law check un
     "Combinatorics/Multinomial", "Combinatorics/ErdosSzekeres", "Combinatorics/DerangementCount",
     "Combinatorics/DerangementFormula", "Combinatorics/MoebiusInversion", "Combinatorics/MoebiusMultiplicative",
     "Combinatorics/CoprimeDivisors", "NumberTheory/FibonacciGCD",
-    // Point-set topology through bases, the real line, Heine–Borel, and Cantor–Bendixson loads under ZF;
-    // only the chosen originals of a cover (CompactImage, CompactMore, Tube) and what imports them select.
+    // Point-set topology through bases, the real line, Heine–Borel, Cantor–Bendixson, the tube lemma, and
+    // the plane loads under ZF; only the chosen originals of a cover (CompactImage, CompactMore) and what
+    // imports them select.
     "Topology/CantorBendixson", "Topology/Real/RationalBase", "Topology/HeineBorel",
+    "Topology/Tube", "Topology/Plane",
     // Real analysis through derivatives, the intermediate value theorem, and induction along an interval
     // (boundedness, extreme values, uniform continuity on [A, B]) loads under ZF; the extreme value theorem's
     // module also holds the countable-choice results on arbitrary sequentially compact sets, so it and what

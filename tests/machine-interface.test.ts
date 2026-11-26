@@ -463,13 +463,13 @@ test("check warns once per module about a theorem restating a generated property
 });
 
 test("closure lists the import closure in dependency order with choice-freedom and the chain to a dependency", () => {
-  const tube = ok(handleMachineRequest({ id: 45, method: "closure", params: { module: "Grace.Cumulus.Topology.Tube", from: "Set.Choice" } }));
-  assert.equal(tube.module, "Grace.Cumulus.Topology.Tube");
-  assert.equal(tube.file, "lib/Grace/Cumulus/Topology/Tube.g17");
+  const tube = ok(handleMachineRequest({ id: 45, method: "closure", params: { module: "Grace.Cumulus.Algebra.Group.CosetSplit", from: "Set.Choice" } }));
+  assert.equal(tube.module, "Grace.Cumulus.Algebra.Group.CosetSplit");
+  assert.equal(tube.file, "lib/Grace/Cumulus/Algebra/Group/CosetSplit.g17");
   assert.equal(tube.choiceFree, false);
   assert.ok(tube.choice.includes("Grace.Cumulus.Set.Choice"));
   assert.equal(tube.count, tube.modules.length);
-  assert.equal(tube.modules.at(-1).module, "Grace.Cumulus.Topology.Tube");
+  assert.equal(tube.modules.at(-1).module, "Grace.Cumulus.Algebra.Group.CosetSplit");
   // Dependencies come before dependents.
   const position = new Map(tube.modules.map((item: { module: string }, index: number) => [item.module, index]));
   for (const item of tube.modules) for (const imported of item.imports) assert.ok(position.get(imported)! < position.get(item.module)!, `${imported} before ${item.module}`);
@@ -478,7 +478,7 @@ test("closure lists the import closure in dependency order with choice-freedom a
   const basic = tube.modules.find((item: { module: string }) => item.module === "Grace.Cumulus.Set.Basic");
   assert.equal(basic.choiceFree, true);
   assert.equal(tube.from, "Grace.Cumulus.Set.Choice");
-  assert.equal(tube.chain[0], "Grace.Cumulus.Topology.Tube");
+  assert.equal(tube.chain[0], "Grace.Cumulus.Algebra.Group.CosetSplit");
   assert.equal(tube.chain.at(-1), "Grace.Cumulus.Set.Choice");
   for (let index = 1; index < tube.chain.length; index += 1) {
     assert.ok(tube.modules.find((item: { module: string }) => item.module === tube.chain[index - 1]).imports.includes(tube.chain[index]));
@@ -519,11 +519,11 @@ test("g17 check --imports, check --continue --quiet, and g17 closure print their
     assert.match(lines.at(-1)!, /^\d+ modules checked, 1 failed, 0 skipped$/);
     const loud = g17("check", "--continue", "--module-root", "lib", failing);
     assert.ok(loud.stdout.split("\n").some(line => line.startsWith("checked ")));
-    const closure = g17("closure", "--text", "Topology.Tube", "--from", "Set.Choice");
+    const closure = g17("closure", "--text", "Algebra.Group.CosetSplit", "--from", "Set.Choice");
     assert.equal(closure.status, 0, closure.stderr);
-    assert.match(closure.stdout, /^Grace\.Cumulus\.Topology\.Tube: \d+ modules, uses Grace\.Cumulus\.Set\.Choice$/m);
+    assert.match(closure.stdout, /^Grace\.Cumulus\.Algebra\.Group\.CosetSplit: \d+ modules, uses Grace\.Cumulus\.Set\.Choice$/m);
     assert.match(closure.stdout, /^choice-free  Grace\.Cumulus\.Set\.Basic  lib\/Grace\/Cumulus\/Set\/Basic\.g17$/m);
-    assert.match(closure.stdout, /^chain: Grace\.Cumulus\.Topology\.Tube → .*Grace\.Cumulus\.Set\.Choice$/m);
+    assert.match(closure.stdout, /^chain: Grace\.Cumulus\.Algebra\.Group\.CosetSplit → .*Grace\.Cumulus\.Set\.Choice$/m);
     const asJson = g17("closure", "Nat.Core");
     assert.equal(JSON.parse(asJson.stdout).result.choiceFree, true);
   } finally {

@@ -60,7 +60,8 @@ The mathematical modules `Int`, `NumberTheory`, `Cardinal`, `Geometry`,
 `LinearAlgebra`, `GraphTheory`, the group theory up to Lagrange's and
 Sylow's theorems, the finite combinatorics, and real analysis through
 derivatives, the intermediate value theorem, and induction along a closed
-interval are checked under ZF by `tests/zf-library.test.ts` and
+interval, and the compactness of products and of closed rectangles in the
+plane are checked under ZF by `tests/zf-library.test.ts` and
 `npm run compile:zf-library`. Uniquely determined values use `defunique`.
 The extreme value, Heine–Cantor, Rolle, mean value, and integration theorems
 on closed intervals use no choice axiom; the theorems about an arbitrary
