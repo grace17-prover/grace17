@@ -776,6 +776,429 @@ proof
   . exfalso
     linarith
 
+-- Section: Completeness and the Cauchy criterion
+-- The first N terms of a real sequence are bounded.
+theorem RealSequence.prefix_bounded (u : Set, N : Nat)
+  requires sequence : RealSequence(u)
+  shows ∃ M ∈ ℝ, R[0] ≤ M ∧ (∀ n ∈ ℕ, n < N → abs(u[n]) ≤ M)
+proof
+  induction N
+  | zero =>
+    witness R[0]
+    refine ⟨realZero.real, ?_, ?_⟩
+    . exact realLe.reflexive with realZero.real
+    . intros n naturalN below
+      exfalso
+      have typed := nat.omega.backward with naturalN
+      arith
+  | succ(k) using ih =>
+    obtain ⟨M, mMember, mNonnegative, bound⟩ := ih
+    have mReal : Real(M) by exact mMember
+    have uk := RealSequence.value at u, k with sequence
+    have absNonnegative := abs.nonnegative at u[k]
+    witness R[M + abs(u[k])]
+    refine ⟨?_, ?_, ?_⟩
+    . typecheck
+    . linarith
+    . intros n naturalN below
+      have typed := nat.omega.backward with naturalN
+      have un := RealSequence.value at u, n with sequence
+      by_cases earlier : n < k
+      . have old := bound with n, naturalN, earlier
+        linarith
+      . have same : n = k by arith
+        rw same
+        linarith
+
+-- A Cauchy sequence of reals converges.
+theorem CauchySequence.converges (u : Set)
+  requires cauchy : CauchySequence(u)
+  shows ∃ L ∈ ℝ, ConvergesTo(u, L)
+proof
+  have parts : RealSequence(u) ∧ (∀ E ∈ ℝ, 0 < E → ∃ N ∈ ℕ, ∀ m ∈ ℕ, N ≤ m →
+      ∀ n ∈ ℕ, N ≤ n → uₘ ∈ openBall(uₙ, E)) by exact cauchy
+  obtain ⟨sequence, control⟩ := parts
+  have onePositive : R[0] < R[1] by linarith
+  have oneMember : R[1] ∈ ℝ by typecheck
+  obtain ⟨N, nMember, close⟩ := control with R[1], oneMember, onePositive
+  have typedN := nat.omega.backward with nMember
+  obtain ⟨M, mMember, mNonnegative, bound⟩ := RealSequence.prefix_bounded at
+    u, N with sequence
+  have mReal : Real(M) by exact mMember
+  have uN := RealSequence.value at u, N with sequence
+  have absN := abs.nonnegative at u[N]
+  have everywhere : ∀ n ∈ ℕ, abs(u[n]) ≤ R[M + abs(u[N]) + 1]
+    intros n naturalN
+    have typed := nat.omega.backward with naturalN
+    have un := RealSequence.value at u, n with sequence
+    by_cases earlier : n < N
+    . have old := bound with n, naturalN, earlier
+      linarith
+    . have later : N ≤ n by arith
+      have reflexive : N ≤ N by arith
+      have ball := close with n, naturalN, later, N, nMember, reflexive
+      obtain ⟨_, near⟩ := openBall.membership.forward with ball
+      have triangle := abs.le_dist_add_abs at u[n], u[N]
+      linarith
+  have terms : TermsIn(u, closedInterval(R[-(M + abs(u[N]) + 1)],
+      R[M + abs(u[N]) + 1]))
+    intros n naturalN
+    have typed := nat.omega.backward with naturalN
+    have un := RealSequence.value at u, n with sequence
+    have unMember : u[n] ∈ ℝ by exact un
+    have bounded := everywhere with n, naturalN
+    have upper := abs.upper at u[n]
+    have lower := abs.upper_neg at u[n]
+    have lowerBound : R[-(M + abs(u[N]) + 1)] ≤ u[n] by linarith
+    have upperBound : u[n] ≤ R[M + abs(u[N]) + 1] by linarith
+    exact closedInterval.membership.backward with
+      ⟨unMember, lowerBound, upperBound⟩
+  obtain ⟨L, inside, converges⟩ := CauchySequence.converges_in_interval with
+    cauchy, terms
+  obtain ⟨lMember, _, _⟩ := closedInterval.membership.forward with inside
+  exact ⟨L, lMember, converges⟩
+
+-- The Cauchy criterion: f is integrable on [A, B] when the tagged sums of
+-- any two δ-fine tagged partitions are close for δ small.
+predicate FineSumsCauchy (f : Set) (A B : Real) :=
+  ∀ E ∈ ℝ, R[0] < E → ∃ D ∈ ℝ, R[0] < D ∧
+    (∀ p, ∀ t, ∀ N ∈ ℕ, ∀ q, ∀ s, ∀ M ∈ ℕ,
+      TaggedPartition(p, t, A, B, N) → FinePartition(p, A, B, N, D) →
+        TaggedPartition(q, s, A, B, M) → FinePartition(q, A, B, M, D) →
+          dist(riemannSum(f, p, t, N), riemannSum(f, q, s, M)) < E)
+
+theorem FineSumsCauchy.dyadic_cauchy (f : Set) (A B : Real)
+  requires function : f : ℝ → ℝ
+  requires ordered : A < B
+  requires cauchy : FineSumsCauchy(f, A, B)
+  shows CauchySequence(dyadicRiemannSums(f, A, B))
+proof
+  constructor
+  . exact dyadicRiemannSums.sequence with function
+  . intros E realE positiveE
+    obtain ⟨D, realD, positiveD, close⟩ := cauchy with E, realE, positiveE
+    obtain ⟨K, naturalK, eventually⟩ :=
+      dyadicRadius.eventually_scaled_below at realSubValue(B, A), D with positiveD
+    witness K
+    constructor
+    . exact naturalK
+    . intros m naturalM afterM n naturalN afterN
+      have typedM := nat.omega.backward with naturalM
+      have typedN := nat.omega.backward with naturalN
+      have gridM := dyadicRiemannSums.fine_grid at A, B, m with ordered
+      have gridN := dyadicRiemannSums.fine_grid at A, B, n with ordered
+      rcases gridM with ⟨taggedM, fineM⟩
+      rcases gridN with ⟨taggedN, fineN⟩
+      have smallM := eventually with m, naturalM, afterM
+      have smallN := eventually with n, naturalN, afterN
+      have weakM := realLess.implies_le with smallM
+      have weakN := realLess.implies_le with smallN
+      have relaxedM := FinePartition.weaken with fineM, weakM
+      have relaxedN := FinePartition.weaken with fineN, weakN
+      have countM := dyadicCellCount.nat at succ(m) with
+        Naturals.constructor.succ at m with assumption
+      have countN := dyadicCellCount.nat at succ(n) with
+        Naturals.constructor.succ at n with assumption
+      have near := close with
+        affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(m))),
+        leftPartitionTags(affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(m)))),
+        dyadicCellCount(succ(m)),
+        nat.omega.forward at dyadicCellCount(succ(m)) with countM,
+        affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(n))),
+        leftPartitionTags(affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(n)))),
+        dyadicCellCount(succ(n)),
+        nat.omega.forward at dyadicCellCount(succ(n)) with countN,
+        taggedM, relaxedM, taggedN, relaxedN
+      have valueM := dyadicRiemannSums.value at f, A, B, m with function
+      have valueN := dyadicRiemannSums.value at f, A, B, n with function
+      have sequence := dyadicRiemannSums.sequence at f, A, B with function
+      have realM := RealSequence.value at dyadicRiemannSums(f, A, B), m with
+        sequence
+      rw valueM at realM
+      rw [valueM, valueN]
+      exact openBall.membership.backward with ⟨realM, near⟩
+
+theorem FineSumsCauchy.integrable (f : Set) (A B : Real)
+  requires function : f : ℝ → ℝ
+  requires ordered : A ≤ B
+  requires cauchy : FineSumsCauchy(f, A, B)
+  shows RiemannIntegrable(f, A, B)
+proof
+  have cases := realLess.trichotomy at A, B
+  rcases cases with strict | equal | reversed
+  . have dyadic := FineSumsCauchy.dyadic_cauchy with function, strict, cauchy
+    obtain ⟨I, realI, limit⟩ := CauchySequence.converges with dyadic
+    have typedI : Real(I) by exact realI
+    refine ⟨I, realI, function, ordered, ?_⟩
+    intros E realE positiveE
+    have typedE : Real(E) by exact realE
+    have halfReal := half.real with typedE
+    have halfMember : half(E) ∈ ℝ by exact halfReal
+    have halfPositive := half.positive with positiveE
+    obtain ⟨D, realD, positiveD, close⟩ := cauchy with half(E), halfMember,
+      halfPositive
+    refine ⟨D, realD, positiveD, ?_⟩
+    intros p t N naturalN tagged fine
+    have typedN := nat.omega.backward with naturalN
+    obtain ⟨K, naturalK, fineEventually⟩ :=
+      dyadicRadius.eventually_scaled_below at realSubValue(B, A), D with positiveD
+    obtain ⟨H, naturalH, nearEventually⟩ := ConvergesTo.eventually with
+      limit, halfPositive
+    have typedK := nat.omega.backward with naturalK
+    have typedH := nat.omega.backward with naturalH
+    obtain ⟨J, naturalJ, afterK, afterH⟩ := nat.common_upper at K, H with *{2}
+    have typedJ := nat.omega.backward with naturalJ
+    obtain ⟨taggedJ, fineJ⟩ := dyadicRiemannSums.fine_grid at A, B, J with
+      strict
+    have small := fineEventually with J, naturalJ, afterK
+    have weak := realLess.implies_le with small
+    have relaxed := FinePartition.weaken with fineJ, weak
+    have count := dyadicCellCount.nat at succ(J) with
+      Naturals.constructor.succ at J with assumption
+    have near := close with p, t, N, naturalN,
+      affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(J))),
+      leftPartitionTags(affinePoints(A, realSubValue(B, A) * dyadicRadius(succ(J)))),
+      dyadicCellCount(succ(J)),
+      nat.omega.forward at dyadicCellCount(succ(J)) with count,
+      tagged, fine, taggedJ, relaxed
+    have value := dyadicRiemannSums.value at f, A, B, J with function
+    rw ← value at near
+    have tail := nearEventually with J, naturalJ, afterH
+    obtain ⟨⟨points, _, _, _⟩, tags, _⟩ := tagged
+    have sumReal := riemannSum.real at f, p, t, N with function, points, tags
+    have sequence := dyadicRiemannSums.sequence at f, A, B with function
+    have gridReal := RealSequence.value at dyadicRiemannSums(f, A, B), J with
+      sequence
+    have ball := openBall.membership.backward with ⟨sumReal, near⟩
+    have joined := openBall.triangle with ball, tail
+    have double := half.add_self with typedE
+    rw double at joined
+    obtain ⟨_, bound⟩ := openBall.membership.forward with joined
+    exact bound
+  . rw ← equal
+    exact RiemannIntegrable.point with function
+  . exfalso
+    linarith
+
+-- Section: Joining tagged partitions
+-- The sequence q delayed by N places, and p followed by q from index N.
+defgraph delayedRealSequence (q : Set, N : Nat) (n ∈ ℕ) : ℝ := q[sub(n, N)]
+requires sequence : RealSequence(q)
+proof
+  have typedN := nat.omega.backward with member
+  have index := sub.closed at n, N
+  exact RealSequence.value at q, sub(n, N) with sequence
+
+def joinedSequence (p q : Set, N : Nat) : Set :=
+  switchSequence(p, delayedRealSequence(q, N), N)
+
+theorem joinedSequence.sequence (p q : Set, N : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  shows RealSequence(joinedSequence(p, q, N))
+proof
+  have delayed : RealSequence(delayedRealSequence(q, N))
+    unfold RealSequence
+    exact delayedRealSequence.function with sequenceQ
+  unfold joinedSequence
+  exact switchSequence.sequence with sequenceP, delayed
+
+theorem joinedSequence.before (p q : Set, N i : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  requires earlier : i < N
+  shows joinedSequence(p, q, N)[i] = p[i]
+proof
+  have delayed : RealSequence(delayedRealSequence(q, N))
+    unfold RealSequence
+    exact delayedRealSequence.function with sequenceQ
+  unfold joinedSequence
+  exact switchSequence.before with sequenceP, delayed, earlier
+
+theorem joinedSequence.after (p q : Set, N j : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  shows joinedSequence(p, q, N)[add(N, j)] = q[j]
+proof
+  have delayed : RealSequence(delayedRealSequence(q, N))
+    unfold RealSequence
+    exact delayedRealSequence.function with sequenceQ
+  have later : N ≤ add(N, j) by arith
+  have index : sub(add(N, j), N) = j := sub.add_left at j, N
+  have natural : add(N, j) ∈ ℕ by typecheck
+  unfold joinedSequence
+  rw [(switchSequence.after with sequenceP, delayed, later),
+    (delayedRealSequence.value with sequenceQ, natural), index]
+
+theorem joinedSequence.shifted (p q : Set, N j : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  shows shiftedRealSequence(joinedSequence(p, q, N), N)[j] = q[j]
+proof
+  have joined := joinedSequence.sequence at p, q, N with sequenceP, sequenceQ
+  rw [(shiftedRealSequence.value with joined),
+    (joinedSequence.after with sequenceP, sequenceQ)]
+
+-- Where p ends where q starts, the cells of the joined sequence are those
+-- of p before N and those of q from N on.
+theorem joinedSequence.cell_before (p q : Set, N i : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  requires meet : p[N] = q[0]
+  requires earlier : i < N
+  shows joinedSequence(p, q, N)[i] = p[i] ∧
+    joinedSequence(p, q, N)[succ(i)] = p[succ(i)]
+proof
+  refine ⟨(joinedSequence.before with sequenceP, sequenceQ, earlier), ?_⟩
+  by_cases inner : succ(i) < N
+  . exact joinedSequence.before with sequenceP, sequenceQ, inner
+  . have last : succ(i) = N by arith
+    have start := joinedSequence.after at p, q, N, 0 with sequenceP, sequenceQ
+    have zeroAdd : add(N, 0) = N by arith
+    rw zeroAdd at start
+    rw [last, start, meet]
+
+theorem joinedSequence.cell_after (p q : Set, N j : Nat)
+  requires sequenceP : RealSequence(p)
+  requires sequenceQ : RealSequence(q)
+  shows joinedSequence(p, q, N)[add(N, j)] = q[j] ∧
+    joinedSequence(p, q, N)[succ(add(N, j))] = q[succ(j)]
+proof
+  refine ⟨(joinedSequence.after with sequenceP, sequenceQ), ?_⟩
+  have shift : succ(add(N, j)) = add(N, succ(j)) by arith
+  rw shift
+  exact joinedSequence.after with sequenceP, sequenceQ
+
+-- Every index below N + K is a cell of p or of q.
+theorem joinedSequence.index_cases (N K i : Nat)
+  requires below : i < add(N, K)
+  shows i < N ∨ (∃ j ∈ ℕ, i = add(N, j) ∧ j < K)
+proof
+  by_cases earlier : i < N
+  . left
+    exact earlier
+  . right
+    have later : N ≤ i by arith
+    have split := sub.add_of_le with later
+    have natural := sub.closed at i, N
+    have naturalMember : sub(i, N) ∈ ℕ by typecheck
+    refine ⟨sub(i, N), naturalMember, ?_, ?_⟩
+    . rw split
+    . arith
+
+-- Joining a δ-fine tagged partition of [A, B] and one of [B, C] gives a
+-- δ-fine tagged partition of [A, C].
+theorem TaggedPartition.join (p t q s : Set) (A B C D : Real, N K : Nat)
+  requires taggedP : TaggedPartition(p, t, A, B, N)
+  requires fineP : FinePartition(p, A, B, N, D)
+  requires taggedQ : TaggedPartition(q, s, B, C, K)
+  requires fineQ : FinePartition(q, B, C, K, D)
+  shows TaggedPartition(joinedSequence(p, q, N), joinedSequence(t, s, N),
+      A, C, add(N, K)) ∧
+    FinePartition(joinedSequence(p, q, N), A, C, add(N, K), D)
+proof
+  obtain ⟨⟨pointsP, startP, endP, stepsP⟩, tagsT, cellsP⟩ := taggedP
+  obtain ⟨⟨pointsQ, startQ, endQ, stepsQ⟩, tagsS, cellsQ⟩ := taggedQ
+  obtain ⟨_, dPositive, widthsP⟩ := fineP
+  obtain ⟨_, _, widthsQ⟩ := fineQ
+  have meet : p[N] = q[0] by rw [endP, startQ]
+  have points := joinedSequence.sequence at p, q, N with pointsP, pointsQ
+  have tags := joinedSequence.sequence at t, s, N with tagsT, tagsS
+  have start : joinedSequence(p, q, N)[0] = A
+    by_cases empty : (0:N) < N
+    . rw [(joinedSequence.before with pointsP, pointsQ, empty), startP]
+    . have zero : N = (0:N) by arith
+      have first := joinedSequence.after at p, q, N, (0:N) with pointsP, pointsQ
+      have zeroAdd : add(N, (0:N)) = N by arith
+      rw zeroAdd at first
+      rw zero at first
+      rw zero at endP
+      rw [zero, first, startQ, ← endP, startP]
+  have finish : joinedSequence(p, q, N)[add(N, K)] = C
+    rw [(joinedSequence.after with pointsP, pointsQ), endQ]
+  have cells : ∀ i ∈ ℕ, i < add(N, K) →
+      (joinedSequence(p, q, N)[i]:R) < (joinedSequence(p, q, N)[succ(i)]:R) ∧
+      joinedSequence(t, s, N)[i] ∈ closedInterval(joinedSequence(p, q, N)[i],
+        joinedSequence(p, q, N)[succ(i)]) ∧
+      realSubValue(joinedSequence(p, q, N)[succ(i)],
+        joinedSequence(p, q, N)[i]) < D
+    intros i naturalI below
+    have typedI := nat.omega.backward with naturalI
+    have cases := joinedSequence.index_cases with below
+    rcases cases with earlier | later
+    . obtain ⟨left, right⟩ := joinedSequence.cell_before with pointsP,
+        pointsQ, meet, earlier
+      have tag := joinedSequence.before at t, s, N, i with tagsT, tagsS,
+        earlier
+      rw [left, right, tag]
+      refine ⟨(stepsP with i, naturalI, earlier),
+        (cellsP with i, naturalI, earlier), (widthsP with i, naturalI, earlier)⟩
+    . obtain ⟨j, naturalJ, same, beforeK⟩ := later
+      have typedJ := nat.omega.backward with naturalJ
+      obtain ⟨left, right⟩ := joinedSequence.cell_after at p, q, N, j with
+        pointsP, pointsQ
+      have tag := joinedSequence.after at t, s, N, j with tagsT, tagsS
+      rw [same, left, right, tag]
+      refine ⟨(stepsQ with j, naturalJ, beforeK),
+        (cellsQ with j, naturalJ, beforeK), (widthsQ with j, naturalJ, beforeK)⟩
+  have partition : IntervalPartition(joinedSequence(p, q, N), A, C, add(N, K))
+    refine ⟨points, start, finish, ?_⟩
+    intros i naturalI below
+    obtain ⟨step, _, _⟩ := cells with i, naturalI, below
+    exact step
+  constructor
+  . refine ⟨partition, tags, ?_⟩
+    intros i naturalI below
+    obtain ⟨_, tag, _⟩ := cells with i, naturalI, below
+    exact tag
+  . refine ⟨partition, dPositive, ?_⟩
+    intros i naturalI below
+    obtain ⟨_, _, width⟩ := cells with i, naturalI, below
+    exact width
+
+-- The tagged sum over the joined partition is the sum of the two sums.
+theorem riemannSum.join (f p t q s : Set, N K : Nat)
+  requires function : f : ℝ → ℝ
+  requires pointsP : RealSequence(p)
+  requires tagsT : RealSequence(t)
+  requires pointsQ : RealSequence(q)
+  requires tagsS : RealSequence(s)
+  requires meet : p[N] = q[0]
+  shows riemannSum(f, joinedSequence(p, q, N), joinedSequence(t, s, N),
+      add(N, K)) = R[riemannSum(f, p, t, N) + riemannSum(f, q, s, K)]
+proof
+  have points := joinedSequence.sequence at p, q, N with pointsP, pointsQ
+  have tags := joinedSequence.sequence at t, s, N with tagsT, tagsS
+  have shiftedPoints := shiftedRealSequence.sequence at
+    joinedSequence(p, q, N), N with points
+  have shiftedTags := shiftedRealSequence.sequence at
+    joinedSequence(t, s, N), N with tags
+  have prefix := riemannSum.congr_cells at f, joinedSequence(p, q, N),
+    joinedSequence(t, s, N), p, t, N with function, points, pointsP, tags,
+    tagsT
+  have prefixEq : riemannSum(f, joinedSequence(p, q, N),
+      joinedSequence(t, s, N), N) = riemannSum(f, p, t, N)
+    apply prefix
+    intros i naturalI earlier
+    have typedI := nat.omega.backward with naturalI
+    obtain ⟨left, right⟩ := joinedSequence.cell_before with pointsP, pointsQ,
+      meet, earlier
+    have tag := joinedSequence.before at t, s, N, i with tagsT, tagsS, earlier
+    exact ⟨left, right, tag⟩
+  have suffixEq : riemannSum(f, shiftedRealSequence(joinedSequence(p, q, N), N),
+      shiftedRealSequence(joinedSequence(t, s, N), N), K) =
+      riemannSum(f, q, s, K)
+    apply riemannSum.congr_cells with function, shiftedPoints, pointsQ,
+      shiftedTags, tagsS
+    intros i naturalI earlier
+    have typedI := nat.omega.backward with naturalI
+    have left := joinedSequence.shifted at p, q, N, i with pointsP, pointsQ
+    have right := joinedSequence.shifted at p, q, N, succ(i) with pointsP,
+      pointsQ
+    have tag := joinedSequence.shifted at t, s, N, i with tagsT, tagsS
+    exact ⟨left, right, tag⟩
+  rw [(riemannSum.split_at with function, points, tags), prefixEq, suffixEq]
+
 -- ∫_A^B g + ∫_B^C g = ∫_A^C g.
 theorem complexIntegral.add_interval (g : Set) (A B C : Real)
   requires first : A ≤ B
