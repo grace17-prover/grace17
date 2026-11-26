@@ -5,7 +5,6 @@
 -- Authors: Grant Passmore
 
 module Grace.Cumulus.Real.Analysis.Integration.IntegralOrderBound
-import Set.Choice
 import RiemannSums
 import CommonRefinementComparison
 import Squares
@@ -726,93 +725,140 @@ predicate CellMeanValueWitnesses (f F p : Set) (N : Nat) :=
       realMulValue(f(X), realSubValue(p[succ(i)], p[i])) =
         realSubValue(F(p[succ(i)]), F(p[i]))
 
--- Outside the finite prefix a tag is the left endpoint, which makes the
--- sequence total without a condition on unused cells.
-defchoose cellMeanValueTag (f F p : Set, N i : Nat) (X ∈ ℝ) :=
-  (i < N → X ∈ closedInterval(p[i], p[succ(i)]) ∧
-    realMulValue(f(X), realSubValue(p[succ(i)], p[i])) =
-      realSubValue(F(p[succ(i)]), F(p[i]))) ∧
-  (¬(i < N) → X = p[i])
-requires points : RealSequence(p)
-requires witnesses : CellMeanValueWitnesses(f, F, p, N)
+-- The real sequence following t before index k and equal to Y from k on.
+defunique extendedTag (t : Set, Y : Real, k n : Nat) (X ∈ ℝ) :=
+  (n < k ∧ X = t[n]) ∨ (k ≤ n ∧ X = Y)
+requires tags : RealSequence(t)
 proof
-  have alternatives : i < N ∨ ¬(i < N)
-    tauto
-  cases alternatives with before | beyond
-  . unfold CellMeanValueWitnesses at witnesses
-    have naturalI := nat.omega.forward at i with assumption
-    obtain ⟨X, inCell, equation⟩ := witnesses with i, naturalI, before
-    have pointI := RealSequence.value at p, i with points
-    have pointNext := RealSequence.value at p, succ(i) with points
-    have data := closedInterval.membership.forward at p[i], p[succ(i)], X
-      with inCell
-    rcases data with ⟨realX, lower, upper⟩
-    witness X
-    constructor
-    . exact realX
-    . constructor
-      . intro beforeAgain
-        refine ⟨inCell, equation⟩
-      . intro notBefore
-        exfalso
-        exact notBefore with before
-  . have pointI := RealSequence.value at p, i with points
-    witness p[i]
-    constructor
-    . unfold Real at pointI
-      exact pointI
-    . constructor
-      . intro before
-        exfalso
-        exact beyond with before
-      . intro notBefore
-        rfl
+  have alternatives := Less.or_LessEqual at n, k
+  cases alternatives with before | after
+  . have value := RealSequence.value at t, n with tags
+    have member : t[n] ∈ ℝ by exact value
+    refine ⟨t[n], member, ?_⟩
+    left
+    refine ⟨before, rfl⟩
+  . have member : Y ∈ ℝ by simp [Real]
+    refine ⟨Y, member, ?_⟩
+    right
+    refine ⟨after, rfl⟩
+uniqueness
+  intros X xMember xProperty Z zMember zProperty
+  rcases xProperty with ⟨xBefore, xValue⟩ | ⟨xAfter, xValue⟩
+  . rcases zProperty with ⟨zBefore, zValue⟩ | ⟨zAfter, zValue⟩
+    . rw [xValue, zValue]
+    . exfalso
+      arith
+  . rcases zProperty with ⟨zBefore, zValue⟩ | ⟨zAfter, zValue⟩
+    . exfalso
+      arith
+    . rw [xValue, zValue]
 
-defgraph cellMeanValueTags (f F p : Set, N : Nat) (i ∈ ℕ) : ℝ :=
-  cellMeanValueTag(f, F, p, N, i)
-requires points : RealSequence(p)
-requires witnesses : CellMeanValueWitnesses(f, F, p, N)
+defgraph extendedTags (t : Set, Y : Real, k : Nat) (n ∈ ℕ) : ℝ :=
+  extendedTag(t, Y, k, n)
+requires tags : RealSequence(t)
 proof
-  have selected := cellMeanValueTag.selected at f, F, p, N, i with
-    assumption, points, witnesses
-  rcases selected with ⟨realTag, properties⟩
-  exact realTag
+  have nNat := nat.omega.backward with member
+  have selected := extendedTag.selected at t, Y, k, n with tags
+  exact selected.left
+
+theorem extendedTags.before (t : Set) (Y : Real, k n : Nat)
+  requires tags : RealSequence(t)
+  requires earlier : n < k
+  shows extendedTags(t, Y, k)[n] = t[n]
+proof
+  have value := extendedTags.value at t, Y, k, n with tags
+  obtain ⟨_, property⟩ := extendedTag.selected at t, Y, k, n with tags
+  rcases property with ⟨_, equal⟩ | ⟨later, _⟩
+  . rw [value, equal]
+  . exfalso
+    arith
+
+theorem extendedTags.after (t : Set) (Y : Real, k n : Nat)
+  requires tags : RealSequence(t)
+  requires later : k ≤ n
+  shows extendedTags(t, Y, k)[n] = Y
+proof
+  have value := extendedTags.value at t, Y, k, n with tags
+  obtain ⟨_, property⟩ := extendedTag.selected at t, Y, k, n with tags
+  rcases property with ⟨earlier, _⟩ | ⟨_, equal⟩
+  . exfalso
+    arith
+  . rw [value, equal]
+
+-- Finitely many cells have mean-value tags together: induction on the
+-- number of cells tagged so far extends the tags by one witness at a time.
+theorem CellMeanValueWitnesses.prefix_tags (f F p : Set) (A B : Real, N k : Nat)
+  requires partition : IntervalPartition(p, A, B, N)
+  requires witnesses : CellMeanValueWitnesses(f, F, p, N)
+  shows k ≤ N → ∃ t, RealSequence(t) ∧
+    (∀ i ∈ ℕ, i < k → t[i] ∈ closedInterval(p[i], p[succ(i)]) ∧
+      realMulValue(f(t[i]), realSubValue(p[succ(i)], p[i])) =
+        realSubValue(F(p[succ(i)]), F(p[i])))
+proof
+  induction k
+  | zero =>
+    intro within
+    have constant := constantSequence.sequence at realZero
+    witness constantSequence(realZero)
+    refine ⟨constant, _⟩
+    intros i naturalI before
+    have typedI := nat.omega.backward with naturalI
+    exfalso
+    arith
+  | succ(j) using ih =>
+    intro within
+    have points : RealSequence(p)
+      rcases partition with ⟨sequence, left, right, increasing⟩
+      exact sequence
+    have jWithin : j ≤ N by arith
+    obtain ⟨t, sequence, valid⟩ := ih with jWithin
+    have before : j < N by arith
+    have naturalJ := nat.omega.forward at j with assumption
+    unfold CellMeanValueWitnesses at witnesses
+    obtain ⟨X, inCell, equation⟩ := witnesses with j, naturalJ, before
+    have pointJ := RealSequence.value at p, j with points
+    have pointNext := RealSequence.value at p, succ(j) with points
+    obtain ⟨realX, lowerX, upperX⟩ := closedInterval.membership.forward with inCell
+    have typedX : Real(X) by simp [Real]
+    have extended : RealSequence(extendedTags(t, X, j))
+      unfold RealSequence
+      exact extendedTags.function with sequence
+    witness extendedTags(t, X, j)
+    refine ⟨extended, _⟩
+    intros i naturalI iBefore
+    have typedI := nat.omega.backward with naturalI
+    have alternatives := Less.or_LessEqual at i, j
+    cases alternatives with earlier | later
+    . have value := extendedTags.before at t, X, j, i with sequence, earlier
+      rw value
+      exact valid with i, naturalI, earlier
+    . have same : i = j by arith
+      have value := extendedTags.after at t, X, j, i with sequence, later
+      rw [value, same]
+      refine ⟨inCell, equation⟩
 
 theorem CellMeanValueWitnesses.tags (f F p : Set) (A B : Real, N : Nat)
   requires partition : IntervalPartition(p, A, B, N)
   requires witnesses : CellMeanValueWitnesses(f, F, p, N)
-  shows TaggedPartition(p, cellMeanValueTags(f, F, p, N), A, B, N) ∧
+  shows ∃ t, TaggedPartition(p, t, A, B, N) ∧
     (∀ i ∈ ℕ, i < N →
-      realMulValue(f(cellMeanValueTags(f, F, p, N)[i]),
-        realSubValue(p[succ(i)], p[i])) =
-          realSubValue(F(p[succ(i)]), F(p[i])))
+      realMulValue(f(t[i]), realSubValue(p[succ(i)], p[i])) =
+        realSubValue(F(p[succ(i)]), F(p[i])))
 proof
-  have points : RealSequence(p)
-    rcases partition with ⟨sequence, left, right, increasing⟩
-    exact sequence
-  have sequence : RealSequence(cellMeanValueTags(f, F, p, N))
-    unfold RealSequence
-    exact cellMeanValueTags.function with points, witnesses
-  have cell : ∀ i ∈ ℕ, i < N → cellMeanValueTags(f, F, p, N)[i] ∈ closedInterval(p[i], p[succ(i)]) ∧ realMulValue(f(cellMeanValueTags(f, F, p, N)[i]), realSubValue(p[succ(i)], p[i])) = realSubValue(F(p[succ(i)]), F(p[i]))
-    intros i naturalI before
-    have typedI := nat.omega.backward with naturalI
-    have value := cellMeanValueTags.value at f, F, p, N, i with
-      points, witnesses
-    have selected := cellMeanValueTag.selected at f, F, p, N, i with
-      points, witnesses
-    rcases selected with ⟨realTag, valid, unused⟩
-    have selectedCell := valid with before
-    rwa value
+  have all := CellMeanValueWitnesses.prefix_tags at f, F, p, A, B, N, N with
+    partition, witnesses
+  obtain ⟨t, sequence, valid⟩ := all with LessEqual.reflexive at N
+  witness t
   constructor
-    constructor
+  . constructor
     . exact partition
     . constructor
       . exact sequence
       . intros j naturalJ before
-        obtain ⟨member, equation⟩ := cell with j, naturalJ, before
+        obtain ⟨member, equation⟩ := valid with j, naturalJ, before
         exact member
   . intros j naturalJ before
-    obtain ⟨member, equation⟩ := cell with j, naturalJ, before
+    obtain ⟨member, equation⟩ := valid with j, naturalJ, before
     exact equation
 
 theorem CellMeanValueWitnesses.all_tags (f F : Set) (A B : Real)
@@ -823,13 +869,11 @@ proof
   intros p N naturalN partition
   have witnesses := local with p, N, naturalN, partition
   have typedN := nat.omega.backward with naturalN
-  obtain ⟨tagged, equations⟩ := CellMeanValueWitnesses.tags with partition, witnesses
-  witness cellMeanValueTags(f, F, p, N)
-  refine ⟨tagged, equations⟩
+  exact CellMeanValueWitnesses.tags with partition, witnesses
 
 -- This is the interval form of the mean value theorem needed by FTC. The
--- choice construction above turns its individual cell witnesses into a
--- single tagged partition without an additional choice assumption.
+-- finite induction above turns its individual cell witnesses into a single
+-- tagged partition without a choice assumption.
 predicate CellMeanValueProperty (f F : Set) :=
   ∀ X ∈ ℝ, ∀ Y ∈ ℝ, (X:R) < (Y:R) →
     ∃ T ∈ closedInterval(X, Y),
