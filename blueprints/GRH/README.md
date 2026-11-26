@@ -306,6 +306,15 @@ graph TD
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 494 | 494 | 0 |
+| GRH.Linear.Modules | 137 | 34 | 103 |
+| GRH.Linear.Dimension | 69 | 2 | 67 |
+| GRH.Linear.Dual | 26 | 0 | 26 |
+| GRH.Linear.Exterior | 51 | 10 | 41 |
+| GRH.Linear.Tensor | 54 | 1 | 53 |
+| GRH.Matrix.Basic | 86 | 0 | 86 |
+| GRH.Matrix.Determinant | 51 | 2 | 49 |
+| GRH.Matrix.Groups | 45 | 0 | 45 |
+| GRH.Matrix.Spectral | 39 | 0 | 39 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **2796** | **2795** | **1** |
+| **total** | **3354** | **2844** | **510** |
 <!-- /blueprint-status -->
