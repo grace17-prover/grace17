@@ -357,7 +357,12 @@ graph TD
 | GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
+| GRH.Padic.Numbers | 88 | 6 | 82 |
+| GRH.Padic.Valuation | 63 | 8 | 55 |
+| GRH.Padic.Cp | 33 | 1 | 32 |
+| GRH.Padic.Witt | 43 | 4 | 39 |
+| GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7736** | **6561** | **1175** |
+| **total** | **7999** | **6582** | **1417** |
 <!-- /blueprint-status -->
