@@ -55,6 +55,10 @@ predicate LinearBound (f V normV normW C : Set) :=
   C ∈ ℝ ∧ realZero ≤ C ∧
   (∀ v ∈ Module.carrier(V), normW(f(v)) ≤ R[C * normV(v)])
 
+-- The bounds of f, as a set of reals.
+def linearBoundSet (f V normV normW : Set) : Set :=
+  { D ∈ ℝ | LinearBound(f, V, normV, normW, D) }
+
 -- The operator norm: the least bound (Mathlib's ContinuousLinearMap.opNorm).
 defunique opNorm (f V normV normW : Set) (C ∈ ℝ) :=
   LinearBound(f, V, normV, normW, C) ∧
@@ -62,7 +66,72 @@ defunique opNorm (f V normV normW : Set) (C ∈ ℝ) :=
 requires bounded : ∃ C, LinearBound(f, V, normV, normW, C)
 requires real : ∀ v ∈ Module.carrier(V), normV(v) ∈ ℝ ∧ normW(f(v)) ∈ ℝ
 proof
-  sorry
+  obtain ⟨C0, lb0⟩ := bounded
+  have lb0b := lb0
+  obtain ⟨C0In, C0Nn, C0Bound⟩ := lb0b
+  have sub : linearBoundSet(f, V, normV, normW) ⊆ ℝ
+    intros x hx
+    exact (linearBoundSet.membership.forward with hx).left
+  have C0Mem : C0 ∈ linearBoundSet(f, V, normV, normW)
+    apply linearBoundSet.membership.backward
+    exact ⟨C0In, lb0⟩
+  have ne : Nonempty(linearBoundSet(f, V, normV, normW))
+    unfold Nonempty
+    exact ⟨C0, C0Mem⟩
+  have zeroIn : (0:R) ∈ ℝ by typecheck
+  have zeroLower : ∀ x ∈ linearBoundSet(f, V, normV, normW), (0:R) ≤ x
+    intros x hx
+    have hx2 := linearBoundSet.membership.forward with hx
+    obtain ⟨xIn, xIn2, xNn, xBound⟩ := hx2
+    exact xNn
+  obtain ⟨U, UIn, lower, greatest⟩ := Real.inf_exists with sub, ne, ⟨(0:R), zeroIn, zeroLower⟩
+  have UR : Real(U) by exact UIn
+  have UNn := greatest with (0:R), zeroIn, zeroLower
+  have C0R : Real(C0) by exact C0In
+  have UC0 := lower with C0, C0Mem
+  refine ⟨U, UIn, ?_, ?_⟩
+  . unfold LinearBound
+    refine ⟨UIn, UNn, ?_⟩
+    intros v hv
+    obtain ⟨nIn, wIn⟩ := real with v, hv
+    have nR : Real(normV(v)) by exact nIn
+    have wR : Real(normW(f(v))) by exact wIn
+    by_cases pos : (0:R) < normV(v)
+    . have nNe : normV(v) ≠ (0:R)
+        intro e0
+        rw e0 at pos
+        linarith
+      have qMul := realDiv.mul_right at normW(f(v)), normV(v) with nNe
+      have qIn : normW(f(v)) / normV(v) ∈ ℝ by typecheck
+      have qR : Real(normW(f(v)) / normV(v)) by exact qIn
+      have qLower : ∀ x ∈ linearBoundSet(f, V, normV, normW), normW(f(v)) / normV(v) ≤ x
+        intros x hx
+        have hx2 := linearBoundSet.membership.forward with hx
+        obtain ⟨xIn, xIn2, xNn, xBound⟩ := hx2
+        have xR : Real(x) by exact xIn
+        have b := xBound with v, hv
+        rw ← qMul at b
+        exact realLe.mul_right_cancel_positive at normW(f(v)) / normV(v), x, normV(v) with pos, b
+      have qU := greatest with normW(f(v)) / normV(v), qIn, qLower
+      have nNn : (0:R) ≤ normV(v) by linarith
+      have m := realLe.mul_right_of_nonnegative at normW(f(v)) / normV(v), U, normV(v) with qU, nNn
+      rw qMul at m
+      exact m
+    . have b := C0Bound with v, hv
+      have nNp : (0:R) ≤ (0:R) - normV(v) by linarith
+      have dNn : (0:R) ≤ C0 - U by linarith
+      have m := realLe.mul_left_of_nonnegative at (0:R), (0:R) - normV(v), C0 - U with nNp, dNn
+      have ex : (C0 - U) * ((0:R) - normV(v)) = U * normV(v) - C0 * normV(v) by ring
+      have ez : (C0 - U) * (0:R) = (0:R) by ring
+      rw [ex, ez] at m
+      linarith
+  . intros D lbD
+    have lbD2 := lbD
+    obtain ⟨DIn, DNn, DBound⟩ := lbD2
+    have DMem : D ∈ linearBoundSet(f, V, normV, normW)
+      apply linearBoundSet.membership.backward
+      exact ⟨DIn, lbD⟩
+    exact lower with D, DMem
 uniqueness
   intros C1 C1In p1 C2 C2In p2
   obtain ⟨lb1, min1⟩ := p1
@@ -201,6 +270,19 @@ proof
     exact values
   exact groupFiniteSum.hom at f, Module.additive(V), Module.additive(W), n, w, u with abelianV, abelianW, hom, (Finite.natural at n), values2, composite
 
+-- The carrier of the topology of a normed space is the module's carrier.
+theorem spaceTopology.carrier_eq (V norm : Set)
+  shows TopologicalSpace.carrier(spaceTopology(V, norm)) = Module.carrier(V)
+proof
+  unfold spaceTopology
+  unfold normTopology
+  rw metricTopology.carrier
+  have m : MetricSpace.carrier(normMetric(Module.additive(V), norm)) =
+      Group.carrier(Module.additive(V))
+    unfold normMetric
+    metric_projections
+  rw [m, Module.additive.carrier]
+
 -- Mathlib's ContinuousLinearMap.comp: composites of continuous linear maps
 -- are continuous linear.
 theorem ContinuousLinearMap.comp (f g h U normU V normV W normW K : Set)
@@ -210,7 +292,43 @@ theorem ContinuousLinearMap.comp (f g h U normU V normV W normW K : Set)
   requires composite : ∀ u ∈ Module.carrier(U), h(u) = g(f(u))
   shows ContinuousLinearMap(h, U, normU, W, normW, K)
 proof
-  sorry
+  obtain ⟨linF, contF⟩ := first
+  obtain ⟨linG, contG⟩ := second
+  obtain ⟨modU, modV, fnF, addF, smulF⟩ := linF
+  obtain ⟨modV2, modW, fnG, addG, smulG⟩ := linG
+  have cc := Continuous.comp with contF, contG
+  rw [spaceTopology.carrier_eq, spaceTopology.carrier_eq, spaceTopology.carrier_eq] at cc
+  have fnC := compose.function at g, f, Module.carrier(U), Module.carrier(V), Module.carrier(W) with fnF, fnG
+  have same : h = compose(g, f, Module.carrier(U), Module.carrier(V), Module.carrier(W))
+    apply FunctionBetween.ext with function, fnC
+    intros u hu
+    have a := compose.apply at g, f, Module.carrier(U), Module.carrier(V), Module.carrier(W), u with fnF, fnG, hu
+    have c1 := composite with u, hu
+    rw [a, c1]
+  unfold ContinuousLinearMap
+  refine ⟨?_, ?_⟩
+  . unfold IsLinearMap
+    refine ⟨modU, modW, function, ?_, ?_⟩
+    . intros v hv w hw
+      have vw := Module.add_mem at K, U, v, w with *
+      have fv := FunctionBetween.apply_closed with fnF, hv
+      have fw := FunctionBetween.apply_closed with fnF, hw
+      have c1 := composite with Module.add(U)(v, w), vw
+      have c2 := composite with v, hv
+      have c3 := composite with w, hw
+      have a1 := addF with v, hv, w, hw
+      rw [c1, c2, c3, a1]
+      exact addG with f(v), fv, f(w), fw
+    . intros c hc v hv
+      have cv := Module.smul_mem at K, U, c, v with *
+      have fv := FunctionBetween.apply_closed with fnF, hv
+      have c1 := composite with Module.smul(U)(c, v), cv
+      have c2 := composite with v, hv
+      have a1 := smulF with c, hc, v, hv
+      rw [c1, c2, a1]
+      exact smulG with c, hc, f(v), fv
+  . rw same
+    exact cc
 
 theorem ContinuousLinearMap.identity (V K absK norm : Set)
   requires normed : NormedSpace(V, K, absK, norm)
@@ -247,6 +365,7 @@ proof
 theorem ContinuousLinearMap.iff_bounded (f V K absK normV W normW : Set)
   requires normedV : NormedSpace(V, K, absK, normV)
   requires normedW : NormedSpace(W, K, absK, normW)
+  requires nontrivial : NontriviallyNormedField(K, absK)
   requires linear : IsLinearMap(f, V, W, K)
   shows ContinuousLinearMap(f, V, normV, W, normW, K) ↔
     (∃ C, LinearBound(f, V, normV, normW, C))
@@ -264,11 +383,38 @@ theorem ContinuousLinearMap.of_continuous_at_zero (f V K absK normV W normW : Se
 proof
   sorry
 
+-- The norms read by the operator norm are real.
+theorem opNorm.real_values (f V K absK normV W normW : Set)
+  requires normedV : NormedSpace(V, K, absK, normV)
+  requires normedW : NormedSpace(W, K, absK, normW)
+  requires linear : IsLinearMap(f, V, W, K)
+  shows ∀ v ∈ Module.carrier(V), normV(v) ∈ ℝ ∧ normW(f(v)) ∈ ℝ
+proof
+  obtain ⟨nfV, modV, ngV, lawV⟩ := normedV
+  obtain ⟨nfW, modW, ngW, lawW⟩ := normedW
+  obtain ⟨abelianV, isNormV⟩ := ngV
+  obtain ⟨normFV, restV⟩ := isNormV
+  obtain ⟨abelianW, isNormW⟩ := ngW
+  obtain ⟨normFW, restW⟩ := isNormW
+  obtain ⟨modV2, modW2, fn, addLaw, smulLaw⟩ := linear
+  intros v hv
+  have fv := FunctionBetween.apply_closed with fn, hv
+  have vA : v ∈ Group.carrier(Module.additive(V))
+    rw Module.additive.carrier
+    exact hv
+  have fvA : f(v) ∈ Group.carrier(Module.additive(W))
+    rw Module.additive.carrier
+    exact fv
+  have a := FunctionBetween.apply_closed with normFV, vA
+  have b := FunctionBetween.apply_closed with normFW, fvA
+  exact ⟨a, b⟩
+
 -- Section: The operator norm
 section OperatorNorm
 variable (f V K absK normV W normW : Set)
 hypothesis normedV : NormedSpace(V, K, absK, normV)
 hypothesis normedW : NormedSpace(W, K, absK, normW)
+hypothesis nontrivial : NontriviallyNormedField(K, absK)
 hypothesis continuous : ContinuousLinearMap(f, V, normV, W, normW, K)
 
 theorem opNorm.bound
@@ -294,7 +440,16 @@ theorem opNorm.le_bound (C : Real)
   requires bound : ∀ v ∈ Module.carrier(V), normW(f(v)) ≤ R[C * normV(v)]
   shows opNorm(f, V, normV, normW) ≤ C
 proof
-  sorry
+  have lin := continuous.left
+  have real := opNorm.real_values with normedV, normedW, lin
+  have CIn : C ∈ ℝ by typecheck
+  have lb : LinearBound(f, V, normV, normW, C)
+    unfold LinearBound
+    exact ⟨CIn, nonneg, bound⟩
+  have sel := opNorm.selected at f, V, normV, normW with ⟨C, lb⟩, real
+  obtain ⟨mem, prop⟩ := sel
+  obtain ⟨lbO, least⟩ := prop
+  exact least with C, lb
 
 theorem opNorm.eq_zero_iff
   shows opNorm(f, V, normV, normW) = realZero ↔
@@ -317,6 +472,7 @@ theorem opNorm.comp_le (f g h U K absK normU V normV W normW : Set)
   requires normedU : NormedSpace(U, K, absK, normU)
   requires normedV : NormedSpace(V, K, absK, normV)
   requires normedW : NormedSpace(W, K, absK, normW)
+  requires nontrivial : NontriviallyNormedField(K, absK)
   requires first : ContinuousLinearMap(f, U, normU, V, normV, K)
   requires second : ContinuousLinearMap(g, V, normV, W, normW, K)
   requires function : h : Module.carrier(U) → Module.carrier(W)
@@ -330,6 +486,7 @@ proof
 theorem opNorm.add_le (f g h V K absK normV W normW : Set)
   requires normedV : NormedSpace(V, K, absK, normV)
   requires normedW : NormedSpace(W, K, absK, normW)
+  requires nontrivial : NontriviallyNormedField(K, absK)
   requires first : ContinuousLinearMap(f, V, normV, W, normW, K)
   requires second : ContinuousLinearMap(g, V, normV, W, normW, K)
   requires sum : ∀ v ∈ Module.carrier(V), h(v) = Module.add(W)(f(v), g(v))
@@ -344,6 +501,7 @@ proof
 theorem opNorm.smul (f h c V K absK normV W normW : Set)
   requires normedV : NormedSpace(V, K, absK, normV)
   requires normedW : NormedSpace(W, K, absK, normW)
+  requires nontrivial : NontriviallyNormedField(K, absK)
   requires commutative : CommRing(K)
   requires continuous : ContinuousLinearMap(f, V, normV, W, normW, K)
   requires scalar : c ∈ Ring.carrier(K)
@@ -358,7 +516,26 @@ theorem opNorm.identity_le (V K absK norm : Set)
   requires normed : NormedSpace(V, K, absK, norm)
   shows opNorm(identity(Module.carrier(V)), V, norm, norm) ≤ realOne
 proof
-  sorry
+  have clm := ContinuousLinearMap.identity at V, K, absK, norm with normed
+  have lin := clm.left
+  have real := opNorm.real_values with normed, normed, lin
+  have oneIn : (1:R) ∈ ℝ by typecheck
+  have oneNn : (0:R) ≤ (1:R) by linarith
+  have lb : LinearBound(identity(Module.carrier(V)), V, norm, norm, (1:R))
+    unfold LinearBound
+    refine ⟨oneIn, oneNn, ?_⟩
+    intros v hv
+    have a := identity.apply at v, Module.carrier(V) with hv
+    rw a
+    have nR := (real with v, hv).left
+    have nRR : Real(norm(v)) by exact nR
+    have e : (1:R) * norm(v) = norm(v) by ring
+    rw e
+    linarith
+  have sel := opNorm.selected at identity(Module.carrier(V)), V, norm, norm with ⟨(1:R), lb⟩, real
+  obtain ⟨mem, prop⟩ := sel
+  obtain ⟨lbO, least⟩ := prop
+  exact least with (1:R), lb
 
 -- Uniform boundedness for sequences of operators converging pointwise is
 -- not needed; continuous linear maps into a Banach space from a dense
@@ -518,31 +695,136 @@ proof
   . rw [carEq, smulEq]
     exact mulEq
 
+-- A commutative ring is a one-dimensional module over itself, spanned by 1.
+theorem FiniteDimensional.self_module (K : Set)
+  requires commutative : CommRing(K)
+  shows FiniteDimensionalModule(selfModule(K), K)
+proof
+  have ring := commutative.left
+  have module := Ring.to_module at K with ring
+  have carEq : Module.carrier(selfModule(K)) = Ring.carrier(K)
+    unfold selfModule
+    simp [Module.mk.carrier]
+  have smulEq : Module.smul(selfModule(K)) = Ring.mul(K)
+    unfold selfModule
+    simp [Module.mk.smul]
+  have oneIn := Ring.one_mem at K with ring
+  have oneNat : (1:N) ∈ ℕ by typecheck
+  have zeroIn : (0:N) ∈ (1:N) by simp
+  have shape1 := natural.successor_as_insert at (0:N)
+  have shape2 : insert((0:N), (0:N)) = {(0:N)}
+    ext x
+    constructor
+    . intro hx
+      have hx2 := insert.membership.forward with hx
+      cases hx2 with a | b
+      . simp [a]
+      . exfalso
+        unfold zero at b
+        exact set.empty with b
+    . intro hx
+      simp at hx
+      apply insert.membership.backward
+      left
+      exact hx
+  rw shape2 at shape1
+  have shape : (1:N) = {(0:N)}
+    exact shape1
+  have abelian := Module.additive.abelian_group at selfModule(K), K with module
+  unfold FiniteDimensionalModule
+  refine ⟨(1:N), oneNat, constantFunction((1:N), Ring.carrier(K), Ring.one(K)), ?_⟩
+  unfold SpansModule
+  refine ⟨module, ?_, ?_⟩
+  . intros i hi
+    rw carEq
+    have a := constantFunction.apply at (1:N), Ring.carrier(K), i, Ring.one(K) with hi, oneIn
+    rw a
+    exact oneIn
+  . intros v hv
+    rw carEq at hv
+    refine ⟨constantFunction((1:N), Ring.carrier(K), v), constantFunction((1:N), Ring.carrier(K), v), ?_, ?_⟩
+    . intros i hi
+      have a1 := constantFunction.apply at (1:N), Ring.carrier(K), i, v with hi, hv
+      have a2 := constantFunction.apply at (1:N), Ring.carrier(K), i, Ring.one(K) with hi, oneIn
+      rw [a1, a2, smulEq]
+      have e : Ring.mul(K)(v, Ring.one(K)) = v by ring
+      rw e
+      exact ⟨hv, rfl⟩
+    . have a0 := constantFunction.apply at (1:N), Ring.carrier(K), (0:N), v with zeroIn, hv
+      have vA : constantFunction((1:N), Ring.carrier(K), v)((0:N)) ∈ Group.carrier(Module.additive(selfModule(K)))
+        rw [Module.additive.carrier, carEq, a0]
+        exact hv
+      have s := groupFiniteSum.singleton at Module.additive(selfModule(K)), (0:N), constantFunction((1:N), Ring.carrier(K), v) with abelian, vA
+      rw ← shape at s
+      rw [s, a0]
+
 theorem FiniteDimensional.real_self
   shows FiniteDimensionalModule(realSelfModule, realRing)
 proof
-  sorry
+  have comm := realRing.comm_ring
+  unfold realSelfModule
+  exact FiniteDimensional.self_module at realRing with comm
 
 theorem FiniteDimensional.complex_self
   shows FiniteDimensionalModule(complexSelfModule, complexRing)
 proof
-  sorry
+  have comm := complexRing.comm_ring
+  unfold complexSelfModule
+  exact FiniteDimensional.self_module at complexRing with comm
 
 theorem spaceTopology.real_self
   shows spaceTopology(realSelfModule, realAbs) = realLine
 proof
-  sorry
+  have addEq : Module.additive(realSelfModule) = Ring.additive(realRing)
+    unfold realSelfModule
+    unfold selfModule
+    unfold Module.additive
+    unfold Ring.additive
+    simp [Module.mk.carrier, Module.mk.add, Module.mk.zero, Module.mk.neg]
+  unfold spaceTopology
+  rw addEq
+  exact normTopology.real
 
 theorem spaceTopology.complex_self
   shows spaceTopology(complexSelfModule, complexAbs) = complexSpace
 proof
-  sorry
+  have addEq : Module.additive(complexSelfModule) = Ring.additive(complexRing)
+    unfold complexSelfModule
+    unfold selfModule
+    unfold Module.additive
+    unfold Ring.additive
+    simp [Module.mk.carrier, Module.mk.add, Module.mk.zero, Module.mk.neg]
+  unfold spaceTopology
+  rw [addEq, ← complexAdditiveGroup.ring_additive]
+  unfold complexSpace
+  rfl
 
 -- Over ℝ or ℂ a continuous linear map ℂ → ℂ is multiplication by f(1).
 theorem ContinuousLinearMap.complex_self (f : Set)
   requires linear : IsLinearMap(f, complexSelfModule, complexSelfModule, complexRing)
   shows ∀ z ∈ complexCarrier, f(z) = complexMul(z, f(complexOne))
 proof
-  sorry
+  obtain ⟨modV, modW, fn, addLaw, smulLaw⟩ := linear
+  have comm := complexRing.comm_ring
+  have ring := comm.left
+  have carEq : Module.carrier(complexSelfModule) = Ring.carrier(complexRing)
+    unfold complexSelfModule
+    unfold selfModule
+    simp [Module.mk.carrier]
+  have smulEq : Module.smul(complexSelfModule) = Ring.mul(complexRing)
+    unfold complexSelfModule
+    unfold selfModule
+    simp [Module.mk.smul]
+  rw [carEq, smulEq] at smulLaw
+  have oneIn := Ring.one_mem at complexRing with ring
+  intros z hz
+  have zIn : z ∈ Ring.carrier(complexRing)
+    rw complexRing.carrierOf
+    exact hz
+  have law := smulLaw with z, zIn, Ring.one(complexRing), oneIn
+  have e : Ring.mul(complexRing)(z, Ring.one(complexRing)) = z by ring
+  rw e at law
+  rw [complexRing.mulOf, complexRing.oneOf] at law
+  exact law
 
 end NormedSpaces
