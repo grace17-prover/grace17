@@ -78,6 +78,88 @@ proof
 `), /cannot resolve notation \+ for operand types/);
 });
 
+test("an order between operands placed nowhere is an error, not a natural reading", () => {
+  const message = failure(prefix + `
+def f (x : Set) : Set := x
+
+theorem unplacedOrder (a b : Set)
+  requires h : f(a) ≤ f(b)
+  shows f(a) ≤ f(b)
+proof
+  exact h
+`);
+  assert.match(message, /cannot read f\(a\) ≤ f\(b\): f\(a\) and f\(b\) are placed in no ordered sort/);
+  assert.match(message, /\(f\(a\):N\)/);
+  assert.match(message, /\(f\(a\):R\)/);
+  assert.match(failure(prefix + `
+def f (x : Set) : Set := x
+
+theorem unplacedStrict (a b : Set)
+  shows f(a) < f(b) ∨ f(b) ≤ f(a)
+proof
+  sorry
+`), /placed in no ordered sort/);
+  assert.match(failure(prefix + `
+def f (x : Set) : Set := x
+
+theorem unplacedBesideVariable (a b : Set)
+  shows a ≤ f(b)
+proof
+  sorry
+`), /cannot read a ≤ f\(b\): .*as in \(f\(b\):N\)/);
+  // An operand placed in ℕ by a fact, a typing rule, or an annotation, or
+  // a numeral beside it, keeps the natural order, as do two variables with
+  // no evidence either way.
+  const kernel = load(prefix + `
+def f (x : Set) : Set := x
+
+theorem byFact (a b : Set)
+  requires natural : Nat(f(b))
+  shows f(a) ≤ f(b) ∨ f(b) < f(a)
+proof
+  sorry
+
+theorem byRule (S T : Set)
+  shows cardinality(S) ≤ cardinality(T) ∨ twice(cardinality(S)) < f(T)
+proof
+  sorry
+
+theorem byAnnotation (a b : Set)
+  shows (f(a):N) ≤ f(b) ∧ 0 ≤ f(a)
+proof
+  sorry
+
+theorem variables (a b : Set)
+  shows a ≤ b
+proof
+  sorry
+`);
+  for (const name of ["byFact", "byRule", "byAnnotation", "variables"]) {
+    const statement = canonical(kernel.theorems.get(`Placement.${name}`)!);
+    assert.doesNotMatch(statement, /real|rational/i, name);
+    assert.match(statement, /LessEqual"/, name);
+  }
+});
+
+// A goal of a natural induction's zero case prints succ(0) as 1; written
+// back as the argument of a real parameter, an annotated (1:N) or a
+// spelled succ(0) stays the natural one, and only a bare 1 is the real one.
+test("an annotated or spelled natural numeral keeps its sort as a typed argument", () => {
+  const kernel = load(prefix + `
+theorem written (X : Real)
+  shows realAddValue(X, (1:N)) = realAddValue(X, succ(0)) ∧ realAddValue(X, 1) = realAddValue(X, (1:R))
+proof
+  sorry
+`);
+  const statement = kernel.theorems.get("Placement.written")!;
+  assert.equal(statement.tag, "forall");
+  const conjunction = (statement as { body: { right: { left: unknown; right: unknown } } }).body.right;
+  const natural = canonical(conjunction.left);
+  const real = canonical(conjunction.right);
+  assert.doesNotMatch(natural, /realOne/);
+  assert.equal((real.match(/realOne/g) ?? []).length, 2);
+});
+
 test("an operand whose rules place it in two sorts asks for an annotation", () => {
   assert.match(failure(prefix + `
 def amb (x : Set) : Set := x

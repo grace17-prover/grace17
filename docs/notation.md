@@ -211,7 +211,12 @@ supply. A value the rules type in several sorts is rejected
 with the annotation that selects each, and, when the token has more than
 one typed declaration in scope, an operand that no fact, rule, instance,
 or declared sort places, `cardinality(S) + T` with `T` a plain set, is an
-error naming the operand sorts rather than a natural reading.
+error naming the operand sorts rather than a natural reading. An order
+between operands no syntax places is read as the natural order when an
+operand is a numeral or placed in ℕ, or when both are variables; when an
+operand is an application placed nowhere, `f(a) ≤ f(b)` with `f` a plain
+definition, it is an error naming the annotations `(f(a):N)` and
+`(f(a):R)` that select each order.
 
 ## Seeing the elaboration
 
