@@ -338,7 +338,7 @@ graph TD
 | GRH.Measure.Spaces | 225 | 174 | 51 |
 | GRH.Measure.Lebesgue | 131 | 89 | 42 |
 | GRH.Measure.LIntegral | 187 | 164 | 23 |
-| GRH.Measure.Bochner | 100 | 0 | 100 |
+| GRH.Measure.Bochner | 170 | 126 | 44 |
 | GRH.Measure.Product | 42 | 0 | 42 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
 | GRH.Measure.Haar | 56 | 0 | 56 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7362** | **6348** | **1014** |
+| **total** | **7432** | **6474** | **958** |
 <!-- /blueprint-status -->

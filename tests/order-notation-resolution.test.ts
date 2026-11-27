@@ -28,7 +28,8 @@ theorem refined_side (p : Set)
 proof
   exact Prime.greater_than_one with prime
 
-theorem untyped_sides (a b : Set)
+theorem placed_side (a b : Set)
+  requires natural : a ∈ ℕ
   requires h : a < b
   shows a < b
 proof

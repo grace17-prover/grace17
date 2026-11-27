@@ -78,7 +78,7 @@ proof
 `), /cannot resolve notation \+ for operand types/);
 });
 
-test("an order between operands placed nowhere is an error, not a natural reading", () => {
+test("an order between operands placed nowhere, variables included, is an error, not a natural reading", () => {
   const message = failure(prefix + `
 def f (x : Set) : Set := x
 
@@ -107,9 +107,14 @@ theorem unplacedBesideVariable (a b : Set)
 proof
   sorry
 `), /cannot read a ≤ f\(b\): .*as in \(f\(b\):N\)/);
-  // An operand placed in ℕ by a fact, a typing rule, or an annotation, or
-  // a numeral beside it, keeps the natural order, as do two variables with
-  // no evidence either way.
+  assert.match(failure(prefix + `
+theorem bareVariables (a b : Set)
+  shows a < b ∨ b ≤ a
+proof
+  sorry
+`), /cannot read a < b: a and b are placed in no ordered sort/);
+  // An operand placed in ℕ by a fact, a membership, a typing rule, or an
+  // annotation, or a numeral beside it, keeps the natural order.
   const kernel = load(prefix + `
 def f (x : Set) : Set := x
 
@@ -129,12 +134,13 @@ theorem byAnnotation (a b : Set)
 proof
   sorry
 
-theorem variables (a b : Set)
+theorem byMembership (a b : Set)
+  requires natural : a ∈ ℕ
   shows a ≤ b
 proof
   sorry
 `);
-  for (const name of ["byFact", "byRule", "byAnnotation", "variables"]) {
+  for (const name of ["byFact", "byRule", "byAnnotation", "byMembership"]) {
     const statement = canonical(kernel.theorems.get(`Placement.${name}`)!);
     assert.doesNotMatch(statement, /real|rational/i, name);
     assert.match(statement, /LessEqual"/, name);
