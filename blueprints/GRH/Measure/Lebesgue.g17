@@ -1465,12 +1465,195 @@ proof
 
 -- Every set has a measurable hull of the same measure
 -- (Mathlib's toMeasurable).
+-- Measurable supersets of A whose measure is within dyadicRadius(n) of
+-- the outer value of A, and a choice of one for every n.
+def approxSupersets (X μ A n : Set) : Set :=
+  { B ∈ measurableSupersets(X, A) |
+    μ(B) ∈ ℝ ∧ μ(B) < R[measureOf(X, μ, A) + dyadicRadii(n)] }
+def approxFamily (X μ A : Set) : Set := { approxSupersets(X, μ, A, n) | n ∈ ℕ }
+def hullSequence (c X μ A : Set) : Set :=
+  { (n, c(approxSupersets(X, μ, A, n))) | n ∈ ℕ }
+
+theorem hullSequence.apply (c X μ A n : Set)
+  requires member : n ∈ ℕ
+  shows hullSequence(c, X, μ, A)(n) = c(approxSupersets(X, μ, A, n))
+proof
+  have edge : (n, c(approxSupersets(X, μ, A, n))) ∈ hullSequence(c, X, μ, A)
+    apply hullSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ hullSequence(c, X, μ, A), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := hullSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, c(approxSupersets(X, μ, A, k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ d, (a, b) ∈ hullSequence(c, X, μ, A) → (a, d) ∈ hullSequence(c, X, μ, A) → b = d
+    intros a b d hb hd
+    obtain ⟨k, hk, bEq⟩ := hullSequence.membership.forward with hb
+    obtain ⟨m, hm, dEq⟩ := hullSequence.membership.forward with hd
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, dd⟩ := orderedPair.injective with dEq
+    rw [← bb, ← dd, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+-- The outer value is below the measure of every measurable superset.
+theorem measureOf.le_superset (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, B)
+  requires inside : A ⊆ B
+  shows EnnLe(measureOf(X, μ, A), μ(B))
+proof
+  have m := measureOf.mono with measure, inside
+  rw measureOf.eq_of_measurable with measure, set at m
+  exact m
+
 theorem measureOf.hull (X μ A : Set)
   requires measure : Measure(X, μ)
   requires inside : A ⊆ MeasurableSpace.carrier(X)
   shows ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B ∧ μ(B) = measureOf(X, μ, A)
 proof
-  sorry
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have u2 := u
+  unfold MeasurableSet at u2
+  have inside2 : supersetMeasures(X, μ, A) ⊆ ennreal
+    intros s hs
+    obtain ⟨B, hB, e⟩ := supersetMeasures.membership.forward with hs
+    obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+    rw ← e
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB2
+    exact Measure.member with measure, mB
+  obtain ⟨lower, greatest⟩ := ennInf.greatest_lower with inside2
+  have mM : measureOf(X, μ, A) ∈ ennreal
+    unfold measureOf
+    exact lower.left
+  by_cases top : measureOf(X, μ, A) = ennTop
+  . have le := measureOf.le_superset with measure, u, inside
+    rw top at le
+    have e := EnnLe.top_eq with le
+    refine ⟨MeasurableSpace.carrier(X), u2, inside, ?_⟩
+    rw [e, top]
+  . obtain ⟨mR, mN⟩ := ennreal.finite with mM, top
+    have mReal : Real(measureOf(X, μ, A)) by exact mR
+    have inhabited : ∀ S ∈ approxFamily(X, μ, A), ∃ y, y ∈ S
+      intros S hS
+      obtain ⟨n, hn, e⟩ := approxFamily.membership.forward with hS
+      rw ← e
+      have nN : Nat(n) by exact hn
+      have rv := dyadicRadii.value at n
+      have rp := dyadicRadius.positive at n
+      have rR : Real(dyadicRadius(n)) := dyadicRadius.real at n
+      by_contra none
+      have bound : EnnLowerBound(supersetMeasures(X, μ, A), R[measureOf(X, μ, A) + dyadicRadii(n)])
+        rw rv
+        have tR : R[measureOf(X, μ, A) + dyadicRadius(n)] ∈ ℝ by typecheck
+        have tN : realZero ≤ R[measureOf(X, μ, A) + dyadicRadius(n)] by linarith
+        have tM := ennreal.of_real with tR, tN
+        have tT := ennreal.not_top_of_real with tR
+        unfold EnnLowerBound
+        refine ⟨tM, ?_⟩
+        intros s hs
+        obtain ⟨B, hB, es⟩ := supersetMeasures.membership.forward with hs
+        have sM := inside2 with s, hs
+        unfold EnnLe
+        refine ⟨tM, sM, ?_⟩
+        by_cases st : s = ennTop
+        . left
+          exact st
+        . right
+          refine ⟨tT, ?_⟩
+          obtain ⟨sR, sN⟩ := ennreal.finite with sM, st
+          have sReal : Real(s) by exact sR
+          by_contra notLe
+          have lt : s < R[measureOf(X, μ, A) + dyadicRadius(n)] by linarith
+          apply none
+          rw ← es at sR
+          rw ← es at lt
+          rw ← rv at lt
+          have mem : B ∈ approxSupersets(X, μ, A, n) := approxSupersets.membership.backward with ⟨hB, sR, lt⟩
+          exact ⟨B, mem⟩
+      have g := greatest with R[measureOf(X, μ, A) + dyadicRadii(n)], bound
+      rw rv at g
+      have mdef : ennInf(supersetMeasures(X, μ, A)) = measureOf(X, μ, A)
+        unfold measureOf
+        rfl
+      rw mdef at g
+      obtain ⟨g1, g2, alt⟩ := g
+      cases alt with t | fin
+      . exact top with t
+      . have l := fin.right
+        linarith
+    obtain ⟨c, fnc, sel⟩ := set.choice with inhabited
+    have hs : ∀ n ∈ ℕ, hullSequence(c, X, μ, A)(n) ∈ approxSupersets(X, μ, A, n)
+      intros n hn
+      rw hullSequence.apply with hn
+      have mem : approxSupersets(X, μ, A, n) ∈ approxFamily(X, μ, A) := approxFamily.membership.backward with ⟨n, hn, rfl⟩
+      exact sel with approxSupersets(X, μ, A, n), mem
+    have hm : ∀ n ∈ ℕ, MeasurableSet(X, hullSequence(c, X, μ, A)(n))
+      intros n hn
+      obtain ⟨hB, rest⟩ := approxSupersets.membership.forward with (hs with n, hn)
+      obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+      unfold MeasurableSet
+      exact hB2
+    have Bm := MeasurableSet.sequence_inter with space, hm
+    have Bm2 := Bm
+    unfold MeasurableSet at Bm2
+    have AB : A ⊆ sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))
+      intros x hx
+      apply sequenceInter.membership.backward
+      refine ⟨(inside with x, hx), ?_⟩
+      intros n hn
+      obtain ⟨hB, rest⟩ := approxSupersets.membership.forward with (hs with n, hn)
+      obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+      exact sub with x, hx
+    refine ⟨sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)), Bm2, AB, ?_⟩
+    have ge := measureOf.le_superset with measure, Bm, AB
+    have below : ∀ n ∈ ℕ, EnnLe(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))), μ(hullSequence(c, X, μ, A)(n)))
+      intros n hn
+      have sub : sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)) ⊆ hullSequence(c, X, μ, A)(n)
+        intros x hx
+        obtain ⟨xX, all⟩ := sequenceInter.membership.forward with hx
+        exact all with n, hn
+      exact Measure.mono with measure, Bm, (hm with n, hn), sub
+    have zN : zero ∈ ℕ by typecheck
+    obtain ⟨hB0, r0, lt0⟩ := approxSupersets.membership.forward with (hs with zero, zN)
+    have b0 := below with zero, zN
+    have bM := Measure.member with measure, Bm
+    have bT : μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) ≠ ennTop
+      intro t
+      rw t at b0
+      have e := EnnLe.top_eq with b0
+      have nt := ennreal.not_top_of_real with r0
+      exact nt with e
+    obtain ⟨bR, bN⟩ := ennreal.finite with bM, bT
+    have bReal : Real(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)))) by exact bR
+    have le : μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) ≤ measureOf(X, μ, A)
+      by_contra notLe
+      have pos : realZero < R[μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) - measureOf(X, μ, A)] by linarith
+      obtain ⟨N, hN, small⟩ := dyadicRadii.eventually_below at R[μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) - measureOf(X, μ, A)] with pos
+      have NN : Nat(N) by exact hN
+      have refl : N ≤ N by arith
+      have sN := small with N, hN, refl
+      obtain ⟨hBN, rN, ltN⟩ := approxSupersets.membership.forward with (hs with N, hN)
+      have rv := dyadicRadii.value at N
+      rw rv at ltN
+      have bNle := below with N, hN
+      obtain ⟨x1, x2, alt⟩ := bNle
+      have rNReal : Real(μ(hullSequence(c, X, μ, A)(N))) by exact rN
+      have rRe : Real(dyadicRadius(N)) := dyadicRadius.real at N
+      cases alt with t | fin
+      . have nt := ennreal.not_top_of_real with rN
+        exact nt with t
+      . have l := fin.right
+        linarith
+    have mT := ennreal.not_top_of_real with bR
+    have le2 : EnnLe(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))), measureOf(X, μ, A))
+      unfold EnnLe
+      refine ⟨bM, mM, ?_⟩
+      right
+      exact ⟨mT, le⟩
+    exact EnnLe.antisymmetric with le2, ge
 
 theorem measureOf.outer (X μ : Set)
   requires measure : Measure(X, μ)
