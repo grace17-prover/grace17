@@ -68,6 +68,110 @@ predicate Profinite (X : Set) :=
 def imageIn (f A Y : Set) : Set := { y ∈ Y | ∃ x ∈ A, y = f(x) }
 def realNaturals : Set := { realNat(n) | n ∈ ℕ }
 
+-- Helpers for Compact.iff_cluster: the open sets missing a member of F,
+-- finite families of them missing one common member, and the filter of
+-- the sets containing what a finite part of a cover leaves of A.
+def cptMissing (X F : Set) : Set :=
+  { U ∈ TopologicalSpace.opens(X) | ∃ B ∈ F, ∀ y ∈ U, y ∉ B }
+def cptMissingFamilies (F G0 : Set) : Set :=
+  { G ∈ 𝒫(G0) | ∃ B ∈ F, ∀ U ∈ G, ∀ y ∈ U, y ∉ B }
+def cptCoverFilter (X A C : Set) : Set :=
+  { B ∈ 𝒫(TopologicalSpace.carrier(X)) |
+    ∃ G, G ⊆ C ∧ Finite(G) ∧ A ∖ ⋃(G) ⊆ B }
+
+theorem cptMissing.common (S F G0 : Set)
+  requires filter : IsFilter(S, F)
+  requires each : ∀ U ∈ G0, ∃ B ∈ F, ∀ y ∈ U, y ∉ B
+  requires finite : Finite(G0)
+  shows ∃ B ∈ F, ∀ U ∈ G0, ∀ y ∈ U, y ∉ B
+proof
+  have base : ∅ ∈ cptMissingFamilies(F, G0)
+    obtain ⟨FP, SF, up, inter⟩ := filter
+    apply cptMissingFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at G0)), S, SF, ?_⟩
+    intros U hU
+    simp at hU
+  have step : ∀ G ⊆ G0, Finite(G) → ∀ W ∈ G0, W ∉ G →
+      G ∈ cptMissingFamilies(F, G0) → G ∪ {W} ∈ cptMissingFamilies(F, G0)
+    intros G hG finiteG W hW fresh known
+    obtain ⟨_, B, hB, missB⟩ := cptMissingFamilies.membership.forward with known
+    obtain ⟨B2, hB2, missB2⟩ := each with W, hW
+    obtain ⟨FP, SF, up, inter⟩ := filter
+    have BB := inter with B, hB, B2, hB2
+    have bound : G ∪ {W} ⊆ G0
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isW
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isW)
+    apply cptMissingFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), B ∩ B2, BB, ?_⟩
+    intros U hU y hy yIn
+    obtain ⟨yB, yB2⟩ := intersection.membership.forward with yIn
+    cases (union2.membership.forward with hU) with inG | isW
+    . exact (missB with U, inG, y, hy) with yB
+    . have UW := singleton.membership.forward with isW
+      rw UW at hy
+      exact (missB2 with y, hy) with yB2
+  have all := Finite.induction with base, step
+  have member := all with G0, (Subset.reflexive at G0), finite
+  obtain ⟨_, rest⟩ := cptMissingFamilies.membership.forward with member
+  exact rest
+
+theorem cptCoverFilter.proper (X A C : Set)
+  requires inside : A ⊆ X.carrier
+  requires noFinite : ¬(∃ G, G ⊆ C ∧ Finite(G) ∧ A ⊆ ⋃(G))
+  shows ProperFilter(X.carrier, cptCoverFilter(X, A, C))
+proof
+  unfold ProperFilter
+  refine ⟨?_, ?_⟩
+  . unfold IsFilter
+    refine ⟨?_, ?_, ?_, ?_⟩
+    . intros B hB
+      exact (cptCoverFilter.membership.forward with hB).left
+    . apply cptCoverFilter.membership.backward
+      refine ⟨(powerset.membership_iff.backward with (Subset.reflexive at X.carrier)), ∅, (empty.subset at C), Finite.empty, ?_⟩
+      intros y hy
+      exact inside with y, (difference.membership.forward with hy).left
+    . intros B hB B2 sub B2X
+      obtain ⟨_, G, GC, finG, AG⟩ := cptCoverFilter.membership.forward with hB
+      apply cptCoverFilter.membership.backward
+      refine ⟨(powerset.membership_iff.backward with B2X), G, GC, finG, (Subset.transitive with AG, sub)⟩
+    . intros B hB B2 hB2
+      obtain ⟨BP, G, GC, finG, AG⟩ := cptCoverFilter.membership.forward with hB
+      obtain ⟨_, G2, GC2, finG2, AG2⟩ := cptCoverFilter.membership.forward with hB2
+      have GG : G ∪ G2 ⊆ C
+        intros Z hZ
+        cases (union2.membership.forward with hZ) with inG | inG2
+        . exact GC with Z, inG
+        . exact GC2 with Z, inG2
+      have BX := powerset.membership_iff.forward with BP
+      have interX : B ∩ B2 ⊆ X.carrier
+        intros y hy
+        exact BX with y, (intersection.membership.forward with hy).left
+      apply cptCoverFilter.membership.backward
+      refine ⟨(powerset.membership_iff.backward with interX), G ∪ G2, GG, (Finite.union with finG, finG2), ?_⟩
+      intros y hy
+      obtain ⟨yA, yNot⟩ := difference.membership.forward with hy
+      have n1 : y ∉ ⋃(G)
+        intro yG
+        obtain ⟨U, hU, yU⟩ := union.membership.forward with yG
+        exact yNot with (union.membership.backward with ⟨U, (union2.left with hU), yU⟩)
+      have n2 : y ∉ ⋃(G2)
+        intro yG
+        obtain ⟨U, hU, yU⟩ := union.membership.forward with yG
+        exact yNot with (union.membership.backward with ⟨U, (union2.right with hU), yU⟩)
+      have y1 := AG with y, (difference.membership.backward with yA, n1)
+      have y2 := AG2 with y, (difference.membership.backward with yA, n2)
+      exact intersection.membership.backward with y1, y2
+  . intro emptyIn
+    obtain ⟨_, G, GC, finG, AG⟩ := cptCoverFilter.membership.forward with emptyIn
+    apply noFinite
+    refine ⟨G, GC, finG, ?_⟩
+    intros y yA
+    by_contra notIn
+    have yE := AG with y, (difference.membership.backward with yA, notIn)
+    simp at yE
+
 -- Section: Compactness through filters
 -- A is compact exactly when every proper filter containing A clusters at
 -- a point of A. No ultrafilter, and so no choice, is involved.
@@ -77,7 +181,103 @@ theorem Compact.iff_cluster (X A : Set)
   shows Compact(X, A) ↔
     (∀ F, ProperFilter(X.carrier, F) → A ∈ F → ∃ x ∈ A, ClusterPt(X, x, F))
 proof
-  sorry
+  constructor
+  . intro compact
+    intros F prop AF
+    have prop2 := prop
+    obtain ⟨filt, noEmpty⟩ := prop2
+    by_contra none
+    have each : ∀ x ∈ A, ∃ U ∈ X.opens, x ∈ U ∧ (∃ B ∈ F, ∀ y ∈ U, y ∉ B)
+      intros x hx
+      have xX := inside with x, hx
+      by_contra noU
+      apply none
+      refine ⟨x, hx, ?_⟩
+      unfold ClusterPt
+      refine ⟨xX, ?_⟩
+      have nf := nhds.is_filter at X, x with space, xX
+      have nff := nf.left
+      have inff := filterInf.is_filter at X.carrier, nhds(X, x), F with nff, filt
+      unfold ProperFilter
+      refine ⟨inff, ?_⟩
+      intro emptyIn
+      obtain ⟨_, N, hN, B, hB, NB⟩ := filterInf.membership.forward with emptyIn
+      obtain ⟨_, U, hU, xU, UN⟩ := nhds.membership.forward with hN
+      apply noU
+      refine ⟨U, hU, xU, B, hB, ?_⟩
+      intros y hy yB
+      have yN := UN with y, hy
+      have yNB := NB with y, (intersection.membership.backward with yN, yB)
+      simp at yNB
+    have cover : OpenCover(X.opens, A, cptMissing(X, F))
+      unfold OpenCover
+      constructor
+      . intros U hU
+        exact (cptMissing.membership.forward with hU).left
+      . intros x hx
+        obtain ⟨U, hU, xU, rest⟩ := each with x, hx
+        have mem : U ∈ cptMissing(X, F)
+          apply cptMissing.membership.backward
+          exact ⟨hU, rest⟩
+        exact union.membership.backward with ⟨U, mem, xU⟩
+    have ic := compact
+    unfold Compact at ic
+    obtain ⟨G, GC, finG, AG⟩ := IsCompact.subcover with ic, cover
+    have eachG : ∀ U ∈ G, ∃ B ∈ F, ∀ y ∈ U, y ∉ B
+      intros U hU
+      exact (cptMissing.membership.forward with (GC with U, hU)).right
+    obtain ⟨B, hB, disj⟩ := cptMissing.common with filt, eachG, finG
+    obtain ⟨FP, XF, up, inter⟩ := filt
+    have AB := inter with A, AF, B, hB
+    have sub : A ∩ B ⊆ ∅
+      intros y hy
+      obtain ⟨yA, yB⟩ := intersection.membership.forward with hy
+      obtain ⟨U, hU, yU⟩ := union.membership.forward with (AG with y, yA)
+      exfalso
+      exact (disj with U, hU, y, yU) with yB
+    have eIn := up with A ∩ B, AB, ∅, sub, (empty.subset at X.carrier)
+    exact noEmpty with eIn
+  . intro clusters
+    unfold Compact
+    unfold IsCompact
+    refine ⟨inside, ?_⟩
+    intros C cover
+    by_contra noFin
+    have prop := cptCoverFilter.proper at X, A, C with inside, noFin
+    have AIn : A ∈ cptCoverFilter(X, A, C)
+      apply cptCoverFilter.membership.backward
+      refine ⟨(powerset.membership_iff.backward with inside), ∅, (empty.subset at C), Finite.empty, ?_⟩
+      intros y hy
+      exact (difference.membership.forward with hy).left
+    obtain ⟨x, xA, cl⟩ := clusters with cptCoverFilter(X, A, C), prop, AIn
+    obtain ⟨CT, AC⟩ := cover
+    obtain ⟨U, UC, xU⟩ := union.membership.forward with (AC with x, xA)
+    have Uopen := CT with U, UC
+    obtain ⟨xX, infProp⟩ := cl
+    obtain ⟨_, noE⟩ := infProp
+    apply noE
+    have UN := nhds.open_mem at X, x, U with space, Uopen, xU
+    have compX : X.carrier ∖ U ⊆ X.carrier
+      intros y hy
+      exact (difference.membership.forward with hy).left
+    have UsingC : {U} ⊆ C
+      intros Z hZ
+      rwa (singleton.membership.forward with hZ)
+    have BIn : X.carrier ∖ U ∈ cptCoverFilter(X, A, C)
+      apply cptCoverFilter.membership.backward
+      refine ⟨(powerset.membership_iff.backward with compX), {U}, UsingC, (Finite.singleton at U), ?_⟩
+      intros y hy
+      obtain ⟨yA, yNot⟩ := difference.membership.forward with hy
+      have yNotU : y ∉ U
+        intro yU
+        exact yNot with (union.membership.backward with ⟨U, (singleton.membership.backward with rfl), yU⟩)
+      exact difference.membership.backward with (inside with y, yA), yNotU
+    apply filterInf.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at X.carrier)), U, UN, X.carrier ∖ U, BIn, ?_⟩
+    intros y hy
+    obtain ⟨yU, yC⟩ := intersection.membership.forward with hy
+    exfalso
+    exact (difference.membership.forward with yC).right with yU
 
 -- Helpers for the family form of the subcover property: the family of
 -- the sets U(i), and finite subfamilies of it, each set named by an index.
