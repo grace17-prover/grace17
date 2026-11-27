@@ -2077,18 +2077,187 @@ def ennMulReal (c a : Set) : Set :=
     (a = ennTop ∧ c = realZero ∧ S = realZero) ∨
     (a = ennTop ∧ c ≠ realZero ∧ S = ennTop) })
 
+-- Helpers for real sums: the real line is Hausdorff, a real sum is the
+-- total value, and a sum of a nonnegative family is nonnegative.
+theorem realLine.hausdorff
+  shows Hausdorff(realLine)
+proof
+  have h := realTopology.hausdorff
+  unfold Hausdorff
+  rw [realLine.carrier, realLine.opens]
+  exact h
+
+theorem RealHasSum.tsum_eq (f I S : Set)
+  requires sum : RealHasSum(f, I, S)
+  shows realTsum(f, I) = S
+proof
+  have top := realAdditiveGroup.topological
+  have abelian := realAdditiveGroup.abelian
+  have haus := realLine.hausdorff
+  unfold RealHasSum at sum
+  unfold realTsum
+  exact tsum.eq_of_hasSum with top, abelian, haus, sum
+
+theorem RealHasSum.real (f I S : Set)
+  requires sum : RealHasSum(f, I, S)
+  shows S ∈ ℝ
+proof
+  unfold RealHasSum at sum
+  have sIn := sum.left
+  rw realAdditiveGroup.carrier at sIn
+  exact sIn
+
+theorem RealHasSum.nonneg (f I S : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
+  requires sum : RealHasSum(f, I, S)
+  shows realZero ≤ S
+proof
+  have SIn := RealHasSum.real with sum
+  have SR : Real(S) by exact SIn
+  by_contra notLe
+  have neg : (S:R) < (0:R) by linarith
+  have pos : (0:R) < (0:R) - (S:R) by linarith
+  have eR : Real(R[0 - S]) by typecheck
+  have eIn : R[0 - S] ∈ ℝ by typecheck
+  have sub := openBall.subset_reals at S, R[0 - S]
+  have self : openBall(S, R[0 - S]) ⊆ openBall(S, R[0 - S]) by simp
+  have iff := realLine.nhds_iff at S, openBall(S, R[0 - S]) with SIn
+  have Bn := iff.backward with ⟨sub, R[0 - S], eIn, pos, self⟩
+  unfold RealHasSum at sum
+  obtain ⟨sIn, tails⟩ := sum
+  obtain ⟨F0, F0I, F0fin, tail⟩ := tails with openBall(S, R[0 - S]), Bn
+  have self0 : F0 ⊆ F0 by simp
+  have inBall := tail with F0, F0I, F0fin, self0
+  have v0 : ∀ i ∈ F0, f(i) ∈ ℝ
+    intros i hi
+    exact values with i, (F0I with i, hi)
+  have n0 : ∀ i ∈ F0, realZero ≤ f(i)
+    intros i hi
+    exact nonneg with i, (F0I with i, hi)
+  have nn := realFiniteSum.nonneg with F0fin, v0, n0
+  have sR := realFiniteSum.real with F0fin, v0
+  have sRR : Real(realFiniteSum(f, F0)) by exact sR
+  have inBall2 : realFiniteSum(f, F0) ∈ openBall(S, R[0 - S])
+    unfold realFiniteSum
+    exact inBall
+  have bounds := (openBall.order_characterization at realFiniteSum(f, F0), S, R[0 - S]).forward with inBall2
+  have hi := bounds.right
+  linarith
+
 theorem ennTop.not_real
   shows ennTop ∉ ℝ
 proof
   unfold ennTop
   exact membership.irreflexive at ℝ
 
+theorem ennSum.of_summable_helper (f I : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
+  requires summable : RealSummable(f, I)
+  shows ennSum(f, I) = realTsum(f, I)
+proof
+  have summable2 := summable
+  unfold RealSummable at summable2
+  obtain ⟨S, SIn, sum⟩ := summable2
+  have sumR : RealHasSum(f, I, S)
+    unfold RealHasSum
+    exact sum
+  have eq := RealHasSum.tsum_eq with sumR
+  have SR := RealHasSum.real with sumR
+  have nn := RealHasSum.nonneg with values, nonneg, sumR
+  have notTop : S ≠ ennTop
+    intro e
+    have bad := ennTop.not_real
+    rw ← e at bad
+    exact bad with SR
+  have SEnn : S ∈ ennreal
+    unfold ennreal
+    simp
+  have family : ennSum.family(f, I) = {S}
+    ext x
+    constructor
+    . intro hx
+      have hx2 := ennSum.family.membership.forward with hx
+      obtain ⟨xIn, alt⟩ := hx2
+      cases alt with fin | top
+      . have e2 := RealHasSum.tsum_eq with fin.right
+        rw eq at e2
+        rw ← e2
+        simp
+      . exfalso
+        exact top.right with summable
+    . intro hx
+      simp at hx
+      rw hx
+      apply ennSum.family.membership.backward
+      refine ⟨SEnn, ?_⟩
+      left
+      exact ⟨notTop, sumR⟩
+  unfold ennSum
+  rw [family, eq]
+  exact union.singleton at S
+
+theorem ennSum.of_not_summable_helper (f I : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
+  requires divergent : ¬RealSummable(f, I)
+  shows ennSum(f, I) = ennTop
+proof
+  have topIn : ennTop ∈ ennreal
+    unfold ennreal
+    simp
+  have family : ennSum.family(f, I) = {ennTop}
+    ext x
+    constructor
+    . intro hx
+      have hx2 := ennSum.family.membership.forward with hx
+      obtain ⟨xIn, alt⟩ := hx2
+      cases alt with fin | top
+      . exfalso
+        apply divergent
+        have sum := fin.right
+        unfold RealHasSum at sum
+        have xIn2 := sum.left
+        unfold RealSummable
+        unfold SummableFamily
+        refine ⟨x, xIn2, sum⟩
+      . rw top.left
+        simp
+    . intro hx
+      simp at hx
+      rw hx
+      apply ennSum.family.membership.backward
+      refine ⟨topIn, ?_⟩
+      right
+      exact ⟨rfl, divergent⟩
+  unfold ennSum
+  rw family
+  exact union.singleton at ennTop
+
 theorem ennSum.member (f I : Set)
   requires values : ∀ i ∈ I, f(i) ∈ ℝ
   requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
   shows ennSum(f, I) ∈ ennreal
 proof
-  sorry
+  by_cases summable : RealSummable(f, I)
+  . have eq := ennSum.of_summable_helper with values, nonneg, summable
+    have summable2 := summable
+    unfold RealSummable at summable2
+    obtain ⟨S, SIn, sum⟩ := summable2
+    have sumR : RealHasSum(f, I, S)
+      unfold RealHasSum
+      exact sum
+    have teq := RealHasSum.tsum_eq with sumR
+    have SR := RealHasSum.real with sumR
+    have nn := RealHasSum.nonneg with values, nonneg, sumR
+    rw [eq, teq]
+    unfold ennreal
+    simp
+  . have eq := ennSum.of_not_summable_helper with values, nonneg, summable
+    rw eq
+    unfold ennreal
+    simp
 
 theorem ennSum.of_summable (f I : Set)
   requires values : ∀ i ∈ I, f(i) ∈ ℝ
@@ -2096,7 +2265,7 @@ theorem ennSum.of_summable (f I : Set)
   requires summable : RealSummable(f, I)
   shows ennSum(f, I) = realTsum(f, I)
 proof
-  sorry
+  exact ennSum.of_summable_helper with values, nonneg, summable
 
 theorem ennSum.of_not_summable (f I : Set)
   requires values : ∀ i ∈ I, f(i) ∈ ℝ
@@ -2104,7 +2273,7 @@ theorem ennSum.of_not_summable (f I : Set)
   requires divergent : ¬RealSummable(f, I)
   shows ennSum(f, I) = ennTop
 proof
-  sorry
+  exact ennSum.of_not_summable_helper with values, nonneg, divergent
 
 -- Mathlib's ENNReal.le_tsum.
 theorem ennSum.term_le (f I j : Set)
