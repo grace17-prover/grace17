@@ -298,10 +298,10 @@ graph TD
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
-| GRH.Algebra.Divisibility | 108 | 105 | 3 |
-| GRH.Algebra.Ideals | 163 | 96 | 67 |
-| GRH.Algebra.Localization | 59 | 26 | 33 |
-| GRH.Algebra.LocalRings | 47 | 27 | 20 |
+| GRH.Algebra.Divisibility | 108 | 106 | 2 |
+| GRH.Algebra.Ideals | 171 | 143 | 28 |
+| GRH.Algebra.Localization | 84 | 70 | 14 |
+| GRH.Algebra.LocalRings | 47 | 34 | 13 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6838** | **5162** | **1676** |
+| **total** | **6871** | **5261** | **1610** |
 <!-- /blueprint-status -->
