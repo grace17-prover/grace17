@@ -302,9 +302,9 @@ graph TD
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
 | GRH.Algebra.Localization | 58 | 1 | 57 |
 | GRH.Algebra.LocalRings | 45 | 0 | 45 |
-| GRH.Matrix.Spectral | 39 | 0 | 39 |
+| GRH.Matrix.Spectral | 49 | 19 | 30 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
-| GRH.Linear.Dual | 26 | 0 | 26 |
+| GRH.Linear.Dual | 81 | 79 | 2 |
 | GRH.Linear.Tensor | 54 | 1 | 53 |
 | GRH.Polynomial.Multivariate | 69 | 1 | 68 |
 | GRH.Algebra.Finiteness | 76 | 1 | 75 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6339** | **4249** | **2090** |
+| **total** | **6404** | **4347** | **2057** |
 <!-- /blueprint-status -->
