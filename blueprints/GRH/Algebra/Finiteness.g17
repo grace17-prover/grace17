@@ -577,7 +577,41 @@ theorem finHelp.neg_one_mul (x : R)
 proof
   ring
 
+theorem finHelp.unit_of_pow_eq (a c : R) (k : Nat)
+  requires domain : IntegralDomain(R)
+  requires nonzero : a ≠ R[0]
+  requires equal : a ^ k = a ^ succ(k) * c
+  shows RingUnit(R, a)
+proof
+  have ringR := CommRing.to_ring with comm
+  have shift := add.right_one at k with *
+  have aIn : a ∈ R.carrier by assumption
+  have cIn : c ∈ R.carrier by assumption
+  have s := Ring.pow_succ at R, a, k with aIn, ringR
+  rw ← shift at equal
+  rw s at equal
+  have pne : a ^ k ≠ R[0]
+    intro pz
+    have az := IntegralDomain.pow_eq_zero at R, a, k with domain, aIn, pz
+    exact nonzero with az
+  have e2 : a ^ k * R[1] = a ^ k * (a * c)
+    linear_combination equal
+  have pIn : a ^ k ∈ R.carrier by typecheck
+  have one : R[1] ∈ R.carrier by typecheck
+  have acIn : a * c ∈ R.carrier by typecheck
+  have c1 := IntegralDomain.mul_cancel at R, a ^ k, R[1], a * c with domain, pIn, one, acIn, pne, e2
+  have c2 : a * c = R[1]
+    symm
+    exact c1
+  have c3 : c * a = R[1]
+    linear_combination c2
+  unfold RingUnit
+  exact ⟨aIn, c, cIn, c2, c3⟩
+
 end FinRingHelpers
+
+-- The principal ideals (aⁿ), n ∈ ℕ.
+def finPowIdeals (R a : Set) : Set := { ringMultiples(R, Ring.pow(R, a, n)) | n ∈ ℕ }
 
 -- Helper (finiteness track): finitely many elements with preimages in K
 -- have preimages in a finite subset of K.
@@ -1943,7 +1977,73 @@ theorem ArtinianRing.domain_field
   requires domain : IntegralDomain(R)
   shows Field(R)
 proof
-  sorry
+  have ringR := CommRing.to_ring with comm
+  have art0 := artinian
+  obtain ⟨_, artMod⟩ := art0
+  obtain ⟨_, minC⟩ := artMod
+  have nt := IntegralDomain.nontrivial at R with domain
+  have units : ∀ a ∈ R.carrier, a ≠ R.zero → RingUnit(R, a)
+    intros a aR ane
+    have zeroIn : 0 ∈ ℕ by typecheck
+    have pIn : ringMultiples(R, Ring.pow(R, a, 0)) ∈ finPowIdeals(R, a)
+      apply finPowIdeals.membership.backward
+      exact ⟨0, zeroIn, rfl⟩
+    have nonE : Nonempty(finPowIdeals(R, a))
+      exact ⟨ringMultiples(R, Ring.pow(R, a, 0)), pIn⟩
+    have ne := Nonempty.ne_empty with nonE
+    have subsF : ∀ J ∈ finPowIdeals(R, a), SubmoduleOf(J, selfModule(R), R)
+      intros J hJ
+      obtain ⟨n, nN, Jn⟩ := finPowIdeals.membership.forward with hJ
+      have nNat : Nat(n) := nN
+      have pR := Ring.pow_mem at R, a, n with aR, ringR
+      have mi := ringMultiples.ideal at R, Ring.pow(R, a, n) with pR, comm
+      rw ← Jn
+      exact (Ideal.iff_submodule at R, ringMultiples(R, Ring.pow(R, a, n)) with comm).forward with mi
+    obtain ⟨J0, hJ0, minJ⟩ := minC with finPowIdeals(R, a), ne, subsF
+    obtain ⟨k, kN, Jk⟩ := finPowIdeals.membership.forward with hJ0
+    have kNat : Nat(k) := kN
+    have sk : succ(k) ∈ ℕ by typecheck
+    have pkR := Ring.pow_mem at R, a, k with aR, ringR
+    have pk1R := Ring.pow_mem at R, a, succ(k) with aR, ringR
+    have J1 : ringMultiples(R, Ring.pow(R, a, succ(k))) ∈ finPowIdeals(R, a)
+      apply finPowIdeals.membership.backward
+      exact ⟨succ(k), sk, rfl⟩
+    have le : k ≤ succ(k) by arith
+    have d := RingDvd.pow_pow at R, a, k, succ(k) with aR, comm, le
+    have sub := (ringMultiples.subset_iff at R, Ring.pow(R, a, succ(k)), Ring.pow(R, a, k) with pk1R, pkR, comm).backward with d
+    rw Jk at sub
+    have same := minJ with ringMultiples(R, Ring.pow(R, a, succ(k))), J1, sub
+    have selfIn := ringMultiples.self_mem at R, Ring.pow(R, a, k) with pkR, comm
+    rw [Jk, ← same] at selfIn
+    have d2 := (ringMultiples.mem_iff at R, Ring.pow(R, a, succ(k)), Ring.pow(R, a, k) with pk1R, pkR, comm).forward with selfIn
+    obtain ⟨_, _, c, cR, eq⟩ := d2
+    exact finHelp.unit_of_pow_eq at R, a, c, k with comm, aR, cR, domain, ane, eq
+  have ideals : ∀ I, Ideal(R, I) → I = {R.zero} ∨ I = R.carrier
+    intros I ideal
+    by_cases iz : I = {R.zero}
+    . left
+      exact iz
+    . right
+      by_contra notWhole
+      apply iz
+      have z := Ideal.zero_mem at R, I with ideal
+      ext x
+      constructor
+      . intro hx
+        by_contra xne
+        have xne2 : x ≠ R.zero
+          intro xz
+          apply xne
+          rw xz
+          exact singleton.self at R.zero
+        have xR := (Ideal.subset at R, I with ideal) with x, hx
+        have u := units with x, xR, xne2
+        exact notWhole with (Ideal.eq_whole_of_unit_mem at R, I, x with comm, ideal, hx, u)
+      . intro hx
+        have xz := singleton.membership.forward with hx
+        rw xz
+        exact z
+  exact Field.of_ideals at R with comm, nt, ideals
 
 theorem ArtinianRing.product_of_local (M : Set) (n : Nat)
   requires artinian : ArtinianRing(R)
