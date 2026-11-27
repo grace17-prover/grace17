@@ -2992,23 +2992,70 @@ proof
     unfold SummableFamily
     refine ⟨U, sum2.left, sum2⟩
 
--- In ℝ unconditional summability is absolute summability.
-theorem RealSummable.iff_abs (f g I : Set)
-  requires values : ∀ i ∈ I, f(i) ∈ ℝ
-  requires absolute : ∀ i ∈ I, g(i) = abs(f(i))
-  shows RealSummable(f, I) ↔ RealSummable(g, I)
+-- Pointwise sums and negatives of real families on I.
+defgraph realFamilyAdd (f g I : Set) (i ∈ I) : ℝ := R[f(i) + g(i)]
+requires valuesF : ∀ j ∈ I, f(j) ∈ ℝ
+requires valuesG : ∀ j ∈ I, g(j) ∈ ℝ
 proof
-  sorry
+  have a := valuesF with i, member
+  have b := valuesG with i, member
+  have aR : Real(f(i)) by exact a
+  have bR : Real(g(i)) by exact b
+  typecheck
 
--- Comparison: a family dominated by a summable nonnegative one is
--- summable, and |Σ f| ≤ Σ g.
-theorem RealSummable.of_abs_le (f g I : Set)
-  requires values : ∀ i ∈ I, f(i) ∈ ℝ
-  requires bound : ∀ i ∈ I, abs(f(i)) ≤ g(i)
-  requires summable : RealSummable(g, I)
-  shows RealSummable(f, I) ∧ abs(realTsum(f, I)) ≤ realTsum(g, I)
+defgraph realFamilyNeg (f I : Set) (i ∈ I) : ℝ := R[-f(i)]
+requires values : ∀ j ∈ I, f(j) ∈ ℝ
 proof
-  sorry
+  have a := values with i, member
+  have aR : Real(f(i)) by exact a
+  typecheck
+
+theorem realFiniteSum.le_double (q g F : Set)
+  requires finite : Finite(F)
+  requires valuesG : ∀ i ∈ F, g(i) ∈ ℝ
+  requires le : ∀ i ∈ F, q(i) ≤ R[g(i) + g(i)]
+  shows (realFiniteSum(q, F):R) ≤
+    (realFiniteSum(g, F):R) + (realFiniteSum(g, F):R)
+proof
+  induction finite with H a
+  | empty =>
+    rw [realFiniteSum.empty, realFiniteSum.empty]
+    linarith
+  | insert using ih =>
+    have valuesQ : ∀ i ∈ H, q(i) ∈ ℝ
+      intros i hi
+      exact (realLe.reals with (le with i, (HSubset with i, hi))).left
+    have valuesGH : ∀ i ∈ H, g(i) ∈ ℝ
+      intros i hi
+      exact valuesG with i, (HSubset with i, hi)
+    have la := le with a, aMember
+    have qa := (realLe.reals with la).left
+    have ga := valuesG with a, aMember
+    have qaR : Real(q(a)) by exact qa
+    have gaR : Real(g(a)) by exact ga
+    have stepQ := realFiniteSum.insert with HFinite, valuesQ, qa, aFresh
+    have stepG := realFiniteSum.insert at g, H, a with HFinite, valuesGH, ga, aFresh
+    have sQ := realFiniteSum.real with HFinite, valuesQ
+    have sG := realFiniteSum.real at g, H with HFinite, valuesGH
+    have sQR : Real(realFiniteSum(q, H)) by exact sQ
+    have sGR : Real(realFiniteSum(g, H)) by exact sG
+    rw [stepQ, stepG]
+    linarith
+
+-- A real below a bound and above its negative has absolute value below it.
+theorem abs.le_of_both (A B : Real)
+  requires upper : A ≤ B
+  requires lower : -A ≤ B
+  shows abs(A) ≤ B
+proof
+  by_cases nn : (0:R) ≤ A
+  . have e := abs.of_nonnegative at A with nn
+    rw e
+    exact upper
+  . have np : A ≤ (0:R) by linarith
+    have e := abs.of_nonpositive at A with np
+    rw e
+    exact lower
 
 -- Mathlib's tsum_le_tsum and HasSum.le: sums preserve ≤.
 theorem realTsum.mono (f g I : Set)
@@ -3160,6 +3207,501 @@ proof
   have le := realTsum.finite_le at f, I, {j} with summable, nonneg, (Finite.singleton at j), inside
   rw step at le
   linarith
+
+-- Real finite sums split over disjoint unions.
+theorem realFiniteSum.union (f V W : Set)
+  requires finiteV : Finite(V)
+  requires finiteW : Finite(W)
+  requires disjoint : Disjoint(V, W)
+  requires values : ∀ i ∈ V ∪ W, f(i) ∈ ℝ
+  shows realFiniteSum(f, V ∪ W) =
+    (realFiniteSum(f, V):R) + (realFiniteSum(f, W):R)
+proof
+  obtain ⟨abelian, c, m, o⟩ := realAdditiveGroup.parts
+  have values2 : ∀ i ∈ V ∪ W, f(i) ∈ Group.carrier(realAdditiveGroup)
+    rw c
+    exact values
+  have split := groupFiniteSum.disjoint_union at realAdditiveGroup, V, W, f with abelian, finiteV, finiteW, disjoint, values2
+  rw m at split
+  unfold realFiniteSum
+  exact split
+
+-- The indices of F where f is nonnegative, and where it is negative.
+def nonnegIndices (f F : Set) : Set := { i ∈ F | realZero ≤ f(i) }
+def negIndices (f F : Set) : Set := { i ∈ F | ¬(realZero ≤ f(i)) }
+
+-- If the finite sums of f over the sets containing F0 lie within 1 of S,
+-- then |f| sums to at most S + 1 + Σ_{F0} |f| over any finite P on which
+-- f is nonnegative.
+theorem RealHasSum.nonneg_part_le (f g I S F0 P : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires absolute : ∀ i ∈ I, g(i) = abs(f(i))
+  requires real : S ∈ ℝ
+  requires insideF0 : F0 ⊆ I
+  requires finiteF0 : Finite(F0)
+  requires tail : ∀ F ⊆ I, Finite(F) → F0 ⊆ F →
+    realFiniteSum(f, F) ∈ openBall(S, (1:R))
+  requires insideP : P ⊆ I
+  requires finiteP : Finite(P)
+  requires nonneg : ∀ i ∈ P, realZero ≤ f(i)
+  shows (realFiniteSum(g, P):R) ≤ (S:R) + (1:R) + (realFiniteSum(g, F0):R)
+proof
+  have SR : Real(S) by exact real
+  have gv : ∀ i ∈ I, g(i) ∈ ℝ
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have a := absolute with i, hi
+    rw a
+    exact abs.real at f(i)
+  have gNn : ∀ i ∈ I, realZero ≤ g(i)
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have a := absolute with i, hi
+    rw a
+    exact abs.nonnegative at f(i)
+  have DSub : F0 ∖ P ⊆ F0
+    intros x hx
+    exact (difference.membership.forward with hx).left
+  have DI : F0 ∖ P ⊆ I
+    intros x hx
+    exact insideF0 with x, (DSub with x, hx)
+  have Dfin := Finite.subset with finiteF0, DSub
+  have disjoint : Disjoint(P, F0 ∖ P)
+    unfold Disjoint
+    ext x
+    constructor
+    . intro hx
+      have hx2 := intersection.membership.forward with hx
+      have hx3 := difference.membership.forward with hx2.right
+      exfalso
+      exact hx3.right with hx2.left
+    . intro hx
+      exfalso
+      exact set.empty with hx
+  have same : P ∪ (F0 ∖ P) = P ∪ F0
+    ext x
+    constructor
+    . intro hx
+      have hx2 := union2.membership.forward with hx
+      cases hx2 with a | b
+      . exact union2.left at x, P, F0 with a
+      . exact union2.right at x, P, F0 with (DSub with x, b)
+    . intro hx
+      have hx2 := union2.membership.forward with hx
+      cases hx2 with a | b
+      . exact union2.left at x, P, F0 ∖ P with a
+      . by_cases xP : x ∈ P
+        . exact union2.left at x, P, F0 ∖ P with xP
+        . have xD : x ∈ F0 ∖ P
+            apply difference.membership.backward
+            exact ⟨b, xP⟩
+          exact union2.right at x, P, F0 ∖ P with xD
+  have UI : P ∪ F0 ⊆ I
+    intros x hx
+    have hx2 := union2.membership.forward with hx
+    cases hx2 with a | b
+    . exact insideP with x, a
+    . exact insideF0 with x, b
+  have Ufin := Finite.union with finiteP, finiteF0
+  have F0U : F0 ⊆ P ∪ F0
+    intros x hx
+    exact union2.right at x, P, F0 with hx
+  have inBall := tail with P ∪ F0, UI, Ufin, F0U
+  have valuesU : ∀ i ∈ P ∪ (F0 ∖ P), f(i) ∈ ℝ
+    rw same
+    intros i hi
+    exact values with i, (UI with i, hi)
+  have split := realFiniteSum.union at f, P, F0 ∖ P with finiteP, Dfin, disjoint, valuesU
+  rw same at split
+  have vP : ∀ i ∈ P, f(i) ∈ ℝ
+    intros i hi
+    exact values with i, (insideP with i, hi)
+  have vD : ∀ i ∈ F0 ∖ P, f(i) ∈ ℝ
+    intros i hi
+    exact values with i, (DI with i, hi)
+  have gvD : ∀ i ∈ F0 ∖ P, g(i) ∈ ℝ
+    intros i hi
+    exact gv with i, (DI with i, hi)
+  have gvF0 : ∀ i ∈ F0, g(i) ∈ ℝ
+    intros i hi
+    exact gv with i, (insideF0 with i, hi)
+  have gNnF0 : ∀ i ∈ F0, realZero ≤ g(i)
+    intros i hi
+    exact gNn with i, (insideF0 with i, hi)
+  have absD : ∀ i ∈ F0 ∖ P, g(i) = abs(f(i))
+    intros i hi
+    exact absolute with i, (DI with i, hi)
+  have congr : realFiniteSum(g, P) = realFiniteSum(f, P)
+    unfold realFiniteSum
+    apply groupFiniteSum.congr
+    intros i hi
+    have iI := insideP with i, hi
+    have fiR : Real(f(i)) by exact (values with i, iI)
+    have e := abs.of_nonnegative at f(i) with (nonneg with i, hi)
+    have a := absolute with i, iI
+    rw [a, e]
+  have sumAbs := realFiniteSum.abs_le at f, g, F0 ∖ P with Dfin, vD, absD
+  have monoD := realFiniteSum.mono_set at g, F0, F0 ∖ P with finiteF0, DSub, gvF0, gNnF0
+  have sP := realFiniteSum.real with finiteP, vP
+  have sD := realFiniteSum.real with Dfin, vD
+  have sgD := realFiniteSum.real at g, F0 ∖ P with Dfin, gvD
+  have sgF0 := realFiniteSum.real at g, F0 with finiteF0, gvF0
+  have sPR : Real(realFiniteSum(f, P)) by exact sP
+  have sDR : Real(realFiniteSum(f, F0 ∖ P)) by exact sD
+  have sgDR : Real(realFiniteSum(g, F0 ∖ P)) by exact sgD
+  have sgF0R : Real(realFiniteSum(g, F0)) by exact sgF0
+  have un := abs.upper_neg at realFiniteSum(f, F0 ∖ P)
+  have aR := abs.real at realFiniteSum(f, F0 ∖ P)
+  have vU : ∀ i ∈ P ∪ F0, f(i) ∈ ℝ
+    intros i hi
+    exact values with i, (UI with i, hi)
+  have uR : Real(realFiniteSum(f, P ∪ F0)) by exact (realFiniteSum.real with Ufin, vU)
+  have bounds := (openBall.order_characterization at realFiniteSum(f, P ∪ F0), S, (1:R)).forward with inBall
+  have hi := bounds.right
+  rw congr
+  linarith
+
+-- Comparison: a family dominated by a summable nonnegative one is
+-- summable, and |Σ f| ≤ Σ g.
+theorem RealSummable.of_abs_le (f g I : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires bound : ∀ i ∈ I, abs(f(i)) ≤ g(i)
+  requires summable : RealSummable(g, I)
+  shows RealSummable(f, I) ∧ abs(realTsum(f, I)) ≤ realTsum(g, I)
+proof
+  obtain ⟨ab, c, m, o⟩ := realAdditiveGroup.parts
+  have top := realAdditiveGroup.topological
+  have abelian := realAdditiveGroup.abelian
+  have gv : ∀ i ∈ I, g(i) ∈ ℝ
+    intros i hi
+    exact (realLe.reals with (bound with i, hi)).right
+  have gNn : ∀ i ∈ I, realZero ≤ g(i)
+    intros i hi
+    have fi := values with i, hi
+    have fiR : Real(f(i)) by exact fi
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have aR := abs.real at f(i)
+    have an := abs.nonnegative at f(i)
+    have b := bound with i, hi
+    linarith
+  have summable2 := summable
+  unfold RealSummable at summable2
+  obtain ⟨T, TIn, sumT⟩ := summable2
+  have sumG : RealHasSum(g, I, T)
+    unfold RealHasSum
+    exact sumT
+  have TIn2 := RealHasSum.real with sumG
+  have TR : Real(T) by exact TIn2
+  have eqG := RealHasSum.tsum_eq with sumG
+  -- q = f + g is nonnegative and below 2g
+  have qv : ∀ i ∈ I, realFamilyAdd(f, g, I)(i) = R[f(i) + g(i)]
+    intros i hi
+    exact realFamilyAdd.value with values, gv, hi
+  have qReal : ∀ i ∈ I, realFamilyAdd(f, g, I)(i) ∈ ℝ
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    rw qv with i, hi
+    typecheck
+  have qNn : ∀ i ∈ I, realZero ≤ realFamilyAdd(f, g, I)(i)
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have un := abs.upper_neg at f(i)
+    have aR := abs.real at f(i)
+    have b := bound with i, hi
+    have e := qv with i, hi
+    rw e
+    linarith
+  have qLe : ∀ i ∈ I, realFamilyAdd(f, g, I)(i) ≤ R[g(i) + g(i)]
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have up := abs.upper at f(i)
+    have aR := abs.real at f(i)
+    have b := bound with i, hi
+    have e := qv with i, hi
+    rw e
+    linarith
+  have qBound : ∃ B ∈ ℝ, ∀ F ∈ finiteSubsets(I), realFiniteSum(realFamilyAdd(f, g, I), F) ≤ B
+    have BIn : R[T + T] ∈ ℝ by typecheck
+    refine ⟨R[T + T], BIn, ?_⟩
+    intros F hF
+    have hF2 := finiteSubsets.membership.forward with hF
+    have FI := powerset.membership_iff.forward with hF2.left
+    have gvF : ∀ i ∈ F, g(i) ∈ ℝ
+      intros i hi
+      exact gv with i, (FI with i, hi)
+    have qLeF : ∀ i ∈ F, realFamilyAdd(f, g, I)(i) ≤ R[g(i) + g(i)]
+      intros i hi
+      exact qLe with i, (FI with i, hi)
+    have d := realFiniteSum.le_double with hF2.right, gvF, qLeF
+    have fl := realTsum.finite_le at g, I, F with summable, gNn, hF2.right, FI
+    rw eqG at fl
+    have sgR : Real(realFiniteSum(g, F)) by exact (realFiniteSum.real with hF2.right, gvF)
+    have qvF : ∀ i ∈ F, realFamilyAdd(f, g, I)(i) ∈ ℝ
+      intros i hi
+      exact qReal with i, (FI with i, hi)
+    have sqR : Real(realFiniteSum(realFamilyAdd(f, g, I), F)) by exact (realFiniteSum.real with hF2.right, qvF)
+    linarith
+  have qSummable := (RealSummable.nonneg_iff at realFamilyAdd(f, g, I), I with qReal, qNn).backward with qBound
+  have qs2 := qSummable
+  unfold RealSummable at qs2
+  obtain ⟨Q, QIn, sumQ⟩ := qs2
+  -- r = −g has sum −T
+  have invEq : Group.inv(realAdditiveGroup) = realNeg
+    unfold realAdditiveGroup
+    group_projections
+  have rv : ∀ i ∈ I, realFamilyNeg(g, I)(i) = Group.inv(realAdditiveGroup)(g(i))
+    intros i hi
+    rw invEq
+    exact realFamilyNeg.value with gv, hi
+  have gvG : ∀ i ∈ I, g(i) ∈ Group.carrier(realAdditiveGroup)
+    rw c
+    exact gv
+  have sumR := HasSum.neg at realAdditiveGroup, realLine, g, realFamilyNeg(g, I), I, T with top, abelian, gvG, rv, sumT
+  have qvG : ∀ i ∈ I, realFamilyAdd(f, g, I)(i) ∈ Group.carrier(realAdditiveGroup)
+    rw c
+    exact qReal
+  have rvG : ∀ i ∈ I, realFamilyNeg(g, I)(i) ∈ Group.carrier(realAdditiveGroup)
+    rw c
+    intros i hi
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have e := realFamilyNeg.value with gv, hi
+    rw e
+    typecheck
+  have fsum : ∀ i ∈ I, f(i) = Group.mul(realAdditiveGroup)(realFamilyAdd(f, g, I)(i), realFamilyNeg(g, I)(i))
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have e1 := qv with i, hi
+    have e2 := realFamilyNeg.value with gv, hi
+    rw [m, e1, e2]
+    ring
+  have sumF := HasSum.add at realAdditiveGroup, realLine, realFamilyAdd(f, g, I), realFamilyNeg(g, I), f, I, Q, Group.inv(realAdditiveGroup)(T) with top, abelian, qvG, rvG, fsum, sumQ, sumR
+  have fSummable : RealSummable(f, I)
+    unfold RealSummable
+    unfold SummableFamily
+    exact ⟨Group.mul(realAdditiveGroup)(Q, Group.inv(realAdditiveGroup)(T)), sumF.left, sumF⟩
+  refine ⟨fSummable, ?_⟩
+  have fs2 := fSummable
+  unfold RealSummable at fs2
+  obtain ⟨S, SIn, sumS⟩ := fs2
+  have sumFR : RealHasSum(f, I, S)
+    unfold RealHasSum
+    exact sumS
+  have SIn2 := RealHasSum.real with sumFR
+  have SR : Real(S) by exact SIn2
+  have eqF := RealHasSum.tsum_eq with sumFR
+  have fvG : ∀ i ∈ I, f(i) ∈ Group.carrier(realAdditiveGroup)
+    rw c
+    exact values
+  have nv : ∀ i ∈ I, realFamilyNeg(f, I)(i) = Group.inv(realAdditiveGroup)(f(i))
+    intros i hi
+    rw invEq
+    exact realFamilyNeg.value with values, hi
+  have sumN := HasSum.neg at realAdditiveGroup, realLine, f, realFamilyNeg(f, I), I, S with top, abelian, fvG, nv, sumS
+  rw invEq at sumN
+  have sumNR : RealHasSum(realFamilyNeg(f, I), I, realNeg(S))
+    unfold RealHasSum
+    exact sumN
+  have nSummable : RealSummable(realFamilyNeg(f, I), I)
+    unfold RealSummable
+    unfold SummableFamily
+    exact ⟨realNeg(S), sumN.left, sumN⟩
+  have eqN := RealHasSum.tsum_eq with sumNR
+  have leF : ∀ i ∈ I, f(i) ≤ g(i)
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have up := abs.upper at f(i)
+    have aR := abs.real at f(i)
+    have b := bound with i, hi
+    linarith
+  have leN : ∀ i ∈ I, realFamilyNeg(f, I)(i) ≤ g(i)
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have giR : Real(g(i)) by exact (gv with i, hi)
+    have up := abs.upper_neg at f(i)
+    have aR := abs.real at f(i)
+    have b := bound with i, hi
+    have e := realFamilyNeg.value with values, hi
+    rw e
+    linarith
+  have m1 := realTsum.mono with fSummable, summable, leF
+  have m2 := realTsum.mono with nSummable, summable, leN
+  rw [eqF, eqG] at m1
+  rw [eqN, eqG] at m2
+  rw [eqF, eqG]
+  exact abs.le_of_both at S, T with m1, m2
+
+-- In ℝ unconditional summability is absolute summability.
+theorem RealSummable.iff_abs (f g I : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires absolute : ∀ i ∈ I, g(i) = abs(f(i))
+  shows RealSummable(f, I) ↔ RealSummable(g, I)
+proof
+  obtain ⟨ab, c, m, o⟩ := realAdditiveGroup.parts
+  have top := realAdditiveGroup.topological
+  have abelian := realAdditiveGroup.abelian
+  have invEq : Group.inv(realAdditiveGroup) = realNeg
+    unfold realAdditiveGroup
+    group_projections
+  have gv : ∀ i ∈ I, g(i) ∈ ℝ
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have a := absolute with i, hi
+    rw a
+    exact abs.real at f(i)
+  have gNn : ∀ i ∈ I, realZero ≤ g(i)
+    intros i hi
+    have fiR : Real(f(i)) by exact (values with i, hi)
+    have a := absolute with i, hi
+    rw a
+    exact abs.nonnegative at f(i)
+  constructor
+  . intro summable
+    have s2 := summable
+    unfold RealSummable at s2
+    obtain ⟨S, SIn, sumS⟩ := s2
+    have sumFR : RealHasSum(f, I, S)
+      unfold RealHasSum
+      exact sumS
+    have SIn2 := RealHasSum.real with sumFR
+    have SR : Real(S) by exact SIn2
+    have oneIn : (1:R) ∈ ℝ by typecheck
+    have onePos : realZero < (1:R) by linarith
+    obtain ⟨F0, F0I, F0fin, tail0⟩ := RealHasSum.ball with sumFR, oneIn, onePos
+    have fvG : ∀ i ∈ I, f(i) ∈ Group.carrier(realAdditiveGroup)
+      rw c
+      exact values
+    have nv : ∀ i ∈ I, realFamilyNeg(f, I)(i) = Group.inv(realAdditiveGroup)(f(i))
+      intros i hi
+      rw invEq
+      exact realFamilyNeg.value with values, hi
+    have sumN := HasSum.neg at realAdditiveGroup, realLine, f, realFamilyNeg(f, I), I, S with top, abelian, fvG, nv, sumS
+    rw invEq at sumN
+    have sumNR : RealHasSum(realFamilyNeg(f, I), I, realNeg(S))
+      unfold RealHasSum
+      exact sumN
+    have nSIn : realNeg(S) ∈ ℝ by typecheck
+    obtain ⟨F1, F1I, F1fin, tail1⟩ := RealHasSum.ball with sumNR, oneIn, onePos
+    have nvals : ∀ i ∈ I, realFamilyNeg(f, I)(i) ∈ ℝ
+      intros i hi
+      have fiR : Real(f(i)) by exact (values with i, hi)
+      have e := realFamilyNeg.value with values, hi
+      rw e
+      typecheck
+    have nabs : ∀ i ∈ I, g(i) = abs(realFamilyNeg(f, I)(i))
+      intros i hi
+      have fiR : Real(f(i)) by exact (values with i, hi)
+      have e := realFamilyNeg.value with values, hi
+      have a := absolute with i, hi
+      have n := abs.neg at f(i)
+      rw [e, n, a]
+    have gvF0 : ∀ i ∈ F0, g(i) ∈ ℝ
+      intros i hi
+      exact gv with i, (F0I with i, hi)
+    have gvF1 : ∀ i ∈ F1, g(i) ∈ ℝ
+      intros i hi
+      exact gv with i, (F1I with i, hi)
+    have A0 := realFiniteSum.real at g, F0 with F0fin, gvF0
+    have A1 := realFiniteSum.real at g, F1 with F1fin, gvF1
+    have A0R : Real(realFiniteSum(g, F0)) by exact A0
+    have A1R : Real(realFiniteSum(g, F1)) by exact A1
+    have BIn : R[(S + (1:R) + realFiniteSum(g, F0)) + (-S + (1:R) + realFiniteSum(g, F1))] ∈ ℝ by typecheck
+    have bounded : ∃ B ∈ ℝ, ∀ F ∈ finiteSubsets(I), realFiniteSum(g, F) ≤ B
+      refine ⟨R[(S + (1:R) + realFiniteSum(g, F0)) + (-S + (1:R) + realFiniteSum(g, F1))], BIn, ?_⟩
+      intros F hF
+      have hF2 := finiteSubsets.membership.forward with hF
+      have FI := powerset.membership_iff.forward with hF2.left
+      have Ffin := hF2.right
+      have PSub : nonnegIndices(f, F) ⊆ F
+        intros x hx
+        exact (nonnegIndices.membership.forward with hx).left
+      have NSub : negIndices(f, F) ⊆ F
+        intros x hx
+        exact (negIndices.membership.forward with hx).left
+      have PI : nonnegIndices(f, F) ⊆ I
+        intros x hx
+        exact FI with x, (PSub with x, hx)
+      have NI : negIndices(f, F) ⊆ I
+        intros x hx
+        exact FI with x, (NSub with x, hx)
+      have Pfin := Finite.subset with Ffin, PSub
+      have Nfin := Finite.subset with Ffin, NSub
+      have Pnn : ∀ i ∈ nonnegIndices(f, F), realZero ≤ f(i)
+        intros i hi
+        exact (nonnegIndices.membership.forward with hi).right
+      have Nnn : ∀ i ∈ negIndices(f, F), realZero ≤ realFamilyNeg(f, I)(i)
+        intros i hi
+        have hi2 := negIndices.membership.forward with hi
+        have iI := FI with i, hi2.left
+        have fiR : Real(f(i)) by exact (values with i, iI)
+        have e := realFamilyNeg.value with values, iI
+        have neg := hi2.right
+        rw e
+        linarith
+      have bP := RealHasSum.nonneg_part_le at f, g, I, S, F0, nonnegIndices(f, F) with values, absolute, SIn2, F0I, F0fin, tail0, PI, Pfin, Pnn
+      have bN := RealHasSum.nonneg_part_le at realFamilyNeg(f, I), g, I, realNeg(S), F1, negIndices(f, F) with nvals, nabs, nSIn, F1I, F1fin, tail1, NI, Nfin, Nnn
+      have disjoint : Disjoint(nonnegIndices(f, F), negIndices(f, F))
+        unfold Disjoint
+        ext x
+        constructor
+        . intro hx
+          have hx2 := intersection.membership.forward with hx
+          have a := nonnegIndices.membership.forward with hx2.left
+          have b := negIndices.membership.forward with hx2.right
+          exfalso
+          exact b.right with a.right
+        . intro hx
+          exfalso
+          exact set.empty with hx
+      have same : nonnegIndices(f, F) ∪ negIndices(f, F) = F
+        ext x
+        constructor
+        . intro hx
+          have hx2 := union2.membership.forward with hx
+          cases hx2 with a | b
+          . exact PSub with x, a
+          . exact NSub with x, b
+        . intro hx
+          by_cases nn : realZero ≤ f(x)
+          . have xP : x ∈ nonnegIndices(f, F)
+              apply nonnegIndices.membership.backward
+              exact ⟨hx, nn⟩
+            exact union2.left at x, nonnegIndices(f, F), negIndices(f, F) with xP
+          . have xN : x ∈ negIndices(f, F)
+              apply negIndices.membership.backward
+              exact ⟨hx, nn⟩
+            exact union2.right at x, nonnegIndices(f, F), negIndices(f, F) with xN
+      have gvU : ∀ i ∈ nonnegIndices(f, F) ∪ negIndices(f, F), g(i) ∈ ℝ
+        rw same
+        intros i hi
+        exact gv with i, (FI with i, hi)
+      have split := realFiniteSum.union at g, nonnegIndices(f, F), negIndices(f, F) with Pfin, Nfin, disjoint, gvU
+      rw same at split
+      have gvP : ∀ i ∈ nonnegIndices(f, F), g(i) ∈ ℝ
+        intros i hi
+        exact gv with i, (PI with i, hi)
+      have gvN : ∀ i ∈ negIndices(f, F), g(i) ∈ ℝ
+        intros i hi
+        exact gv with i, (NI with i, hi)
+      have sPR : Real(realFiniteSum(g, nonnegIndices(f, F))) by exact (realFiniteSum.real with Pfin, gvP)
+      have sNR : Real(realFiniteSum(g, negIndices(f, F))) by exact (realFiniteSum.real with Nfin, gvN)
+      rw split
+      linarith
+    exact (RealSummable.nonneg_iff at g, I with gv, gNn).backward with bounded
+  . intro summable
+    have bound : ∀ i ∈ I, abs(f(i)) ≤ g(i)
+      intros i hi
+      have fiR : Real(f(i)) by exact (values with i, hi)
+      have a := absolute with i, hi
+      rw a
+      have aR := abs.real at f(i)
+      linarith
+    have both := RealSummable.of_abs_le with values, bound, summable
+    exact both.left
 
 -- A subfamily of a summable nonnegative family is summable with a smaller
 -- sum.
