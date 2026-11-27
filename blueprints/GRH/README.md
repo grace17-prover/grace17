@@ -297,7 +297,7 @@ graph TD
 | GRH.Linear.Dimension | 109 | 91 | 18 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
-| GRH.Matrix.Determinant | 110 | 96 | 14 |
+| GRH.Matrix.Determinant | 122 | 115 | 7 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
 | GRH.Algebra.Localization | 58 | 1 | 57 |
@@ -350,8 +350,8 @@ graph TD
 | GRH.LSeries.VonMangoldt | 53 | 15 | 38 |
 | GRH.SpecialFunctions.More | 81 | 13 | 68 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
-| GRH.Matrix.Groups | 45 | 4 | 41 |
+| GRH.Matrix.Groups | 92 | 78 | 14 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6176** | **3953** | **2223** |
+| **total** | **6235** | **4046** | **2189** |
 <!-- /blueprint-status -->
