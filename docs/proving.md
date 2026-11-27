@@ -989,7 +989,9 @@ the name again proves its own fact); a kept fact is a hypothesis of the
 induction's statement, admitted through an auxiliary theorem reported with the
 theorem, so a fact no case needs is left out. A fact mentioning `n` or a
 generalized variable is reported at its `have` line, since no case could use
-it; prove such a fact inside the cases instead. List any declared variables whose values must remain
+it, and so is a fact a case names that mentions a variable those steps
+introduce, such as a witness of `obtain`; prove such a fact inside the cases
+instead. List any declared variables whose values must remain
 arbitrary after `generalizing`; they may occur before or after `n`. The optional
 final `with` names the cases in the usual spelling. Their soft-type premises,
 dependent binders, and requirements depending on `n` or on a generalized
