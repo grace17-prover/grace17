@@ -298,10 +298,10 @@ graph TD
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
-| GRH.Algebra.Divisibility | 108 | 106 | 2 |
-| GRH.Algebra.Ideals | 171 | 143 | 28 |
-| GRH.Algebra.Localization | 84 | 70 | 14 |
-| GRH.Algebra.LocalRings | 47 | 34 | 13 |
+| GRH.Algebra.Divisibility | 108 | 105 | 3 |
+| GRH.Algebra.Ideals | 163 | 96 | 67 |
+| GRH.Algebra.Localization | 59 | 26 | 33 |
+| GRH.Algebra.LocalRings | 47 | 27 | 20 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
@@ -324,9 +324,9 @@ graph TD
 | GRH.Topology.Sums | 138 | 137 | 1 |
 | GRH.Normed.Groups | 118 | 110 | 8 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
-| GRH.Normed.Spaces | 60 | 53 | 7 |
-| GRH.Normed.InnerProduct | 86 | 62 | 24 |
-| GRH.Calculus.Frechet | 51 | 32 | 19 |
+| GRH.Normed.Spaces | 62 | 55 | 7 |
+| GRH.Normed.InnerProduct | 90 | 70 | 20 |
+| GRH.Calculus.Frechet | 70 | 54 | 16 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
@@ -348,10 +348,10 @@ graph TD
 | GRH.LSeries.Completed | 73 | 21 | 52 |
 | GRH.LSeries.NonVanishing | 50 | 12 | 38 |
 | GRH.LSeries.VonMangoldt | 53 | 15 | 38 |
-| GRH.SpecialFunctions.More | 81 | 13 | 68 |
+| GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6871** | **5261** | **1610** |
+| **total** | **6882** | **5271** | **1611** |
 <!-- /blueprint-status -->
