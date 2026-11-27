@@ -2518,6 +2518,56 @@ proof
     rw [card, cardT]
     arith
 
+-- Finitely many points of an image have a finite set of preimages of no
+-- larger size (finite choice, by induction on the finite set).
+theorem Finite.preimages (f A R : Set)
+  requires finite : Finite(R)
+  requires covered : ∀ y ∈ R, ∃ x ∈ A, f(x) = y
+  shows ∃ S, S ⊆ A ∧ Finite(S) ∧ cardinality(S) ≤ cardinality(R) ∧
+    (∀ y ∈ R, ∃ x ∈ S, f(x) = y)
+proof
+  induction finite with H a
+  | empty =>
+    have e := cardinality.empty
+    refine ⟨∅, empty.subset at A, Finite.empty, ?_, ?_⟩
+    . rw e
+      arith
+    . intros y hy
+      exfalso
+      simp at hy
+  | insert using ih =>
+    obtain ⟨S, SA, finiteS, cardS, coverS⟩ := ih
+    obtain ⟨x, xA, fx⟩ := covered with a, aMember
+    have single := Finite.singleton at x
+    have finiteU := Finite.union with finiteS, single
+    have le := cardinality.union_le at S, {x} with finiteS, single
+    have one := cardinality.singleton at x
+    have cardH := cardinality.union_singleton at H, a with HFinite, aFresh
+    have n1 := cardinality.nat at S with finiteS
+    have n2 := cardinality.nat at H with HFinite
+    have n3 := cardinality.nat at S ∪ {x} with finiteU
+    have UA : S ∪ {x} ⊆ A
+      intros z hz
+      have c := union2.membership.forward with hz
+      cases c with l | r
+      . exact SA with z, l
+      . have e := singleton.membership.forward with r
+        rw e
+        exact xA
+    refine ⟨S ∪ {x}, UA, finiteU, ?_, ?_⟩
+    . rw [cardH]
+      rw one at le
+      arith
+    . intros y hy
+      have c := union2.membership.forward with hy
+      cases c with l | r
+      . obtain ⟨z, zS, fz⟩ := coverS with y, l
+        exact ⟨z, (union2.left with zS), fz⟩
+      . have e := singleton.membership.forward with r
+        have xx := singleton.self at x
+        rw e
+        exact ⟨x, (union2.right with xx), fx⟩
+
 -- The identity of S restricted to J ⊆ S is the identity of J.
 theorem identity.restrict_subset (S J : Set)
   requires subset : J ⊆ S
@@ -2539,6 +2589,12 @@ proof
   have a2 := identity.apply at x, S with xS
   have a3 := identity.apply at x, J with hx
   rw [a1, a2, a3]
+
+-- Helper for subspaces: the deficits n − |P| of the finite independent
+-- subsets P of W.
+def independentDeficits (V K W n : Set) : Set :=
+  { j ∈ ℕ | ∃ P, P ⊆ W ∧ Finite(P) ∧ LinearIndependent(V, K, P, identity(P)) ∧
+    cardinality(P) + j = n }
 
 -- Section: Vector spaces
 section VectorSpaces
@@ -3337,6 +3393,333 @@ proof
   have vz := singleton.membership.forward with vIn
   exact vNonzero with vz
 
+-- Helpers for rank–nullity: adjoining a vector outside the span keeps a
+-- finite set independent.
+theorem LinearIndependent.insert_set (P w : Set)
+  requires subset : P ⊆ V.carrier
+  requires finite : Finite(P)
+  requires independent : LinearIndependent(V, K, P, identity(P))
+  requires wIn : w ∈ V.carrier
+  requires outside : w ∉ moduleSpan(V, K, P)
+  shows LinearIndependent(V, K, P ∪ {w}, identity(P ∪ {w}))
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := Field.parts with field
+  obtain ⟨_, _, inverses⟩ := parts
+  have inSpan := moduleSpan.subset_span at K, V, P with ringK, module, subset
+  have spanSub := moduleSpan.submodule at K, V, P with ringK, module
+  have wP : w ∉ P
+    intro wP
+    exact outside with (inSpan with w, wP)
+  have single := Finite.singleton at w
+  have finiteU := Finite.union with finite, single
+  have UV : P ∪ {w} ⊆ V.carrier
+    intros x hx
+    have c := union2.membership.forward with hx
+    cases c with l | r
+    . exact subset with x, l
+    . have e := singleton.membership.forward with r
+      rw e
+      exact wIn
+  have PU : P ⊆ P ∪ {w}
+    intros x hx
+    exact union2.left with hx
+  have ww := singleton.self at w
+  have wU : w ∈ P ∪ {w}
+    exact union2.right with ww
+  have idU := identity.inclusion with UV
+  have idP := identity.inclusion with subset
+  have law := LinearIndependent.finite_iff at K, V, P ∪ {w}, identity(P ∪ {w}) with comm, module, finiteU, idU
+  have lawP := LinearIndependent.finite_iff at K, V, P, identity(P) with comm, module, finite, idP
+  have zeroesP := lawP.forward with independent
+  apply law.backward
+  intros c cF zero
+  have termsF := combinationTerms.function at V, K, P ∪ {w}, c, identity(P ∪ {w}) with module, cF, idU
+  have split := moduleSum.insert at K, V, P, combinationTerms(V, K, P ∪ {w}, c, identity(P ∪ {w})), w with ringK, module, finite, wP, termsF
+  have cP := restrict.domain_function at c, P ∪ {w}, K.carrier, P with cF, PU
+  have termsP := combinationTerms.function at V, K, P, restrict(c, P), identity(P) with module, cP, idP
+  have restrictF := restrict.domain_function at combinationTerms(V, K, P ∪ {w}, c, identity(P ∪ {w})), P ∪ {w}, V.carrier, P with termsF, PU
+  have agree : ∀ p ∈ P, restrict(combinationTerms(V, K, P ∪ {w}, c, identity(P ∪ {w})), P)(p) = combinationTerms(V, K, P, restrict(c, P), identity(P))(p)
+    intros p hp
+    have pU := PU with p, hp
+    have a1 := restrict.domain_apply at combinationTerms(V, K, P ∪ {w}, c, identity(P ∪ {w})), P ∪ {w}, V.carrier, P, p with termsF, PU, hp
+    have a2 := combinationTerms.value at V, K, P ∪ {w}, c, identity(P ∪ {w}), p with module, cF, idU, pU
+    have a3 := combinationTerms.value at V, K, P, restrict(c, P), identity(P), p with module, cP, idP, hp
+    have a4 := restrict.domain_apply at c, P ∪ {w}, K.carrier, P, p with cF, PU, hp
+    have a5 := identity.apply at p, P ∪ {w} with pU
+    have a6 := identity.apply at p, P with hp
+    rw [a1, a2, a3, a4, a5, a6]
+  have same := moduleSum.congr at K, V, P, restrict(combinationTerms(V, K, P ∪ {w}, c, identity(P ∪ {w})), P), combinationTerms(V, K, P, restrict(c, P), identity(P)) with ringK, module, finite, restrictF, termsP, agree
+  have tw := combinationTerms.value at V, K, P ∪ {w}, c, identity(P ∪ {w}), w with module, cF, idU, wU
+  have iw := identity.apply at w, P ∪ {w} with wU
+  rw iw at tw
+  unfold moduleCombination at zero
+  rw [split, same, tw] at zero
+  have sIn := SubmoduleOf.combination_mem at K, V, moduleSpan(V, K, P), P, restrict(c, P), identity(P) with ringK, module, spanSub, finite, cP, (identity.inclusion with inSpan)
+  unfold moduleCombination at sIn
+  have sV := SubmoduleOf.subset at K, V, moduleSpan(V, K, P) with ringK, module, spanSub
+  have sInV := sV with moduleSum(V, P, combinationTerms(V, K, P, restrict(c, P), identity(P))), sIn
+  have cw := FunctionBetween.apply_closed with cF, wU
+  by_cases cwz : c(w) = K.zero
+  . have z := zero_smul at K, V, w with ringK, module, wIn
+    have z2 := Module.add_zero at K, V, moduleSum(V, P, combinationTerms(V, K, P, restrict(c, P), identity(P))) with ringK, module, sInV
+    rw [cwz, z, z2] at zero
+    have sZero : moduleCombination(V, K, P, restrict(c, P), identity(P)) = V.zero
+      unfold moduleCombination
+      exact zero
+    have allP := zeroesP with restrict(c, P), cP, sZero
+    intros x hx
+    have cases := union2.membership.forward with hx
+    cases cases with l | r
+    . have a4 := restrict.domain_apply at c, P ∪ {w}, K.carrier, P, x with cF, PU, l
+      have ap := allP with x, l
+      rw a4 at ap
+      exact ap
+    . have e := singleton.membership.forward with r
+      rw e
+      exact cwz
+  . exfalso
+    obtain ⟨y, inverse⟩ := inverses with c(w), cw, cwz
+    obtain ⟨_, yIn, left, _⟩ := inverse
+    have tIn := Module.smul_mem at K, V, c(w), w with ringK, module, cw, wIn
+    have e := Module.eq_neg_of_add_eq_zero at K, V, moduleSum(V, P, combinationTerms(V, K, P, restrict(c, P), identity(P))), call2(V.smul, c(w), w) with ringK, module, sInV, tIn, zero
+    have negS := SubmoduleOf.neg_mem at K, V, moduleSpan(V, K, P), moduleSum(V, P, combinationTerms(V, K, P, restrict(c, P), identity(P))) with ringK, module, spanSub, sIn
+    have nn := Module.neg_neg at K, V, call2(V.smul, c(w), w) with ringK, module, tIn
+    rw [e, nn] at negS
+    have ySpan := SubmoduleOf.smul_mem at K, V, moduleSpan(V, K, P), y, call2(V.smul, c(w), w) with ringK, module, spanSub, yIn, negS
+    have l1 := one_smul at K, V, w with ringK, module, wIn
+    have l2 := mul_smul at K, V, y, c(w), w with ringK, module, yIn, cw, wIn
+    rw [left, l1] at l2
+    rw ← l2 at ySpan
+    exact outside with ySpan
+
+-- A subspace of a finite-dimensional space has a finite independent set
+-- spanning it: take an independent subset of largest size.
+theorem SubmoduleOf.set_basis (W : Set)
+  requires finiteDimensional : FiniteDimensional(V, K)
+  requires sub : SubmoduleOf(W, V, K)
+  shows ∃ P, P ⊆ W ∧ Finite(P) ∧ LinearIndependent(V, K, P, identity(P)) ∧
+    moduleSpan(V, K, P) = W
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := Field.parts with field
+  obtain ⟨_, nontrivialParts, _⟩ := parts
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have free := FiniteDimensional.finite_free at K, V with field, module, finiteDimensional
+  have selected := finrank.selected at V, K with comm, nontrivial, free
+  obtain ⟨member, _⟩ := selected
+  have finNat := nat.omega.backward with member
+  have WV := SubmoduleOf.subset at K, V, W with ringK, module, sub
+  have emptyIndependent : LinearIndependent(V, K, ∅, identity(∅))
+    have emptyV := empty.subset at V.carrier
+    have idE := identity.inclusion with emptyV
+    unfold LinearIndependent
+    refine ⟨module, idE, ?_⟩
+    intros J JE finiteJ c cF zero j hj
+    exfalso
+    have jE := JE with j, hj
+    simp at jE
+  have naturals : independentDeficits(V, K, W, finrank(V, K)) ⊆ ℕ
+    intros k hk
+    obtain ⟨kIn, _⟩ := independentDeficits.membership.forward with hk
+    exact kIn
+  have nIn : finrank(V, K) ∈ independentDeficits(V, K, W, finrank(V, K))
+    apply independentDeficits.membership.backward
+    have e := cardinality.empty
+    refine ⟨member, ∅, empty.subset at W, Finite.empty, emptyIndependent, ?_⟩
+    rw e
+    arith
+  have inhabited : Nonempty(independentDeficits(V, K, W, finrank(V, K)))
+    unfold Nonempty
+    exact ⟨finrank(V, K), nIn⟩
+  have least := leastNatural.member at independentDeficits(V, K, W, finrank(V, K)) with inhabited, naturals
+  obtain ⟨jIn, P, PW, finiteP, independentP, cardP⟩ := independentDeficits.membership.forward with least
+  have jNat := nat.omega.backward with jIn
+  have PV : P ⊆ V.carrier
+    intros x hx
+    exact WV with x, (PW with x, hx)
+  have spanLaw := moduleSpan.least at K, V, P, W with ringK, module, PV, sub
+  have spanLe := spanLaw.backward with PW
+  have inSpan := moduleSpan.subset_span at K, V, P with ringK, module, PV
+  refine ⟨P, PW, finiteP, independentP, ?_⟩
+  ext w
+  constructor
+  . intro hw
+    exact spanLe with w, hw
+  . intro hw
+    by_contra outside
+    have wIn := WV with w, hw
+    have bigger := LinearIndependent.insert_set at K, V, P, w with field, module, PV, finiteP, independentP, wIn, outside
+    have wP : w ∉ P
+      intro wP
+      exact outside with (inSpan with w, wP)
+    have card := cardinality.union_singleton at P, w with finiteP, wP
+    have single := Finite.singleton at w
+    have finiteU := Finite.union with finiteP, single
+    have UW : P ∪ {w} ⊆ W
+      intros x hx
+      have c := union2.membership.forward with hx
+      cases c with l | r
+      . exact PW with x, l
+      . have e := singleton.membership.forward with r
+        rw e
+        exact hw
+    have UV : P ∪ {w} ⊆ V.carrier
+      intros x hx
+      exact WV with x, (UW with x, hx)
+    have le := LinearIndependent.set_card_le at K, V, P ∪ {w} with field, module, finiteDimensional, UV, finiteU, bigger
+    have cardNat := cardinality.nat at P with finiteP
+    have cardUNat := cardinality.nat at P ∪ {w} with finiteU
+    obtain ⟨k, kNat, sum⟩ := le
+    have kIn : k ∈ independentDeficits(V, K, W, finrank(V, K))
+      apply independentDeficits.membership.backward
+      have kMember := nat.omega.forward at k with kNat
+      refine ⟨kMember, P ∪ {w}, UW, finiteU, bigger, sum⟩
+    have minimal := leastNatural.least at independentDeficits(V, K, W, finrank(V, K)), k with inhabited, naturals, kIn
+    arith
+
+-- A finite independent set spanning a subspace W is a basis of W as a
+-- module of its own.
+theorem SubmoduleOf.basis_of_span (W P : Set)
+  requires sub : SubmoduleOf(W, V, K)
+  requires PW : P ⊆ W
+  requires finite : Finite(P)
+  requires independent : LinearIndependent(V, K, P, identity(P))
+  requires spans : moduleSpan(V, K, P) = W
+  shows ModuleBasis(submoduleModule(V, K, W), K, P, identity(P))
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have subModule := SubmoduleOf.submodule_module at K, V, W with ringK, module, sub
+  have carrier := submoduleModule.carrier_eq at V, K, W
+  have WV := SubmoduleOf.subset at K, V, W with ringK, module, sub
+  have PV : P ⊆ V.carrier
+    intros x hx
+    exact WV with x, (PW with x, hx)
+  have PS : P ⊆ Module.carrier(submoduleModule(V, K, W))
+    rw carrier
+    exact PW
+  have idPW := identity.inclusion with PW
+  have idPS := identity.inclusion with PS
+  have idPV := identity.inclusion with PV
+  have idWV := identity.inclusion with WV
+  have incl := SubmoduleOf.inclusion_linear at K, V, W with ringK, module, sub
+  have composite : compose(identity(W), identity(P), P, Module.carrier(submoduleModule(V, K, W)), V.carrier) = identity(P)
+    rw carrier
+    have cF := compose.function at identity(W), identity(P), P, W, V.carrier with idPW, idWV
+    apply FunctionBetween.ext with cF, idPV
+    intros x hx
+    have xW := PW with x, hx
+    have a1 := compose.apply at identity(W), identity(P), P, W, V.carrier, x with idPW, idWV, hx
+    have a2 := identity.apply at x, P with hx
+    have a3 := identity.apply at x, W with xW
+    rw [a1, a2, a3]
+  unfold ModuleBasis
+  refine ⟨?_, ?_⟩
+  . have law := LinearIndependent.finite_iff at K, submoduleModule(V, K, W), P, identity(P) with comm, subModule, finite, idPS
+    have lawV := LinearIndependent.finite_iff at K, V, P, identity(P) with comm, module, finite, idPV
+    have zeroesV := lawV.forward with independent
+    apply law.backward
+    intros c cF zero
+    have mapped := LinearMap.map_combination at K, submoduleModule(V, K, W), V, identity(W), P, c, identity(P) with ringK, subModule, module, incl, finite, cF, idPS
+    have z := submoduleModule.zero_eq at V, K, W
+    have zeroW := SubmoduleOf.zero_mem at K, V, W with ringK, module, sub
+    have i0 := identity.apply at V.zero, W with zeroW
+    rw [zero, composite, z, i0] at mapped
+    have e : moduleCombination(V, K, P, c, identity(P)) = V.zero
+      symm
+      exact mapped
+    exact zeroesV with c, cF, e
+  . unfold SpansModule
+    refine ⟨subModule, idPS, ?_⟩
+    have image := functionImage.identity at P, Module.carrier(submoduleModule(V, K, W)) with PS
+    rw image
+    have imageSpan := LinearMap.image_span at K, submoduleModule(V, K, W), V, identity(W), P with ringK, subModule, module, incl, PS
+    have imageP : functionImage(identity(W), P, V.carrier) = P
+      ext y
+      constructor
+      . intro hy
+        obtain ⟨_, x, hx, yx⟩ := functionImage.membership.forward with hy
+        have a := identity.apply at x, W with (PW with x, hx)
+        rw [yx, a]
+        exact hx
+      . intro hy
+        have a := identity.apply at y, W with (PW with y, hy)
+        apply functionImage.membership.backward
+        refine ⟨(PV with y, hy), y, hy, ?_⟩
+        rw a
+    rw [imageP, spans] at imageSpan
+    have spanSub := moduleSpan.submodule at K, submoduleModule(V, K, W), P with ringK, subModule
+    have spanSubset := SubmoduleOf.subset at K, submoduleModule(V, K, W), moduleSpan(submoduleModule(V, K, W), K, P) with ringK, subModule, spanSub
+    rw carrier at spanSubset
+    rw carrier
+    ext x
+    constructor
+    . intro hx
+      exact spanSubset with x, hx
+    . intro hx
+      rw ← imageSpan at hx
+      obtain ⟨_, y, hy, yx⟩ := submoduleImage.membership.forward with hx
+      have yW := spanSubset with y, hy
+      have a := identity.apply at y, W with yW
+      rw a at yx
+      rw ← yx
+      exact hy
+
+-- The span of S ⊆ U inside the subspace U is its span in V.
+theorem SubmoduleOf.span_inside (U S : Set)
+  requires sub : SubmoduleOf(U, V, K)
+  requires SU : S ⊆ U
+  shows moduleSpan(submoduleModule(V, K, U), K, S) = moduleSpan(V, K, S)
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have subModule := SubmoduleOf.submodule_module at K, V, U with ringK, module, sub
+  have carrier := submoduleModule.carrier_eq at V, K, U
+  have UV := SubmoduleOf.subset at K, V, U with ringK, module, sub
+  have SV : S ⊆ V.carrier
+    intros x hx
+    exact UV with x, (SU with x, hx)
+  have SS : S ⊆ Module.carrier(submoduleModule(V, K, U))
+    rw carrier
+    exact SU
+  have incl := SubmoduleOf.inclusion_linear at K, V, U with ringK, module, sub
+  have imageSpan := LinearMap.image_span at K, submoduleModule(V, K, U), V, identity(U), S with ringK, subModule, module, incl, SS
+  have imageS : functionImage(identity(U), S, V.carrier) = S
+    ext y
+    constructor
+    . intro hy
+      obtain ⟨_, x, hx, yx⟩ := functionImage.membership.forward with hy
+      have a := identity.apply at x, U with (SU with x, hx)
+      rw [yx, a]
+      exact hx
+    . intro hy
+      have a := identity.apply at y, U with (SU with y, hy)
+      apply functionImage.membership.backward
+      refine ⟨(SV with y, hy), y, hy, ?_⟩
+      rw a
+  rw imageS at imageSpan
+  have spanSub := moduleSpan.submodule at K, submoduleModule(V, K, U), S with ringK, subModule
+  have spanSubset := SubmoduleOf.subset at K, submoduleModule(V, K, U), moduleSpan(submoduleModule(V, K, U), K, S) with ringK, subModule, spanSub
+  rw carrier at spanSubset
+  rw ← imageSpan
+  ext x
+  constructor
+  . intro hx
+    have xU := spanSubset with x, hx
+    have a := identity.apply at x, U with xU
+    apply submoduleImage.membership.backward
+    refine ⟨(UV with x, xU), x, hx, a⟩
+  . intro hx
+    obtain ⟨_, y, hy, yx⟩ := submoduleImage.membership.forward with hx
+    have yU := spanSubset with y, hy
+    have a := identity.apply at y, U with yU
+    rw a at yx
+    rw ← yx
+    exact hy
+
 -- Subspaces: finite-dimensional, of dimension at most dim V, with
 -- equality only for V (Submodule.finrank_le, eq_top_of_finrank_eq).
 theorem SubmoduleOf.finite_dimensional (W : Set)
@@ -3345,7 +3728,27 @@ theorem SubmoduleOf.finite_dimensional (W : Set)
   shows FiniteDimensional(submoduleModule(V, K, W), K) ∧
     finrank(submoduleModule(V, K, W), K) ≤ finrank(V, K)
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := Field.parts with field
+  obtain ⟨_, nontrivialParts, _⟩ := parts
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have subModule := SubmoduleOf.submodule_module at K, V, W with ringK, module, sub
+  have WV := SubmoduleOf.subset at K, V, W with ringK, module, sub
+  obtain ⟨P, PW, finiteP, independentP, spanP⟩ := SubmoduleOf.set_basis at K, V, W with field, module, finiteDimensional, sub
+  have PV : P ⊆ V.carrier
+    intros x hx
+    exact WV with x, (PW with x, hx)
+  have basis := SubmoduleOf.basis_of_span at K, V, W, P with field, module, sub, PW, finiteP, independentP, spanP
+  have rank := finrank.of_basis at K, submoduleModule(V, K, W), P, identity(P) with comm, nontrivial, subModule, finiteP, basis
+  have free : FiniteFreeModule(submoduleModule(V, K, W), K)
+    unfold FiniteFreeModule
+    exact ⟨P, identity(P), finiteP, basis⟩
+  have dimensional := FiniteDimensional.of_finite_free at K, submoduleModule(V, K, W) with field, subModule, free
+  have le := LinearIndependent.set_card_le at K, V, P with field, module, finiteDimensional, PV, finiteP, independentP
+  refine ⟨dimensional, ?_⟩
+  rw rank
+  exact le
 
 theorem SubmoduleOf.eq_of_finrank_eq (W : Set)
   requires finiteDimensional : FiniteDimensional(V, K)
@@ -3353,7 +3756,26 @@ theorem SubmoduleOf.eq_of_finrank_eq (W : Set)
   requires same : finrank(submoduleModule(V, K, W), K) = finrank(V, K)
   shows W = V.carrier
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := Field.parts with field
+  obtain ⟨_, nontrivialParts, _⟩ := parts
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have subModule := SubmoduleOf.submodule_module at K, V, W with ringK, module, sub
+  have WV := SubmoduleOf.subset at K, V, W with ringK, module, sub
+  obtain ⟨P, PW, finiteP, independentP, spanP⟩ := SubmoduleOf.set_basis at K, V, W with field, module, finiteDimensional, sub
+  have PV : P ⊆ V.carrier
+    intros x hx
+    exact WV with x, (PW with x, hx)
+  have basis := SubmoduleOf.basis_of_span at K, V, W, P with field, module, sub, PW, finiteP, independentP, spanP
+  have rank := finrank.of_basis at K, submoduleModule(V, K, W), P, identity(P) with comm, nontrivial, subModule, finiteP, basis
+  rw rank at same
+  have basisV := LinearIndependent.basis_of_card at K, V, P, identity(P) with field, module, finiteDimensional, finiteP, independentP, same
+  obtain ⟨_, spansV⟩ := basisV
+  obtain ⟨_, _, spanEq⟩ := spansV
+  have image := functionImage.identity at P, V.carrier with PV
+  rw [image, spanP] at spanEq
+  exact spanEq
 
 -- A subspace of dimension d is spanned by d vectors
 -- (Submodule.exists_fun_fin_finrank_span_eq).
