@@ -296,7 +296,7 @@ graph TD
 | GRH.Linear.Modules | 313 | 313 | 0 |
 | GRH.Linear.Dimension | 130 | 125 | 5 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
-| GRH.Linear.Exterior | 51 | 10 | 41 |
+| GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
@@ -305,7 +305,7 @@ graph TD
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
-| GRH.Linear.Tensor | 186 | 175 | 11 |
+| GRH.Linear.Tensor | 214 | 206 | 8 |
 | GRH.Polynomial.Multivariate | 69 | 1 | 68 |
 | GRH.Algebra.Finiteness | 76 | 1 | 75 |
 | GRH.Algebra.Completion | 37 | 0 | 37 |
@@ -320,13 +320,13 @@ graph TD
 | GRH.Integral | 154 | 154 | 0 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
 | GRH.Topology.Compactness | 67 | 31 | 36 |
-| GRH.Topology.Groups | 58 | 25 | 33 |
+| GRH.Topology.Groups | 52 | 10 | 42 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
-| GRH.Normed.Groups | 118 | 110 | 8 |
+| GRH.Normed.Groups | 88 | 75 | 13 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
-| GRH.Normed.Spaces | 60 | 53 | 7 |
-| GRH.Normed.InnerProduct | 86 | 62 | 24 |
-| GRH.Calculus.Frechet | 51 | 32 | 19 |
+| GRH.Normed.Spaces | 59 | 51 | 8 |
+| GRH.Normed.InnerProduct | 69 | 31 | 38 |
+| GRH.Calculus.Frechet | 47 | 23 | 24 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6653** | **4728** | **1925** |
+| **total** | **6752** | **4817** | **1935** |
 <!-- /blueprint-status -->
