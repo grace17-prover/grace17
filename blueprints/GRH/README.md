@@ -344,14 +344,14 @@ graph TD
 | GRH.Measure.Haar | 56 | 0 | 56 |
 | GRH.Fourier.Euclidean | 26 | 0 | 26 |
 | GRH.Fourier.Torus | 21 | 0 | 21 |
-| GRH.LSeries.Dirichlet | 98 | 28 | 70 |
-| GRH.LSeries.Completed | 73 | 21 | 52 |
-| GRH.LSeries.NonVanishing | 50 | 12 | 38 |
-| GRH.LSeries.VonMangoldt | 53 | 15 | 38 |
+| GRH.LSeries.Dirichlet | 141 | 120 | 21 |
+| GRH.LSeries.Completed | 77 | 40 | 37 |
+| GRH.LSeries.NonVanishing | 73 | 63 | 10 |
+| GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7115** | **5862** | **1253** |
+| **total** | **7197** | **6059** | **1138** |
 <!-- /blueprint-status -->

@@ -20,6 +20,7 @@
 module GRH.LSeries.Dirichlet
 import GRH.LFunction
 import GRH.Measure.Bochner
+import GRH.FunctionalEquation
 
 section LSeries
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
@@ -37,7 +38,12 @@ defgraph lseriesTerms (f s : Set) (n ∈ ℕ) : complexCarrier :=
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 requires hs : s ∈ complexCarrier
 proof
-  sorry
+  have nNat := nat.omega.backward with member
+  have index : n + 1 ∈ ℕ by typecheck
+  have value := FunctionBetween.apply_closed with values, index
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have power := realCpow.member at realNat(n + 1), ℂ[-s] with negative
+  typecheck
 
 -- The series converges absolutely at s (Mathlib's LSeriesSummable:
 -- summability in ℂ, which is absolute summability).
@@ -56,12 +62,60 @@ def LSeries (f s : Set) : Set :=
     (LSeriesSummable(f, s) ∧ ComplexSumsTo(lseriesTerms(f, s), a)) ∨
     (¬LSeriesSummable(f, s) ∧ a = complexZero) })
 
+-- The sum where the series converges absolutely, 0 elsewhere.
+theorem LSeries.of_summable (f s : Set)
+  requires summable : LSeriesSummable(f, s)
+  shows ComplexSumsTo(lseriesTerms(f, s), LSeries(f, s))
+proof
+  have absolute := summable
+  unfold LSeriesSummable at absolute
+  have summ := ComplexAbsolutelySummable.summable with absolute
+  obtain ⟨a, aIn, sums⟩ := summ
+  have value : LSeries(f, s) = a
+    unfold LSeries
+    apply union.of_unique
+    . simp
+    . intros y hy
+      obtain ⟨_, alternatives⟩ := hy
+      rcases alternatives with ⟨_, ySums⟩ | ⟨notSummable, _⟩
+      . exact ComplexSumsTo.unique with ySums, sums
+      . exfalso
+        exact notSummable with summable
+  rw value
+  exact sums
+
+theorem LSeries.of_not_summable_value (f s : Set)
+  requires notSummable : ¬LSeriesSummable(f, s)
+  shows LSeries(f, s) = ℂ[0]
+proof
+  unfold LSeries
+  apply union.of_unique
+  . have zero := complexZero.member
+    refine ⟨zero, ?_⟩
+    right
+    exact ⟨notSummable, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨summable, _⟩ | ⟨_, yZero⟩
+    . exfalso
+      exact notSummable with summable
+    . exact yZero
+
+theorem LSeries.value_member (f s : Set)
+  shows LSeries(f, s) ∈ ℂ
+proof
+  by_cases summable : LSeriesSummable(f, s)
+  . have sums := LSeries.of_summable with summable
+    exact ComplexSumsTo.member with sums
+  . rw (LSeries.of_not_summable_value with summable)
+    exact complexZero.member
+
 -- s ↦ LSeries(f, s) as a function on ℂ.
 defgraph LSeriesMap (f : Set) (s ∈ complexCarrier) : complexCarrier :=
     LSeries(f, s)
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 proof
-  sorry
+  exact LSeries.value_member at f, s
 
 -- The abscissa of absolute convergence, as Mathlib's
 -- abscissaOfAbsConv f ≤ x (an extended real in Mathlib): the series
@@ -107,6 +161,43 @@ def complexFamilySum (a I : Set) : Set :=
   finiteRingSum(I, complexCarrier, complexAdd, complexZero, complexNeg,
     complexMul, complexOne, a)
 
+-- A finite sum reads its weights only on the summed set: weights given on
+-- a larger set D sum as their restriction.
+theorem finiteRingSum.restrict_weights (V D A add zero neg mul one w : Set)
+  requires subset : V ⊆ D
+  requires weights : w : D → A
+  shows finiteRingSum(V, A, add, zero, neg, mul, one, w) =
+    finiteRingSum(V, A, add, zero, neg, mul, one, restrict(w, V))
+proof
+  have key : ∀ k, Nat(k) → ∀ e, BijectiveBetween(e, k, V) →
+      indexedRingSum(w, e, add, zero, k) =
+        indexedRingSum(restrict(w, V), e, add, zero, k)
+    intros k kNat e bijective
+    obtain ⟨injective, _⟩ := bijective
+    have eFunction := Injective.function with injective
+    apply indexedRingSum.congr at w, restrict(w, V), e, e, add, zero, k
+    intros i hi
+    have image := FunctionBetween.apply_closed with eFunction, hi
+    have restricted := restrict.domain_apply with weights, subset, image
+    rw restricted
+  have same : finiteRingSum.candidates(V, A, add, zero, neg, mul, one, w) =
+      finiteRingSum.candidates(V, A, add, zero, neg, mul, one, restrict(w, V))
+    ext x
+    constructor
+    . intro hx
+      obtain ⟨xA, k, kNat, e, bijective, value⟩ := hx
+      refine ⟨xA, k, kNat, e, bijective, ?_⟩
+      rw value
+      exact key with k, kNat, e, bijective
+    . intro hx
+      obtain ⟨xA, k, kNat, e, bijective, value⟩ := hx
+      refine ⟨xA, k, kNat, e, bijective, ?_⟩
+      rw value
+      have back := key with k, kNat, e, bijective
+      rw back
+  unfold finiteRingSum
+  rw same
+
 -- Dirichlet convolution (f ⋆ g)(n) = Σ_{d ∣ n} f(d) g(n/d) (Mathlib's
 -- LSeries.convolution, ArithmeticFunction multiplication).
 defgraph convolutionTerms (f g : Set, n : Nat) (d ∈ ℕ) : complexCarrier :=
@@ -114,10 +205,19 @@ defgraph convolutionTerms (f g : Set, n : Nat) (d ∈ ℕ) : complexCarrier :=
 requires fValues : FunctionBetween(f, ℕ, complexCarrier)
 requires gValues : FunctionBetween(g, ℕ, complexCarrier)
 proof
-  sorry
+  have nNat := nat.omega.backward with member
+  have first := FunctionBetween.apply_closed with fValues, member
+  have quotient := quotientNat.natural at d, n
+  have quotientMember : quotientNat(n, d) ∈ ℕ by typecheck
+  have second := FunctionBetween.apply_closed with gValues, quotientMember
+  typecheck
+
+-- The divisors of n as Nat.divisors gives them: none for n = 0, whose
+-- set of divisors in the sense of ∣ is all of ℕ.
+def dirichletDivisors (n : Set) : Set := { d ∈ divisorSet(n) | ¬(n = ∅) }
 
 defgraph dirichletConvolution (f g : Set) (n ∈ ℕ) : complexCarrier :=
-  complexFamilySum(convolutionTerms(f, g, n), divisorSet(n))
+  complexFamilySum(convolutionTerms(f, g, n), dirichletDivisors(n))
 requires fValues : FunctionBetween(f, ℕ, complexCarrier)
 requires gValues : FunctionBetween(g, ℕ, complexCarrier)
 proof
@@ -128,7 +228,9 @@ proof
 defgraph shiftedCoefficients (f : Set) (k ∈ ℕ) : complexCarrier := f(k + 1)
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 proof
-  sorry
+  have kNat := nat.omega.backward with member
+  have index : k + 1 ∈ ℕ by typecheck
+  exact FunctionBetween.apply_closed with values, index
 
 def summatory (f : Set, n : Nat) : Set :=
   complexPartialSum(shiftedCoefficients(f), n)
@@ -137,7 +239,10 @@ def summatory (f : Set, n : Nat) : Set :=
 defgraph absCoefficients (f : Set) (k ∈ ℕ) : ℝ := complexAbs(f(k + 1))
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 proof
-  sorry
+  have kNat := nat.omega.backward with member
+  have index : k + 1 ∈ ℕ by typecheck
+  have value := FunctionBetween.apply_closed with values, index
+  exact FunctionBetween.apply_closed with complexAbs.function, value
 
 def summatoryAbs (f : Set, n : Nat) : Set :=
   realPartialSum(absCoefficients(f), n)
@@ -168,12 +273,89 @@ def lseriesEulerProduct (f s : Set) (n : Nat) → Set
   | f, s, succ(k) => complexMul(lseriesEulerProduct(f, s, k),
       lseriesEulerFactor(f, s, k))
 
+-- The Euler factor at a prime and elsewhere, and the partial products are
+-- complex numbers.
+theorem lseriesEulerFactor.prime (f s : Set) (p : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires prime : Prime(p)
+  shows lseriesEulerFactor(f, s, p) =
+    complexInv(ℂ[1 - f(p) * realCpow(realNat(p), ℂ[-s])])
+proof
+  have index : p ∈ ℕ by typecheck
+  have value := FunctionBetween.apply_closed with values, index
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have power := realCpow.member at realNat(p), ℂ[-s] with negative
+  have difference : ℂ[1 - f(p) * realCpow(realNat(p), ℂ[-s])] ∈ ℂ by
+    typecheck
+  have inverse := complexInv.member with difference
+  unfold lseriesEulerFactor
+  apply union.of_unique
+  . refine ⟨inverse, ?_⟩
+    left
+    exact ⟨prime, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨_, yValue⟩ | ⟨notPrime, _⟩
+    . exact yValue
+    . exfalso
+      exact notPrime with prime
+
+theorem lseriesEulerFactor.not_prime (f s : Set) (p : Nat)
+  requires notPrime : ¬Prime(p)
+  shows lseriesEulerFactor(f, s, p) = complexOne
+proof
+  have one := complexOne.member
+  unfold lseriesEulerFactor
+  apply union.of_unique
+  . refine ⟨one, ?_⟩
+    right
+    exact ⟨notPrime, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨prime, _⟩ | ⟨_, yValue⟩
+    . exfalso
+      exact notPrime with prime
+    . exact yValue
+
+theorem lseriesEulerFactor.member (f s : Set) (p : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerFactor(f, s, p) ∈ ℂ
+proof
+  by_cases prime : Prime(p)
+  . have index : p ∈ ℕ by typecheck
+    have value := FunctionBetween.apply_closed with values, index
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(p), ℂ[-s] with negative
+    have difference : ℂ[1 - f(p) * realCpow(realNat(p), ℂ[-s])] ∈ ℂ by
+      typecheck
+    rw (lseriesEulerFactor.prime with values, hs, prime)
+    exact complexInv.member with difference
+  . rw (lseriesEulerFactor.not_prime with prime)
+    exact complexOne.member
+
+theorem lseriesEulerProduct.member (f s : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerProduct(f, s, n) ∈ ℂ
+proof
+  induction n
+  | zero =>
+    rw lseriesEulerProduct
+    exact complexOne.member
+  | succ(k) using ih =>
+    have factor := lseriesEulerFactor.member at f, s, k with values, hs
+    rw lseriesEulerProduct
+    typecheck
+
 defgraph lseriesEulerProducts (f s : Set) (n ∈ ℕ) : complexCarrier :=
   lseriesEulerProduct(f, s, n)
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 requires hs : s ∈ complexCarrier
 proof
-  sorry
+  have nNat := nat.omega.backward with member
+  exact lseriesEulerProduct.member with values, hs
 
 -- The termwise product of two complex sequences.
 def productSequence (u v : Set) : Set := { (n, ℂ[u(n) * v(n)]) | n ∈ ℕ }
@@ -183,29 +365,749 @@ defgraph lseriesTermMap (f : Set, n : Nat) (s ∈ complexCarrier) :
     complexCarrier := ℂ[f(n) * realCpow(realNat(n), ℂ[-s])]
 requires values : FunctionBetween(f, ℕ, complexCarrier)
 proof
-  sorry
+  have value := FunctionBetween.apply_closed at f, ℕ, complexCarrier, n with values
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have power := realCpow.member at realNat(n), ℂ[-s] with negative
+  typecheck
+
+-- Section: Graphs given by their pairs
+-- A set of pairs over A that is total and single-valued on A is a function
+-- from A to any B holding its values; its application reads the pairs.
+theorem coefficientGraph.function (G A B : Set)
+  requires shape : ∀ p ∈ G, ∃ a ∈ A, ∃ b ∈ B, p = (a, b)
+  requires total : ∀ a ∈ A, ∃ b ∈ B, (a, b) ∈ G
+  requires functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ G → (a, c) ∈ G → b = c
+  shows G : A → B
+proof
+  refine ⟨?_, ?_, ?_⟩
+  . unfold RelationBetween
+    unfold Subset
+    intros p hp
+    obtain ⟨a, aIn, b, bIn, eq⟩ := shape with p, hp
+    rw eq
+    exact product.pair with aIn, bIn
+  . unfold Functional
+    intros x y xy z xz
+    unfold relates at xy
+    unfold relates at xz
+    exact functional with x, y, z, xy, xz
+  . intros a aIn
+    obtain ⟨b, bIn, ab⟩ := total with a, aIn
+    unfold relates
+    exact ⟨b, bIn, ab⟩
+
+theorem coefficientGraph.second_in_union (G a b : Set)
+  requires mapped : (a, b) ∈ G
+  shows b ∈ ⋃(⋃(G))
+proof
+  have inner := orderedPair.second_in_union at a, b
+  obtain ⟨q, qIn, bq⟩ := union.membership.forward with inner
+  have qUnion : q ∈ ⋃(G)
+    apply union.membership.backward
+    exact ⟨(a, b), mapped, qIn⟩
+  apply union.membership.backward
+  exact ⟨q, qUnion, bq⟩
+
+theorem coefficientGraph.apply (G A x y : Set)
+  requires shape : ∀ p ∈ G, ∃ a ∈ A, ∃ b, p = (a, b)
+  requires total : ∀ a ∈ A, ∃ b, (a, b) ∈ G
+  requires functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ G → (a, c) ∈ G → b = c
+  requires index : x ∈ A
+  requires mapped : (x, y) ∈ G
+  shows G(x) = y
+proof
+  have shapeB : ∀ p ∈ G, ∃ a ∈ A, ∃ b ∈ ⋃(⋃(G)), p = (a, b)
+    intros p hp
+    obtain ⟨a, aIn, b, eq⟩ := shape with p, hp
+    have abIn : (a, b) ∈ G
+      rw ← eq
+      exact hp
+    have outer := coefficientGraph.second_in_union with abIn
+    exact ⟨a, aIn, b, outer, eq⟩
+  have totalB : ∀ a ∈ A, ∃ b ∈ ⋃(⋃(G)), (a, b) ∈ G
+    intros a aIn
+    obtain ⟨b, ab⟩ := total with a, aIn
+    have outer := coefficientGraph.second_in_union with ab
+    exact ⟨b, outer, ab⟩
+  have function := coefficientGraph.function with shapeB, totalB, functional
+  apply FunctionBetween.apply_value with function, index
+  unfold relates
+  exact mapped
+
+theorem characterCoefficients.eval (χ n : Set)
+  requires index : n ∈ ℕ
+  shows characterCoefficients(χ)(n) = χ(integerOfNat(n))
+proof
+  have shape : ∀ p0 ∈ characterCoefficients(χ), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [characterCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, χ(integerOfNat(m0)), rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ characterCoefficients(χ)
+    intros a0 aIn
+    refine ⟨χ(integerOfNat(a0)), ?_⟩
+    simp [characterCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ characterCoefficients(χ) →
+      (a0, c0) ∈ characterCoefficients(χ) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [characterCoefficients] at ab
+    simp [characterCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, χ(integerOfNat(n))) ∈ characterCoefficients(χ)
+    simp [characterCoefficients]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem characterCoefficients.maps (χ B : Set)
+  requires values : ∀ n ∈ ℕ, χ(integerOfNat(n)) ∈ B
+  shows characterCoefficients(χ) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ characterCoefficients(χ), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [characterCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, χ(integerOfNat(m0)), value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ characterCoefficients(χ)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨χ(integerOfNat(a0)), value, ?_⟩
+    simp [characterCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ characterCoefficients(χ) →
+      (a0, c0) ∈ characterCoefficients(χ) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [characterCoefficients] at ab
+    simp [characterCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem realCoefficients.eval (a n : Set)
+  requires index : n ∈ ℕ
+  shows realCoefficients(a)(n) = complexOfReal(a(n))
+proof
+  have shape : ∀ p0 ∈ realCoefficients(a), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [realCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, complexOfReal(a(m0)), rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ realCoefficients(a)
+    intros a0 aIn
+    refine ⟨complexOfReal(a(a0)), ?_⟩
+    simp [realCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ realCoefficients(a) →
+      (a0, c0) ∈ realCoefficients(a) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [realCoefficients] at ab
+    simp [realCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, complexOfReal(a(n))) ∈ realCoefficients(a)
+    simp [realCoefficients]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem realCoefficients.maps (a B : Set)
+  requires values : ∀ n ∈ ℕ, complexOfReal(a(n)) ∈ B
+  shows realCoefficients(a) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ realCoefficients(a), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [realCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, complexOfReal(a(m0)), value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ realCoefficients(a)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨complexOfReal(a(a0)), value, ?_⟩
+    simp [realCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ realCoefficients(a) →
+      (a0, c0) ∈ realCoefficients(a) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [realCoefficients] at ab
+    simp [realCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem coefficientAdd.eval (f g n : Set)
+  requires index : n ∈ ℕ
+  shows coefficientAdd(f, g)(n) = ℂ[f(n) + g(n)]
+proof
+  have shape : ∀ p0 ∈ coefficientAdd(f, g), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientAdd] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) + g(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ coefficientAdd(f, g)
+    intros a0 aIn
+    refine ⟨ℂ[f(a0) + g(a0)], ?_⟩
+    simp [coefficientAdd]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientAdd(f, g) →
+      (a0, c0) ∈ coefficientAdd(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientAdd] at ab
+    simp [coefficientAdd] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[f(n) + g(n)]) ∈ coefficientAdd(f, g)
+    simp [coefficientAdd]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem coefficientAdd.maps (f g B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[f(n) + g(n)] ∈ B
+  shows coefficientAdd(f, g) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ coefficientAdd(f, g), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientAdd] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) + g(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ coefficientAdd(f, g)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[f(a0) + g(a0)], value, ?_⟩
+    simp [coefficientAdd]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientAdd(f, g) →
+      (a0, c0) ∈ coefficientAdd(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientAdd] at ab
+    simp [coefficientAdd] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem coefficientSub.eval (f g n : Set)
+  requires index : n ∈ ℕ
+  shows coefficientSub(f, g)(n) = ℂ[f(n) - g(n)]
+proof
+  have shape : ∀ p0 ∈ coefficientSub(f, g), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientSub] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) - g(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ coefficientSub(f, g)
+    intros a0 aIn
+    refine ⟨ℂ[f(a0) - g(a0)], ?_⟩
+    simp [coefficientSub]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientSub(f, g) →
+      (a0, c0) ∈ coefficientSub(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientSub] at ab
+    simp [coefficientSub] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[f(n) - g(n)]) ∈ coefficientSub(f, g)
+    simp [coefficientSub]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem coefficientSub.maps (f g B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[f(n) - g(n)] ∈ B
+  shows coefficientSub(f, g) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ coefficientSub(f, g), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientSub] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) - g(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ coefficientSub(f, g)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[f(a0) - g(a0)], value, ?_⟩
+    simp [coefficientSub]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientSub(f, g) →
+      (a0, c0) ∈ coefficientSub(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientSub] at ab
+    simp [coefficientSub] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem coefficientScale.eval (c f n : Set)
+  requires index : n ∈ ℕ
+  shows coefficientScale(c, f)(n) = ℂ[c * f(n)]
+proof
+  have shape : ∀ p0 ∈ coefficientScale(c, f), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientScale] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[c * f(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ coefficientScale(c, f)
+    intros a0 aIn
+    refine ⟨ℂ[c * f(a0)], ?_⟩
+    simp [coefficientScale]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientScale(c, f) →
+      (a0, c0) ∈ coefficientScale(c, f) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientScale] at ab
+    simp [coefficientScale] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[c * f(n)]) ∈ coefficientScale(c, f)
+    simp [coefficientScale]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem coefficientScale.maps (c f B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[c * f(n)] ∈ B
+  shows coefficientScale(c, f) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ coefficientScale(c, f), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientScale] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[c * f(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ coefficientScale(c, f)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[c * f(a0)], value, ?_⟩
+    simp [coefficientScale]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientScale(c, f) →
+      (a0, c0) ∈ coefficientScale(c, f) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientScale] at ab
+    simp [coefficientScale] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem coefficientMul.eval (f g n : Set)
+  requires index : n ∈ ℕ
+  shows coefficientMul(f, g)(n) = ℂ[f(n) * g(n)]
+proof
+  have shape : ∀ p0 ∈ coefficientMul(f, g), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientMul] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) * g(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ coefficientMul(f, g)
+    intros a0 aIn
+    refine ⟨ℂ[f(a0) * g(a0)], ?_⟩
+    simp [coefficientMul]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientMul(f, g) →
+      (a0, c0) ∈ coefficientMul(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientMul] at ab
+    simp [coefficientMul] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[f(n) * g(n)]) ∈ coefficientMul(f, g)
+    simp [coefficientMul]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem coefficientMul.maps (f g B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[f(n) * g(n)] ∈ B
+  shows coefficientMul(f, g) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ coefficientMul(f, g), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [coefficientMul] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[f(m0) * g(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ coefficientMul(f, g)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[f(a0) * g(a0)], value, ?_⟩
+    simp [coefficientMul]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ coefficientMul(f, g) →
+      (a0, c0) ∈ coefficientMul(f, g) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [coefficientMul] at ab
+    simp [coefficientMul] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem logMulCoefficients.eval (f n : Set)
+  requires index : n ∈ ℕ
+  shows logMulCoefficients(f)(n) = ℂ[complexOfReal(realLog(realNat(n))) * f(n)]
+proof
+  have shape : ∀ p0 ∈ logMulCoefficients(f), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [logMulCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[complexOfReal(realLog(realNat(m0))) * f(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ logMulCoefficients(f)
+    intros a0 aIn
+    refine ⟨ℂ[complexOfReal(realLog(realNat(a0))) * f(a0)], ?_⟩
+    simp [logMulCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ logMulCoefficients(f) →
+      (a0, c0) ∈ logMulCoefficients(f) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [logMulCoefficients] at ab
+    simp [logMulCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[complexOfReal(realLog(realNat(n))) * f(n)]) ∈ logMulCoefficients(f)
+    simp [logMulCoefficients]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem logMulCoefficients.maps (f B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[complexOfReal(realLog(realNat(n))) * f(n)] ∈ B
+  shows logMulCoefficients(f) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ logMulCoefficients(f), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [logMulCoefficients] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[complexOfReal(realLog(realNat(m0))) * f(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ logMulCoefficients(f)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[complexOfReal(realLog(realNat(a0))) * f(a0)], value, ?_⟩
+    simp [logMulCoefficients]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ logMulCoefficients(f) →
+      (a0, c0) ∈ logMulCoefficients(f) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [logMulCoefficients] at ab
+    simp [logMulCoefficients] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem familyValues.eval (F n I i : Set)
+  requires index : i ∈ I
+  shows familyValues(F, n, I)(i) = F(i)(n)
+proof
+  have shape : ∀ p0 ∈ familyValues(F, n, I), ∃ a0 ∈ I, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [familyValues] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, F(m0)(n), rfl⟩
+  have total : ∀ a0 ∈ I, ∃ b0, (a0, b0) ∈ familyValues(F, n, I)
+    intros a0 aIn
+    refine ⟨F(a0)(n), ?_⟩
+    simp [familyValues]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ familyValues(F, n, I) →
+      (a0, c0) ∈ familyValues(F, n, I) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [familyValues] at ab
+    simp [familyValues] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (i, F(i)(n)) ∈ familyValues(F, n, I)
+    simp [familyValues]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem familyValues.maps (F n I B : Set)
+  requires values : ∀ i ∈ I, F(i)(n) ∈ B
+  shows familyValues(F, n, I) : I → B
+proof
+  have shape : ∀ p0 ∈ familyValues(F, n, I), ∃ a0 ∈ I, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [familyValues] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, F(m0)(n), value, rfl⟩
+  have total : ∀ a0 ∈ I, ∃ b0 ∈ B, (a0, b0) ∈ familyValues(F, n, I)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨F(a0)(n), value, ?_⟩
+    simp [familyValues]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ familyValues(F, n, I) →
+      (a0, c0) ∈ familyValues(F, n, I) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [familyValues] at ab
+    simp [familyValues] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+theorem productSequence.eval (u v n : Set)
+  requires index : n ∈ ℕ
+  shows productSequence(u, v)(n) = ℂ[u(n) * v(n)]
+proof
+  have shape : ∀ p0 ∈ productSequence(u, v), ∃ a0 ∈ ℕ, ∃ b0, p0 = (a0, b0)
+    intros p0 hp
+    simp [productSequence] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[u(m0) * v(m0)], rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0, (a0, b0) ∈ productSequence(u, v)
+    intros a0 aIn
+    refine ⟨ℂ[u(a0) * v(a0)], ?_⟩
+    simp [productSequence]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ productSequence(u, v) →
+      (a0, c0) ∈ productSequence(u, v) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [productSequence] at ab
+    simp [productSequence] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[u(n) * v(n)]) ∈ productSequence(u, v)
+    simp [productSequence]
+  exact coefficientGraph.apply with shape, total, functional, index, mapped
+
+theorem productSequence.maps (u v B : Set)
+  requires values : ∀ n ∈ ℕ, ℂ[u(n) * v(n)] ∈ B
+  shows productSequence(u, v) : ℕ → B
+proof
+  have shape : ∀ p0 ∈ productSequence(u, v), ∃ a0 ∈ ℕ, ∃ b0 ∈ B, p0 = (a0, b0)
+    intros p0 hp
+    simp [productSequence] at hp
+    obtain ⟨m0, mIn, eq⟩ := hp
+    have value := values with m0, mIn
+    rw ← eq
+    exact ⟨m0, mIn, ℂ[u(m0) * v(m0)], value, rfl⟩
+  have total : ∀ a0 ∈ ℕ, ∃ b0 ∈ B, (a0, b0) ∈ productSequence(u, v)
+    intros a0 aIn
+    have value := values with a0, aIn
+    refine ⟨ℂ[u(a0) * v(a0)], value, ?_⟩
+    simp [productSequence]
+  have functional : ∀ a0, ∀ b0, ∀ c0, (a0, b0) ∈ productSequence(u, v) →
+      (a0, c0) ∈ productSequence(u, v) → b0 = c0
+    intros a0 b0 c0 ab ac
+    simp [productSequence] at ab
+    simp [productSequence] at ac
+    obtain ⟨m0, _, abEq⟩ := ab
+    obtain ⟨k0, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  exact coefficientGraph.function with shape, total, functional
+
+-- Section: Comparison helpers
+theorem ComplexAbsolutelySummable.of_abs_le (u w : Set)
+  requires sequence : ComplexSequence(u)
+  requires absolute : ComplexAbsolutelySummable(w)
+  requires dominated : ∀ n ∈ ℕ, complexAbs(u(n)) ≤ complexAbs(w(n))
+  shows ComplexAbsolutelySummable(u)
+proof
+  obtain ⟨wSequence, wSummable⟩ := absolute
+  apply ComplexAbsolutelySummable.of_bound with sequence, wSummable
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  rw (complexAbsSequence.value with wSequence, nIn)
+  exact dominated with n, nIn
+
+theorem ComplexAbsolutelySummable.of_abs_le_scaled (u w : Set) (C : Real)
+  requires sequence : ComplexSequence(u)
+  requires absolute : ComplexAbsolutelySummable(w)
+  requires dominated : ∀ n ∈ ℕ, complexAbs(u(n)) ≤ R[C * complexAbs(w(n))]
+  shows ComplexAbsolutelySummable(u)
+proof
+  obtain ⟨wSequence, wSummable⟩ := absolute
+  have scaled := Summable.scale at complexAbsSequence(w), C with wSummable
+  have absSequence : RealSequence(complexAbsSequence(w)) by
+    exact complexAbsSequence.function with wSequence
+  have constant := constantSequence.sequence at C
+  apply ComplexAbsolutelySummable.of_bound with sequence, scaled
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  have wFunction : w : ℕ → ℂ by exact wSequence
+  have term := FunctionBetween.apply_closed with wFunction, nIn
+  have absReal := complexAbs.real with term
+  have absValue := complexAbsSequence.value with wSequence, nIn
+  have valueReal : Real(complexAbsSequence(w)(n))
+    rw absValue
+    exact absReal
+  have constantValue := constantSequence.value at C, n
+  have constantReal : Real(constantSequence(C)(n))
+    rw constantValue
+    typecheck
+  rw [(mulSequence.value with constant, absSequence, constantReal, valueReal),
+    constantValue, absValue]
+  exact dominated with n, nIn
+
+theorem ComplexAbsolutelySummable.of_abs_le_add (u v w : Set)
+  requires sequence : ComplexSequence(u)
+  requires absoluteV : ComplexAbsolutelySummable(v)
+  requires absoluteW : ComplexAbsolutelySummable(w)
+  requires dominated : ∀ n ∈ ℕ,
+    complexAbs(u(n)) ≤ R[complexAbs(v(n)) + complexAbs(w(n))]
+  shows ComplexAbsolutelySummable(u)
+proof
+  obtain ⟨vSequence, vSummable⟩ := absoluteV
+  obtain ⟨wSequence, wSummable⟩ := absoluteW
+  have sum := Summable.add with vSummable, wSummable
+  have vAbs : RealSequence(complexAbsSequence(v)) by
+    exact complexAbsSequence.function with vSequence
+  have wAbs : RealSequence(complexAbsSequence(w)) by
+    exact complexAbsSequence.function with wSequence
+  apply ComplexAbsolutelySummable.of_bound with sequence, sum
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  have vFunction : v : ℕ → ℂ by exact vSequence
+  have wFunction : w : ℕ → ℂ by exact wSequence
+  have vTerm := FunctionBetween.apply_closed with vFunction, nIn
+  have wTerm := FunctionBetween.apply_closed with wFunction, nIn
+  have vReal := complexAbs.real with vTerm
+  have wReal := complexAbs.real with wTerm
+  have vValue := complexAbsSequence.value with vSequence, nIn
+  have wValue := complexAbsSequence.value with wSequence, nIn
+  have vValueReal : Real(complexAbsSequence(v)(n))
+    rw vValue
+    exact vReal
+  have wValueReal : Real(complexAbsSequence(w)(n))
+    rw wValue
+    exact wReal
+  rw [(addSequence.value with vAbs, wAbs, vValueReal, wValueReal), vValue,
+    wValue]
+  exact dominated with n, nIn
+
+-- n^S ≤ n^T for n ≥ 1 and S ≤ T.
+theorem realRpow.nat_le_of_exponent (n : Nat) (S T : Real)
+  requires positive : 1 ≤ n
+  requires order : S ≤ T
+  shows realRpow(realNat(n), S) ≤ realRpow(realNat(n), T)
+proof
+  have leftReal := realRpow.real at realNat(n), S
+  have rightReal := realRpow.real at realNat(n), T
+  by_cases one : n = (1:N)
+  . rw [one, realNat.one, realRpow.one_base, realRpow.one_base]
+    linarith
+  . have above : (1:N) < n by arith
+    have base := realNat.lt_of_lt with above
+    rw realNat.one at base
+    by_cases strict : S < T
+    . have smaller := realRpow.lt_of_exponent with base, strict
+      exact realLess.implies_le with smaller
+    . have same : S = T by linarith
+      rw same
+      linarith
+
+-- Terms only read the coefficients at n ≥ 1.
+theorem lseriesTerms.congr (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires same : ∀ n ∈ ℕ, n ≠ (0:N) → f(n) = g(n)
+  shows lseriesTerms(f, s) = lseriesTerms(g, s)
+proof
+  have left := lseriesTerms.function with fValues, hs
+  have right := lseriesTerms.function with gValues, hs
+  apply FunctionBetween.ext with left, right
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  have next : n + 1 ∈ ℕ by typecheck
+  have nonzero : n + 1 ≠ (0:N) by arith
+  have agree := same with n + 1, next, nonzero
+  rw [(lseriesTerms.value with fValues, hs, nMember),
+    (lseriesTerms.value with gValues, hs, nMember), agree]
 
 -- Section: Coefficients
 theorem characterCoefficients.function (N : Nat) (χ : Set)
   requires character : DirichletCharacter(N, χ)
   shows FunctionBetween(characterCoefficients(χ), ℕ, complexCarrier)
 proof
-  sorry
+  have values := DirichletCharacter.function with character
+  apply characterCoefficients.maps
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  have index : integerOfNat(n) ∈ ℤ by typecheck
+  exact FunctionBetween.apply_closed with values, index
 
 theorem characterCoefficients.apply (χ : Set) (n : Nat)
   shows characterCoefficients(χ)(n) = χ(integerOfNat(n))
 proof
-  sorry
+  have index : n ∈ ℕ by typecheck
+  exact characterCoefficients.eval with index
 
 theorem oneCoefficients.function
   shows FunctionBetween(oneCoefficients, ℕ, complexCarrier)
 proof
-  sorry
+  unfold oneCoefficients
+  apply coefficientGraph.function
+  . intros p hp
+    obtain ⟨_, a, aIn, b, bIn, shape⟩ := product.membership.forward with hp
+    simp at bIn
+    have one := complexOne.member
+    rw bIn at shape
+    exact ⟨a, aIn, complexOne, one, shape⟩
+  . intros a aIn
+    have one : complexOne ∈ {complexOne} by simp
+    have pair := product.pair with aIn, one
+    exact ⟨complexOne, complexOne.member, pair⟩
+  . intros a b c ab ac
+    obtain ⟨_, bOne⟩ := product.pair_membership.forward with ab
+    obtain ⟨_, cOne⟩ := product.pair_membership.forward with ac
+    simp at bOne
+    simp at cOne
+    rw [bOne, cOne]
 
 theorem oneCoefficients.apply (n : Nat)
   shows oneCoefficients(n) = complexOne
 proof
-  sorry
+  have index : n ∈ ℕ by typecheck
+  have function := oneCoefficients.function
+  have one : complexOne ∈ {complexOne} by simp
+  have mapped : relates(oneCoefficients, n, complexOne)
+    unfold relates
+    unfold oneCoefficients
+    exact product.pair with index, one
+  exact FunctionBetween.apply_value with function, index, mapped
 
 -- |χ(n)| ≤ 1 (Mathlib's DirichletCharacter.norm_le_one).
 theorem characterCoefficients.abs_le_one (N : Nat) (χ : Set) (n : Nat)
@@ -213,19 +1115,40 @@ theorem characterCoefficients.abs_le_one (N : Nat) (χ : Set) (n : Nat)
   requires character : DirichletCharacter(N, χ)
   shows complexAbs(characterCoefficients(χ)(n)) ≤ R[1]
 proof
-  sorry
+  have index : integerOfNat(n) ∈ ℤ by typecheck
+  have positiveN : 0 < N by arith
+  rw characterCoefficients.apply
+  exact DirichletCharacter.abs_le_one with character, positiveN, index
 
 -- A Dirichlet character is completely multiplicative on ℕ.
 theorem characterCoefficients.multiplicative (N : Nat) (χ : Set)
   requires character : DirichletCharacter(N, χ)
   shows CompletelyMultiplicative(characterCoefficients(χ))
 proof
-  sorry
+  have function := characterCoefficients.function with character
+  refine ⟨function, ?_, ?_⟩
+  . rw [characterCoefficients.apply, integerOfNat.one]
+    exact DirichletCharacter.one with character
+  . intros m mIn n nIn
+    have mNat := nat.omega.backward with mIn
+    have nNat := nat.omega.backward with nIn
+    have mInteger : integerOfNat(m) ∈ ℤ by typecheck
+    have nInteger : integerOfNat(n) ∈ ℤ by typecheck
+    rw [characterCoefficients.apply, characterCoefficients.apply,
+      characterCoefficients.apply, integerOfNat.mul]
+    exact DirichletCharacter.mul with character, mInteger, nInteger
 
 theorem oneCoefficients.multiplicative
   shows CompletelyMultiplicative(oneCoefficients)
 proof
-  sorry
+  have function := oneCoefficients.function
+  refine ⟨function, ?_, ?_⟩
+  . rw oneCoefficients.apply
+  . intros m mIn n nIn
+    have mNat := nat.omega.backward with mIn
+    have nNat := nat.omega.backward with nIn
+    rw [oneCoefficients.apply, oneCoefficients.apply, oneCoefficients.apply]
+    ring
 
 -- The series of a character is layer 1's: the terms agree with
 -- dirichletSeriesTerms, and the terms of 1 with zetaSeriesTerms.
@@ -235,13 +1158,32 @@ theorem lseriesTerms.character (N : Nat) (χ s : Set)
   shows lseriesTerms(characterCoefficients(χ), s) =
     dirichletSeriesTerms(χ, s)
 proof
-  sorry
+  have values := DirichletCharacter.function with character
+  have coefficients := characterCoefficients.function with character
+  have left := lseriesTerms.function with coefficients, hs
+  have right := dirichletSeriesTerms.function with values, hs
+  apply FunctionBetween.ext with left, right
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  rw [(lseriesTerms.value with coefficients, hs, nMember),
+    (dirichletSeriesTerms.value with values, hs, nMember),
+    characterCoefficients.apply]
 
 theorem lseriesTerms.one (s : Set)
   requires hs : s ∈ ℂ
   shows lseriesTerms(oneCoefficients, s) = zetaSeriesTerms(s)
 proof
-  sorry
+  have coefficients := oneCoefficients.function
+  have left := lseriesTerms.function with coefficients, hs
+  have right := zetaSeriesTerms.function with hs
+  apply FunctionBetween.ext with left, right
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have power := realCpow.member at realNat(n + 1), ℂ[-s] with negative
+  rw [(lseriesTerms.value with coefficients, hs, nMember),
+    (zetaSeriesTerms.value with hs, nMember), oneCoefficients.apply]
+  ring
 
 -- Section: Terms
 theorem lseriesTerms.apply (f s : Set) (n : Nat)
@@ -250,7 +1192,8 @@ theorem lseriesTerms.apply (f s : Set) (n : Nat)
   shows lseriesTerms(f, s)(n) =
     ℂ[f(n + 1) * realCpow(realNat(n + 1), ℂ[-s])]
 proof
-  sorry
+  have index : n ∈ ℕ by typecheck
+  exact lseriesTerms.value with values, hs, index
 
 -- |f(n) n^(−s)| = |f(n)| n^(−re s) (Mathlib's LSeries.norm_term_eq).
 theorem lseriesTerms.abs (f s : Set) (n : Nat)
@@ -259,7 +1202,14 @@ theorem lseriesTerms.abs (f s : Set) (n : Nat)
   shows complexAbs(lseriesTerms(f, s)(n)) =
     R[complexAbs(f(n + 1)) * realRpow(realNat(n + 1), -complexRe(s))]
 proof
-  sorry
+  have index : n ∈ ℕ by typecheck
+  have next : n + 1 ∈ ℕ by typecheck
+  have positive : 1 ≤ n + 1 by arith
+  have value := FunctionBetween.apply_closed with values, next
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have power := realCpow.member at realNat(n + 1), ℂ[-s] with negative
+  rw [(lseriesTerms.value with values, hs, index),
+    (complexAbs.mul with value, power), (realCpow.nat_neg_abs with positive, hs)]
 
 -- Comparison of terms (Mathlib's LSeries.norm_term_le).
 theorem lseriesTerms.abs_le (f g s : Set) (n : Nat)
@@ -269,7 +1219,11 @@ theorem lseriesTerms.abs_le (f g s : Set) (n : Nat)
   requires bound : complexAbs(f(n + 1)) ≤ complexAbs(g(n + 1))
   shows complexAbs(lseriesTerms(f, s)(n)) ≤ complexAbs(lseriesTerms(g, s)(n))
 proof
-  sorry
+  have positive : 1 ≤ n + 1 by arith
+  rw [(lseriesTerms.abs with fValues, hs), (lseriesTerms.abs with gValues, hs)]
+  have power := realRpow.positive at realNat(n + 1), R[-complexRe(s)]
+  exact realLe.mul_right_of_nonnegative with bound,
+    (realLess.implies_le with power)
 
 -- A term decreases in modulus as re s grows (Mathlib's
 -- LSeries.norm_term_le_of_re_le_re).
@@ -277,7 +1231,7 @@ theorem lseriesTerms.abs_le_of_re_le (f s t : Set) (n : Nat)
   requires values : FunctionBetween(f, ℕ, complexCarrier)
   requires hs : s ∈ ℂ
   requires ht : t ∈ ℂ
-  requires order : complexRe(s) ≤ complexRe(t)
+  requires order : R[0] ≤ R[complexRe(t) - complexRe(s)]
   shows complexAbs(lseriesTerms(f, t)(n)) ≤ complexAbs(lseriesTerms(f, s)(n))
 proof
   sorry
@@ -309,14 +1263,14 @@ theorem LSeries.member (f s : Set)
   requires hs : s ∈ ℂ
   shows LSeries(f, s) ∈ ℂ
 proof
-  sorry
+  exact LSeries.value_member at f, s
 
 theorem LSeriesMap.apply (f s : Set)
   requires values : FunctionBetween(f, ℕ, complexCarrier)
   requires hs : s ∈ ℂ
   shows LSeriesMap(f)(s) = LSeries(f, s)
 proof
-  sorry
+  exact LSeriesMap.value with values, hs
 
 -- Mathlib's LSeriesHasSum_iff.
 theorem LSeriesHasSum.iff (f s a : Set)
@@ -325,7 +1279,17 @@ theorem LSeriesHasSum.iff (f s a : Set)
   shows LSeriesHasSum(f, s, a) ↔
     LSeriesSummable(f, s) ∧ LSeries(f, s) = a
 proof
-  sorry
+  constructor
+  . intro has
+    obtain ⟨summable, sums⟩ := has
+    have own := LSeries.of_summable with summable
+    have equal := ComplexSumsTo.unique with own, sums
+    exact ⟨summable, equal⟩
+  . intro both
+    obtain ⟨summable, equal⟩ := both
+    have own := LSeries.of_summable with summable
+    rw equal at own
+    exact ⟨summable, own⟩
 
 -- Mathlib's LSeriesSummable.LSeriesHasSum.
 theorem LSeriesSummable.hasSum (f s : Set)
@@ -334,7 +1298,8 @@ theorem LSeriesSummable.hasSum (f s : Set)
   requires summable : LSeriesSummable(f, s)
   shows LSeriesHasSum(f, s, LSeries(f, s))
 proof
-  sorry
+  have own := LSeries.of_summable with summable
+  exact ⟨summable, own⟩
 
 -- Off the summable s the sum is 0 (Mathlib's
 -- LSeries.eq_zero_of_not_LSeriesSummable).
@@ -344,7 +1309,7 @@ theorem LSeries.of_not_summable (f s : Set)
   requires notSummable : ¬LSeriesSummable(f, s)
   shows LSeries(f, s) = ℂ[0]
 proof
-  sorry
+  exact LSeries.of_not_summable_value with notSummable
 
 -- Only the values at n ≥ 1 matter (Mathlib's LSeriesSummable_congr,
 -- LSeries_congr).
@@ -355,7 +1320,16 @@ theorem LSeriesSummable.congr (f g s : Set)
   requires same : ∀ n ∈ ℕ, n ≠ (0:N) → f(n) = g(n)
   shows LSeriesSummable(f, s) ↔ LSeriesSummable(g, s)
 proof
-  sorry
+  have terms := lseriesTerms.congr with fValues, gValues, hs, same
+  constructor
+  . intro summable
+    unfold LSeriesSummable
+    unfold LSeriesSummable at summable
+    rwa terms at summable
+  . intro summable
+    unfold LSeriesSummable
+    unfold LSeriesSummable at summable
+    rwa ← terms at summable
 
 theorem LSeries.congr (f g s : Set)
   requires fValues : FunctionBetween(f, ℕ, complexCarrier)
@@ -364,18 +1338,68 @@ theorem LSeries.congr (f g s : Set)
   requires same : ∀ n ∈ ℕ, n ≠ (0:N) → f(n) = g(n)
   shows LSeries(f, s) = LSeries(g, s)
 proof
-  sorry
+  have terms := lseriesTerms.congr with fValues, gValues, hs, same
+  have both := LSeriesSummable.congr with fValues, gValues, hs, same
+  by_cases summable : LSeriesSummable(f, s)
+  . have gSummable := both.forward with summable
+    have fSums := LSeries.of_summable with summable
+    have gSums := LSeries.of_summable with gSummable
+    rw terms at fSums
+    exact ComplexSumsTo.unique with fSums, gSums
+  . have gNot : ¬LSeriesSummable(g, s)
+      intro gSummable
+      exact summable with (both.backward with gSummable)
+    rw [(LSeries.of_not_summable_value with summable),
+      (LSeries.of_not_summable_value with gNot)]
 
 -- Summability moves right (Mathlib's LSeriesSummable.of_re_le_re).
 theorem LSeriesSummable.of_re_le_re (f s t : Set)
   requires values : FunctionBetween(f, ℕ, complexCarrier)
   requires hs : s ∈ ℂ
   requires ht : t ∈ ℂ
-  requires order : complexRe(s) ≤ complexRe(t)
+  requires order : R[0] ≤ R[complexRe(t) - complexRe(s)]
   requires summable : LSeriesSummable(f, s)
   shows LSeriesSummable(f, t)
 proof
   sorry
+
+-- The comparisons in the real order of re s and re t (the statements
+-- `lseriesTerms.abs_le_of_re_le` and `LSeriesSummable.of_re_le_re` read
+-- complexRe(s) ≤ complexRe(t) in the natural-number order).
+theorem lseriesTerms.abs_le_of_re (f s t : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires ht : t ∈ ℂ
+  requires order : R[0] ≤ R[complexRe(t) - complexRe(s)]
+  shows complexAbs(lseriesTerms(f, t)(n)) ≤ complexAbs(lseriesTerms(f, s)(n))
+proof
+  have next : n + 1 ∈ ℕ by typecheck
+  have positive : 1 ≤ n + 1 by arith
+  have value := FunctionBetween.apply_closed with values, next
+  have valueAbs := complexAbs.nonnegative with value
+  have reS : Real(complexRe(s)) by typecheck
+  have reT : Real(complexRe(t)) by typecheck
+  have exponents : R[-complexRe(t)] ≤ R[-complexRe(s)] by linarith
+  have powers := realRpow.nat_le_of_exponent with positive, exponents
+  rw [(lseriesTerms.abs with values, ht), (lseriesTerms.abs with values, hs)]
+  exact realLe.mul_left_of_nonnegative with powers, valueAbs
+
+theorem LSeriesSummable.of_re_le (f s t : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires ht : t ∈ ℂ
+  requires order : R[0] ≤ R[complexRe(t) - complexRe(s)]
+  requires summable : LSeriesSummable(f, s)
+  shows LSeriesSummable(f, t)
+proof
+  have terms := lseriesTerms.function with values, ht
+  have sequence : ComplexSequence(lseriesTerms(f, t)) by exact terms
+  unfold LSeriesSummable
+  unfold LSeriesSummable at summable
+  apply ComplexAbsolutelySummable.of_abs_le with sequence, summable
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  exact lseriesTerms.abs_le_of_re with values, hs, ht, order
 
 -- Summability depends only on re s (Mathlib's LSeriesSummable_iff_of_re_eq_re).
 theorem LSeriesSummable.of_re_eq (f s t : Set)
@@ -385,7 +1409,15 @@ theorem LSeriesSummable.of_re_eq (f s t : Set)
   requires same : complexRe(s) = complexRe(t)
   shows LSeriesSummable(f, s) ↔ LSeriesSummable(f, t)
 proof
-  sorry
+  have reS : Real(complexRe(s)) by typecheck
+  have reT : Real(complexRe(t)) by typecheck
+  have forward : R[0] ≤ R[complexRe(t) - complexRe(s)] by linarith
+  have backward : R[0] ≤ R[complexRe(s) - complexRe(t)] by linarith
+  constructor
+  . intro summable
+    exact LSeriesSummable.of_re_le with values, hs, ht, forward, summable
+  . intro summable
+    exact LSeriesSummable.of_re_le with values, ht, hs, backward, summable
 
 -- Comparison: dominated coefficients (Mathlib's LSeriesSummable.of_norm_le
 -- pattern, via norm_term_le).
@@ -397,7 +1429,16 @@ theorem LSeriesSummable.of_abs_le (f g s : Set)
   requires summable : LSeriesSummable(g, s)
   shows LSeriesSummable(f, s)
 proof
-  sorry
+  have terms := lseriesTerms.function with fValues, hs
+  have sequence : ComplexSequence(lseriesTerms(f, s)) by exact terms
+  unfold LSeriesSummable
+  unfold LSeriesSummable at summable
+  apply ComplexAbsolutelySummable.of_abs_le with sequence, summable
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  have next : n + 1 ∈ ℕ by typecheck
+  have nextBound := bound with n + 1, next
+  exact lseriesTerms.abs_le with fValues, gValues, hs, nextBound
 
 -- Bounded coefficients give absolute convergence on re s > 1 (Mathlib's
 -- LSeriesSummable_of_le_const_mul_rpow with exponent 0).
@@ -408,7 +1449,24 @@ theorem LSeriesSummable.of_bounded (f s : Set) (C : Real)
   requires halfPlane : realOne < complexRe(s)
   shows LSeriesSummable(f, s)
 proof
-  sorry
+  obtain ⟨_, absoluteZeta⟩ := zeta.series with hs, halfPlane
+  have terms := lseriesTerms.function with values, hs
+  have sequence : ComplexSequence(lseriesTerms(f, s)) by exact terms
+  have dominated : ∀ n ∈ ℕ, complexAbs(lseriesTerms(f, s)(n)) ≤
+      R[C * complexAbs(zetaSeriesTerms(s)(n))]
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have next : n + 1 ∈ ℕ by typecheck
+    have positive : 1 ≤ n + 1 by arith
+    have valueBound := bound with n + 1, next
+    rw [(lseriesTerms.abs with values, hs), (zetaSeriesTerms.value with hs, nIn),
+      (realCpow.nat_neg_abs with positive, hs)]
+    have power := realRpow.positive at realNat(n + 1), R[-complexRe(s)]
+    exact realLe.mul_right_of_nonnegative with valueBound,
+      (realLess.implies_le with power)
+  unfold LSeriesSummable
+  exact ComplexAbsolutelySummable.of_abs_le_scaled with sequence,
+    absoluteZeta, dominated
 
 -- Coefficients O(n^x) give absolute convergence on re s > x + 1 (Mathlib's
 -- LSeriesSummable_of_le_const_mul_rpow).
@@ -420,7 +1478,49 @@ theorem LSeriesSummable.of_le_rpow (f s : Set) (X C : Real)
   requires halfPlane : R[X + 1] < complexRe(s)
   shows LSeriesSummable(f, s)
 proof
-  sorry
+  have reS : Real(complexRe(s)) by typecheck
+  have hw : complexOfReal(R[complexRe(s) - X]) ∈ ℂ by typecheck
+  have reW := complexOfReal.re at R[complexRe(s) - X]
+  have halfPlaneW : realOne < complexRe(complexOfReal(R[complexRe(s) - X]))
+    rw reW
+    linarith
+  obtain ⟨_, absoluteZeta⟩ := zeta.series with hw, halfPlaneW
+  have terms := lseriesTerms.function with values, hs
+  have sequence : ComplexSequence(lseriesTerms(f, s)) by exact terms
+  have dominated : ∀ n ∈ ℕ, complexAbs(lseriesTerms(f, s)(n)) ≤
+      R[C * complexAbs(zetaSeriesTerms(complexOfReal(R[complexRe(s) - X]))(n))]
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have next : n + 1 ∈ ℕ by typecheck
+    have positive : 1 ≤ n + 1 by arith
+    have nonzero : n + 1 ≠ (0:N) by arith
+    have valueBound := bound with n + 1, next, nonzero
+    have atLeast := realNat.one_le with positive
+    have positiveReal : R[0] < realNat(n + 1) by linarith
+    have split := realRpow.add at realNat(n + 1), X, R[-complexRe(s)] with
+      positiveReal
+    have exponent : R[-complexRe(complexOfReal(R[complexRe(s) - X]))] =
+        R[X + -complexRe(s)]
+      rw reW
+      ring
+    rw [(lseriesTerms.abs with values, hs),
+      (zetaSeriesTerms.value with hw, nIn),
+      (realCpow.nat_neg_abs with positive, hw), exponent, split]
+    have power := realRpow.positive at realNat(n + 1), R[-complexRe(s)]
+    have scaled := realLe.mul_right_of_nonnegative with valueBound,
+      (realLess.implies_le with power)
+    have powerX := realRpow.real at realNat(n + 1), X
+    have powerS := realRpow.real at realNat(n + 1), R[-complexRe(s)]
+    have value := FunctionBetween.apply_closed with values, next
+    have absReal := complexAbs.real with value
+    have regroup : R[C * realRpow(realNat(n + 1), X) *
+        realRpow(realNat(n + 1), R[-complexRe(s)])] =
+      R[C * (realRpow(realNat(n + 1), X) *
+        realRpow(realNat(n + 1), R[-complexRe(s)]))] by ring
+    linarith
+  unfold LSeriesSummable
+  exact ComplexAbsolutelySummable.of_abs_le_scaled with sequence,
+    absoluteZeta, dominated
 
 -- The series of 1 converges absolutely exactly on re s > 1 (Mathlib's
 -- LSeriesSummable_one_iff, Real.summable_nat_rpow_inv).
@@ -440,7 +1540,28 @@ theorem LSeriesSummable.mul_bounded (f g s : Set)
   requires summable : LSeriesSummable(f, s)
   shows LSeriesSummable(coefficientMul(g, f), s)
 proof
-  sorry
+  have product : FunctionBetween(coefficientMul(g, f), ℕ, complexCarrier)
+    apply coefficientMul.maps
+    intros n nIn
+    have gn := FunctionBetween.apply_closed with gValues, nIn
+    have fn := FunctionBetween.apply_closed with fValues, nIn
+    typecheck
+  have dominated : ∀ n ∈ ℕ, complexAbs(coefficientMul(g, f)(n)) ≤
+      complexAbs(f(n))
+    intros n nIn
+    have gn := FunctionBetween.apply_closed with gValues, nIn
+    have fn := FunctionBetween.apply_closed with fValues, nIn
+    have gAbs := complexAbs.nonnegative with gn
+    have fAbs := complexAbs.nonnegative with fn
+    have gReal := complexAbs.real with gn
+    have fReal := complexAbs.real with fn
+    have gBound := bound with n, nIn
+    rw [(coefficientMul.eval with nIn), (complexAbs.mul with gn, fn)]
+    have scaled := realLe.mul_right_of_nonnegative with gBound, fAbs
+    have unit : R[1 * complexAbs(f(n))] = complexAbs(f(n)) by ring
+    linarith
+  exact LSeriesSummable.of_abs_le with product, fValues, hs, dominated,
+    summable
 
 -- Section: The abscissa
 -- Mathlib's LSeriesSummable.abscissaOfAbsConv_le.
@@ -450,7 +1571,14 @@ theorem LSeriesSummable.abscissa_le (f s : Set)
   requires summable : LSeriesSummable(f, s)
   shows AbscissaAtMost(f, complexRe(s))
 proof
-  sorry
+  intros Y yIn less
+  have yReal : Real(Y) by typecheck
+  have reS : Real(complexRe(s)) by typecheck
+  have hy : complexOfReal(Y) ∈ ℂ by typecheck
+  have order : R[0] ≤ R[complexRe(complexOfReal(Y)) - complexRe(s)]
+    rw complexOfReal.re
+    linarith
+  exact LSeriesSummable.of_re_le with values, hs, hy, order, summable
 
 -- Mathlib's LSeriesSummable_of_abscissaOfAbsConv_lt_re.
 theorem AbscissaAtMost.summable (f s : Set) (X : Real)
@@ -460,7 +1588,18 @@ theorem AbscissaAtMost.summable (f s : Set) (X : Real)
   requires halfPlane : X < complexRe(s)
   shows LSeriesSummable(f, s)
 proof
-  sorry
+  have reS : Real(complexRe(s)) by typecheck
+  have twice := half.add_self at R[X + complexRe(s)]
+  have middleReal : Real(half(R[X + complexRe(s)])) by typecheck
+  have middleIn : half(R[X + complexRe(s)]) ∈ ℝ by typecheck
+  have above : X < half(R[X + complexRe(s)]) by linarith
+  have middle := abscissa with half(R[X + complexRe(s)]), middleIn, above
+  have hy : complexOfReal(half(R[X + complexRe(s)])) ∈ ℂ by typecheck
+  have order : R[0] ≤
+      R[complexRe(s) - complexRe(complexOfReal(half(R[X + complexRe(s)])))]
+    rw complexOfReal.re
+    linarith
+  exact LSeriesSummable.of_re_le with values, hy, hs, order, middle
 
 theorem AbscissaBelow.summable (f s : Set)
   requires values : FunctionBetween(f, ℕ, complexCarrier)
@@ -468,13 +1607,29 @@ theorem AbscissaBelow.summable (f s : Set)
   requires abscissa : AbscissaBelow(f, s)
   shows LSeriesSummable(f, s)
 proof
-  sorry
+  obtain ⟨Y, yIn, below, summable⟩ := abscissa
+  have yReal : Real(Y) by typecheck
+  have reS : Real(complexRe(s)) by typecheck
+  have hy : complexOfReal(Y) ∈ ℂ by typecheck
+  have order : R[0] ≤ R[complexRe(s) - complexRe(complexOfReal(Y))]
+    rw complexOfReal.re
+    linarith
+  exact LSeriesSummable.of_re_le with values, hy, hs, order, summable
 
 -- The series of 1 has abscissa 1 (Mathlib's abscissaOfAbsConv_one).
 theorem AbscissaAtMost.one
   shows AbscissaAtMost(oneCoefficients, R[1])
 proof
-  sorry
+  intros Y yIn above
+  have yReal : Real(Y) by typecheck
+  have hy : complexOfReal(Y) ∈ ℂ by typecheck
+  have halfPlane : realOne < complexRe(complexOfReal(Y))
+    rw complexOfReal.re
+    linarith
+  obtain ⟨_, absolute⟩ := zeta.series with hy, halfPlane
+  unfold LSeriesSummable
+  rw (lseriesTerms.one with hy)
+  exact absolute
 
 -- Section: Linearity
 -- Mathlib's LSeriesHasSum.add, LSeries_add.
@@ -486,7 +1641,58 @@ theorem LSeriesHasSum.add (f g s a b : Set)
   requires gSum : LSeriesHasSum(g, s, b)
   shows LSeriesHasSum(coefficientAdd(f, g), s, ℂ[a + b])
 proof
-  sorry
+  obtain ⟨fSummable, fSums⟩ := fSum
+  obtain ⟨gSummable, gSums⟩ := gSum
+  have aIn := ComplexSumsTo.member with fSums
+  have bIn := ComplexSumsTo.member with gSums
+  have sumValues : FunctionBetween(coefficientAdd(f, g), ℕ, complexCarrier)
+    apply coefficientAdd.maps
+    intros n nIn
+    have fn := FunctionBetween.apply_closed with fValues, nIn
+    have gn := FunctionBetween.apply_closed with gValues, nIn
+    typecheck
+  have hTerms := lseriesTerms.function with sumValues, hs
+  have hSequence : ComplexSequence(lseriesTerms(coefficientAdd(f, g), s)) by
+    exact hTerms
+  have fTerms := lseriesTerms.function with fValues, hs
+  have gTerms := lseriesTerms.function with gValues, hs
+  have termValues : ∀ m ∈ ℕ, lseriesTerms(coefficientAdd(f, g), s)(m) =
+      ℂ[lseriesTerms(f, s)(m) + lseriesTerms(g, s)(m)]
+    intros m mIn
+    have mNat := nat.omega.backward with mIn
+    have next : m + 1 ∈ ℕ by typecheck
+    have fn := FunctionBetween.apply_closed with fValues, next
+    have gn := FunctionBetween.apply_closed with gValues, next
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(m + 1), ℂ[-s] with negative
+    rw [(lseriesTerms.value with sumValues, hs, mIn),
+      (lseriesTerms.value with fValues, hs, mIn),
+      (lseriesTerms.value with gValues, hs, mIn), (coefficientAdd.eval with next)]
+    ring
+  have linear : ∀ m ∈ ℕ, lseriesTerms(coefficientAdd(f, g), s)(m) =
+      ℂ[1 * lseriesTerms(f, s)(m) + 1 * lseriesTerms(g, s)(m)]
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    have gm := FunctionBetween.apply_closed with gTerms, mIn
+    rw (termValues with m, mIn)
+    ring
+  have one : ℂ[1] ∈ ℂ by typecheck
+  have sums := ComplexSumsTo.linear with fSums, gSums, one, one, hSequence,
+    linear
+  have unit : ℂ[1 * a + 1 * b] = ℂ[a + b] by ring
+  rw unit at sums
+  have summable : LSeriesSummable(coefficientAdd(f, g), s)
+    unfold LSeriesSummable
+    unfold LSeriesSummable at fSummable
+    unfold LSeriesSummable at gSummable
+    apply ComplexAbsolutelySummable.of_abs_le_add with hSequence, fSummable,
+      gSummable
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    have gm := FunctionBetween.apply_closed with gTerms, mIn
+    rw (termValues with m, mIn)
+    exact complexAbs.triangle with fm, gm
+  exact ⟨summable, sums⟩
 
 theorem LSeriesHasSum.sub (f g s a b : Set)
   requires fValues : FunctionBetween(f, ℕ, complexCarrier)
@@ -496,7 +1702,60 @@ theorem LSeriesHasSum.sub (f g s a b : Set)
   requires gSum : LSeriesHasSum(g, s, b)
   shows LSeriesHasSum(coefficientSub(f, g), s, ℂ[a - b])
 proof
-  sorry
+  obtain ⟨fSummable, fSums⟩ := fSum
+  obtain ⟨gSummable, gSums⟩ := gSum
+  have aIn := ComplexSumsTo.member with fSums
+  have bIn := ComplexSumsTo.member with gSums
+  have subValues : FunctionBetween(coefficientSub(f, g), ℕ, complexCarrier)
+    apply coefficientSub.maps
+    intros n nIn
+    have fn := FunctionBetween.apply_closed with fValues, nIn
+    have gn := FunctionBetween.apply_closed with gValues, nIn
+    have negative := FunctionBetween.apply_closed with complexNeg.function, gn
+    typecheck
+  have hTerms := lseriesTerms.function with subValues, hs
+  have hSequence : ComplexSequence(lseriesTerms(coefficientSub(f, g), s)) by
+    exact hTerms
+  have fTerms := lseriesTerms.function with fValues, hs
+  have gTerms := lseriesTerms.function with gValues, hs
+  have termValues : ∀ m ∈ ℕ, lseriesTerms(coefficientSub(f, g), s)(m) =
+      ℂ[lseriesTerms(f, s)(m) - lseriesTerms(g, s)(m)]
+    intros m mIn
+    have mNat := nat.omega.backward with mIn
+    have next : m + 1 ∈ ℕ by typecheck
+    have fn := FunctionBetween.apply_closed with fValues, next
+    have gn := FunctionBetween.apply_closed with gValues, next
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(m + 1), ℂ[-s] with negative
+    rw [(lseriesTerms.value with subValues, hs, mIn),
+      (lseriesTerms.value with fValues, hs, mIn),
+      (lseriesTerms.value with gValues, hs, mIn), (coefficientSub.eval with next)]
+    ring
+  have linear : ∀ m ∈ ℕ, lseriesTerms(coefficientSub(f, g), s)(m) =
+      ℂ[1 * lseriesTerms(f, s)(m) + (-1) * lseriesTerms(g, s)(m)]
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    have gm := FunctionBetween.apply_closed with gTerms, mIn
+    rw (termValues with m, mIn)
+    ring
+  have one : ℂ[1] ∈ ℂ by typecheck
+  have minusOne : ℂ[-1] ∈ ℂ by typecheck
+  have sums := ComplexSumsTo.linear with fSums, gSums, one, minusOne,
+    hSequence, linear
+  have unit : ℂ[1 * a + (-1) * b] = ℂ[a - b] by ring
+  rw unit at sums
+  have summable : LSeriesSummable(coefficientSub(f, g), s)
+    unfold LSeriesSummable
+    unfold LSeriesSummable at fSummable
+    unfold LSeriesSummable at gSummable
+    apply ComplexAbsolutelySummable.of_abs_le_add with hSequence, fSummable,
+      gSummable
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    have gm := FunctionBetween.apply_closed with gTerms, mIn
+    rw (termValues with m, mIn)
+    exact complexAbs.sub_le with fm, gm
+  exact ⟨summable, sums⟩
 
 -- Mathlib's LSeriesHasSum.smul.
 theorem LSeriesHasSum.scale (c f s a : Set)
@@ -506,7 +1765,53 @@ theorem LSeriesHasSum.scale (c f s a : Set)
   requires sum : LSeriesHasSum(f, s, a)
   shows LSeriesHasSum(coefficientScale(c, f), s, ℂ[c * a])
 proof
-  sorry
+  obtain ⟨fSummable, fSums⟩ := sum
+  have aIn := ComplexSumsTo.member with fSums
+  have scaleValues : FunctionBetween(coefficientScale(c, f), ℕ, complexCarrier)
+    apply coefficientScale.maps
+    intros n nIn
+    have fn := FunctionBetween.apply_closed with values, nIn
+    typecheck
+  have hTerms := lseriesTerms.function with scaleValues, hs
+  have hSequence : ComplexSequence(lseriesTerms(coefficientScale(c, f), s)) by
+    exact hTerms
+  have fTerms := lseriesTerms.function with values, hs
+  have termValues : ∀ m ∈ ℕ, lseriesTerms(coefficientScale(c, f), s)(m) =
+      ℂ[c * lseriesTerms(f, s)(m)]
+    intros m mIn
+    have mNat := nat.omega.backward with mIn
+    have next : m + 1 ∈ ℕ by typecheck
+    have fn := FunctionBetween.apply_closed with values, next
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(m + 1), ℂ[-s] with negative
+    rw [(lseriesTerms.value with scaleValues, hs, mIn),
+      (lseriesTerms.value with values, hs, mIn),
+      (coefficientScale.eval with next)]
+    ring
+  have zero : ℂ[0] ∈ ℂ by typecheck
+  have linear : ∀ m ∈ ℕ, lseriesTerms(coefficientScale(c, f), s)(m) =
+      ℂ[c * lseriesTerms(f, s)(m) + 0 * lseriesTerms(f, s)(m)]
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    rw (termValues with m, mIn)
+    ring
+  have sums := ComplexSumsTo.linear with fSums, fSums, hc, zero, hSequence,
+    linear
+  have unit : ℂ[c * a + 0 * a] = ℂ[c * a] by ring
+  rw unit at sums
+  have summable : LSeriesSummable(coefficientScale(c, f), s)
+    unfold LSeriesSummable
+    unfold LSeriesSummable at fSummable
+    apply ComplexAbsolutelySummable.of_abs_le_scaled at
+      lseriesTerms(coefficientScale(c, f), s), lseriesTerms(f, s), complexAbs(c)
+      with hSequence, fSummable
+    intros m mIn
+    have fm := FunctionBetween.apply_closed with fTerms, mIn
+    rw [(termValues with m, mIn), (complexAbs.mul with hc, fm)]
+    have absC := complexAbs.real with hc
+    have absF := complexAbs.real with fm
+    linarith
+  exact ⟨summable, sums⟩
 
 -- Mathlib's LSeriesHasSum.sum: a finite sum of series.
 theorem LSeriesHasSum.family_sum (F I a s : Set)
@@ -649,6 +1954,182 @@ proof
   sorry
 
 -- Section: Euler products
+-- Absolutely summable terms are eventually below 1.
+theorem ComplexAbsolutelySummable.eventually_small (t : Set)
+  requires absolute : ComplexAbsolutelySummable(t)
+  shows ∃ M ∈ ℕ, ∀ n ∈ ℕ, M ≤ n → complexAbs(t(n)) < R[1]
+proof
+  obtain ⟨sequence, summable⟩ := absolute
+  obtain ⟨L, lReal, sums⟩ := summable
+  have zero := SumsTo.terms_converge_zero with sums
+  obtain ⟨_, close⟩ := zero
+  have one : R[0] < R[1] by linarith
+  have oneIn : R[1] ∈ ℝ by typecheck
+  obtain ⟨M, mIn, after⟩ := close with R[1], oneIn, one
+  refine ⟨M, mIn, ?_⟩
+  intros n nIn later
+  have ball := after with n, nIn, later
+  have nNat := nat.omega.backward with nIn
+  rw (complexAbsSequence.value with sequence, nIn) at ball
+  obtain ⟨_, high⟩ := openBall.order_characterization.forward with ball
+  linarith
+
+-- For completely multiplicative f the terms are multiplicative in the
+-- shifted indexing.
+theorem lseriesTerms.multiplicative (f s : Set)
+  requires multiplicative : CompletelyMultiplicative(f)
+  requires hs : s ∈ ℂ
+  shows ∀ r ∈ ℕ, ∀ j ∈ ℕ, lseriesTerms(f, s)((r + 1) * j + r) =
+    ℂ[lseriesTerms(f, s)(r) * lseriesTerms(f, s)(j)]
+proof
+  obtain ⟨values, _, fMul⟩ := multiplicative
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  intros r rMember j jMember
+  have rNat := nat.omega.backward with rMember
+  have jNat := nat.omega.backward with jMember
+  have position : (r + 1) * j + r ∈ ℕ by typecheck
+  have index : (r + 1) * j + r + 1 = (r + 1) * (j + 1) by arith
+  have positiveR : 1 ≤ r + 1 by arith
+  have positiveJ : 1 ≤ j + 1 by arith
+  have rNext : r + 1 ∈ ℕ by typecheck
+  have jNext : j + 1 ∈ ℕ by typecheck
+  have rValue := FunctionBetween.apply_closed with values, rNext
+  have jValue := FunctionBetween.apply_closed with values, jNext
+  have rPower := realCpow.member at realNat(r + 1), ℂ[-s] with negative
+  have jPower := realCpow.member at realNat(j + 1), ℂ[-s] with negative
+  rw [(lseriesTerms.value with values, hs, position),
+    (lseriesTerms.value with values, hs, rMember),
+    (lseriesTerms.value with values, hs, jMember), index,
+    (realCpow.nat_neg_mul with positiveR, positiveJ, hs),
+    (fMul with r + 1, rNext, j + 1, jNext)]
+  ring
+
+-- A term equal to 1 at a prime index propagates to arbitrarily large
+-- indices.
+theorem complexTerms.ones_unbounded (t : Set) (r k : Nat)
+  requires positive : 1 ≤ r
+  requires first : t((0:N)) = ℂ[1]
+  requires multiplicative : ∀ j ∈ ℕ, t((r + 1) * j + r) = ℂ[t(r) * t(j)]
+  requires isOne : t(r) = ℂ[1]
+  shows ∃ j ∈ ℕ, k ≤ j ∧ t(j) = ℂ[1]
+proof
+  induction k
+  | zero =>
+    have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+    have le : (0:N) ≤ (0:N) by arith
+    exact ⟨(0:N), zeroMember, le, first⟩
+  | succ(i) using ih =>
+    obtain ⟨j, jIn, le, value⟩ := ih
+    have jNat := nat.omega.backward with jIn
+    have next : (r + 1) * j + r ∈ ℕ by typecheck
+    have product : r * j ∈ ℕ by typecheck
+    have expand : (r + 1) * j + r = r * j + j + r by ring
+    have bigger : succ(i) ≤ (r + 1) * j + r
+      rw expand
+      arith
+    have nextValue := multiplicative with j, jIn
+    rw [isOne, value] at nextValue
+    have unit : ℂ[1 * 1] = ℂ[1] by ring
+    rw unit at nextValue
+    exact ⟨(r + 1) * j + r, next, bigger, nextValue⟩
+
+theorem lseriesTerms.prime_not_one (f s : Set) (r : Nat)
+  requires multiplicative : CompletelyMultiplicative(f)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  requires prime : Prime(r + 1)
+  shows lseriesTerms(f, s)(r) ≠ ℂ[1]
+proof
+  intro isOne
+  have multiplicativeTerms := lseriesTerms.multiplicative with
+    multiplicative, hs
+  obtain ⟨values, fOne, _⟩ := multiplicative
+  have rMember : r ∈ ℕ by typecheck
+  have above := Prime.greater_than_one with prime
+  have positive : 1 ≤ r by arith
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first : lseriesTerms(f, s)((0:N)) = ℂ[1]
+    rw [(lseriesTerms.value with values, hs, zeroMember),
+      natural.zero_add_one, (realCpow.nat_neg_one with hs), fOne]
+    ring
+  have along : ∀ j ∈ ℕ, lseriesTerms(f, s)((r + 1) * j + r) =
+      ℂ[lseriesTerms(f, s)(r) * lseriesTerms(f, s)(j)]
+    intros j jIn
+    exact multiplicativeTerms with r, rMember, j, jIn
+  unfold LSeriesSummable at summable
+  obtain ⟨M, mIn, small⟩ := ComplexAbsolutelySummable.eventually_small with
+    summable
+  have mNat := nat.omega.backward with mIn
+  obtain ⟨j, jIn, later, value⟩ := complexTerms.ones_unbounded at
+    lseriesTerms(f, s), r, M with positive, first, along, isOne
+  have below := small with j, jIn, later
+  rw [value, complexAbs.one] at below
+  linarith
+
+-- The Euler product of a completely multiplicative f with absolutely
+-- convergent series, through layer 1's sieve.
+theorem LSeries.euler_sieve (f s : Set)
+  requires multiplicative : CompletelyMultiplicative(f)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  shows ComplexConvergesTo(lseriesEulerProducts(f, s), LSeries(f, s)) ∧
+    LSeries(f, s) ≠ ℂ[0]
+proof
+  have multiplicativeCopy := multiplicative
+  have multiplicativeTerms := lseriesTerms.multiplicative with
+    multiplicative, hs
+  obtain ⟨values, fOne, _⟩ := multiplicativeCopy
+  have sums := LSeries.of_summable with summable
+  have summableCopy := summable
+  unfold LSeriesSummable at summableCopy
+  have products := lseriesEulerProducts.function with values, hs
+  have sequenceE : ComplexSequence(lseriesEulerProducts(f, s)) by
+    exact products
+  have negative : ℂ[-s] ∈ ℂ by typecheck
+  have zeroMember : (0:N) ∈ ℕ := nat.omega.forward at (0:N) with *
+  have first : lseriesTerms(f, s)((0:N)) = ℂ[1]
+    rw [(lseriesTerms.value with values, hs, zeroMember),
+      natural.zero_add_one, (realCpow.nat_neg_one with hs), fOne]
+    ring
+  have primeMultiplicative : ∀ r ∈ ℕ, Prime(r + 1) → (∀ j ∈ ℕ,
+      lseriesTerms(f, s)((r + 1) * j + r) =
+        ℂ[lseriesTerms(f, s)(r) * lseriesTerms(f, s)(j)])
+    intros r rMember prime
+    exact multiplicativeTerms with r, rMember
+  have notOne : ∀ r ∈ ℕ, Prime(r + 1) → lseriesTerms(f, s)(r) ≠ ℂ[1]
+    intros r rMember prime
+    have rNat := nat.omega.backward with rMember
+    exact lseriesTerms.prime_not_one with multiplicative, hs, summable, prime
+  have start : lseriesEulerProducts(f, s)((0:N)) = ℂ[1]
+    rw [(lseriesEulerProducts.value with values, hs, zeroMember),
+      lseriesEulerProduct]
+  have primeStep : ∀ r ∈ ℕ, Prime(r + 1) →
+      lseriesEulerProducts(f, s)(r + 1 + 1) =
+        ℂ[lseriesEulerProducts(f, s)(r + 1) *
+          complexInv(ℂ[1 - lseriesTerms(f, s)(r)])]
+    intros r rMember prime
+    have rNat := nat.omega.backward with rMember
+    have here : r + 1 ∈ ℕ by typecheck
+    have next : r + 1 + 1 ∈ ℕ by typecheck
+    have index : r + 1 + 1 = succ(r + 1) by arith
+    rw [(lseriesEulerProducts.value with values, hs, next),
+      (lseriesEulerProducts.value with values, hs, here),
+      (lseriesTerms.value with values, hs, rMember), index,
+      lseriesEulerProduct, (lseriesEulerFactor.prime with values, hs, prime)]
+  have otherStep : ∀ k ∈ ℕ, ¬Prime(k) →
+      lseriesEulerProducts(f, s)(k + 1) = lseriesEulerProducts(f, s)(k)
+    intros k kMember notPrime
+    have kNat := nat.omega.backward with kMember
+    have next : k + 1 ∈ ℕ by typecheck
+    have index : k + 1 = succ(k) by arith
+    have product := lseriesEulerProduct.member at f, s, k with values, hs
+    rw [(lseriesEulerProducts.value with values, hs, next),
+      (lseriesEulerProducts.value with values, hs, kMember), index,
+      lseriesEulerProduct, (lseriesEulerFactor.not_prime with notPrime)]
+    ring
+  exact ComplexConvergesTo.euler_sieve with summableCopy, sums, first,
+    primeMultiplicative, notOne, sequenceE, start, primeStep, otherStep
+
 -- For f completely multiplicative with absolutely convergent series, the
 -- partial Euler products converge to the sum (Mathlib's
 -- eulerProduct_completely_multiplicative_hasProd, for the L-series terms).
@@ -658,7 +2139,9 @@ theorem LSeries.euler_product (f s : Set)
   requires summable : LSeriesSummable(f, s)
   shows ComplexConvergesTo(lseriesEulerProducts(f, s), LSeries(f, s))
 proof
-  sorry
+  obtain ⟨converges, _⟩ := LSeries.euler_sieve with multiplicative, hs,
+    summable
+  exact converges
 
 -- Mathlib's LSeries_eulerProduct_exp_log: the sum is exp of
 -- Σ_p −log(1 − f(p) p^(−s)); stated as: no Euler factor vanishes and the
@@ -669,7 +2152,55 @@ theorem LSeries.ne_zero_of_euler (f s : Set)
   requires summable : LSeriesSummable(f, s)
   shows LSeries(f, s) ≠ ℂ[0]
 proof
-  sorry
+  obtain ⟨_, nonzero⟩ := LSeries.euler_sieve with multiplicative, hs,
+    summable
+  exact nonzero
+
+-- The partial Euler products of χ and of 1 are layer 1's, factor by factor.
+theorem lseriesEulerProduct.character (N : Nat) (χ s : Set) (n : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerProduct(characterCoefficients(χ), s, n) =
+    lEulerProduct(χ, s, n)
+proof
+  induction n
+  | zero =>
+    rw [lseriesEulerProduct, lEulerProduct]
+  | succ(k) using ih =>
+    have values := DirichletCharacter.function with character
+    have coefficients := characterCoefficients.function with character
+    obtain ⟨_, primeValue, otherValue⟩ := lEulerFactor.selected at χ, s, k
+      with values, hs
+    have factor : lseriesEulerFactor(characterCoefficients(χ), s, k) =
+        lEulerFactor(χ, s, k)
+      by_cases prime : Prime(k)
+      . rw [(lseriesEulerFactor.prime with coefficients, hs, prime),
+          (primeValue with prime), characterCoefficients.apply]
+      . rw [(lseriesEulerFactor.not_prime with prime), (otherValue with prime)]
+    rw [lseriesEulerProduct, lEulerProduct, ih, factor]
+
+theorem lseriesEulerProduct.one (s : Set) (n : Nat)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerProduct(oneCoefficients, s, n) = zetaEulerProduct(s, n)
+proof
+  induction n
+  | zero =>
+    rw [lseriesEulerProduct, zetaEulerProduct]
+  | succ(k) using ih =>
+    have coefficients := oneCoefficients.function
+    obtain ⟨_, primeValue, otherValue⟩ := zetaEulerFactor.selected at s, k
+      with hs
+    have negative : ℂ[-s] ∈ ℂ by typecheck
+    have power := realCpow.member at realNat(k), ℂ[-s] with negative
+    have factor : lseriesEulerFactor(oneCoefficients, s, k) =
+        zetaEulerFactor(s, k)
+      by_cases prime : Prime(k)
+      . have unit : ℂ[1 - complexOne * realCpow(realNat(k), ℂ[-s])] =
+            ℂ[1 - realCpow(realNat(k), ℂ[-s])] by ring
+        rw [(lseriesEulerFactor.prime with coefficients, hs, prime),
+          (primeValue with prime), oneCoefficients.apply, unit]
+      . rw [(lseriesEulerFactor.not_prime with prime), (otherValue with prime)]
+    rw [lseriesEulerProduct, zetaEulerProduct, ih, factor]
 
 -- The Euler factors of a character are layer 1's.
 theorem lseriesEulerProducts.character (N : Nat) (χ s : Set)
@@ -678,13 +2209,30 @@ theorem lseriesEulerProducts.character (N : Nat) (χ s : Set)
   shows lseriesEulerProducts(characterCoefficients(χ), s) =
     lEulerProducts(χ, s)
 proof
-  sorry
+  have values := DirichletCharacter.function with character
+  have coefficients := characterCoefficients.function with character
+  have left := lseriesEulerProducts.function with coefficients, hs
+  have right := lEulerProducts.function with values, hs
+  apply FunctionBetween.ext with left, right
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  rw [(lseriesEulerProducts.value with coefficients, hs, nMember),
+    (lEulerProducts.value with values, hs, nMember)]
+  exact lseriesEulerProduct.character at N, χ, s, n with character, hs
 
 theorem lseriesEulerProducts.one (s : Set)
   requires hs : s ∈ ℂ
   shows lseriesEulerProducts(oneCoefficients, s) = zetaEulerProducts(s)
 proof
-  sorry
+  have coefficients := oneCoefficients.function
+  have left := lseriesEulerProducts.function with coefficients, hs
+  have right := zetaEulerProducts.function with hs
+  apply FunctionBetween.ext with left, right
+  intros n nMember
+  have nNat := nat.omega.backward with nMember
+  rw [(lseriesEulerProducts.value with coefficients, hs, nMember),
+    (zetaEulerProducts.value with hs, nMember)]
+  exact lseriesEulerProduct.one at s, n with hs
 
 -- Section: The bridge to layer 1
 -- For re s > 1 the series of χ converges absolutely to layer 1's L(s, χ)
@@ -697,7 +2245,11 @@ theorem LSeriesSummable.character (N : Nat) (χ s : Set)
   requires halfPlane : realOne < complexRe(s)
   shows LSeriesSummable(characterCoefficients(χ), s)
 proof
-  sorry
+  obtain ⟨_, absolute⟩ := LFunction.series with positive, character, hs,
+    halfPlane
+  unfold LSeriesSummable
+  rw (lseriesTerms.character with character, hs)
+  exact absolute
 
 -- The series of χ converges absolutely exactly on re s > 1 (Mathlib's
 -- DirichletCharacter.LSeriesSummable_iff, N ≥ 1).
@@ -717,7 +2269,13 @@ theorem LSeriesHasSum.character (N : Nat) (χ s : Set)
   requires halfPlane : realOne < complexRe(s)
   shows LSeriesHasSum(characterCoefficients(χ), s, LFunction(N, χ, s))
 proof
-  sorry
+  obtain ⟨sums, _⟩ := LFunction.series with positive, character, hs,
+    halfPlane
+  have summable := LSeriesSummable.character with positive, character, hs,
+    halfPlane
+  have terms := lseriesTerms.character with character, hs
+  rw ← terms at sums
+  exact ⟨summable, sums⟩
 
 -- Mathlib's DirichletCharacter.LFunction_eq_LSeries.
 theorem LFunction.eq_LSeries (N : Nat) (χ s : Set)
@@ -727,7 +2285,12 @@ theorem LFunction.eq_LSeries (N : Nat) (χ s : Set)
   requires halfPlane : realOne < complexRe(s)
   shows LFunction(N, χ, s) = LSeries(characterCoefficients(χ), s)
 proof
-  sorry
+  have has := LSeriesHasSum.character with positive, character, hs, halfPlane
+  have coefficients := characterCoefficients.function with character
+  have iff := LSeriesHasSum.iff at characterCoefficients(χ), s,
+    LFunction(N, χ, s) with coefficients, hs
+  obtain ⟨_, equal⟩ := iff.forward with has
+  rw equal
 
 -- Mathlib's LSeriesHasSum_one and LSeries_one_eq_riemannZeta.
 theorem LSeriesHasSum.one (s : Set)
@@ -735,14 +2298,26 @@ theorem LSeriesHasSum.one (s : Set)
   requires halfPlane : realOne < complexRe(s)
   shows LSeriesHasSum(oneCoefficients, s, riemannZeta(s))
 proof
-  sorry
+  obtain ⟨sums, absolute⟩ := zeta.series with hs, halfPlane
+  have terms := lseriesTerms.one with hs
+  have summable : LSeriesSummable(oneCoefficients, s)
+    unfold LSeriesSummable
+    rw terms
+    exact absolute
+  rw ← terms at sums
+  exact ⟨summable, sums⟩
 
 theorem riemannZeta.eq_LSeries (s : Set)
   requires hs : s ∈ ℂ
   requires halfPlane : realOne < complexRe(s)
   shows riemannZeta(s) = LSeries(oneCoefficients, s)
 proof
-  sorry
+  have has := LSeriesHasSum.one with hs, halfPlane
+  have coefficients := oneCoefficients.function
+  have iff := LSeriesHasSum.iff at oneCoefficients, s, riemannZeta(s) with
+    coefficients, hs
+  obtain ⟨_, equal⟩ := iff.forward with has
+  rw equal
 
 -- The derivatives agree on re s > 1 (Mathlib's
 -- DirichletCharacter.deriv_LFunction_eq_deriv_LSeries). Layer 1's L(·, χ)
@@ -779,7 +2354,8 @@ theorem LSeries.euler_product_character (N : Nat) (χ s : Set)
   shows ComplexConvergesTo(lEulerProducts(χ, s),
     LSeries(characterCoefficients(χ), s))
 proof
-  sorry
+  rw ← (LFunction.eq_LSeries with positive, character, hs, halfPlane)
+  exact LFunction.euler_product with positive, character, hs, halfPlane
 
 -- Mathlib's riemannZeta_eulerProduct_hasProd, in partial products (layer
 -- 1's zeta.euler_product).
@@ -801,6 +2377,31 @@ theorem LSeries.euler_product_mul (N : Nat) (χ s : Set)
   shows ComplexConvergesTo(productSequence(zetaEulerProducts(s),
     lEulerProducts(χ, s)), ℂ[riemannZeta(s) * LFunction(N, χ, s)])
 proof
-  sorry
+  have values := DirichletCharacter.function with character
+  have zetaConverges := zeta.euler_product with hs, halfPlane
+  have lConverges := LFunction.euler_product with positive, character, hs,
+    halfPlane
+  have product := ComplexConvergesTo.mul with zetaConverges, lConverges
+  have zetaFunction := zetaEulerProducts.function with hs
+  have lFunction := lEulerProducts.function with values, hs
+  have zetaSequence : ComplexSequence(zetaEulerProducts(s)) by
+    exact zetaFunction
+  have lSequence : ComplexSequence(lEulerProducts(χ, s)) by exact lFunction
+  have left : FunctionBetween(productSequence(zetaEulerProducts(s),
+      lEulerProducts(χ, s)), ℕ, complexCarrier)
+    apply productSequence.maps
+    intros n nIn
+    have zn := FunctionBetween.apply_closed with zetaFunction, nIn
+    have ln := FunctionBetween.apply_closed with lFunction, nIn
+    typecheck
+  have right := complexSeqMul.function with zetaSequence, lSequence
+  have same : productSequence(zetaEulerProducts(s), lEulerProducts(χ, s)) =
+      complexSeqMul(zetaEulerProducts(s), lEulerProducts(χ, s))
+    apply FunctionBetween.ext with left, right
+    intros n nIn
+    rw [(productSequence.eval with nIn),
+      (complexSeqMul.value with zetaSequence, lSequence, nIn)]
+  rw same
+  exact product
 
 end LSeries
