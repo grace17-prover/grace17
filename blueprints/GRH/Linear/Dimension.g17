@@ -17,6 +17,9 @@ module GRH.Linear.Dimension
 import GRH.Linear.Modules
 import Grace.Cumulus.Cardinal.Enumeration
 import Grace.Cumulus.Algebra.Ring.Homomorphism
+import Grace.Cumulus.Algebra.Ring.DeterminantProduct
+import Grace.Cumulus.Algebra.Ring.DeterminantIdentity
+import Grace.Cumulus.Algebra.Ring.SumSupport
 
 -- Section: Independence, spanning, bases
 -- A family v : I → M is linearly independent when every vanishing linear
@@ -160,6 +163,69 @@ proof
   unfold moduleCombination
   rw [same, ← total, l2, l3]
 
+theorem moduleCombination.smul_coefficients (R M I r c v : Set)
+  requires ring : Ring(R)
+  requires module : Module(M, R)
+  requires finite : Finite(I)
+  requires scalar : r ∈ Ring.carrier(R)
+  requires coefficients : c : I → Ring.carrier(R)
+  requires vectors : v : I → Module.carrier(M)
+  shows (pointwiseSmul(I, selfModule(R), r, c) : I → Ring.carrier(R)) ∧
+    moduleCombination(M, R, I, pointwiseSmul(I, selfModule(R), r, c), v) =
+      call2(Module.smul(M), r, moduleCombination(M, R, I, c, v))
+proof
+  have selfCarrier := selfModule.carrier_eq at R
+  have selfSmul := selfModule.smul_eq at R
+  have coefficientValues : ∀ i ∈ I, call2(Module.smul(selfModule(R)), r, c(i)) ∈ Module.carrier(selfModule(R))
+    intros i hi
+    have y := FunctionBetween.apply_closed with coefficients, hi
+    rw [selfSmul, selfCarrier]
+    exact Ring.mul_mem at R, r, c(i) with *
+  have cF0 := pointwiseSmul.graph_function at I, selfModule(R), r, c with coefficientValues
+  rw selfCarrier at cF0
+  have t2F := combinationTerms.function at M, R, I, c, v with module, coefficients, vectors
+  have tF := combinationTerms.function at M, R, I, pointwiseSmul(I, selfModule(R), r, c), v with module, cF0, vectors
+  have termValues : ∀ i ∈ I, call2(Module.smul(M), r, combinationTerms(M, R, I, c, v)(i)) ∈ Module.carrier(M)
+    intros i hi
+    have y := FunctionBetween.apply_closed with t2F, hi
+    exact Module.smul_mem at R, M, r, combinationTerms(M, R, I, c, v)(i) with *
+  have scaledF := pointwiseSmul.graph_function at I, M, r, combinationTerms(M, R, I, c, v) with termValues
+  have same : combinationTerms(M, R, I, pointwiseSmul(I, selfModule(R), r, c), v) = pointwiseSmul(I, M, r, combinationTerms(M, R, I, c, v))
+    apply FunctionBetween.ext with tF, scaledF
+    intros i hi
+    have y := FunctionBetween.apply_closed with coefficients, hi
+    have vi := FunctionBetween.apply_closed with vectors, hi
+    have e1 := combinationTerms.value at M, R, I, pointwiseSmul(I, selfModule(R), r, c), v, i with module, cF0, vectors, hi
+    have e2 := pointwiseSmul.graph_apply at I, selfModule(R), r, c, i with coefficientValues, hi
+    have e3 := pointwiseSmul.graph_apply at I, M, r, combinationTerms(M, R, I, c, v), i with termValues, hi
+    have e4 := combinationTerms.value at M, R, I, c, v, i with module, coefficients, vectors, hi
+    have l1 := mul_smul at R, M, r, c(i), v(i) with *
+    rw [e1, e2, selfSmul, e3, e4, l1]
+  have total := moduleSum.smul_of at R, M, I, combinationTerms(M, R, I, c, v), r with ring, module, finite, t2F, scalar
+  refine ⟨cF0, ?_⟩
+  unfold moduleCombination
+  rw [same, ← total]
+
+-- A finite sum in the module R is the ring's finite sum.
+theorem moduleSum.self_ring_sum (R V w : Set)
+  requires ring : CommRing(R)
+  requires finite : Finite(V)
+  requires values : w : V → Ring.carrier(R)
+  shows moduleSum(selfModule(R), V, w) =
+    finiteRingSum(V, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, w)
+proof
+  have parts := CommRing.parts with ring
+  have ringR := CommRing.to_ring with ring
+  have self := Ring.to_module at R with ringR
+  obtain ⟨n, natural, e, enumeration⟩ := Finite.bijective_enumeration at R, selfModule(R), V with ringR, self, finite
+  have ringSum := finiteRingSum.enumeration at V, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, w, e, n with parts, values, enumeration
+  have selfCarrier := selfModule.carrier_eq at R
+  have wS : w : V → Module.carrier(selfModule(R))
+    rw selfCarrier
+    exact values
+  have value := moduleSum.enumeration at R, selfModule(R), V, w, e, n with wS, enumeration
+  rw [value, ringSum, selfModule.add_eq, selfModule.zero_eq]
+
 -- Coefficients with equal combinations along an independent family are
 -- equal.
 theorem LinearIndependent.coefficients_eq (R M I v c d : Set)
@@ -253,6 +319,218 @@ uniqueness
 def basisCoordinate (M R I v i : Set) : Set :=
   { p ∈ Module.carrier(M) × Ring.carrier(R) |
     ∃ x ∈ Module.carrier(M), p = (x, basisCoordinates(M, R, I, v, x)(i)) }
+
+-- Helpers for the invariance of rank: the matrix of a family w : J → M in
+-- a basis v : I → M, and an n × n matrix that is F on D ⊆ n × n and zero
+-- elsewhere.
+def coordinateMatrix (M R I v J w : Set) : Set :=
+  { q ∈ (I × J) × Ring.carrier(R) | ∃ i ∈ I, ∃ j ∈ J,
+    q = ((i, j), basisCoordinates(M, R, I, v, w(j))(i)) }
+
+def padMatrix (R n D F : Set) : Set :=
+  { q ∈ (n × n) × Ring.carrier(R) | ∃ i ∈ n, ∃ j ∈ n,
+    ((i, j) ∈ D ∧ q = ((i, j), F((i, j)))) ∨
+    ((i, j) ∉ D ∧ q = ((i, j), Ring.zero(R))) }
+
+theorem basisCoordinate.graph_relates (M R I v i x : Set)
+  requires index : x ∈ Module.carrier(M)
+  requires valueIn : basisCoordinates(M, R, I, v, x)(i) ∈ Ring.carrier(R)
+  shows relates(basisCoordinate(M, R, I, v, i), x, basisCoordinates(M, R, I, v, x)(i))
+proof
+  unfold relates
+  apply basisCoordinate.membership.backward
+  refine ⟨(product.pair at x, basisCoordinates(M, R, I, v, x)(i), Module.carrier(M), Ring.carrier(R) with index, valueIn), x, index, rfl⟩
+
+theorem basisCoordinate.graph_function (M R I v i : Set)
+  requires values : ∀ x ∈ Module.carrier(M), basisCoordinates(M, R, I, v, x)(i) ∈ Ring.carrier(R)
+  shows basisCoordinate(M, R, I, v, i) : Module.carrier(M) → Ring.carrier(R)
+proof
+  constructor
+    intros q0 member
+    obtain ⟨bounded, witnesses⟩ := basisCoordinate.membership.forward with member
+    exact bounded
+  . constructor
+      intros z0 first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := basisCoordinate.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := basisCoordinate.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros x xIn
+      have valueIn := values with x, xIn
+      refine ⟨basisCoordinates(M, R, I, v, x)(i), valueIn, (basisCoordinate.graph_relates at M, R, I, v, i, x with xIn, valueIn)⟩
+
+theorem basisCoordinate.graph_apply (M R I v i x : Set)
+  requires values : ∀ x ∈ Module.carrier(M), basisCoordinates(M, R, I, v, x)(i) ∈ Ring.carrier(R)
+  requires index : x ∈ Module.carrier(M)
+  shows basisCoordinate(M, R, I, v, i)(x) = basisCoordinates(M, R, I, v, x)(i)
+proof
+  have function := basisCoordinate.graph_function at M, R, I, v, i with values
+  have valueIn := values with x, index
+  have mapped := basisCoordinate.graph_relates at M, R, I, v, i, x with index, valueIn
+  exact FunctionBetween.apply_value with function, index, mapped
+
+theorem coordinateMatrix.graph_relates (M R I v J w i j : Set)
+  requires rowIn : i ∈ I
+  requires colIn : j ∈ J
+  requires valueIn : basisCoordinates(M, R, I, v, w(j))(i) ∈ Ring.carrier(R)
+  shows relates(coordinateMatrix(M, R, I, v, J, w), (i, j), basisCoordinates(M, R, I, v, w(j))(i))
+proof
+  have pairIn := product.pair at i, j, I, J with rowIn, colIn
+  have outer := product.pair at (i, j), basisCoordinates(M, R, I, v, w(j))(i), I × J, Ring.carrier(R) with pairIn, valueIn
+  unfold relates
+  apply coordinateMatrix.membership.backward
+  exact ⟨outer, i, rowIn, j, colIn, rfl⟩
+
+theorem coordinateMatrix.graph_function (M R I v J w : Set)
+  requires values : ∀ i ∈ I, ∀ j ∈ J, basisCoordinates(M, R, I, v, w(j))(i) ∈ Ring.carrier(R)
+  shows coordinateMatrix(M, R, I, v, J, w) : I × J → Ring.carrier(R)
+proof
+  constructor
+    intros q0 member
+    obtain ⟨bounded, witnesses⟩ := coordinateMatrix.membership.forward with member
+    exact bounded
+  . constructor
+      intros z0 first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, b1, b1In, firstShape⟩ := coordinateMatrix.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, b2, b2In, secondShape⟩ := coordinateMatrix.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw xi at xj
+      obtain ⟨aa, bb⟩ := orderedPair.injective with xj
+      rw [firstEqual, secondEqual]
+      cc
+    . intros q0 pIn
+      obtain ⟨bound, i, rowIn, j, colIn, shape⟩ := product.membership.forward with pIn
+      have valueIn := values with i, rowIn, j, colIn
+      have mapped := coordinateMatrix.graph_relates at M, R, I, v, J, w, i, j with rowIn, colIn, valueIn
+      rw shape
+      exact ⟨basisCoordinates(M, R, I, v, w(j))(i), valueIn, mapped⟩
+
+theorem coordinateMatrix.graph_entry (M R I v J w i j : Set)
+  requires values : ∀ i ∈ I, ∀ j ∈ J, basisCoordinates(M, R, I, v, w(j))(i) ∈ Ring.carrier(R)
+  requires rowIn : i ∈ I
+  requires colIn : j ∈ J
+  shows coordinateMatrix(M, R, I, v, J, w)((i, j)) = basisCoordinates(M, R, I, v, w(j))(i)
+proof
+  have function := coordinateMatrix.graph_function at M, R, I, v, J, w with values
+  have valueIn := values with i, rowIn, j, colIn
+  have mapped := coordinateMatrix.graph_relates at M, R, I, v, J, w, i, j with rowIn, colIn, valueIn
+  have pairIn := product.pair at i, j, I, J with rowIn, colIn
+  exact FunctionBetween.apply_value with function, pairIn, mapped
+
+theorem padMatrix.graph_function (R n D F : Set)
+  requires ring : Ring(R)
+  requires subset : D ⊆ n × n
+  requires values : F : D → Ring.carrier(R)
+  shows padMatrix(R, n, D, F) : n × n → Ring.carrier(R)
+proof
+  have zeroIn := Ring.zero_mem at R with ring
+  constructor
+    intros q0 member
+    obtain ⟨bounded, rest⟩ := padMatrix.membership.forward with member
+    exact bounded
+  . constructor
+      intros z0 first r1 second r2
+      unfold relates at r1
+      unfold relates at r2
+      obtain ⟨_, i1, hi1, j1, hj1, c1⟩ := padMatrix.membership.forward with r1
+      obtain ⟨_, i2, hi2, j2, hj2, c2⟩ := padMatrix.membership.forward with r2
+      cases c1 with d1 | o1
+      . obtain ⟨e1, s1⟩ := d1
+        obtain ⟨z1, f1⟩ := orderedPair.injective with s1
+        cases c2 with d2 | o2
+        . obtain ⟨e2, s2⟩ := d2
+          obtain ⟨z2, f2⟩ := orderedPair.injective with s2
+          rw [f1, f2]
+          cc
+        . obtain ⟨e2, s2⟩ := o2
+          obtain ⟨z2, f2⟩ := orderedPair.injective with s2
+          exfalso
+          have same : (i2, j2) = (i1, j1) by cc
+          rw same at e2
+          exact e2 with e1
+      . obtain ⟨e1, s1⟩ := o1
+        obtain ⟨z1, f1⟩ := orderedPair.injective with s1
+        cases c2 with d2 | o2
+        . obtain ⟨e2, s2⟩ := d2
+          obtain ⟨z2, f2⟩ := orderedPair.injective with s2
+          exfalso
+          have same : (i1, j1) = (i2, j2) by cc
+          rw same at e1
+          exact e1 with e2
+        . obtain ⟨e2, s2⟩ := o2
+          obtain ⟨z2, f2⟩ := orderedPair.injective with s2
+          rw [f1, f2]
+    . intros p hp
+      obtain ⟨pIn, i, hi, j, hj, shape⟩ := product.membership.forward with hp
+      have hp2 := product.pair at i, j, n, n with hi, hj
+      rw shape
+      by_cases inside : (i, j) ∈ D
+      . have value := FunctionBetween.apply_closed with values, inside
+        have pair := product.pair at (i, j), F((i, j)), n × n, Ring.carrier(R) with hp2, value
+        refine ⟨F((i, j)), value, ?_⟩
+        unfold relates
+        apply padMatrix.membership.backward
+        refine ⟨pair, i, hi, j, hj, ?_⟩
+        left
+        exact ⟨inside, rfl⟩
+      . have pair := product.pair at (i, j), Ring.zero(R), n × n, Ring.carrier(R) with hp2, zeroIn
+        refine ⟨Ring.zero(R), zeroIn, ?_⟩
+        unfold relates
+        apply padMatrix.membership.backward
+        refine ⟨pair, i, hi, j, hj, ?_⟩
+        right
+        exact ⟨inside, rfl⟩
+
+theorem padMatrix.entry_inside (R n D F i j : Set)
+  requires ring : Ring(R)
+  requires subset : D ⊆ n × n
+  requires values : F : D → Ring.carrier(R)
+  requires inside : (i, j) ∈ D
+  shows padMatrix(R, n, D, F)((i, j)) = F((i, j))
+proof
+  have function := padMatrix.graph_function at R, n, D, F with ring, subset, values
+  have pIn := subset with inside
+  obtain ⟨_, a, ha, b, hb, shape⟩ := product.membership.forward with pIn
+  obtain ⟨ia, jb⟩ := orderedPair.injective with shape
+  have value := FunctionBetween.apply_closed with values, inside
+  have pair := product.pair at (i, j), F((i, j)), n × n, Ring.carrier(R) with pIn, value
+  have mapped : relates(padMatrix(R, n, D, F), (i, j), F((i, j)))
+    unfold relates
+    apply padMatrix.membership.backward
+    rw ← ia at ha
+    rw ← jb at hb
+    refine ⟨pair, i, ha, j, hb, ?_⟩
+    left
+    exact ⟨inside, rfl⟩
+  exact FunctionBetween.apply_value with function, pIn, mapped
+
+theorem padMatrix.entry_outside (R n D F i j : Set)
+  requires ring : Ring(R)
+  requires subset : D ⊆ n × n
+  requires values : F : D → Ring.carrier(R)
+  requires row : i ∈ n
+  requires column : j ∈ n
+  requires outside : (i, j) ∉ D
+  shows padMatrix(R, n, D, F)((i, j)) = Ring.zero(R)
+proof
+  have function := padMatrix.graph_function at R, n, D, F with ring, subset, values
+  have zeroIn := Ring.zero_mem at R with ring
+  have pIn := product.pair at i, j, n, n with row, column
+  have pair := product.pair at (i, j), Ring.zero(R), n × n, Ring.carrier(R) with pIn, zeroIn
+  have mapped : relates(padMatrix(R, n, D, F), (i, j), Ring.zero(R))
+    unfold relates
+    apply padMatrix.membership.backward
+    refine ⟨pair, i, row, j, column, ?_⟩
+    right
+    exact ⟨outside, rfl⟩
+  exact FunctionBetween.apply_value with function, pIn, mapped
 
 -- Section: The standard basis and free modules
 -- The unit vector eᵢ ∈ Rᴵ, 1 at i and 0 elsewhere, and the family
@@ -770,7 +1048,68 @@ theorem basisCoordinate.linear (I v i : Set)
   requires index : i ∈ I
   shows LinearMap(basisCoordinate(M, R, I, v, i), M, R, selfModule(R))
 proof
-  sorry
+  have ringR := CommRing.to_ring with ring
+  have self := Ring.to_module at R with ringR
+  have selfCarrier := selfModule.carrier_eq at R
+  have selfAdd := selfModule.add_eq at R
+  have selfSmul := selfModule.smul_eq at R
+  have basis0 := basis
+  obtain ⟨independent, spans⟩ := basis0
+  obtain ⟨_, vF, _⟩ := spans
+  have coordF : ∀ x ∈ M.carrier, basisCoordinates(M, R, I, v, x) : I → R.carrier
+    intros x hx
+    have selected := basisCoordinates.selected at M, R, I, v, x with basis, finite, hx
+    exact functionSpace.mem_iff.forward with selected.left
+  have values : ∀ x ∈ M.carrier, basisCoordinates(M, R, I, v, x)(i) ∈ R.carrier
+    intros x hx
+    have cF := coordF with x, hx
+    exact FunctionBetween.apply_closed with cF, index
+  have fF := basisCoordinate.graph_function at M, R, I, v, i with values
+  rw ← selfCarrier at fF
+  apply LinearMap.of_laws with module, self, fF
+  . intros x hx y hy
+    have cx := coordF with x, hx
+    have cy := coordF with y, hy
+    have ex := basisCoordinates.combination at R, M, I, v, x with *
+    have ey := basisCoordinates.combination at R, M, I, v, y with *
+    obtain ⟨sF, sLaw⟩ := moduleCombination.add_coefficients at R, M, I, basisCoordinates(M, R, I, v, x), basisCoordinates(M, R, I, v, y), v with ringR, module, finite, cx, cy, vF
+    have xy := Module.add_mem at R, M, x, y with *
+    have back := basisCoordinates.of_combination at R, M, I, v, pointwiseSum(I, selfModule(R), basisCoordinates(M, R, I, v, x), basisCoordinates(M, R, I, v, y)) with ring, module, basis, finite, sF
+    have sumEq : call2(M.add, x, y) = moduleCombination(M, R, I, pointwiseSum(I, selfModule(R), basisCoordinates(M, R, I, v, x), basisCoordinates(M, R, I, v, y)), v)
+      rw sLaw
+      rw ← ex
+      rw ← ey
+    rw ← sumEq at back
+    have a1 := basisCoordinate.graph_apply at M, R, I, v, i, call2(M.add, x, y) with values, xy
+    have a2 := basisCoordinate.graph_apply at M, R, I, v, i, x with values, hx
+    have a3 := basisCoordinate.graph_apply at M, R, I, v, i, y with values, hy
+    have pointValues : ∀ k ∈ I, call2(Module.add(selfModule(R)), basisCoordinates(M, R, I, v, x)(k), basisCoordinates(M, R, I, v, y)(k)) ∈ Module.carrier(selfModule(R))
+      intros k hk
+      have p := FunctionBetween.apply_closed with cx, hk
+      have q := FunctionBetween.apply_closed with cy, hk
+      rw [selfAdd, selfCarrier]
+      exact Ring.add_mem at R, basisCoordinates(M, R, I, v, x)(k), basisCoordinates(M, R, I, v, y)(k) with *
+    have a4 := pointwiseSum.graph_apply at I, selfModule(R), basisCoordinates(M, R, I, v, x), basisCoordinates(M, R, I, v, y), i with pointValues, index
+    rw [a1, a2, a3, back, a4]
+  . intros r hr x hx
+    have cx := coordF with x, hx
+    have ex := basisCoordinates.combination at R, M, I, v, x with *
+    obtain ⟨sF, sLaw⟩ := moduleCombination.smul_coefficients at R, M, I, r, basisCoordinates(M, R, I, v, x), v with ringR, module, finite, hr, cx, vF
+    have rx := Module.smul_mem at R, M, r, x with *
+    have back := basisCoordinates.of_combination at R, M, I, v, pointwiseSmul(I, selfModule(R), r, basisCoordinates(M, R, I, v, x)) with ring, module, basis, finite, sF
+    have smulEq : call2(M.smul, r, x) = moduleCombination(M, R, I, pointwiseSmul(I, selfModule(R), r, basisCoordinates(M, R, I, v, x)), v)
+      rw sLaw
+      rw ← ex
+    rw ← smulEq at back
+    have a1 := basisCoordinate.graph_apply at M, R, I, v, i, call2(M.smul, r, x) with values, rx
+    have a2 := basisCoordinate.graph_apply at M, R, I, v, i, x with values, hx
+    have pointValues : ∀ k ∈ I, call2(Module.smul(selfModule(R)), r, basisCoordinates(M, R, I, v, x)(k)) ∈ Module.carrier(selfModule(R))
+      intros k hk
+      have p := FunctionBetween.apply_closed with cx, hk
+      rw [selfSmul, selfCarrier]
+      exact Ring.mul_mem at R, r, basisCoordinates(M, R, I, v, x)(k) with *
+    have a4 := pointwiseSmul.graph_apply at I, selfModule(R), r, basisCoordinates(M, R, I, v, x), i with pointValues, index
+    rw [a1, a2, back, a4]
 
 -- Basis.ext: linear maps agreeing on a basis are equal.
 theorem ModuleBasis.ext (N f g I v : Set)
@@ -957,6 +1296,165 @@ hypothesis ring : CommRing(R)
 hypothesis nontrivial : R.zero ≠ R.one
 hypothesis module : Module(M, R)
 
+-- No basis is indexed by a smaller natural number than another basis:
+-- the coordinate matrices B (of v in w) and A (of w in v), padded to
+-- n × n, satisfy B A = 1, while A has the zero row m, so 1 = det B · 0.
+theorem ModuleBasis.not_smaller (m n : Nat) (v w : Set)
+  requires basisV : ModuleBasis(M, R, m, v)
+  requires basisW : ModuleBasis(M, R, n, w)
+  requires smaller : m ∈ n
+  shows ⊥
+proof
+  have ringR := CommRing.to_ring with ring
+  have parts := CommRing.parts with ring
+  have zeroIn := Ring.zero_mem at R with ringR
+  have oneIn := Ring.one_mem at R with ringR
+  have self := Ring.to_module at R with ringR
+  have selfCarrier := selfModule.carrier_eq at R
+  have selfSmul := selfModule.smul_eq at R
+  have finiteM := Finite.natural at m
+  have finiteN := Finite.natural at n
+  have ordN := Ordinal.natural at n
+  have transN := Ordinal.transitive with ordN
+  have mSub : m ⊆ n
+    unfold Transitive at transN
+    exact transN with m, smaller
+  have basisV0 := basisV
+  obtain ⟨_, spansV⟩ := basisV0
+  obtain ⟨_, vF, _⟩ := spansV
+  have basisW0 := basisW
+  obtain ⟨_, spansW⟩ := basisW0
+  obtain ⟨_, wF, _⟩ := spansW
+  have coordV : ∀ x ∈ M.carrier, basisCoordinates(M, R, m, v, x) : m → R.carrier
+    intros x hx
+    have selected := basisCoordinates.selected at M, R, m, v, x with basisV, finiteM, hx
+    exact functionSpace.mem_iff.forward with selected.left
+  have coordW : ∀ x ∈ M.carrier, basisCoordinates(M, R, n, w, x) : n → R.carrier
+    intros x hx
+    have selected := basisCoordinates.selected at M, R, n, w, x with basisW, finiteN, hx
+    exact functionSpace.mem_iff.forward with selected.left
+  have aValues : ∀ i ∈ m, ∀ j ∈ n, basisCoordinates(M, R, m, v, w(j))(i) ∈ R.carrier
+    intros i hi j hj
+    have wj := FunctionBetween.apply_closed with wF, hj
+    have cF := coordV with w(j), wj
+    exact FunctionBetween.apply_closed with cF, hi
+  have bValues : ∀ k ∈ n, ∀ i ∈ m, basisCoordinates(M, R, n, w, v(i))(k) ∈ R.carrier
+    intros k hk i hi
+    have vi := FunctionBetween.apply_closed with vF, hi
+    have cF := coordW with v(i), vi
+    exact FunctionBetween.apply_closed with cF, hk
+  have aF := coordinateMatrix.graph_function at M, R, m, v, n, w with aValues
+  have bF := coordinateMatrix.graph_function at M, R, n, w, m, v with bValues
+  have subA : m × n ⊆ n × n
+    intros p hp
+    obtain ⟨_, i, hi, j, hj, shape⟩ := product.membership.forward with hp
+    have hi2 := mSub with hi
+    rw shape
+    exact product.pair at i, j, n, n with hi2, hj
+  have subB : n × m ⊆ n × n
+    intros p hp
+    obtain ⟨_, i, hi, j, hj, shape⟩ := product.membership.forward with hp
+    have hj2 := mSub with hj
+    rw shape
+    exact product.pair at i, j, n, n with hi, hj2
+  have padA := padMatrix.graph_function at R, n, m × n, coordinateMatrix(M, R, m, v, n, w) with ringR, subA, aF
+  have padB := padMatrix.graph_function at R, n, n × m, coordinateMatrix(M, R, n, w, m, v) with ringR, subB, bF
+  have matrixA : RingMatrix(n, R.carrier, padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)))
+    unfold RingMatrix
+    exact padA
+  have matrixB : RingMatrix(n, R.carrier, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)))
+    unfold RingMatrix
+    exact padB
+  have matrixI := identityMatrix.matrix at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, n with parts
+  have entries : ∀ k ∈ n, ∀ j ∈ n, identityMatrix(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one)((k, j)) = matrixProductEntry(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j)
+    intros k hk j hj
+    have wj := FunctionBetween.apply_closed with wF, hj
+    have cF := coordV with w(j), wj
+    have phi := basisCoordinate.linear at R, M, n, w, k with ring, module, basisW, finiteN, hk
+    have phiF := LinearMap.function_of with phi
+    have kValues : ∀ x ∈ M.carrier, basisCoordinates(M, R, n, w, x)(k) ∈ R.carrier
+      intros x hx
+      have cx := coordW with x, hx
+      exact FunctionBetween.apply_closed with cx, hk
+    have comb := basisCoordinates.combination at R, M, m, v, w(j) with ring, module, basisV, finiteM, wj
+    have mapped := LinearMap.map_combination at R, M, selfModule(R), basisCoordinate(M, R, n, w, k), m, basisCoordinates(M, R, m, v, w(j)), v with ringR, module, self, phi, finiteM, cF, vF
+    rw ← comb at mapped
+    have phiAt := basisCoordinate.graph_apply at M, R, n, w, k, w(j) with kValues, wj
+    have unit := basisCoordinates.basis_vector at R, M, n, w, j with ring, module, basisW, finiteN, hj
+    rw [phiAt, unit] at mapped
+    have image := compose.function at basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R)) with vF, phiF
+    have termsF0 := combinationTerms.function at selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R))) with self, cF, image
+    have termsF : combinationTerms(selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R)))) : m → R.carrier
+      rw ← selfCarrier
+      exact termsF0
+    have sumEq := moduleSum.self_ring_sum at R, m, combinationTerms(selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R)))) with ring, finiteM, termsF
+    unfold moduleCombination at mapped
+    rw sumEq at mapped
+    have weightsF := matrixProductWeights.function at n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j with parts, matrixB, matrixA, hk, hj
+    have agreement : ∀ s ∈ m, matrixProductWeights(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j)(s) = combinationTerms(selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R))))(s)
+      intros s hs
+      have sn := mSub with hs
+      have vs := FunctionBetween.apply_closed with vF, hs
+      have w1 := matrixProductWeights.value at n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j, s with parts, matrixB, matrixA, hk, hj, sn
+      have ks := product.pair at k, s, n, m with hk, hs
+      have sj := product.pair at s, j, m, n with hs, hj
+      have b1 := padMatrix.entry_inside at R, n, n × m, coordinateMatrix(M, R, n, w, m, v), k, s with ringR, subB, bF, ks
+      have b2 := coordinateMatrix.graph_entry at M, R, n, w, m, v, k, s with bValues, hk, hs
+      have a1 := padMatrix.entry_inside at R, n, m × n, coordinateMatrix(M, R, m, v, n, w), s, j with ringR, subA, aF, sj
+      have a2 := coordinateMatrix.graph_entry at M, R, m, v, n, w, s, j with aValues, hs, hj
+      have t1 := combinationTerms.value at selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R))), s with self, cF, image, hs
+      have t2 := compose.apply at basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R)), s with vF, phiF, hs
+      have t3 := basisCoordinate.graph_apply at M, R, n, w, k, v(s) with kValues, vs
+      have x := aValues with s, hs, j, hj
+      have y := bValues with k, hk, s, hs
+      rw [w1, b1, b2, a1, a2, t1, t2, t3, selfSmul]
+      ring
+    have vanishes : ∀ d ∈ n, ¬(d ∈ m) → matrixProductWeights(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j)(d) = R.zero
+      intros d hd out
+      have w1 := matrixProductWeights.value at n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j, d with parts, matrixB, matrixA, hk, hj, hd
+      have outside : (d, j) ∉ m × n
+        intro h
+        obtain ⟨_, a, ha, b, hb, shape⟩ := product.membership.forward with h
+        obtain ⟨da, jb⟩ := orderedPair.injective with shape
+        rw ← da at ha
+        exact out with ha
+      have a1 := padMatrix.entry_outside at R, n, m × n, coordinateMatrix(M, R, m, v, n, w), d, j with ringR, subA, aF, hd, hj, outside
+      have kd := product.pair at k, d, n, n with hk, hd
+      have y := FunctionBetween.apply_closed with padB, kd
+      rw [w1, a1]
+      ring
+    have extension := finiteRingSum.zero_extension at n, m, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, matrixProductWeights(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), k, j), combinationTerms(selfModule(R), R, m, basisCoordinates(M, R, m, v, w(j)), compose(basisCoordinate(M, R, n, w, k), v, m, M.carrier, Module.carrier(selfModule(R)))) with parts, finiteN, weightsF, termsF, mSub, agreement, vanishes
+    have idEntry := identityMatrix.entry at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, n, k, j with parts, hk, hj
+    unfold matrixProductEntry
+    rw [extension, ← mapped, idEntry]
+    by_cases same : k = j
+    . have s1 := singleValue.same at R.carrier, R.zero, R.one, j, k with zeroIn, oneIn, same
+      have s2 := unitVector.apply_same at R, n, j with ring, hj
+      rw [s1, same, s2]
+    . have s1 := singleValue.other at R.carrier, R.zero, R.one, j, k with zeroIn, oneIn, same
+      have s2 := unitVector.apply_other at R, n, j, k with ring, hk, same
+      rw [s1, s2]
+  have product := determinant.product at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, n, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), identityMatrix(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one) with parts, matrixB, matrixA, matrixI, entries
+  have detI := determinant.identity at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, n with parts
+  have row : ∀ j ∈ n, padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w))((m, j)) = R.zero
+    intros j hj
+    have outside : (m, j) ∉ m × n
+      intro h
+      obtain ⟨_, a, ha, b, hb, shape⟩ := product.membership.forward with h
+      obtain ⟨ma, jb⟩ := orderedPair.injective with shape
+      rw ← ma at ha
+      have irreflexive := membership.irreflexive at m
+      exact irreflexive with ha
+    exact padMatrix.entry_outside at R, n, m × n, coordinateMatrix(M, R, m, v, n, w), m, j with ringR, subA, aF, smaller, hj, outside
+  have detA := determinant.zero_row at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, m × n, coordinateMatrix(M, R, m, v, n, w)), n, m with parts, matrixA, smaller, row
+  have detB := determinant.closed at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v)), n with parts, matrixB
+  rw [detI, detA] at product
+  have vanish : call2(R.mul, determinant(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, padMatrix(R, n, n × m, coordinateMatrix(M, R, n, w, m, v))), R.zero) = R.zero by ring
+  rw vanish at product
+  apply nontrivial
+  symm
+  exact product
+
 -- Invariance of rank over a nontrivial commutative ring: two finite bases
 -- have the same number of elements.
 theorem HasRank.unique (m n : Nat)
@@ -964,7 +1462,20 @@ theorem HasRank.unique (m n : Nat)
   requires second : HasRank(M, R, n)
   shows m = n
 proof
-  sorry
+  obtain ⟨v, basisV⟩ := first
+  obtain ⟨w, basisW⟩ := second
+  have tri := Less.trichotomy at m, n with *
+  cases tri with less | rest
+  . have toMember := membership.of_Less at m, n with *
+    have member := toMember with less
+    exfalso
+    exact ModuleBasis.not_smaller at R, M, m, n, v, w with ring, nontrivial, module, basisV, basisW, member
+  cases rest with same | greater
+  . exact same
+  . have toMember := membership.of_Less at n, m with *
+    have member := toMember with greater
+    exfalso
+    exact ModuleBasis.not_smaller at R, M, n, m, w, v with ring, nontrivial, module, basisW, basisV, member
 
 theorem ModuleBasis.card_eq (I J v w : Set)
   requires finiteI : Finite(I)
