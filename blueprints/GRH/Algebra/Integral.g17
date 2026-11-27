@@ -159,16 +159,16 @@ proof
 
 -- Conversely, a polynomial with leading coefficient 1 in degree n has the
 -- value of a Cumulus monic list (over a nontrivial ring; dividing by X).
-theorem intHelp.poly_list (R S f x : Set) (n : Nat)
+theorem intHelp.poly_list (R S f x c : Set) (n : Nat)
   requires comm : CommRing(R)
   requires target : CommRing(S)
   requires hom : f : R →+* S
   requires point : x ∈ Ring.carrier(S)
   requires nontrivial : Ring.zero(R) ≠ Ring.one(R)
-  shows ∀ p ∈ Ring.carrier(polynomialRing(R, {0})), polyCoeff(p, n) = Ring.one(R) →
+  shows ∀ p ∈ Ring.carrier(polynomialRing(R, {0})), polyCoeff(p, n) = c →
     (∀ k ∈ ℕ, n < k → polyCoeff(p, k) = Ring.zero(R)) →
     ∃ cs, List(Ring.carrier(R), cs) ∧ polyEval2(R, S, f, x, p) =
-      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), Ring.one(S), x, cs)
+      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), f(c), x, cs)
 proof
   induction n
   | zero =>
@@ -187,14 +187,14 @@ proof
       unfold polyCoeff at z
       exact nz with z
     have pc := uni.const_of_lt_one at R, p with comm, polys, lt1
+    have cR := uni.coeff_mem at R, p, 0 with comm, pIn
     rw top at pc
-    have oneR : Ring.one(R) ∈ Ring.carrier(R) by typecheck
+    rw top at cR
     have nilL : List(Ring.carrier(R), List.nil) by typecheck
     refine ⟨List.nil, nilL, ?_⟩
     rw pc
     rw monicValue
-    rw (polyEval2.C at R, S, f, x, Ring.one(R) with comm, polys, target, hom, point, oneR)
-    exact RingHom.map_one with hom
+    exact polyEval2.C at R, S, f, x, c with comm, polys, target, hom, point, cR
   | succ(m) using ih =>
     intros p pIn top vanish
     have polys := polynomialRing.comm_ring at R, {0} with comm
@@ -230,7 +230,7 @@ proof
       rw split
       rw (intHelp.shift_coeff at R, q, polyCoeff(r, 0), j with comm, qIn, r0)
     have mN : m ∈ ℕ by typecheck
-    have qtop : polyCoeff(q, m) = Ring.one(R)
+    have qtop : polyCoeff(q, m) = c
       rw (shifted with m, mN)
       have same : m + 1 = succ(m) by arith
       rw same
@@ -589,6 +589,93 @@ proof
 
 end IntRestriction
 
+-- Section: Helpers for integral multiples
+-- If p has leading coefficient a and p(x) = 0, then a x is integral:
+-- f(e) · p_s(x) = f(a) · q_t(a x) along the Horner tails.
+section IntMultiple
+variable (A add zero neg mul one B plus z minus times unit f x a : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+hypothesis scalar : a ∈ A
+
+theorem intHelp.scaled_tail (s : List(A))
+  shows ∃ e ∈ A, ∃ t, List(A, t) ∧
+    S[f(e) * monicValue{A}(f, plus, times, f(a), x, s)] =
+    S[f(a) * monicValue{A}(f, plus, times, unit, S[f(a) * x], t)]
+proof
+  induction s
+  | List.nil =>
+    have oneIn : R[1] ∈ R by typecheck
+    have empty : List(A, []) by typecheck
+    have one := IsRingHom.one with hom
+    have fa := IsRingHom.closed with hom, scalar
+    refine ⟨R[1], oneIn, [], empty, ?_⟩
+    rw [monicValue, monicValue, one]
+    ring
+  | List.cons(c, s0) using ih =>
+    obtain ⟨e0, e0In, t0, list0, equation⟩ := ih
+    have cIn : c ∈ A by assumption
+    have ordinary := IsCommRing.ring with source
+    have ae := IsRing.mul_closed with ordinary, scalar, e0In
+    have ec := IsRing.mul_closed with ordinary, e0In, cIn
+    have cons : List(A, (R[e0 * c]) :: t0) by typecheck
+    have fa := IsRingHom.closed with hom, scalar
+    have fe := IsRingHom.closed with hom, e0In
+    have fc := IsRingHom.closed with hom, cIn
+    have v0 := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(a), s0 with *
+    have sRing := IsCommRing.ring with target
+    have ax := IsRing.mul_closed with sRing, fa, element
+    have m0 := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, S[f(a) * x], t0 with *
+    have mul1 := IsRingHom.mul with hom, scalar, e0In
+    have mul2 := IsRingHom.mul with hom, e0In, cIn
+    refine ⟨R[a * e0], ae, (R[e0 * c]) :: t0, cons, ?_⟩
+    rw [monicValue, monicValue, mul1, mul2]
+    linear_combination S[f(a) * x] * equation
+
+theorem intHelp.integral_multiple (cs : List(A))
+  requires relation : monicValue{A}(f, plus, times, f(a), x, cs) = z
+  shows IntegralOver(f, R, S, S[f(a) * x])
+proof
+  induction cs
+  | List.nil =>
+    intro relation
+    have zeroIn : R[0] ∈ R by typecheck
+    have zero := IsRingHom.zero with hom
+    rw monicValue at relation
+    have io := IntegralOver.coefficient at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, R[0] with *
+    rw zero at io
+    have same : S[f(a) * x] = S[0]
+      rw relation
+      ring
+    rw same
+    exact io
+  | List.cons(c, s0) using ih =>
+    intro relation
+    obtain ⟨e0, e0In, t0, list0, equation⟩ := intHelp.scaled_tail at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, a, s0 with *
+    have cIn : c ∈ A by assumption
+    have ordinary := IsCommRing.ring with source
+    have ec := IsRing.mul_closed with ordinary, e0In, cIn
+    have cons : List(A, (R[e0 * c]) :: t0) by typecheck
+    have fa := IsRingHom.closed with hom, scalar
+    have fe := IsRingHom.closed with hom, e0In
+    have fc := IsRingHom.closed with hom, cIn
+    have v0 := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(a), s0 with *
+    have sRing := IsCommRing.ring with target
+    have ax := IsRing.mul_closed with sRing, fa, element
+    have m0 := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, S[f(a) * x], t0 with *
+    have mul2 := IsRingHom.mul with hom, e0In, cIn
+    rw monicValue at relation
+    unfold IntegralOver
+    refine ⟨ax, (R[e0 * c]) :: t0, cons, ?_⟩
+    rw [monicValue, mul2]
+    linear_combination f(e0) * relation - x * equation
+
+end IntMultiple
+
 -- Section: Bundled forms of the bridges
 -- The projections of an algebra as Cumulus's unbundled ring data.
 theorem intHelp.parts (A : Set)
@@ -640,6 +727,17 @@ proof
     rw (intHelp.span_eq at A, G with algebra)
     exact span
 
+-- Helper: membership in the integral closure.
+theorem intHelp.closure_mem (A x : Set)
+  shows x ∈ integralClosure(A) ↔ IntegralElement(A, x)
+proof
+  unfold integralClosure
+  constructor
+  . intro h
+    exact h.right
+  . intro h
+    exact ⟨h.right.left, h⟩
+
 -- Section: Laws of integral elements
 section IntegralElements
 variable (A : Set)
@@ -683,8 +781,9 @@ proof
         intros k hk lt
         have kNat := nat.omega.backward with hk
         exact polyNatDegree.coeff_zero_of_lt at Algebra.base(A), p, k with pIn, base, polys, lt
-      have all := intHelp.poly_list at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, polyNatDegree(Algebra.base(A), p) with base, ringA, sh, pt, triv
+      have all := intHelp.poly_list at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, Ring.one(Algebra.base(A)), polyNatDegree(Algebra.base(A), p) with base, ringA, sh, pt, triv
       obtain ⟨cs, list, value⟩ := all with p, pIn, lead, vanish
+      rw (RingHom.map_one with sh) at value
       refine ⟨cs, list, ?_⟩
       rw ← value
       unfold polyAeval at root
@@ -890,7 +989,43 @@ proof
 theorem integralClosure.subalgebra
   shows SubalgebraOf(A, integralClosure(A))
 proof
-  sorry
+  have sh := Algebra.structure_hom at A with algebra
+  have zeroB : Ring.zero(Algebra.base(A)) ∈ Ring.carrier(Algebra.base(A)) by typecheck
+  have oneB : Ring.one(Algebra.base(A)) ∈ Ring.carrier(Algebra.base(A)) by typecheck
+  have z := RingHom.map_zero with sh
+  have o := RingHom.map_one with sh
+  have iz := IntegralElement.algebra_map at A, Ring.zero(Algebra.base(A)) with algebra, zeroB
+  have io := IntegralElement.algebra_map at A, Ring.one(Algebra.base(A)) with algebra, oneB
+  rw z at iz
+  rw o at io
+  unfold SubalgebraOf
+  refine ⟨algebra, ?_⟩
+  unfold Subalgebra
+  refine ⟨?_, ?_⟩
+  . unfold IsSubring
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+    . intros w hw
+      exact ((intHelp.closure_mem at A, w).forward with hw).right.left
+    . exact (intHelp.closure_mem at A, Ring.zero(Algebra.ring(A))).backward with iz
+    . exact (intHelp.closure_mem at A, Ring.one(Algebra.ring(A))).backward with io
+    . unfold ClosedUnary
+      intros v hv
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      exact (intHelp.closure_mem at A, apply(Ring.neg(Algebra.ring(A)), v)).backward with (IntegralElement.neg at A, v with algebra, iv)
+    . unfold ClosedBinary
+      intros v hv w hw
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      have iw := (intHelp.closure_mem at A, w).forward with hw
+      exact (intHelp.closure_mem at A, call2(Ring.add(Algebra.ring(A)), v, w)).backward with (IntegralElement.add at A, v, w with algebra, iv, iw)
+    . unfold ClosedBinary
+      intros v hv w hw
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      have iw := (intHelp.closure_mem at A, w).forward with hw
+      exact (intHelp.closure_mem at A, call2(Ring.mul(Algebra.ring(A)), v, w)).backward with (IntegralElement.mul at A, v, w with algebra, iv, iw)
+  . intros w hw
+    obtain ⟨_, a, ha, wa⟩ := functionImage.membership.forward with hw
+    rw wa
+    exact (intHelp.closure_mem at A, Algebra.map(A)(a)).backward with (IntegralElement.algebra_map at A, a with algebra, ha)
 
 -- The finiteness criterion: x is integral iff R[x] is a finite R-module
 -- (IsIntegral.fg_adjoin_singleton, isIntegral_iff_fg_adjoin), and an
@@ -901,7 +1036,24 @@ theorem IntegralElement.iff_adjoin_finite (x : Set)
   shows IntegralElement(A, x) ↔
     SubmoduleFG(algebraModule(A), Algebra.base(A), adjoinOf(A, {x}))
 proof
-  sorry
+  have xs : {x} ⊆ algebraCarrier(A)
+    intros w hw
+    rw singleton.membership at hw
+    rw hw
+    exact member
+  constructor
+  . intro ix
+    have all : ∀ w ∈ {x}, IntegralElement(A, w)
+      intros w hw
+      rw singleton.membership at hw
+      rw hw
+      exact ix
+    exact adjoinOf.finite_of_integral at A, {x} with algebra, (Finite.singleton at x), all
+  . intro fg
+    have both := adjoinOf.subalgebra at A, {x} with algebra, xs
+    have xIn : x ∈ {x} by simp [singleton.membership]
+    have xT := both.right with x, xIn
+    exact IntegralElement.of_mem_fg at A, adjoinOf(A, {x}), x with algebra, both.left, fg, xT
 
 theorem IntegralAlgebra.of_finite
   requires finite : FiniteAlgebra(A)
@@ -931,7 +1083,18 @@ theorem FiniteAlgebra.of_integral_finite_type
   requires finiteType : FiniteTypeAlgebra(A)
   shows FiniteAlgebra(A)
 proof
-  sorry
+  obtain ⟨_, G, GA, finG, eq⟩ := finiteType
+  have all : ∀ w ∈ G, IntegralElement(A, w)
+    intros w hw
+    exact integral.right with w, (GA with w, hw)
+  have fg := adjoinOf.finite_of_integral at A, G with algebra, finG, all
+  rw eq at fg
+  have base := Algebra.base_comm_ring at A with algebra
+  have modA := algebraModule.module_of at A with algebra
+  rw ← (algebraModule.carrier_eq at A) at fg
+  have fgm := (FinitelyGeneratedModule.iff_fg at Algebra.base(A), algebraModule(A) with base, modA).backward with fg
+  unfold FiniteAlgebra
+  exact ⟨algebra, fgm⟩
 
 -- IsIntegral.map: algebra homomorphisms preserve integrality; the image
 -- under a surjection of an integral algebra is integral.
@@ -940,7 +1103,22 @@ theorem IntegralElement.map (B f x : Set)
   requires integral : IntegralElement(A, x)
   shows IntegralElement(B, f(x))
 proof
-  sorry
+  obtain ⟨_, xA, p, monic, root⟩ := integral
+  have algB := AlgebraHom.target with hom
+  have baseEq := AlgebraHom.base_eq with hom
+  have fF := AlgebraHom.function with hom
+  have rh := AlgebraHom.ring_hom with hom
+  have pIn := monic.left
+  have ap := polyAeval.algebra_hom_apply at A, B, f, x, p with algebra, hom, xA, pIn
+  rw root at ap
+  rw (RingHom.map_zero with rh) at ap
+  have fx := FunctionBetween.apply_closed with fF, xA
+  unfold IntegralElement
+  refine ⟨algB, fx, p, ?_, ?_⟩
+  . rw ← baseEq
+    exact monic
+  . symm
+    exact ap
 
 -- The integral closure is integrally closed (integralClosure_idem): an
 -- element of A integral over the integral closure is in it.
