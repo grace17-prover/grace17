@@ -19343,16 +19343,13 @@ function placementSorts(
 
 /**
  * Whether a comparison neither of whose operands has a sort by its syntax
- * reads in the natural sort `natural`: when its operands are variables and
- * numerals, or an operand is a plain numeral or a term a fact, a result
- * sort, a typing rule, or the refinement search places there.
+ * reads in the natural sort `natural`: when an operand is a plain numeral
+ * or a term (a variable included) that a fact, a result sort, a typing
+ * rule, or the refinement search places there.
  */
 function naturallyPlaced(kernel: Kernel, scope: SurfaceScope, left: Term, right: Term, natural: string): boolean {
   const numeral = (term: Term): boolean => naturalValue(term) !== undefined && !bareRingNumerals.has(term);
   const operands = [left, right].filter(term => naturalValue(term) === undefined);
-  // Variables with no evidence either way keep the natural reading; an
-  // application placed nowhere does not.
-  if (operands.every(term => term.tag === "var")) return true;
   if (numeral(left) || numeral(right) || operands.some(term => placementSorts(kernel, scope, term, [natural]).length > 0)) return true;
   // A term the refinement search types, succ(h) for a natural h, is placed
   // too; the search runs only once every cheaper placement has failed.
