@@ -1,4 +1,5 @@
--- Countable sets are closed under subsets, images, and finite products
+-- Countable sets are closed under subsets, images, finite products, and
+-- binary unions, all without choice
 -- Part of Cumulus, the Grace17 mathematics library.
 -- Copyright (c) 2026 Grant Passmore.
 -- Released under the Apache License 2.0. See LICENSE in the repository root.
@@ -7,6 +8,7 @@
 module Grace.Cumulus.Cardinal.CountableClosure
 import Countable
 import Product
+import Set.Function.Union
 
 -- A subset of a countable set is countable: restrict the injection.
 theorem Countable.subset (A S : Set)
@@ -51,7 +53,7 @@ proof
   have gFunction := Injective.function with injection
   rcases surjection with ⟨fFunction, onto⟩
   obtain ⟨a, ha, relatesA⟩ := onto with b, member
-  have code := FunctionBetween.apply_closed at g, A, ℕ, a with *
+  have code := FunctionBetween.apply_closed with ha
   witness g(a)
   apply surjectionCodes.membership.backward
   constructor
@@ -100,10 +102,10 @@ proof
     obtain ⟨_, a1, ha1, relatesF1, codeA1⟩ := data1
     obtain ⟨_, a2, ha2, relatesF2, codeA2⟩ := data2
     have sameCode : g(a2) = g(a1) by cc
-    have gRelates1 := FunctionBetween.relates_apply at g, A, ℕ, a1 with *
-    have gRelates2 := FunctionBetween.relates_apply at g, A, ℕ, a2 with *
+    have gRelates1 := FunctionBetween.relates_apply with ha1
+    have gRelates2 := FunctionBetween.relates_apply with ha2
     rw sameCode at gRelates2
-    have codeNatural := FunctionBetween.apply_closed at g, A, ℕ, a1 with *
+    have codeNatural := FunctionBetween.apply_closed with ha1
     have sameInput := Injective.cancel with ha1, ha2
     rw sameInput at relatesF1
     exact Functional.unique with *
@@ -244,3 +246,112 @@ theorem naturals.countable
 proof
   witness identity(ℕ)
   exact identity.injective
+
+-- A set that injects into a countable set is countable.
+theorem Countable.of_injection (f A B : Set)
+  requires injective : InjectiveBetween(f, A, B)
+  requires countable : Countable(B)
+  shows Countable(A)
+proof
+  obtain ⟨g, code⟩ := countable
+  have composite := compose.injective with injective, code
+  exact ⟨compose(g, f, A, B, ℕ), composite⟩
+
+-- A finite set is countable.
+theorem Countable.of_finite (A : Set)
+  requires finite : Finite(A)
+  shows Countable(A)
+proof
+  obtain ⟨n, natural, equivalent⟩ := finite
+  obtain ⟨f, bijective⟩ := equivalent
+  have injective := Bijective.injective with bijective
+  have function := Injective.function with injective
+  have values : ∀ x ∈ A, f(x) ∈ ℕ
+    intros x hx
+    have valueIn := FunctionBetween.apply_closed with function, hx
+    have typed := natural.member at n with f(x), valueIn
+    exact nat.omega.forward with typed
+  have widened := FunctionBetween.codomain_of_values with function, values
+  have cancel : ∀ x ∈ A, ∀ y ∈ A, f(x) = f(y) → x = y
+    intros x hx y hy same
+    exact Injective.apply_cancel with injective, hx, hy, same
+  have intoNaturals := Injective.of_pointwise with widened, cancel
+  exact ⟨f, intoNaturals⟩
+
+-- The image of a countable set under a function is countable.
+theorem Countable.image (f A B : Set)
+  requires function : f : A → B
+  requires countable : Countable(A)
+  shows Countable(functionImage(f, A, B))
+proof
+  have surjection := functionImage.surjective with function
+  exact Countable.of_surjection with countable, surjection
+
+-- A code f : A → ℕ tagged with t, so that codes with distinct tags differ.
+defgraph taggedCode (f A t : Set) (x ∈ A) : ℕ × {t} := (f(x), t)
+requires code : f : A → ℕ
+proof
+  have value := FunctionBetween.apply_closed with code, member
+  exact product.pair with value, (singleton.self at t)
+
+theorem taggedCode.injective (f A t : Set)
+  requires code : InjectiveBetween(f, A, ℕ)
+  shows InjectiveBetween(taggedCode(f, A, t), A, ℕ × {t})
+proof
+  have function := Injective.function with code
+  have tagged := taggedCode.function at f, A, t with function
+  apply Injective.of_pointwise with tagged
+  intros x hx y hy same
+  have valueX := taggedCode.value at f, A, t, x with function, hx
+  have valueY := taggedCode.value at f, A, t, y with function, hy
+  rw [valueX, valueY] at same
+  obtain ⟨sameCode, _⟩ := orderedPair.injective with same
+  exact Injective.apply_cancel with code, hx, hy, sameCode
+
+-- The union of two countable sets is countable: code a point of A by
+-- (f(x), 0) and a point of B ∖ A by (g(x), 1). No choice is needed.
+theorem Countable.union2 (A B : Set)
+  requires countableA : Countable(A)
+  requires countableB : Countable(B)
+  shows Countable(A ∪ B)
+proof
+  obtain ⟨f, codeA⟩ := countableA
+  have restSubset := difference.subset_left at B, A
+  obtain ⟨g, codeRest⟩ := Countable.subset with countableB, restSubset
+  have left := taggedCode.injective at f, A, 0 with codeA
+  have right := taggedCode.injective at g, B ∖ A, 1 with codeRest
+  have domains := Disjoint.symmetric with (difference.disjoint at B, A)
+  have codomains : Disjoint(ℕ × {0}, ℕ × {1})
+    apply Disjoint.iff.backward
+    intros p hp hq
+    simp [product.membership, singleton.membership] at hp
+    simp [product.membership, singleton.membership] at hq
+    obtain ⟨_, a, _, s, zero, shapeA⟩ := hp
+    obtain ⟨_, b, _, t, one, shapeB⟩ := hq
+    have same : (a, 0) = (b, 1) by cc
+    obtain ⟨_, tags⟩ := orderedPair.injective with same
+    exact zero.ne_one with tags
+  have joined := Injective.union_disjoint with left, right, domains, codomains
+  have pairs : ℕ × {0} ∪ ℕ × {1} ⊆ ℕ × ℕ
+    have naturals := Subset.reflexive at ℕ
+    have zeroTag : {0} ⊆ ℕ
+      intros z hz
+      simp [singleton.membership] at hz
+      rw hz
+      typecheck
+    have oneTag : {1} ⊆ ℕ
+      intros z hz
+      simp [singleton.membership] at hz
+      rw hz
+      typecheck
+    have zeroPairs := product.monotone with naturals, zeroTag
+    have onePairs := product.monotone with naturals, oneTag
+    exact union2.subset with zeroPairs, onePairs
+  have naturalPairs :=
+    Countable.product with naturals.countable, naturals.countable
+  have countablePairs := Countable.subset with naturalPairs, pairs
+  have whole := Countable.of_injection with joined, countablePairs
+  have same : A ∪ (B ∖ A) = A ∪ B
+    ext y
+    simp
+  rwa same at whole
