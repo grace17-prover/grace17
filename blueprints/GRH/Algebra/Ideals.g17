@@ -230,6 +230,14 @@ def torsionBy (M R r : Set) : Set :=
   { v ∈ Module.carrier(M) | call2(Module.smul(M), r, v) = Module.zero(M) }
 
 -- Section: Laws of the ideal operations
+-- Helper: the ideals avoiding a set S, as a family of subsets of R.
+def avoidingIdeals (R S : Set) : Set :=
+  { J ∈ 𝒫(Ring.carrier(R)) | Ideal(R, J) ∧ (∀ s ∈ S, s ∉ J) }
+
+-- Helper: the powers xⁿ of an element.
+def elementPowers (R x : Set) : Set :=
+  { y ∈ Ring.carrier(R) | ∃ n ∈ ℕ, y = Ring.pow(R, x, n) }
+
 section IdealOperations
 variable (R : Set)
 hypothesis comm : CommRing(R)
@@ -461,7 +469,10 @@ theorem idealSum.comm (I J : Set)
   requires second : Ideal(R, J)
   shows idealSum(R, I, J) = idealSum(R, J, I)
 proof
-  sorry
+  have a := idealSum.generated at R, I, J with comm, first, second
+  have b := idealSum.generated at R, J, I with comm, second, first
+  have u := union2.commutative at I, J
+  rw [a, b, u]
 
 theorem Ideal.intersection (I J : Set)
   requires first : Ideal(R, I)
@@ -584,7 +595,9 @@ theorem idealProduct.comm (I J : Set)
   requires second : Ideal(R, J)
   shows idealProduct(R, I, J) = idealProduct(R, J, I)
 proof
-  sorry
+  have a := idealProduct.comm_of_ideals at R, I, J with comm, first, second
+  have b := idealProduct.comm_of_ideals at R, J, I with comm, second, first
+  exact Subset.antisymmetric with a, b
 
 theorem idealProduct.assoc (I J K : Set)
   requires first : Ideal(R, I)
@@ -1321,6 +1334,126 @@ theorem idealRadical.exists_pow_subset (I J : Set)
 proof
   sorry
 
+-- Helper: an ideal avoiding a multiplicative set lies in a prime avoiding
+-- it (Ideal.exists_le_prime_disjoint); Zorn's lemma, so Choice.
+theorem Ideal.exists_prime_avoiding (I S : Set)
+  requires ideal : Ideal(R, I)
+  requires bounded : S ⊆ R.carrier
+  requires one : R[1] ∈ S
+  requires closed : ∀ s t ∈ S, s * t ∈ S
+  requires avoids : ∀ s ∈ S, s ∉ I
+  shows ∃ P, PrimeIdeal(R, P) ∧ I ⊆ P ∧ (∀ s ∈ S, s ∉ P)
+proof
+  have ringR := CommRing.to_ring with comm
+  have avoidMem : ∀ J, Ideal(R, J) → (∀ s ∈ S, s ∉ J) → J ∈ avoidingIdeals(R, S)
+    intros J idJ avJ
+    have sub := Ideal.subset at R, J with idJ
+    unfold Subset at sub
+    have pw := set.powerset.backward with sub
+    exact avoidingIdeals.membership.backward with ⟨pw, idJ, avJ⟩
+  have seed := avoidMem with I, ideal, avoids
+  have closedF : ∀ T, Nonempty(T) → T ⊆ avoidingIdeals(R, S) →
+      (∀ C ∈ T, ∀ D ∈ T, C ⊆ D ∨ D ⊆ C) → ⋃(T) ∈ avoidingIdeals(R, S)
+    intros T inhabited subset nested
+    have ideals : ∀ J ∈ T, IsIdeal(R.carrier, R.add, R.zero, R.neg, R.mul, J)
+      intros J hJ
+      have mJ := subset with J, hJ
+      obtain ⟨pw, idJ, avJ⟩ := avoidingIdeals.membership.forward with mJ
+      exact Ideal.parts at R, J with idJ
+    have uIdeal := IsIdeal.union_chain with inhabited, ideals, nested
+    have uB := Ideal.of_projections at R, ⋃(T) with uIdeal
+    have uAv : ∀ s ∈ S, s ∉ ⋃(T)
+      intros s sS sU
+      obtain ⟨J, hJ, sJ⟩ := (union.membership at s, T).forward with sU
+      have mJ := subset with J, hJ
+      obtain ⟨pw, idJ, avJ⟩ := avoidingIdeals.membership.forward with mJ
+      exact (avJ with s, sS) with sJ
+    exact avoidMem with ⋃(T), uB, uAv
+  obtain ⟨M, memberM, extends, maximal⟩ := maximal_extension with seed, closedF
+  obtain ⟨pwM, idM, avM⟩ := avoidingIdeals.membership.forward with memberM
+  have escape : ∀ x ∈ R.carrier, x ∉ M →
+      (∃ s ∈ S, ∃ m ∈ M, ∃ a ∈ R.carrier, s = m + a * x)
+    intros x xIn xOut
+    have multIdeal := ringMultiples.ideal at R, x with comm
+    have K := idealSum.ideal at R, M, ringMultiples(R, x) with comm, idM, multIdeal
+    obtain ⟨s1, s2⟩ := idealSum.left_subset at R, M, ringMultiples(R, x) with comm, idM, multIdeal
+    have xX := ringMultiples.self_mem at R, x with comm
+    have xK := s2 with xX
+    by_contra none
+    have avK : ∀ s ∈ S, s ∉ idealSum(R, M, ringMultiples(R, x))
+      intros s sS sK
+      obtain ⟨sIn, m, mM, y, yX, sy⟩ := idealSum.membership.forward at R, M, ringMultiples(R, x), s with sK
+      obtain ⟨yIn, a, aIn, ya⟩ := ringMultiples.membership.forward at R, x, y with yX
+      rw ya at sy
+      exact none with ⟨s, sS, m, mM, a, aIn, sy⟩
+    have Kmem := avoidMem with idealSum(R, M, ringMultiples(R, x)), K, avK
+    have eq := maximal with idealSum(R, M, ringMultiples(R, x)), Kmem, s1
+    rw eq at xK
+    exact xOut with xK
+  have oneOut := avM with R[1], one
+  have proper := ProperIdeal.mk at R, M with ringR, idM, oneOut
+  have prime : PrimeIdeal(R, M)
+    refine ⟨proper, ?_⟩
+    intros x xIn y yIn xy
+    have ax : x ∈ M ∨ x ∉ M by tauto
+    cases ax with xM | xOut
+    . left
+      exact xM
+    . have ay : y ∈ M ∨ y ∉ M by tauto
+      cases ay with yM | yOut
+      . right
+        exact yM
+      . exfalso
+        obtain ⟨s, sS, m, mM, a, aIn, sx⟩ := escape with x, xIn, xOut
+        obtain ⟨t, tS, n, nM, b, bIn, ty⟩ := escape with y, yIn, yOut
+        have mIn := Ideal.mem_carrier at R, M, m with idM, mM
+        have nIn := Ideal.mem_carrier at R, M, n with idM, nM
+        have st := closed with s, sS, t, tS
+        have law : s * t = m * (n + b * y) + n * (a * x) + (a * b) * (x * y)
+          rw [sx, ty]
+          ring
+        have p1 := Ideal.mul_right_mem at R, M, n + b * y, m with idM, *, mM
+        have p2 := Ideal.mul_right_mem at R, M, a * x, n with idM, *, nM
+        have p3 := Ideal.mul_left_mem at R, M, a * b, x * y with idM, *, xy
+        have p12 := Ideal.add_mem at R, M, m * (n + b * y), n * (a * x) with idM, p1, p2
+        have p123 := Ideal.add_mem at R, M, m * (n + b * y) + n * (a * x), (a * b) * (x * y) with idM, p12, p3
+        rw ← law at p123
+        exact (avM with s * t, st) with p123
+  exact ⟨M, prime, extends, avM⟩
+
+theorem elementPowers.multiplicative (x : Set)
+  requires element : x ∈ R.carrier
+  shows elementPowers(R, x) ⊆ R.carrier ∧ R[1] ∈ elementPowers(R, x) ∧
+    (∀ s t ∈ elementPowers(R, x), s * t ∈ elementPowers(R, x)) ∧
+    x ∈ elementPowers(R, x)
+proof
+  have ringR := CommRing.to_ring with comm
+  have b : elementPowers(R, x) ⊆ R.carrier
+    intros y hy
+    exact (elementPowers.membership.forward at R, x, y with hy).left
+  have oneIn : R[1] ∈ R.carrier by typecheck
+  have z := Ring.pow_zero at R, x with ringR
+  have zN : 0 ∈ ℕ by typecheck
+  symm at z
+  have o := elementPowers.membership.backward at R, x, R[1] with ⟨oneIn, 0, zN, z⟩
+  have p1 := Ring.pow_one at R, x with ringR
+  have oN : 1 ∈ ℕ by typecheck
+  symm at p1
+  have xm := elementPowers.membership.backward at R, x, x with ⟨element, 1, oN, p1⟩
+  have c : ∀ s t ∈ elementPowers(R, x), s * t ∈ elementPowers(R, x)
+    intros s hs t ht
+    obtain ⟨sIn, m, mN, sm⟩ := elementPowers.membership.forward at R, x, s with hs
+    obtain ⟨tIn, n, nN, tn⟩ := elementPowers.membership.forward at R, x, t with ht
+    have mNat : Nat(m) by typecheck
+    have nNat : Nat(n) by typecheck
+    have add := Ring.pow_add at R, x, m, n with ringR
+    have pIn : s * t ∈ R.carrier by typecheck
+    have sumN : m + n ∈ ℕ by typecheck
+    have e : s * t = Ring.pow(R, x, m + n)
+      rw [sm, tn, add]
+    exact elementPowers.membership.backward at R, x, s * t with ⟨pIn, m + n, sumN, e⟩
+  exact ⟨b, o, c, xm⟩
+
 -- The radical is the intersection of the primes containing I
 -- (Ideal.radical_eq_sInf). The inclusion of the intersection in the
 -- radical builds a prime avoiding the powers of an element by Zorn's
@@ -1329,7 +1462,32 @@ theorem idealRadical.eq_prime_intersection (I : Set)
   requires ideal : Ideal(R, I)
   shows idealRadical(R, I) = primeIntersection(R, I)
 proof
-  sorry
+  have s1 : idealRadical(R, I) ⊆ primeIntersection(R, I)
+    intros x hx
+    have xIn := (idealRadical.membership.forward at R, I, x with hx).left
+    have all : ∀ P, PrimeIdeal(R, P) → I ⊆ P → x ∈ P
+      intros P prime sub
+      have m := idealRadical.mono at R, I, P with comm, sub
+      have rad := PrimeIdeal.radical at R, P with comm, prime
+      obtain ⟨_, eq⟩ := rad
+      have xr := m with hx
+      rw eq at xr
+      exact xr
+    exact primeIntersection.membership.backward at R, I, x with ⟨xIn, all⟩
+  have s2 : primeIntersection(R, I) ⊆ idealRadical(R, I)
+    intros x hx
+    obtain ⟨xIn, all⟩ := primeIntersection.membership.forward at R, I, x with hx
+    by_contra xOut
+    obtain ⟨b, o, c, xm⟩ := elementPowers.multiplicative at R, x with comm, xIn
+    have avoids : ∀ s ∈ elementPowers(R, x), s ∉ I
+      intros s hs sI
+      obtain ⟨sIn, n, nN, sn⟩ := elementPowers.membership.forward at R, x, s with hs
+      rw sn at sI
+      exact xOut with (idealRadical.membership.backward at R, I, x with ⟨xIn, n, nN, sI⟩)
+    obtain ⟨P, prime, sub, avP⟩ := Ideal.exists_prime_avoiding at R, I, elementPowers(R, x) with comm, ideal, b, o, c, avoids
+    have xP := all with P, prime, sub
+    exact (avP with x, xm) with xP
+  exact Subset.antisymmetric with s1, s2
 
 -- The nilradical is the set of nilpotent elements, and R is reduced
 -- exactly when it is zero (nilradical_eq_zero).
@@ -1453,11 +1611,70 @@ proof
     exact sub with xI
   exact jacobsonRadical.membership.backward at R, I, x with ⟨xIn, all⟩
 
+theorem MaximalIdeal.exists_inverse (M x : Set)
+  requires maximal : MaximalIdeal(R, M)
+  requires element : x ∈ R.carrier
+  requires outside : x ∉ M
+  shows ∃ y ∈ R.carrier, ∃ m ∈ M, call2(R.add, call2(R.mul, x, y), m) = R[1]
+proof
+  have parts := CommRing.parts at R with comm
+  have mparts := MaximalIdeal.parts at R, M with maximal
+  obtain ⟨i, iM, a, aIn, law⟩ := IsMaximalIdeal.bezout with parts, mparts, element, outside
+  have idM := MaximalIdeal.to_ideal at R, M with maximal
+  have iIn := Ideal.mem_carrier at R, M, i with idM, iM
+  have law2 : x * a + i = R[1]
+    rw law
+    ring
+  exact ⟨a, aIn, i, iM, law2⟩
+
 theorem jacobsonRadical.mem_zero_iff (x : R)
   shows x ∈ jacobsonRadical(R, {R[0]}) ↔
     (∀ y ∈ R.carrier, RingUnit(R, R[1] + x * y))
 proof
-  sorry
+  have ringR := CommRing.to_ring with comm
+  have xIn : x ∈ R.carrier by assumption
+  have zeroIdeal := Ideal.zero at R with ringR
+  constructor
+  . intro h
+    obtain ⟨_, all⟩ := jacobsonRadical.membership.forward at R, {R[0]}, x with h
+    intros y yIn
+    by_contra notUnit
+    have uIn : R[1] + x * y ∈ R.carrier by typecheck
+    have ideal := ringMultiples.ideal at R, R[1] + x * y with comm
+    have oneOut : R[1] ∉ ringMultiples(R, R[1] + x * y)
+      intro oneIn
+      have whole := Ideal.contains_one at R, ringMultiples(R, R[1] + x * y) with ideal, oneIn
+      have u := (ringMultiples.eq_whole_iff at R, R[1] + x * y with comm).forward with whole
+      exact notUnit with u
+    have proper := ProperIdeal.mk at R, ringMultiples(R, R[1] + x * y) with ringR, ideal, oneOut
+    obtain ⟨M, maxM, sub⟩ := ProperIdeal.extends_maximal at R, ringMultiples(R, R[1] + x * y) with ringR, proper
+    have idM := MaximalIdeal.to_ideal at R, M with maxM
+    have z := Ideal.zero_mem at R, M with idM
+    have zsub := (singleton.subset_iff at R[0], M).backward with z
+    have xM := all with M, maxM, zsub
+    have uSelf := ringMultiples.self_mem at R, R[1] + x * y with comm
+    have uM := sub with uSelf
+    have xyM := Ideal.mul_right_mem at R, M, y, x with idM, yIn, xM
+    have d := Ideal.sub_mem at R, M, R[1] + x * y, x * y with idM, uM, xyM
+    have e : (R[1] + x * y) - x * y = R[1] by ring
+    rw e at d
+    exact (ProperIdeal.one_not_mem at R, M with (MaximalIdeal.to_proper at R, M with maxM)) with d
+  . intro h
+    have all : ∀ M, MaximalIdeal(R, M) → {R[0]} ⊆ M → x ∈ M
+      intros M maxM sub
+      by_contra xOut
+      obtain ⟨y, yIn, m, mM, law⟩ := MaximalIdeal.exists_inverse at R, M, x with comm, maxM, xIn, xOut
+      have nyIn : -y ∈ R.carrier by typecheck
+      have unit := h with -y, nyIn
+      have idM := MaximalIdeal.to_ideal at R, M with maxM
+      have mIn := Ideal.mem_carrier at R, M, m with idM, mM
+      have e : R[1] + x * (-y) = m
+        rw ← law
+        ring
+      rw e at unit
+      have proper := MaximalIdeal.to_proper at R, M with maxM
+      exact (ProperIdeal.not_mem_unit at R, M, m with comm, proper, unit) with mM
+    exact jacobsonRadical.membership.backward at R, {R[0]}, x with ⟨xIn, all⟩
 
 theorem jacobsonRadical.radical (I : Set)
   requires ideal : Ideal(R, I)
@@ -1566,7 +1783,13 @@ theorem idealColon.contains (I J : Set)
   requires inside : J ⊆ R.carrier
   shows I ⊆ idealColon(R, I, J)
 proof
-  sorry
+  intros x xI
+  have xIn := Ideal.mem_carrier at R, I, x with ideal, xI
+  have all : ∀ y ∈ J, x * y ∈ I
+    intros y yJ
+    have yIn := inside with yJ
+    exact Ideal.mul_right_mem at R, I, y, x with ideal, yIn, xI
+  exact idealColon.membership.backward at R, I, J, x with ⟨xIn, all⟩
 
 -- Minimal primes. Every prime over I contains a minimal prime over I
 -- (Ideal.exists_minimalPrimes_le): Zorn's lemma on descending chains of
@@ -1593,23 +1816,23 @@ theorem ProperIdeal.iff_exists_maximal (I : Set)
   requires ideal : Ideal(R, I)
   shows ProperIdeal(R, I) ↔ (∃ M, MaximalIdeal(R, M) ∧ I ⊆ M)
 proof
-  sorry
-
-theorem MaximalIdeal.exists_inverse (M x : Set)
-  requires maximal : MaximalIdeal(R, M)
-  requires element : x ∈ R.carrier
-  requires outside : x ∉ M
-  shows ∃ y ∈ R.carrier, ∃ m ∈ M, call2(R.add, call2(R.mul, x, y), m) = R[1]
-proof
-  have parts := CommRing.parts at R with comm
-  have mparts := MaximalIdeal.parts at R, M with maximal
-  obtain ⟨i, iM, a, aIn, law⟩ := IsMaximalIdeal.bezout with parts, mparts, element, outside
-  have idM := MaximalIdeal.to_ideal at R, M with maximal
-  have iIn := Ideal.mem_carrier at R, M, i with idM, iM
-  have law2 : x * a + i = R[1]
-    rw law
-    ring
-  exact ⟨a, aIn, i, iM, law2⟩
+  constructor
+  . intro proper
+    obtain ⟨ideal2, notOne⟩ := proper
+    have bounded := Ideal.subset at R, I with ideal
+    have same := generatedIdeal.eq_of_ideal at R, I with ideal
+    have notIn : R[1] ∉ generatedIdeal(R, I)
+      rw same
+      exact notOne
+    exact generatedIdeal.exists_maximal at R, I with bounded, notIn
+  . intro h
+    obtain ⟨M, maximal, sub⟩ := h
+    obtain ⟨properM, rest⟩ := maximal
+    obtain ⟨idealM, notOne⟩ := properM
+    have notI : R[1] ∉ I
+      intro oneI
+      exact notOne with (sub with oneI)
+    exact ⟨ideal, notI⟩
 
 -- Distinct maximal ideals are coprime (Ideal.isCoprime_of_isMaximal).
 theorem MaximalIdeal.coprime (M N : Set)
