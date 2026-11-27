@@ -5560,15 +5560,37 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   });
 
   const outerBinders = binders.filter(item => item.name !== inductionVariable && !generalizedSet.has(item.name));
-  // The steps between `proof` and the induction clause are run first, and
-  // each fact they prove that mentions neither the induction variable nor a
-  // generalized one is kept in every case, as a premise of the motive
-  // discharged by its proof. A fact that mentions one is reported at its line.
+  const generalizedAssumptions = [
+    ...binderAssumptions(generalizedBinders),
+    ...dependentRequirements.map(item => item.formula),
+  ];
+  const auxiliaryName = `${name}.generalized_induction_aux`;
+  const inductionAssumption = pred(inductionDatatype.predicate, ...inductionParameters, v(inductionVariable));
+  // The declared statement from the auxiliary induction theorem, each outer
+  // assumption discharged by `discharge`, the others assumed.
+  const instantiateAuxiliary = (assumptions: readonly Formula[], discharge: ReadonlyMap<string, Proof>): Proof => {
+    let result: Proof = theorem(auxiliaryName);
+    for (const binder of outerBinders) result = forallElim(result, v(binder.name));
+    result = forallElim(result, v(inductionVariable));
+    result = impElim(result, assume(inductionAssumption));
+    for (const assumption of assumptions) result = impElim(result, discharge.get(formulaCanonical(assumption)) ?? assume(assumption));
+    for (const binder of generalizedBinders) result = forallElim(result, v(binder.name));
+    for (const assumption of generalizedAssumptions) result = impElim(result, assume(assumption));
+    return result;
+  };
+  // The steps between `proof` and the induction clause are run first, against
+  // the declared goal, and each fact they prove that mentions neither the
+  // induction variable nor a generalized one is kept in every case, as a
+  // premise of the motive. The internal step that ends them closes the goal
+  // from the auxiliary induction theorem, discharging each kept premise by
+  // the fact's proof where that proof is in scope: the facts before it are
+  // assumptions there, as they are not at the top of the theorem.
   const prefixSteps = joinTacticContinuations(block.filter(line => line.number > (proofLines[0]?.number ?? shows.number) &&
     line.number < inductionLine.number && !line.narrative && !line.text.startsWith("shows ") && !line.text.startsWith("requires ")))
     .flatMap(splitTacticLine);
-  const keptFacts: { readonly name: string; readonly formula: Formula; readonly proof: Proof }[] = [];
+  const keptFacts: { readonly name: string; readonly formula: Formula }[] = [];
   let prefixTrace: TacticTraceStep[] = [];
+  let prefixProof: Proof | undefined;
   if (prefixSteps.length) {
     const seedAssumptions = [...binderAssumptions(binders), ...requirements];
     const seed: TacticScriptSeed = {
@@ -5576,46 +5598,70 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
       locals: new Map(requirements.map((formula, index) => [parsedRequirements[index]!.name ?? `requirement${index + 1}`, { formula, proof: assume(formula) }])),
       variables: new Set(binders.map(item => item.name)),
     };
-    keptFactsCapture = undefined;
-    const capture: SourceLine = { number: inductionLine.number, text: "__keep_facts", indent: inductionLine.indent };
-    const prefix = elaborateTacticTheorem(kernel, name, binders, requirements, parsedRequirements.map(item => item.name),
-      eq(v(inductionVariable), v(inductionVariable)), [...prefixSteps, capture], scope, seed, [], scopeEntries);
-    const captured = keptFactsCapture;
-    keptFactsCapture = undefined;
-    if (!captured) throw new SurfaceError(inductionLine.number, "the steps before induction must leave the goal open for it");
-    prefixTrace = (prefix?.trace.steps ?? []).filter(step => step.command !== "__keep_facts");
-    for (const [factName, local] of captured) {
-      if (seed.locals.get(factName)?.formula === local.formula) continue;
-      const free = freeFormulaVariables(local.formula);
-      const dependent = [inductionVariable, ...generalizedSet].find(variable => free.has(variable));
-      if (dependent) {
-        const origin = prefixSteps.find(step => new RegExp(`^have\\s+${factName}(?:\\s|:|$)`, "u").test(step.text)) ?? inductionLine;
-        throw new SurfaceError(origin.number,
-          `fact ${factName} mentions the induction variable ${dependent}, so the induction cases cannot keep it; ` +
-          `prove it inside the cases, or state it before induction without ${dependent}`);
+    const boundNames = new Set(binders.map(item => item.name));
+    const caseLines = block.filter(line => line.number > inductionLine.number);
+    const handoff = (current: Formula, locals: ReadonlyMap<string, LocalProof>): Proof => {
+      if (!formulaEquals(current, goal)) {
+        throw new SurfaceError(inductionLine.number,
+          `the steps before induction changed the goal to ${formatFormula(current)}; ` +
+          "induction proves the goal as stated, so state facts with have before it");
       }
-      // A fact no case names is not kept: keeping one makes it a hypothesis
-      // of the induction's statement, which is then admitted through an
-      // auxiliary theorem, and the proofs that never use it need none.
-      const escaped = factName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const caseLines = block.filter(line => line.number > inductionLine.number);
-      const named = caseLines.some(line =>
-        new RegExp(`(^|[^\\p{L}\\p{N}_'.])${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
-      // A case that declares the name again proves its own fact.
-      const redeclared = caseLines.some(line =>
-        new RegExp(`^\\s*(?:\\.\\s*)?(?:have|obtain|set|rcases)\\s+${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
-      if (!named || redeclared) continue;
-      keptFacts.push({ name: factName, formula: local.formula, proof: local.proof });
+      const discharge = new Map<string, Proof>();
+      for (const [factName, local] of locals) {
+        if (seed.locals.get(factName)?.formula === local.formula) continue;
+        const origin = (): SourceLine =>
+          prefixSteps.find(step => new RegExp(`^have\\s+${factName}(?:\\s|:|$)`, "u").test(step.text)) ?? inductionLine;
+        const free = freeFormulaVariables(local.formula);
+        const dependent = [inductionVariable, ...generalizedSet].find(variable => free.has(variable));
+        if (dependent) {
+          throw new SurfaceError(origin().number,
+            `fact ${factName} mentions the induction variable ${dependent}, so the induction cases cannot keep it; ` +
+            `prove it inside the cases, or state it before induction without ${dependent}`);
+        }
+        // A fact no case names is not kept: keeping one makes it a hypothesis
+        // of the induction's statement, which is then admitted through an
+        // auxiliary theorem, and the proofs that never use it need none.
+        const escaped = factName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const named = caseLines.some(line =>
+          new RegExp(`(^|[^\\p{L}\\p{N}_'.])${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
+        // A case that declares the name again proves its own fact.
+        const redeclared = caseLines.some(line =>
+          new RegExp(`^\\s*(?:\\.\\s*)?(?:have|obtain|set|rcases)\\s+${escaped}(?![\\p{L}\\p{N}_'])`, "u").test(line.text));
+        if (!named || redeclared) continue;
+        // A variable the steps introduced, an obtained witness, is not a
+        // parameter of the induction's statement.
+        const introduced = [...free].find(variable => !boundNames.has(variable));
+        if (introduced) {
+          throw new SurfaceError(origin().number,
+            `fact ${factName} mentions ${introduced}, which the steps before induction introduce, so the induction ` +
+            `cases cannot keep it; prove it inside the cases`);
+        }
+        keptFacts.push({ name: factName, formula: local.formula });
+        discharge.set(formulaCanonical(local.formula), local.proof);
+      }
+      // With no fact kept the steps' proof is not used.
+      if (!keptFacts.length) return assume(goal);
+      return instantiateAuxiliary([...outerBaseAssumptions, ...keptFacts.map(item => item.formula)], discharge);
+    };
+    const outerBaseAssumptions = [...binderAssumptions(outerBinders),
+      ...parsedRequirements.filter(item => !dependentRequirements.includes(item)).map(item => item.formula)];
+    const capture: SourceLine = { number: inductionLine.number, text: "__keep_facts", indent: inductionLine.indent };
+    let handedOff = false;
+    keptFactsHandoff = (current, locals) => { handedOff = true; return handoff(current, locals); };
+    let prefix: TacticScriptResult | void;
+    try {
+      prefix = elaborateTacticTheorem(kernel, name, binders, requirements, parsedRequirements.map(item => item.name),
+        goal, [...prefixSteps, capture], scope, seed, [], scopeEntries);
+    } finally {
+      keptFactsHandoff = undefined;
     }
+    if (!handedOff) throw new SurfaceError(inductionLine.number, "the steps before induction must leave the goal open for it");
+    prefixTrace = (prefix?.trace.steps ?? []).filter(step => step.command !== "__keep_facts");
+    if (keptFacts.length) prefixProof = prefix?.proof;
   }
-  const keptProofs = new Map(keptFacts.map(item => [formulaCanonical(item.formula), item.proof]));
   const outerRequirements = [...parsedRequirements.filter(item => !dependentRequirements.includes(item)),
     ...keptFacts.map(item => ({ name: item.name, formula: item.formula }))];
   const outerAssumptions = [...binderAssumptions(outerBinders), ...outerRequirements.map(item => item.formula)];
-  const generalizedAssumptions = [
-    ...binderAssumptions(generalizedBinders),
-    ...dependentRequirements.map(item => item.formula),
-  ];
   let generalizedGoal = generalizedAssumptions.reduceRight<Formula>((result, assumption) => imp(assumption, result), goal);
   for (const binder of [...generalizedBinders].reverse()) generalizedGoal = forall(binder.name, generalizedGoal);
   const motive = outerAssumptions.reduceRight<Formula>((result, assumption) => imp(assumption, result), generalizedGoal);
@@ -5749,21 +5795,15 @@ function elaborateTheorem(kernel: Kernel, block: readonly SourceLine[], scope: S
   // differs (an induction variable that is not the last parameter, or a
   // generalized induction) the proof is admitted as a checked auxiliary and
   // the public theorem instantiates it in the declared order.
-  const auxiliaryName = `${name}.generalized_induction_aux`;
   try {
     kernel.addTheorem(auxiliaryName, canonicalStatement, canonicalProof);
   } catch (error) {
     if (error instanceof KernelError) throw new SurfaceError(header.number, error.message);
     throw error;
   }
-  let bodyProof: Proof = theorem(auxiliaryName);
-  for (const binder of outerBinders) bodyProof = forallElim(bodyProof, v(binder.name));
-  bodyProof = forallElim(bodyProof, v(inductionVariable));
-  const inductionAssumption = pred(inductionDatatype.predicate, ...inductionParameters, v(inductionVariable));
-  bodyProof = impElim(bodyProof, assume(inductionAssumption));
-  for (const assumption of outerAssumptions) bodyProof = impElim(bodyProof, keptProofs.get(formulaCanonical(assumption)) ?? assume(assumption));
-  for (const binder of generalizedBinders) bodyProof = forallElim(bodyProof, v(binder.name));
-  for (const assumption of generalizedAssumptions) bodyProof = impElim(bodyProof, assume(assumption));
+  // With kept facts, the steps before the induction already end in the
+  // auxiliary theorem's instance, their facts discharging its premises.
+  const bodyProof = prefixProof ?? instantiateAuxiliary(outerAssumptions, new Map());
   let proof = targetAssumptions.reduceRight<Proof>((result, assumption) => impIntro(assumption, result), bodyProof);
   for (const binder of [...binders].reverse()) proof = forallIntro(binder.name, proof);
   try {
@@ -8662,11 +8702,18 @@ function elaborateTacticTheorem(
       replaceWith(line, [{ goal: bottom }], ([absurdity]) => falseElim(current.goal, absurdity!));
       continue;
     }
-    // The steps written before an `induction` clause run against a trivial
-    // goal; this internal step hands their facts to the induction cases.
-    if (command === "__keep_facts" && current.goal.tag === "eq") {
-      keptFactsCapture = new Map(current.locals);
-      close(line, refl(current.goal.left));
+    // The steps written before an `induction` clause end in this internal
+    // step, which hands their facts to the induction cases and closes the
+    // goal with the induction theorem's instance. That theorem is admitted
+    // once the cases are elaborated, so the proof is checked with the
+    // theorem's, not here.
+    if (command === "__keep_facts" && keptFactsHandoff) {
+      const handoff = keptFactsHandoff;
+      keptFactsHandoff = undefined;
+      const proof = handoff(current.goal, current.locals);
+      focused(line);
+      pending.shift();
+      current.close(proof);
       continue;
     }
     // `by_contra` or `by_contra h` assumes the negation of the goal under
@@ -14983,8 +15030,11 @@ function orderTypingFacts(
   return derived;
 }
 const orderTypingProofs = new WeakMap<Proof, Proof>();
-/** The facts the steps before an `induction` clause proved, handed over by the internal `__keep_facts` step. */
-let keptFactsCapture: Map<string, LocalProof> | undefined;
+/**
+ * Receives the facts the steps before an `induction` clause proved, from the
+ * internal `__keep_facts` step, and returns the proof that closes the goal.
+ */
+let keptFactsHandoff: ((goal: Formula, locals: ReadonlyMap<string, LocalProof>) => Proof) | undefined;
 
 /**
  * `formula` with every occurrence of `source` replaced by `target`, outside

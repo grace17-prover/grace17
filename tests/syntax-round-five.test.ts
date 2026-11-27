@@ -158,6 +158,58 @@ proof
   assert.match(message, /mentions.*induction variable n/u);
 });
 
+// A fact before induction proved by its own steps, from the facts before
+// it, is discharged where those facts are in scope, so the kernel accepts
+// the proof; one about a witness obtained there is reported at its line.
+test("a fact proved before induction from earlier facts stays available in the cases", () => {
+  checks(`
+theorem chainedFacts (n : Nat) (A B C : Set)
+  requires ab : A ⊆ B
+  requires bc : B ⊆ C
+  shows A ⊆ C
+proof
+  have first : A ⊆ B := ab
+  have both : A ⊆ B ∧ B ⊆ C
+    exact ⟨first, bc⟩
+  induction n
+  | zero =>
+    intros x hx
+    exact both.right with (both.left with hx)
+  | succ(k) using ih =>
+    exact ih
+
+theorem chainedFactsFirst (A B C : Set) (n : Nat)
+  requires ab : A ⊆ B
+  requires bc : B ⊆ C
+  shows A ⊆ C
+proof
+  have first : A ⊆ B := ab
+  have through : A ⊆ C
+    intros x hx
+    exact bc with (first with hx)
+  induction n
+  | zero =>
+    exact through
+  | succ(k) using ih =>
+    exact through
+`);
+  const message = failure(`
+theorem witnessFact (n : Nat) (A : Set)
+  requires inhabited : ∃ a, a ∈ A
+  shows ∃ a, a ∈ A
+proof
+  obtain ⟨w, hw⟩ := inhabited
+  have again : w ∈ A := hw
+  induction n
+  | zero =>
+    exact ⟨w, again⟩
+  | succ(k) using ih =>
+    exact ih
+`);
+  assert.match(message, /^\d+: fact again mentions w, which the steps before induction introduce/mu);
+  assert.doesNotMatch(message, /active assumption/u);
+});
+
 test("a forward reference names the later declaration in this module", () => {
   const message = failure(`
 theorem early (A : Set)
