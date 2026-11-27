@@ -294,10 +294,10 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | GRH.Linear.Modules | 313 | 313 | 0 |
-| GRH.Linear.Dimension | 109 | 91 | 18 |
+| GRH.Linear.Dimension | 117 | 107 | 10 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
-| GRH.Matrix.Determinant | 122 | 115 | 7 |
+| GRH.Matrix.Determinant | 164 | 163 | 1 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
 | GRH.Algebra.Localization | 58 | 1 | 57 |
@@ -350,8 +350,8 @@ graph TD
 | GRH.LSeries.VonMangoldt | 53 | 15 | 38 |
 | GRH.SpecialFunctions.More | 81 | 13 | 68 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
-| GRH.Matrix.Groups | 92 | 78 | 14 |
+| GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6249** | **4100** | **2149** |
+| **total** | **6299** | **4168** | **2131** |
 <!-- /blueprint-status -->
