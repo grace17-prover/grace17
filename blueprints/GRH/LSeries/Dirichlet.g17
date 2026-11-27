@@ -1,0 +1,806 @@
+-- Dirichlet series Σ_{n≥1} f(n) n^(−s) of a coefficient function
+-- f : ℕ → ℂ, as Mathlib's LSeries: the terms, absolute summability and
+-- the sum (0 off the summable s), the abscissa of absolute convergence as
+-- a predicate, comparison and linearity, Dirichlet convolution,
+-- differentiation term by term, summation by parts
+-- (`LSeries_eq_mul_integral`), Euler products for completely
+-- multiplicative coefficients; and the bridge to layer 1: for re s > 1
+-- the series of a Dirichlet character χ modulo N sums to layer 1's
+-- L(s, χ), the series of 1 to layer 1's ζ(s), with their derivatives and
+-- Euler products.
+-- Part of the GRH blueprint (layer 2, track D: the L-series bridge).
+-- Source: Mathlib's NumberTheory/LSeries/{Basic, Convergence, Deriv,
+-- Linearity, Convolution, SumCoeff, Dirichlet, DirichletContinuation} and
+-- NumberTheory/EulerProduct/DirichletLSeries.
+-- Planned home: NumberTheory/LSeries/Basic.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LSeries.Dirichlet
+import GRH.LFunction
+import GRH.Measure.Bochner
+
+section LSeries
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- Coefficients are functions f : ℕ → ℂ; as in Mathlib the value f(0) is
+-- never read by a series. The terms f(n) n^(−s), n = 1, 2, …, indexed
+-- from 0 as f(n + 1) (n + 1)^(−s), in the indexing of layer 1's
+-- zetaSeriesTerms and dirichletSeriesTerms (Mathlib's LSeries.term, which
+-- puts 0 at n = 0).
+defgraph lseriesTerms (f s : Set) (n ∈ ℕ) : complexCarrier :=
+  ℂ[f(n + 1) * realCpow(realNat(n + 1), ℂ[-s])]
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+requires hs : s ∈ complexCarrier
+proof
+  sorry
+
+-- The series converges absolutely at s (Mathlib's LSeriesSummable:
+-- summability in ℂ, which is absolute summability).
+predicate LSeriesSummable (f s : Set) :=
+  ComplexAbsolutelySummable(lseriesTerms(f, s))
+
+-- The series converges absolutely at s with sum a (Mathlib's
+-- LSeriesHasSum).
+predicate LSeriesHasSum (f s a : Set) :=
+  LSeriesSummable(f, s) ∧ ComplexSumsTo(lseriesTerms(f, s), a)
+
+-- The sum Σ_{n≥1} f(n) n^(−s) where the series converges absolutely, and 0
+-- elsewhere (Mathlib's LSeries, a tsum, with its junk value 0).
+def LSeries (f s : Set) : Set :=
+  ⋃({ a ∈ complexCarrier |
+    (LSeriesSummable(f, s) ∧ ComplexSumsTo(lseriesTerms(f, s), a)) ∨
+    (¬LSeriesSummable(f, s) ∧ a = complexZero) })
+
+-- s ↦ LSeries(f, s) as a function on ℂ.
+defgraph LSeriesMap (f : Set) (s ∈ complexCarrier) : complexCarrier :=
+    LSeries(f, s)
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+proof
+  sorry
+
+-- The abscissa of absolute convergence, as Mathlib's
+-- abscissaOfAbsConv f ≤ x (an extended real in Mathlib): the series
+-- converges absolutely at every real y > x.
+predicate AbscissaAtMost (f : Set, X : Real) :=
+  ∀ Y ∈ ℝ, X < Y → LSeriesSummable(f, complexOfReal(Y))
+
+-- abscissaOfAbsConv f < re s: the series converges absolutely at some real
+-- y < re s.
+predicate AbscissaBelow (f s : Set) :=
+  ∃ Y ∈ ℝ, Y < complexRe(s) ∧ LSeriesSummable(f, complexOfReal(Y))
+
+-- The coefficients n ↦ χ(n) of a function χ on ℤ, a Dirichlet character
+-- (Mathlib's ↗χ, n ↦ χ (n : ZMod N)).
+def characterCoefficients (χ : Set) : Set :=
+  { (n, χ(integerOfNat(n))) | n ∈ ℕ }
+
+-- The constant coefficients 1 (Mathlib's 1 : ℕ → ℂ), whose series is ζ.
+def oneCoefficients : Set := ℕ × {complexOne}
+
+-- The coefficients of a real sequence a, n ↦ a(n) in ℂ.
+def realCoefficients (a : Set) : Set :=
+  { (n, complexOfReal(a(n))) | n ∈ ℕ }
+
+-- Pointwise operations on coefficients: f + g, f − g, c f, f g, and
+-- n ↦ log(n) f(n) (Mathlib's LSeries.logMul; log 0 = 0 is never read).
+def coefficientAdd (f g : Set) : Set := { (n, ℂ[f(n) + g(n)]) | n ∈ ℕ }
+def coefficientSub (f g : Set) : Set := { (n, ℂ[f(n) - g(n)]) | n ∈ ℕ }
+def coefficientScale (c f : Set) : Set := { (n, ℂ[c * f(n)]) | n ∈ ℕ }
+def coefficientMul (f g : Set) : Set := { (n, ℂ[f(n) * g(n)]) | n ∈ ℕ }
+def logMulCoefficients (f : Set) : Set :=
+  { (n, ℂ[complexOfReal(realLog(realNat(n))) * f(n)]) | n ∈ ℕ }
+
+-- The sum Σ_{i ∈ I} F(i) of a finite family of coefficient functions,
+-- pointwise (Mathlib's ∑ i ∈ S, f i for functions ℕ → ℂ).
+def familyValues (F n I : Set) : Set := { (i, F(i)(n)) | i ∈ I }
+def coefficientFamilySum (F I : Set) : Set :=
+  { (n, finiteRingSum(I, complexCarrier, complexAdd, complexZero,
+      complexNeg, complexMul, complexOne, familyValues(F, n, I))) | n ∈ ℕ }
+
+-- The finite family of the complex numbers a(i), i ∈ I, summed.
+def complexFamilySum (a I : Set) : Set :=
+  finiteRingSum(I, complexCarrier, complexAdd, complexZero, complexNeg,
+    complexMul, complexOne, a)
+
+-- Dirichlet convolution (f ⋆ g)(n) = Σ_{d ∣ n} f(d) g(n/d) (Mathlib's
+-- LSeries.convolution, ArithmeticFunction multiplication).
+defgraph convolutionTerms (f g : Set, n : Nat) (d ∈ ℕ) : complexCarrier :=
+  ℂ[f(d) * g(quotientNat(n, d))]
+requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+proof
+  sorry
+
+defgraph dirichletConvolution (f g : Set) (n ∈ ℕ) : complexCarrier :=
+  complexFamilySum(convolutionTerms(f, g, n), divisorSet(n))
+requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+proof
+  sorry
+
+-- The coefficients shifted down, k ↦ f(k + 1), whose partial sums are the
+-- summatory function A(n) = Σ_{k=1}^{n} f(k) = complexPartialSum(·, n).
+defgraph shiftedCoefficients (f : Set) (k ∈ ℕ) : complexCarrier := f(k + 1)
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+proof
+  sorry
+
+def summatory (f : Set, n : Nat) : Set :=
+  complexPartialSum(shiftedCoefficients(f), n)
+
+-- Σ_{k=1}^{n} |f(k)|, real.
+defgraph absCoefficients (f : Set) (k ∈ ℕ) : ℝ := complexAbs(f(k + 1))
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+proof
+  sorry
+
+def summatoryAbs (f : Set, n : Nat) : Set :=
+  realPartialSum(absCoefficients(f), n)
+
+-- The integrand t ↦ A(⌊t⌋) t^(−(s+1)) of the summation by parts, on
+-- ℝ (only t > 1 is read).
+defgraph summatoryIntegrand (f s : Set) (X ∈ ℝ) : complexCarrier :=
+  ℂ[summatory(f, realFloor(X)) * realCpow(X, ℂ[-(s + 1)])]
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+requires hs : s ∈ complexCarrier
+proof
+  sorry
+
+-- f is completely multiplicative: f(1) = 1 and f(m n) = f(m) f(n).
+predicate CompletelyMultiplicative (f : Set) :=
+  FunctionBetween(f, ℕ, complexCarrier) ∧ f(1) = complexOne ∧
+  (∀ m ∈ ℕ, ∀ n ∈ ℕ, f(m * n) = complexMul(f(m), f(n)))
+
+-- The Euler factor (1 − f(p) p^(−s))⁻¹ at a prime p and 1 at the other
+-- naturals, and the partial Euler products over the primes p < n.
+def lseriesEulerFactor (f s : Set, p : Nat) : Set :=
+  ⋃({ w ∈ complexCarrier |
+    (Prime(p) ∧ w = complexInv(ℂ[1 - f(p) * realCpow(realNat(p), ℂ[-s])])) ∨
+    (¬Prime(p) ∧ w = complexOne) })
+
+def lseriesEulerProduct (f s : Set) (n : Nat) → Set
+  | f, s, zero => complexOne
+  | f, s, succ(k) => complexMul(lseriesEulerProduct(f, s, k),
+      lseriesEulerFactor(f, s, k))
+
+defgraph lseriesEulerProducts (f s : Set) (n ∈ ℕ) : complexCarrier :=
+  lseriesEulerProduct(f, s, n)
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+requires hs : s ∈ complexCarrier
+proof
+  sorry
+
+-- The termwise product of two complex sequences.
+def productSequence (u v : Set) : Set := { (n, ℂ[u(n) * v(n)]) | n ∈ ℕ }
+
+-- The term s ↦ f(n) n^(−s) as a function on ℂ.
+defgraph lseriesTermMap (f : Set, n : Nat) (s ∈ complexCarrier) :
+    complexCarrier := ℂ[f(n) * realCpow(realNat(n), ℂ[-s])]
+requires values : FunctionBetween(f, ℕ, complexCarrier)
+proof
+  sorry
+
+-- Section: Coefficients
+theorem characterCoefficients.function (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FunctionBetween(characterCoefficients(χ), ℕ, complexCarrier)
+proof
+  sorry
+
+theorem characterCoefficients.apply (χ : Set) (n : Nat)
+  shows characterCoefficients(χ)(n) = χ(integerOfNat(n))
+proof
+  sorry
+
+theorem oneCoefficients.function
+  shows FunctionBetween(oneCoefficients, ℕ, complexCarrier)
+proof
+  sorry
+
+theorem oneCoefficients.apply (n : Nat)
+  shows oneCoefficients(n) = complexOne
+proof
+  sorry
+
+-- |χ(n)| ≤ 1 (Mathlib's DirichletCharacter.norm_le_one).
+theorem characterCoefficients.abs_le_one (N : Nat) (χ : Set) (n : Nat)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows complexAbs(characterCoefficients(χ)(n)) ≤ R[1]
+proof
+  sorry
+
+-- A Dirichlet character is completely multiplicative on ℕ.
+theorem characterCoefficients.multiplicative (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows CompletelyMultiplicative(characterCoefficients(χ))
+proof
+  sorry
+
+theorem oneCoefficients.multiplicative
+  shows CompletelyMultiplicative(oneCoefficients)
+proof
+  sorry
+
+-- The series of a character is layer 1's: the terms agree with
+-- dirichletSeriesTerms, and the terms of 1 with zetaSeriesTerms.
+theorem lseriesTerms.character (N : Nat) (χ s : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  shows lseriesTerms(characterCoefficients(χ), s) =
+    dirichletSeriesTerms(χ, s)
+proof
+  sorry
+
+theorem lseriesTerms.one (s : Set)
+  requires hs : s ∈ ℂ
+  shows lseriesTerms(oneCoefficients, s) = zetaSeriesTerms(s)
+proof
+  sorry
+
+-- Section: Terms
+theorem lseriesTerms.apply (f s : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows lseriesTerms(f, s)(n) =
+    ℂ[f(n + 1) * realCpow(realNat(n + 1), ℂ[-s])]
+proof
+  sorry
+
+-- |f(n) n^(−s)| = |f(n)| n^(−re s) (Mathlib's LSeries.norm_term_eq).
+theorem lseriesTerms.abs (f s : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows complexAbs(lseriesTerms(f, s)(n)) =
+    R[complexAbs(f(n + 1)) * realRpow(realNat(n + 1), -complexRe(s))]
+proof
+  sorry
+
+-- Comparison of terms (Mathlib's LSeries.norm_term_le).
+theorem lseriesTerms.abs_le (f g s : Set) (n : Nat)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires bound : complexAbs(f(n + 1)) ≤ complexAbs(g(n + 1))
+  shows complexAbs(lseriesTerms(f, s)(n)) ≤ complexAbs(lseriesTerms(g, s)(n))
+proof
+  sorry
+
+-- A term decreases in modulus as re s grows (Mathlib's
+-- LSeries.norm_term_le_of_re_le_re).
+theorem lseriesTerms.abs_le_of_re_le (f s t : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires ht : t ∈ ℂ
+  requires order : complexRe(s) ≤ complexRe(t)
+  shows complexAbs(lseriesTerms(f, t)(n)) ≤ complexAbs(lseriesTerms(f, s)(n))
+proof
+  sorry
+
+-- Nonnegative real coefficients at a real point give nonnegative real
+-- terms (Mathlib's LSeries.term_nonneg).
+theorem lseriesTerms.nonneg (a : Set, X : Real) (n : Nat)
+  requires sequence : RealSequence(a)
+  requires nonneg : ∀ k ∈ ℕ, R[0] ≤ a(k)
+  shows ∃ Y ∈ ℝ, R[0] ≤ Y ∧
+    lseriesTerms(realCoefficients(a), complexOfReal(X))(n) = complexOfReal(Y)
+proof
+  sorry
+
+-- The derivative of a term: d/ds f(n) n^(−s) = −log(n) f(n) n^(−s)
+-- (Mathlib's LSeries.hasDerivAt_term).
+theorem lseriesTermMap.derivative (f : Set) (n : Nat) (s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows HasComplexDerivativeAt(lseriesTermMap(f, n), complexCarrier,
+    ℂ[-(complexOfReal(realLog(realNat(n))) * f(n) *
+      realCpow(realNat(n), ℂ[-s]))], s)
+proof
+  sorry
+
+-- Section: Sums
+theorem LSeries.member (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows LSeries(f, s) ∈ ℂ
+proof
+  sorry
+
+theorem LSeriesMap.apply (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows LSeriesMap(f)(s) = LSeries(f, s)
+proof
+  sorry
+
+-- Mathlib's LSeriesHasSum_iff.
+theorem LSeriesHasSum.iff (f s a : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  shows LSeriesHasSum(f, s, a) ↔
+    LSeriesSummable(f, s) ∧ LSeries(f, s) = a
+proof
+  sorry
+
+-- Mathlib's LSeriesSummable.LSeriesHasSum.
+theorem LSeriesSummable.hasSum (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  shows LSeriesHasSum(f, s, LSeries(f, s))
+proof
+  sorry
+
+-- Off the summable s the sum is 0 (Mathlib's
+-- LSeries.eq_zero_of_not_LSeriesSummable).
+theorem LSeries.of_not_summable (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires notSummable : ¬LSeriesSummable(f, s)
+  shows LSeries(f, s) = ℂ[0]
+proof
+  sorry
+
+-- Only the values at n ≥ 1 matter (Mathlib's LSeriesSummable_congr,
+-- LSeries_congr).
+theorem LSeriesSummable.congr (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires same : ∀ n ∈ ℕ, n ≠ (0:N) → f(n) = g(n)
+  shows LSeriesSummable(f, s) ↔ LSeriesSummable(g, s)
+proof
+  sorry
+
+theorem LSeries.congr (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires same : ∀ n ∈ ℕ, n ≠ (0:N) → f(n) = g(n)
+  shows LSeries(f, s) = LSeries(g, s)
+proof
+  sorry
+
+-- Summability moves right (Mathlib's LSeriesSummable.of_re_le_re).
+theorem LSeriesSummable.of_re_le_re (f s t : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires ht : t ∈ ℂ
+  requires order : complexRe(s) ≤ complexRe(t)
+  requires summable : LSeriesSummable(f, s)
+  shows LSeriesSummable(f, t)
+proof
+  sorry
+
+-- Summability depends only on re s (Mathlib's LSeriesSummable_iff_of_re_eq_re).
+theorem LSeriesSummable.of_re_eq (f s t : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires ht : t ∈ ℂ
+  requires same : complexRe(s) = complexRe(t)
+  shows LSeriesSummable(f, s) ↔ LSeriesSummable(f, t)
+proof
+  sorry
+
+-- Comparison: dominated coefficients (Mathlib's LSeriesSummable.of_norm_le
+-- pattern, via norm_term_le).
+theorem LSeriesSummable.of_abs_le (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires bound : ∀ n ∈ ℕ, complexAbs(f(n)) ≤ complexAbs(g(n))
+  requires summable : LSeriesSummable(g, s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+-- Bounded coefficients give absolute convergence on re s > 1 (Mathlib's
+-- LSeriesSummable_of_le_const_mul_rpow with exponent 0).
+theorem LSeriesSummable.of_bounded (f s : Set) (C : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires bound : ∀ n ∈ ℕ, complexAbs(f(n)) ≤ C
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+-- Coefficients O(n^x) give absolute convergence on re s > x + 1 (Mathlib's
+-- LSeriesSummable_of_le_const_mul_rpow).
+theorem LSeriesSummable.of_le_rpow (f s : Set) (X C : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires bound : ∀ n ∈ ℕ, n ≠ (0:N) →
+    complexAbs(f(n)) ≤ R[C * realRpow(realNat(n), X)]
+  requires halfPlane : R[X + 1] < complexRe(s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+-- The series of 1 converges absolutely exactly on re s > 1 (Mathlib's
+-- LSeriesSummable_one_iff, Real.summable_nat_rpow_inv).
+theorem LSeriesSummable.one_iff (s : Set)
+  requires hs : s ∈ ℂ
+  shows LSeriesSummable(oneCoefficients, s) ↔ realOne < complexRe(s)
+proof
+  sorry
+
+-- A bounded multiplier keeps summability (Mathlib's
+-- DirichletCharacter.LSeriesSummable_mul).
+theorem LSeriesSummable.mul_bounded (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires bound : ∀ n ∈ ℕ, complexAbs(g(n)) ≤ R[1]
+  requires summable : LSeriesSummable(f, s)
+  shows LSeriesSummable(coefficientMul(g, f), s)
+proof
+  sorry
+
+-- Section: The abscissa
+-- Mathlib's LSeriesSummable.abscissaOfAbsConv_le.
+theorem LSeriesSummable.abscissa_le (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  shows AbscissaAtMost(f, complexRe(s))
+proof
+  sorry
+
+-- Mathlib's LSeriesSummable_of_abscissaOfAbsConv_lt_re.
+theorem AbscissaAtMost.summable (f s : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires abscissa : AbscissaAtMost(f, X)
+  requires halfPlane : X < complexRe(s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+theorem AbscissaBelow.summable (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires abscissa : AbscissaBelow(f, s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+-- The series of 1 has abscissa 1 (Mathlib's abscissaOfAbsConv_one).
+theorem AbscissaAtMost.one
+  shows AbscissaAtMost(oneCoefficients, R[1])
+proof
+  sorry
+
+-- Section: Linearity
+-- Mathlib's LSeriesHasSum.add, LSeries_add.
+theorem LSeriesHasSum.add (f g s a b : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires fSum : LSeriesHasSum(f, s, a)
+  requires gSum : LSeriesHasSum(g, s, b)
+  shows LSeriesHasSum(coefficientAdd(f, g), s, ℂ[a + b])
+proof
+  sorry
+
+theorem LSeriesHasSum.sub (f g s a b : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires fSum : LSeriesHasSum(f, s, a)
+  requires gSum : LSeriesHasSum(g, s, b)
+  shows LSeriesHasSum(coefficientSub(f, g), s, ℂ[a - b])
+proof
+  sorry
+
+-- Mathlib's LSeriesHasSum.smul.
+theorem LSeriesHasSum.scale (c f s a : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hc : c ∈ ℂ
+  requires hs : s ∈ ℂ
+  requires sum : LSeriesHasSum(f, s, a)
+  shows LSeriesHasSum(coefficientScale(c, f), s, ℂ[c * a])
+proof
+  sorry
+
+-- Mathlib's LSeriesHasSum.sum: a finite sum of series.
+theorem LSeriesHasSum.family_sum (F I a s : Set)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, FunctionBetween(F(i), ℕ, complexCarrier)
+  requires sums : FunctionBetween(a, I, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires each : ∀ i ∈ I, LSeriesHasSum(F(i), s, a(i))
+  shows LSeriesHasSum(coefficientFamilySum(F, I), s, complexFamilySum(a, I))
+proof
+  sorry
+
+-- Section: Convolution
+-- The series of a convolution is the product of the series (Mathlib's
+-- LSeriesHasSum.convolution, LSeries_convolution').
+theorem LSeriesHasSum.convolution (f g s : Set)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires fSummable : LSeriesSummable(f, s)
+  requires gSummable : LSeriesSummable(g, s)
+  shows LSeriesHasSum(dirichletConvolution(f, g), s,
+    ℂ[LSeries(f, s) * LSeries(g, s)])
+proof
+  sorry
+
+-- Convolution with 1 sums over divisors (Mathlib's
+-- ArithmeticFunction.coe_mul_zeta_apply).
+theorem dirichletConvolution.one_right (f : Set) (n : Nat)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  shows dirichletConvolution(f, oneCoefficients)(n) =
+    complexFamilySum(f, divisorSet(n))
+proof
+  sorry
+
+-- A completely multiplicative twist distributes over convolution
+-- (Mathlib's LSeries.mul_convolution_distrib).
+theorem dirichletConvolution.twist (χ f g : Set) (n : Nat)
+  requires multiplicative : CompletelyMultiplicative(χ)
+  requires fValues : FunctionBetween(f, ℕ, complexCarrier)
+  requires gValues : FunctionBetween(g, ℕ, complexCarrier)
+  shows coefficientMul(χ, dirichletConvolution(f, g))(n) =
+    dirichletConvolution(coefficientMul(χ, f), coefficientMul(χ, g))(n)
+proof
+  sorry
+
+-- Section: Derivatives
+-- Absolute convergence of log(n) f(n) n^(−s) left of the abscissa
+-- (Mathlib's LSeriesSummable_logMul_of_lt_re).
+theorem LSeriesSummable.logMul (f s : Set)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires abscissa : AbscissaBelow(f, s)
+  shows LSeriesSummable(logMulCoefficients(f), s)
+proof
+  sorry
+
+-- The sum is holomorphic right of the abscissa (Mathlib's
+-- LSeries_differentiableOn).
+theorem LSeriesMap.holomorphic (f : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires abscissa : AbscissaAtMost(f, X)
+  shows HolomorphicOn(LSeriesMap(f), rightHalfPlane(X))
+proof
+  sorry
+
+-- and is differentiated term by term: the derivative is
+-- −Σ log(n) f(n) n^(−s) (Mathlib's LSeries_hasDerivAt, LSeries_deriv).
+theorem LSeriesMap.deriv (f s : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires abscissa : AbscissaAtMost(f, X)
+  requires halfPlane : X < complexRe(s)
+  requires hs : s ∈ ℂ
+  shows complexDeriv(LSeriesMap(f), rightHalfPlane(X))(s) =
+    ℂ[-LSeries(logMulCoefficients(f), s)]
+proof
+  sorry
+
+-- Section: Summation by parts
+-- Summatory functions Σ_{k≤n} |f(k)| = O(n^r), 0 ≤ r < re s, give absolute
+-- convergence (Mathlib's LSeriesSummable_of_sum_norm_bigO; the O-bound at
+-- infinity is written out).
+theorem LSeriesSummable.of_summatory_bound (f s : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires nonneg : R[0] ≤ X
+  requires bound : ∃ C ∈ ℝ, ∃ M ∈ ℕ, ∀ n ∈ ℕ, M ≤ n →
+    summatoryAbs(f, n) ≤ R[C * realRpow(realNat(n), X)]
+  requires halfPlane : X < complexRe(s)
+  shows LSeriesSummable(f, s)
+proof
+  sorry
+
+-- The same for nonnegative real coefficients (Mathlib's
+-- LSeriesSummable_of_sum_norm_bigO_and_nonneg).
+theorem LSeriesSummable.of_summatory_bound_nonneg (a s : Set) (X : Real)
+  requires sequence : RealSequence(a)
+  requires hs : s ∈ ℂ
+  requires nonneg : ∀ n ∈ ℕ, R[0] ≤ a(n)
+  requires exponent : R[0] ≤ X
+  requires bound : ∃ C ∈ ℝ, ∃ M ∈ ℕ, ∀ n ∈ ℕ, M ≤ n →
+    realPartialSum(absCoefficients(realCoefficients(a)), n) ≤
+      R[C * realRpow(realNat(n), X)]
+  requires halfPlane : X < complexRe(s)
+  shows LSeriesSummable(realCoefficients(a), s)
+proof
+  sorry
+
+-- Summation by parts: if |A(n)| = O(n^r) with A(n) = Σ_{k=1}^{n} f(k),
+-- 0 ≤ r < re s, and the series converges absolutely, then
+-- L(f, s) = s ∫_{(1,∞)} A(⌊t⌋) t^(−(s+1)) dt (Mathlib's
+-- LSeries_eq_mul_integral).
+theorem LSeries.eq_mul_integral (f s : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires nonneg : R[0] ≤ X
+  requires halfPlane : X < complexRe(s)
+  requires summable : LSeriesSummable(f, s)
+  requires bound : ∃ C ∈ ℝ, ∃ M ∈ ℕ, ∀ n ∈ ℕ, M ≤ n →
+    complexAbs(summatory(f, n)) ≤ R[C * realRpow(realNat(n), X)]
+  shows ComplexIntegrableOn(realMeasurableSpace, realVolume,
+      summatoryIntegrand(f, s), realIoi(R[1])) ∧
+    LSeries(f, s) = ℂ[s * complexSetIntegral(realMeasurableSpace, realVolume,
+      summatoryIntegrand(f, s), realIoi(R[1]))]
+proof
+  sorry
+
+-- The same from the bound on Σ_{k≤n} |f(k)| alone (Mathlib's
+-- LSeries_eq_mul_integral').
+theorem LSeries.eq_mul_integral_of_abs (f s : Set) (X : Real)
+  requires values : FunctionBetween(f, ℕ, complexCarrier)
+  requires hs : s ∈ ℂ
+  requires nonneg : R[0] ≤ X
+  requires halfPlane : X < complexRe(s)
+  requires bound : ∃ C ∈ ℝ, ∃ M ∈ ℕ, ∀ n ∈ ℕ, M ≤ n →
+    summatoryAbs(f, n) ≤ R[C * realRpow(realNat(n), X)]
+  shows LSeries(f, s) = ℂ[s * complexSetIntegral(realMeasurableSpace,
+    realVolume, summatoryIntegrand(f, s), realIoi(R[1]))]
+proof
+  sorry
+
+-- Section: Euler products
+-- For f completely multiplicative with absolutely convergent series, the
+-- partial Euler products converge to the sum (Mathlib's
+-- eulerProduct_completely_multiplicative_hasProd, for the L-series terms).
+theorem LSeries.euler_product (f s : Set)
+  requires multiplicative : CompletelyMultiplicative(f)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  shows ComplexConvergesTo(lseriesEulerProducts(f, s), LSeries(f, s))
+proof
+  sorry
+
+-- Mathlib's LSeries_eulerProduct_exp_log: the sum is exp of
+-- Σ_p −log(1 − f(p) p^(−s)); stated as: no Euler factor vanishes and the
+-- sum is nonzero.
+theorem LSeries.ne_zero_of_euler (f s : Set)
+  requires multiplicative : CompletelyMultiplicative(f)
+  requires hs : s ∈ ℂ
+  requires summable : LSeriesSummable(f, s)
+  shows LSeries(f, s) ≠ ℂ[0]
+proof
+  sorry
+
+-- The Euler factors of a character are layer 1's.
+theorem lseriesEulerProducts.character (N : Nat) (χ s : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerProducts(characterCoefficients(χ), s) =
+    lEulerProducts(χ, s)
+proof
+  sorry
+
+theorem lseriesEulerProducts.one (s : Set)
+  requires hs : s ∈ ℂ
+  shows lseriesEulerProducts(oneCoefficients, s) = zetaEulerProducts(s)
+proof
+  sorry
+
+-- Section: The bridge to layer 1
+-- For re s > 1 the series of χ converges absolutely to layer 1's L(s, χ)
+-- (Mathlib's DirichletCharacter.LSeriesSummable_of_one_lt_re,
+-- LFunction_eq_LSeries, and LSeriesHasSum for χ).
+theorem LSeriesSummable.character (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesSummable(characterCoefficients(χ), s)
+proof
+  sorry
+
+-- The series of χ converges absolutely exactly on re s > 1 (Mathlib's
+-- DirichletCharacter.LSeriesSummable_iff, N ≥ 1).
+theorem LSeriesSummable.character_iff (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  shows LSeriesSummable(characterCoefficients(χ), s) ↔
+    realOne < complexRe(s)
+proof
+  sorry
+
+theorem LSeriesHasSum.character (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesHasSum(characterCoefficients(χ), s, LFunction(N, χ, s))
+proof
+  sorry
+
+-- Mathlib's DirichletCharacter.LFunction_eq_LSeries.
+theorem LFunction.eq_LSeries (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LFunction(N, χ, s) = LSeries(characterCoefficients(χ), s)
+proof
+  sorry
+
+-- Mathlib's LSeriesHasSum_one and LSeries_one_eq_riemannZeta.
+theorem LSeriesHasSum.one (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesHasSum(oneCoefficients, s, riemannZeta(s))
+proof
+  sorry
+
+theorem riemannZeta.eq_LSeries (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows riemannZeta(s) = LSeries(oneCoefficients, s)
+proof
+  sorry
+
+-- The derivatives agree on re s > 1 (Mathlib's
+-- DirichletCharacter.deriv_LFunction_eq_deriv_LSeries). Layer 1's L(·, χ)
+-- is holomorphic on ℂ ∖ {1} for every χ.
+theorem LFunction.deriv_eq_deriv_LSeries (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows complexDeriv(LFunctionMap(N, χ), complexCarrier ∖ {ℂ[1]})(s) =
+    complexDeriv(LSeriesMap(characterCoefficients(χ)), rightHalfPlane(R[1]))(s)
+proof
+  sorry
+
+-- and the derivative of L(·, χ) is −Σ χ(n) log(n) n^(−s) there.
+theorem LFunction.deriv_series (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows complexDeriv(LFunctionMap(N, χ), complexCarrier ∖ {ℂ[1]})(s) =
+    ℂ[-LSeries(logMulCoefficients(characterCoefficients(χ)), s)]
+proof
+  sorry
+
+-- The Euler product of the series of χ (Mathlib's
+-- DirichletCharacter.LSeries_eulerProduct_hasProd, partial products over
+-- the primes p < n; layer 1's LFunction.euler_product).
+theorem LSeries.euler_product_character (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexConvergesTo(lEulerProducts(χ, s),
+    LSeries(characterCoefficients(χ), s))
+proof
+  sorry
+
+-- Mathlib's riemannZeta_eulerProduct_hasProd, in partial products (layer
+-- 1's zeta.euler_product).
+theorem riemannZeta.euler_product_hasProd (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexConvergesTo(zetaEulerProducts(s), riemannZeta(s))
+proof
+  exact zeta.euler_product with hs, halfPlane
+
+-- The product of two Euler products is the Euler product of the products
+-- of the factors, converging to the product of the sums (the step of
+-- Mathlib's HasProd.mul used for ζ(s) L(s, χ)).
+theorem LSeries.euler_product_mul (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows ComplexConvergesTo(productSequence(zetaEulerProducts(s),
+    lEulerProducts(χ, s)), ℂ[riemannZeta(s) * LFunction(N, χ, s)])
+proof
+  sorry
+
+end LSeries
