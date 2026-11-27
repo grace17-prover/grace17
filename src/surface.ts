@@ -21013,7 +21013,12 @@ function parseTerm(text: string, kernel: Kernel, variables: ReadonlySet<string>,
       const typedArguments = signature && signature.parameters.length === elaborated.length
         ? elaborated.map((argument, index) => {
           const parameterType = signature.parameters[index]!.type;
-          return parameterType === "Set" || parameterType === "Class"
+          // A bare literal takes the sort of its parameter; a numeral
+          // annotated with another sort, (1:N), or spelled with succ keeps
+          // its own, so a natural goal printed as 1 can be written back.
+          const annotated = notationResultTypes.get(argument);
+          return parameterType === "Set" || parameterType === "Class" || argument.tag !== "nat" ||
+              (annotated !== undefined && annotated !== parameterType)
             ? argument
             : numeralFor(argument, parameterType) ?? argument;
         })

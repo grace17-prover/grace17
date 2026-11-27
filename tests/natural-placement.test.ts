@@ -141,6 +141,25 @@ proof
   }
 });
 
+// A goal of a natural induction's zero case prints succ(0) as 1; written
+// back as the argument of a real parameter, an annotated (1:N) or a
+// spelled succ(0) stays the natural one, and only a bare 1 is the real one.
+test("an annotated or spelled natural numeral keeps its sort as a typed argument", () => {
+  const kernel = load(prefix + `
+theorem written (X : Real)
+  shows realAddValue(X, (1:N)) = realAddValue(X, succ(0)) ∧ realAddValue(X, 1) = realAddValue(X, (1:R))
+proof
+  sorry
+`);
+  const statement = kernel.theorems.get("Placement.written")!;
+  assert.equal(statement.tag, "forall");
+  const conjunction = (statement as { body: { right: { left: unknown; right: unknown } } }).body.right;
+  const natural = canonical(conjunction.left);
+  const real = canonical(conjunction.right);
+  assert.doesNotMatch(natural, /realOne/);
+  assert.equal((real.match(/realOne/g) ?? []).length, 2);
+});
+
 test("an operand whose rules place it in two sorts asks for an annotation", () => {
   assert.match(failure(prefix + `
 def amb (x : Set) : Set := x
