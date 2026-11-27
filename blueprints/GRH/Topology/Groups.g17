@@ -67,6 +67,98 @@ predicate ClosedSubgroup (H G X : Set) := Subgroup(H, G) ∧ Closed(X, H)
 -- A profinite group: a topological group whose space is profinite.
 predicate ProfiniteGroup (G X : Set) := TopologicalGroup(G, X) ∧ Profinite(X)
 
+-- Application of a graph of pairs that is functional: r(x) = y when
+-- (x, y) ∈ r, read off with domain(r) and range(r).
+theorem pairGraph.domain_contains (x y r : Set)
+  requires hPair : (x, y) ∈ r
+  shows x ∈ domain(r)
+proof
+  apply domain.membership.backward
+  constructor
+  unfold coordinateBound
+  apply set.union.backward
+  witness {x, y}
+  constructor
+  apply set.union.backward
+  witness (x, y)
+  constructor
+  exact hPair
+  simp [orderedPair, pair.membership]
+  exact pair.left
+  witness y
+  exact hPair
+
+theorem pairGraph.apply (r x y : Set)
+  requires pairs : ∀ p ∈ r, ∃ a, ∃ b, p = (a, b)
+  requires functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ r → (a, c) ∈ r → b = c
+  requires edge : (x, y) ∈ r
+  shows r(x) = y
+proof
+  have fn : r : domain(r) → range(r)
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros p hp
+      obtain ⟨a, b, pEq⟩ := pairs with p, hp
+      rw pEq at hp
+      rw pEq
+      exact product.pair with (pairGraph.domain_contains with hp), (range.contains with hp)
+    . unfold Functional
+      intros a b hb c hc
+      exact functional with a, b, c, hb, hc
+    . intros a ha
+      obtain ⟨b, hb⟩ := (domain.membership.forward with ha).right
+      exact ⟨b, (range.contains with hb), hb⟩
+  exact FunctionBetween.apply_value with fn, (pairGraph.domain_contains with edge), edge
+
+-- Left multiplication by g, as a graph on the carrier.
+def leftMulMap (G g : Set) : Set := { (x, Group.mul(G)(g, x)) | x ∈ Group.carrier(G) }
+
+theorem leftMulMap.apply (G g x : Set)
+  requires member : x ∈ Group.carrier(G)
+  shows leftMulMap(G, g)(x) = Group.mul(G)(g, x)
+proof
+  have edge : (x, Group.mul(G)(g, x)) ∈ leftMulMap(G, g)
+    apply leftMulMap.membership.backward
+    exact ⟨x, member, rfl⟩
+  have pairs : ∀ p ∈ leftMulMap(G, g), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := leftMulMap.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, Group.mul(G)(g, k), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ leftMulMap(G, g) → (a, c) ∈ leftMulMap(G, g) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := leftMulMap.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := leftMulMap.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem leftMulMap.function (G g : Set)
+  requires group : Group(G)
+  requires member : g ∈ Group.carrier(G)
+  shows leftMulMap(G, g) : Group.carrier(G) → Group.carrier(G)
+proof
+  unfold FunctionBetween
+  refine ⟨?_, ?_, ?_⟩
+  . unfold RelationBetween
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := leftMulMap.membership.forward with hp
+    rw ← pEq
+    exact product.pair with hk, (Group.mul_mem at G, g, k with group, member, hk)
+  . unfold Functional
+    intros a b hb c hc
+    obtain ⟨k, hk, bEq⟩ := leftMulMap.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := leftMulMap.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  . intros x hx
+    refine ⟨Group.mul(G)(g, x), (Group.mul_mem at G, g, x with group, member, hx), ?_⟩
+    apply leftMulMap.membership.backward
+    exact ⟨x, hx, rfl⟩
+
 -- Section: Topological groups
 theorem TopologicalGroup.carrier (G X : Set)
   requires topological : TopologicalGroup(G, X)
@@ -364,7 +456,49 @@ theorem TopologicalGroup.open_translate (G X g U : Set)
   requires open : U ∈ X.opens
   shows leftCoset(G, g, U) ∈ X.opens
 proof
-  sorry
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have ig := Group.inv_mem at G, g with group, member
+  have igX : G.inv(g) ∈ X.carrier
+    rw carrierEq
+    exact ig
+  have fn : leftMulMap(G, G.inv(g)) : X.carrier → X.carrier
+    rw carrierEq
+    exact leftMulMap.function with group, ig
+  have vals : ∀ x ∈ X.carrier, leftMulMap(G, G.inv(g))(x) = G.mul(G.inv(g), x)
+    intros x hx
+    rw carrierEq at hx
+    exact leftMulMap.apply with hx
+  have cont := productSpace.left_slice_continuous at X, G.mul, G.inv(g), leftMulMap(G, G.inv(g)) with mulCont, igX, fn, vals
+  have Uo := Open.of_mem at X, U with space, open
+  have pre := Open.mem with (Continuous.preimage_open at leftMulMap(G, G.inv(g)), X, X, U with cont, Uo)
+  have same : leftCoset(G, g, U) = functionPreimage(leftMulMap(G, G.inv(g)), X.carrier, U)
+    ext y
+    constructor
+    . intro hy
+      obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+      have yX : y ∈ X.carrier
+        rw carrierEq
+        exact yG
+      apply functionPreimage.of_apply with yX
+      rw [(vals with y, yX), yEq]
+      have uX := (IsTopology.subset with (TopologicalSpace.parts with space), open) with u, hu
+      have uG : u ∈ G.carrier
+        rw ← carrierEq
+        exact uX
+      rw (inv_mul_cancel_left at G, g, u with group, member, uG)
+      exact hu
+    . intro hy
+      obtain ⟨yX, inU⟩ := functionPreimage.membership.forward with hy
+      have yG : y ∈ G.carrier
+        rw ← carrierEq
+        exact yX
+      rw (vals with y, yX) at inU
+      apply leftCoset.membership.backward
+      refine ⟨yG, G.mul(G.inv(g), y), inU, ?_⟩
+      rw (mul_inv_cancel_left at G, g, y with group, member, yG)
+  rw same
+  exact pre
 
 -- The neighborhoods of g are the translates of the neighborhoods of 1.
 theorem TopologicalGroup.nhds_translate (G X g N : Set)
