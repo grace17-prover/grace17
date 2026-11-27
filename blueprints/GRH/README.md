@@ -294,7 +294,7 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | GRH.Linear.Modules | 313 | 313 | 0 |
-| GRH.Linear.Dimension | 117 | 107 | 10 |
+| GRH.Linear.Dimension | 130 | 125 | 5 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
@@ -302,9 +302,9 @@ graph TD
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
 | GRH.Algebra.Localization | 58 | 1 | 57 |
 | GRH.Algebra.LocalRings | 45 | 0 | 45 |
-| GRH.Matrix.Spectral | 49 | 19 | 30 |
+| GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
-| GRH.Linear.Dual | 81 | 79 | 2 |
+| GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 54 | 1 | 53 |
 | GRH.Polynomial.Multivariate | 69 | 1 | 68 |
 | GRH.Algebra.Finiteness | 76 | 1 | 75 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6404** | **4347** | **2057** |
+| **total** | **6440** | **4404** | **2036** |
 <!-- /blueprint-status -->
