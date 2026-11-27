@@ -248,6 +248,96 @@ proof
     exact intersection.membership.backward with yA, (KG with y, yK)
   exact Finite.subset with fin, sub
 
+-- A compact subset is a compact space in the subspace topology; the
+-- traces on A of a finite family of sets form a finite family.
+def cptTraces (G A : Set) : Set := { U ∩ A | U ∈ G }
+def cptTraceFamilies (A F : Set) : Set :=
+  { G ∈ 𝒫(F) | Finite(cptTraces(G, A)) }
+
+theorem cptTraces.finite (A F : Set)
+  requires finite : Finite(F)
+  shows Finite(cptTraces(F, A))
+proof
+  have base : ∅ ∈ cptTraceFamilies(A, F)
+    apply cptTraceFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), ?_⟩
+    have sub : cptTraces(∅, A) ⊆ ∅
+      intros W hW
+      obtain ⟨U, hU, _⟩ := cptTraces.membership.forward with hW
+      simp at hU
+    exact Finite.subset with Finite.empty, sub
+  have step : ∀ G ⊆ F, Finite(G) → ∀ W ∈ F, W ∉ G →
+      G ∈ cptTraceFamilies(A, F) → G ∪ {W} ∈ cptTraceFamilies(A, F)
+    intros G hG finiteG W hW fresh known
+    obtain ⟨_, finG⟩ := cptTraceFamilies.membership.forward with known
+    have bound : G ∪ {W} ⊆ F
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isW
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isW)
+    have sub : cptTraces(G ∪ {W}, A) ⊆ cptTraces(G, A) ∪ {W ∩ A}
+      intros Z hZ
+      obtain ⟨U, hU, eq⟩ := cptTraces.membership.forward with hZ
+      cases (union2.membership.forward with hU) with inG | isW
+      . apply union2.left
+        apply cptTraces.membership.backward
+        exact ⟨U, inG, eq⟩
+      . apply union2.right
+        rw ← eq
+        rw (singleton.membership.forward with isW)
+        simp
+    apply cptTraceFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), ?_⟩
+    exact Finite.subset with (Finite.union with finG, (Finite.singleton at W ∩ A)), sub
+  have all := Finite.induction with base, step
+  have member := all with F, (Subset.reflexive at F), finite
+  exact (cptTraceFamilies.membership.forward with member).right
+
+theorem cptCompact.subspace (X A : Set)
+  requires space : TopologicalSpace(X)
+  requires compact : Compact(X, A)
+  shows Compact(subspace(X, A))
+proof
+  have ic := compact
+  unfold Compact at ic
+  obtain ⟨AX, _⟩ := ic
+  apply Compact.of_space_parts
+  rw [subspace.carrier, subspace.opens]
+  unfold IsCompact
+  refine ⟨(Subset.reflexive at A), ?_⟩
+  intros C cover
+  obtain ⟨CT, AC⟩ := cover
+  have cover2 : OpenCover(X.opens, A, tracedBy(X.opens, A, C))
+    unfold OpenCover
+    constructor
+    . intros U hU
+      exact (tracedBy.membership.forward with hU).left
+    . intros y hy
+      obtain ⟨W, hW, yW⟩ := union.membership.forward with (AC with y, hy)
+      obtain ⟨U, hU, eq⟩ := subspaceTopology.membership.forward with (CT with W, hW)
+      have UA : U ∩ A ∈ C
+        rw eq
+        exact hW
+      have mem : U ∈ tracedBy(X.opens, A, C)
+        apply tracedBy.membership.backward
+        exact ⟨hU, UA⟩
+      rw ← eq at yW
+      exact union.membership.backward with ⟨U, mem, (intersection.membership.forward with yW).left⟩
+  have ic2 := compact
+  unfold Compact at ic2
+  obtain ⟨G, GC, finG, AG⟩ := IsCompact.subcover with ic2, cover2
+  refine ⟨cptTraces(G, A), ?_, (cptTraces.finite at A, G with finG), ?_⟩
+  . intros W hW
+    obtain ⟨U, hU, eq⟩ := cptTraces.membership.forward with hW
+    rw ← eq
+    exact (tracedBy.membership.forward with (GC with U, hU)).right
+  . intros y hy
+    obtain ⟨U, hU, yU⟩ := union.membership.forward with (AG with y, hy)
+    have mem : U ∩ A ∈ cptTraces(G, A)
+      apply cptTraces.membership.backward
+      exact ⟨U, hU, rfl⟩
+    exact union.membership.backward with ⟨U ∩ A, mem, (intersection.membership.backward with yU, hy)⟩
+
 -- Section: Compactness through filters
 -- A is compact exactly when every proper filter containing A clusters at
 -- a point of A. No ultrafilter, and so no choice, is involved.
@@ -1651,7 +1741,60 @@ theorem TotallyDisconnected.subspace (X A : Set)
   requires inside : A ⊆ X.carrier
   shows TotallyDisconnected(subspace(X, A))
 proof
-  sorry
+  obtain ⟨space, pts⟩ := totally
+  unfold TotallyDisconnected
+  have sspace := subspace.space at X, A with space, inside
+  refine ⟨sspace, ?_⟩
+  intros B conn a ha b hb
+  have conn2 := conn
+  unfold ConnectedSubset at conn2
+  unfold IsConnectedSubset at conn2
+  rw [subspace.carrier, subspace.opens] at conn2
+  obtain ⟨BA, noSep⟩ := conn2
+  have BX := Subset.transitive with BA, inside
+  have connX : ConnectedSubset(X, B)
+    unfold ConnectedSubset
+    unfold IsConnectedSubset
+    refine ⟨BX, ?_⟩
+    intro sep
+    obtain ⟨U, V, sepUV⟩ := sep
+    obtain ⟨hU, hV, cov, disj, neU, neV⟩ := sepUV
+    apply noSep
+    have eU : (U ∩ A) ∩ B = U ∩ B
+      ext y
+      constructor
+      . intro hy
+        obtain ⟨yUA, yB⟩ := intersection.membership.forward with hy
+        exact intersection.membership.backward with (intersection.membership.forward with yUA).left, yB
+      . intro hy
+        obtain ⟨yU, yB⟩ := intersection.membership.forward with hy
+        exact intersection.membership.backward with (intersection.membership.backward with yU, (BA with y, yB)), yB
+    have eV : (V ∩ A) ∩ B = V ∩ B
+      ext y
+      constructor
+      . intro hy
+        obtain ⟨yVA, yB⟩ := intersection.membership.forward with hy
+        exact intersection.membership.backward with (intersection.membership.forward with yVA).left, yB
+      . intro hy
+        obtain ⟨yV, yB⟩ := intersection.membership.forward with hy
+        exact intersection.membership.backward with (intersection.membership.backward with yV, (BA with y, yB)), yB
+    have oU : U ∩ A ∈ subspaceTopology(X.opens, A)
+      apply subspaceTopology.membership.backward
+      exact ⟨U, hU, rfl⟩
+    have oV : V ∩ A ∈ subspaceTopology(X.opens, A)
+      apply subspaceTopology.membership.backward
+      exact ⟨V, hV, rfl⟩
+    have cov2 : B ⊆ (U ∩ A) ∪ (V ∩ A)
+      intros y hy
+      have yA := BA with y, hy
+      cases (union2.membership.forward with (cov with y, hy)) with yU | yV
+      . exact union2.left with (intersection.membership.backward with yU, yA)
+      . exact union2.right with (intersection.membership.backward with yV, yA)
+    refine ⟨U ∩ A, V ∩ A, ?_⟩
+    unfold OpenSeparation
+    rw [eU, eV]
+    exact ⟨oU, oV, cov2, disj, neU, neV⟩
+  exact pts with B, connX, a, ha, b, hb
 
 theorem TotallyDisconnected.product (X Y : Set)
   requires totallyX : TotallyDisconnected(X)
@@ -1697,7 +1840,13 @@ theorem Profinite.closed_subspace (X A : Set)
   requires closed : Closed(X, A)
   shows Profinite(subspace(X, A))
 proof
-  sorry
+  obtain ⟨space, compact, haus, totally⟩ := profinite
+  have c2 := closed
+  obtain ⟨AX, _⟩ := c2
+  have cc := (Compact.space_iff at X with space).forward with compact
+  have cA := Compact.of_closed_subset at X, X.carrier, A with space, cc, closed, AX
+  unfold Profinite
+  refine ⟨(subspace.space at X, A with space, AX), (cptCompact.subspace with space, cA), (Hausdorff.subspace_of with space, haus, AX), (TotallyDisconnected.subspace with totally, AX)⟩
 
 theorem Profinite.product (X Y : Set)
   requires profiniteX : Profinite(X)
