@@ -74,6 +74,236 @@ predicate IntegralAlong (f R S y : Set) :=
 predicate IntegralHom (f R S : Set) :=
   RingHom(f, R, S) ∧ (∀ y ∈ Ring.carrier(S), IntegralAlong(f, R, S, y))
 
+-- Section: Helpers for the bridge to Cumulus's monic relations
+theorem intHelp.pred (k : Nat)
+  requires positive : 0 < k
+  shows ∃ j ∈ ℕ, k = j + 1
+proof
+  induction k
+  | zero =>
+    intro h
+    exfalso
+    arith
+  | succ(m) using ih =>
+    intro h
+    have mN : m ∈ ℕ by typecheck
+    refine ⟨m, mN, ?_⟩
+    arith
+
+-- The coefficients of a + X p are a, then those of p (shifted by one).
+theorem intHelp.shift_coeff (R p a : Set) (j : Nat)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyCoeff(call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), j + 1) = polyCoeff(p, j)
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have pring := CommRing.to_ring with polys
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have add := polyCoeff.add at R, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), j + 1 with comm, polys, cIn, xpIn
+  have c := polyC.coeff at R, a, j + 1 with comm, polys, scalar
+  have ne : j + 1 ≠ 0 by arith
+  have c0 := c.right with ne
+  have pow1 := Ring.pow_one at polynomialRing(R, {0}), polyX(R) with xIn, pring
+  have sh := polyCoeff.X_pow_mul at R, p, 1, j with comm, polys, member
+  rw pow1 at sh
+  have pj := uni.coeff_mem at R, p, j with comm, member
+  rw [add, c0, sh]
+  exact finHelp.zero_add at R, polyCoeff(p, j) with pj, comm
+
+theorem intHelp.shift_coeff_zero (R p a : Set)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyCoeff(call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), 0) =
+    call2(Ring.add(R), a, polyCoeff(call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), 0))
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have add := polyCoeff.add at R, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), 0 with comm, polys, cIn, xpIn
+  have c := polyC.coeff at R, a, 0 with comm, polys, scalar
+  have e : (0:Nat) = 0 by rfl
+  rw [add, (c.left with e)]
+
+-- The value of a + X p is f(a) + x · p(x).
+theorem intHelp.shift_eval (R S f x p a : Set)
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyEval2(R, S, f, x, call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p))) =
+    call2(Ring.add(S), f(a), call2(Ring.mul(S), x, polyEval2(R, S, f, x, p)))
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have H := polyEval2.hom at R, S, f, x with comm, polys, target, hom, point
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have eC := polyEval2.C at R, S, f, x, a with comm, polys, target, hom, point, scalar
+  have eX := polyEval2.X at R, S, f, x with comm, polys, target, hom, point
+  unfold polyEval2 at eC
+  unfold polyEval2 at eX
+  unfold polyEval2
+  rw (RingHom.map_add at evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x)), polynomialRing(R, {0}), S, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) with cIn, xpIn, H)
+  rw (RingHom.map_mul at evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x)), polynomialRing(R, {0}), S, polyX(R), p with xIn, member, H)
+  rw [eC, eX]
+
+-- Conversely, a polynomial with leading coefficient 1 in degree n has the
+-- value of a Cumulus monic list (over a nontrivial ring; dividing by X).
+theorem intHelp.poly_list (R S f x : Set) (n : Nat)
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  requires nontrivial : Ring.zero(R) ≠ Ring.one(R)
+  shows ∀ p ∈ Ring.carrier(polynomialRing(R, {0})), polyCoeff(p, n) = Ring.one(R) →
+    (∀ k ∈ ℕ, n < k → polyCoeff(p, k) = Ring.zero(R)) →
+    ∃ cs, List(Ring.carrier(R), cs) ∧ polyEval2(R, S, f, x, p) =
+      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), Ring.one(S), x, cs)
+proof
+  induction n
+  | zero =>
+    intros p pIn top vanish
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have lt1 : p ∈ polyDegreeLT(R, 1)
+      unfold polyDegreeLT
+      refine ⟨pIn, ?_⟩
+      intros k hk
+      unfold polyDegrees at hk
+      obtain ⟨kN, nz⟩ := hk
+      have kNat := nat.omega.backward with kN
+      by_contra ge
+      have pos : 0 < k by arith
+      have z := vanish with k, kN, pos
+      unfold polyCoeff at z
+      exact nz with z
+    have pc := uni.const_of_lt_one at R, p with comm, polys, lt1
+    rw top at pc
+    have oneR : Ring.one(R) ∈ Ring.carrier(R) by typecheck
+    have nilL : List(Ring.carrier(R), List.nil) by typecheck
+    refine ⟨List.nil, nilL, ?_⟩
+    rw pc
+    rw monicValue
+    rw (polyEval2.C at R, S, f, x, Ring.one(R) with comm, polys, target, hom, point, oneR)
+    exact RingHom.map_one with hom
+  | succ(m) using ih =>
+    intros p pIn top vanish
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have pp := CommRing.parts with polys
+    have xIn := polyX.mem at R with comm, polys
+    have xm := PolyMonic.X at R with comm, polys
+    have e1 : (1:Nat) = 1 by rfl
+    have xtop := (uni.X_coeff at R, 1 with comm, polys).left with e1
+    have xvanish : ∀ k ∈ ℕ, 1 < k → polyCoeff(polyX(R), k) = Ring.zero(R)
+      intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have n1 : k ≠ 1 by arith
+      exact (uni.X_coeff at R, k with comm, polys).right with n1
+    have xd := (uni.monic_of at R, polyX(R), 1 with comm, polys, xIn, xtop, xvanish).right with nontrivial
+    have vanishN : ∀ k ∈ ℕ, succ(m) + 1 ≤ k → polyCoeff(p, k) = Ring.zero(R)
+      intros k hk le
+      have kNat := nat.omega.backward with hk
+      have lt : succ(m) < k by arith
+      exact vanish with k, hk, lt
+    obtain ⟨q, qIn, r, rIn, split, small⟩ := uni.div_exists at R, polyX(R), succ(m) + 1 with xIn, comm, polys, xm, p, pIn, vanishN
+    rw xd at small
+    have rc := uni.const_of_lt_one at R, r with comm, polys, small
+    have r0 := uni.coeff_mem at R, r, 0 with comm, rIn
+    have qx := IsCommRing.mul_comm with pp, qIn, xIn
+    have xqIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), q) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+    have cIn := polyC.mem at R, polyCoeff(r, 0) with comm, polys, r0
+    rw [qx, rc] at split
+    have ac := IsCommRing.add_comm with pp, xqIn, cIn
+    rw ac at split
+    have shifted : ∀ j ∈ ℕ, polyCoeff(q, j) = polyCoeff(p, j + 1)
+      intros j hj
+      have jNat := nat.omega.backward with hj
+      rw split
+      rw (intHelp.shift_coeff at R, q, polyCoeff(r, 0), j with comm, qIn, r0)
+    have mN : m ∈ ℕ by typecheck
+    have qtop : polyCoeff(q, m) = Ring.one(R)
+      rw (shifted with m, mN)
+      have same : m + 1 = succ(m) by arith
+      rw same
+      exact top
+    have qvanish : ∀ k ∈ ℕ, m < k → polyCoeff(q, k) = Ring.zero(R)
+      intros k hk lt
+      have kNat := nat.omega.backward with hk
+      rw (shifted with k, hk)
+      have k1 : k + 1 ∈ ℕ by typecheck
+      have lt2 : succ(m) < k + 1 by arith
+      exact vanish with k + 1, k1, lt2
+    obtain ⟨cs, list, value⟩ := ih with q, qIn, qtop, qvanish
+    have cons : List(Ring.carrier(R), List.cons(polyCoeff(r, 0), cs)) by typecheck
+    refine ⟨List.cons(polyCoeff(r, 0), cs), cons, ?_⟩
+    rw split
+    rw (intHelp.shift_eval at R, S, f, x, q, polyCoeff(r, 0) with comm, target, hom, point, qIn, r0)
+    rw value
+    rw monicValue
+
+-- A Cumulus monic list gives a polynomial with leading coefficient 1 in
+-- degree n and the same value.
+theorem intHelp.list_poly (R S f x : Set) (cs : List(Ring.carrier(R)))
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  shows ∃ p ∈ Ring.carrier(polynomialRing(R, {0})), ∃ n ∈ ℕ,
+    polyCoeff(p, n) = Ring.one(R) ∧
+    (∀ k ∈ ℕ, n < k → polyCoeff(p, k) = Ring.zero(R)) ∧
+    polyEval2(R, S, f, x, p) =
+      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), Ring.one(S), x, cs)
+proof
+  induction cs
+  | List.nil =>
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have oneR : Ring.one(R) ∈ Ring.carrier(R) by typecheck
+    have cIn := polyC.mem at R, Ring.one(R) with comm, polys, oneR
+    have zN : (0:Nat) ∈ ℕ by typecheck
+    have c := polyC.coeff at R, Ring.one(R), 0 with comm, polys, oneR
+    have e : (0:Nat) = 0 by rfl
+    refine ⟨polyC(R, Ring.one(R)), cIn, 0, zN, (c.left with e), ?_, ?_⟩
+    . intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have ne : k ≠ 0 by arith
+      exact (polyC.coeff at R, Ring.one(R), k with comm, polys, oneR).right with ne
+    . rw monicValue
+      rw (polyEval2.C at R, S, f, x, Ring.one(R) with comm, polys, target, hom, point, oneR)
+      exact RingHom.map_one with hom
+  | List.cons(a, tail) using ih =>
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have aR : a ∈ Ring.carrier(R) by assumption
+    obtain ⟨p, pIn, n, nN, top, vanish, value⟩ := ih
+    have nNat := nat.omega.backward with nN
+    have xIn := polyX.mem at R with comm, polys
+    have cIn := polyC.mem at R, a with comm, polys, aR
+    have qIn : call2(Ring.add(polynomialRing(R, {0})), polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+    have sN : n + 1 ∈ ℕ by typecheck
+    refine ⟨call2(Ring.add(polynomialRing(R, {0})), polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), qIn, n + 1, sN, ?_, ?_, ?_⟩
+    . rw (intHelp.shift_coeff at R, p, a, n with comm, pIn, aR)
+      exact top
+    . intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have kpos : 0 < k by arith
+      obtain ⟨j, jN, jk⟩ := intHelp.pred at k with kpos
+      have jNat := nat.omega.backward with jN
+      rw jk
+      rw (intHelp.shift_coeff at R, p, a, j with comm, pIn, aR)
+      have lt2 : n < j by arith
+      exact vanish with j, jN, lt2
+    . rw (intHelp.shift_eval at R, S, f, x, p, a with comm, target, hom, point, pIn, aR)
+      rw value
+      rw monicValue
+
 -- Section: Laws of integral elements
 section IntegralElements
 variable (A : Set)
@@ -87,7 +317,52 @@ theorem IntegralElement.iff_cumulus (x : Set)
       Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)),
       Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), x)
 proof
-  sorry
+  have base := Algebra.base_comm_ring at A with algebra
+  have ringA := Algebra.comm_ring at A with algebra
+  have sh := Algebra.structure_hom at A with algebra
+  have polys := polynomialRing.comm_ring at Algebra.base(A), {0} with base
+  have pt := member
+  unfold algebraCarrier at pt
+  constructor
+  . intro integral
+    obtain ⟨_, _, p, monic, root⟩ := integral
+    unfold IntegralOver
+    refine ⟨member, ?_⟩
+    have nilL : List(Ring.carrier(Algebra.base(A)), List.nil) by typecheck
+    by_cases triv : Ring.zero(Algebra.base(A)) = Ring.one(Algebra.base(A))
+    . refine ⟨List.nil, nilL, ?_⟩
+      rw monicValue
+      have o := RingHom.map_one with sh
+      have z := RingHom.map_zero with sh
+      rw triv at z
+      rw o at z
+      exact z
+    . have m0 := monic
+      obtain ⟨pIn, lead⟩ := m0
+      have dN : polyNatDegree(Algebra.base(A), p) ∈ ℕ by typecheck
+      have dNat := nat.omega.backward with dN
+      have le := uni.lead_eq at Algebra.base(A), p with base, polys
+      rw le at lead
+      have vanish : ∀ k ∈ ℕ, polyNatDegree(Algebra.base(A), p) < k → polyCoeff(p, k) = Ring.zero(Algebra.base(A))
+        intros k hk lt
+        have kNat := nat.omega.backward with hk
+        exact polyNatDegree.coeff_zero_of_lt at Algebra.base(A), p, k with pIn, base, polys, lt
+      have all := intHelp.poly_list at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, polyNatDegree(Algebra.base(A), p) with base, ringA, sh, pt, triv
+      obtain ⟨cs, list, value⟩ := all with p, pIn, lead, vanish
+      refine ⟨cs, list, ?_⟩
+      rw ← value
+      unfold polyAeval at root
+      exact root
+  . intro io
+    obtain ⟨_, cs, list, value⟩ := io
+    obtain ⟨p, pIn, n, nN, top, vanish, ev⟩ := intHelp.list_poly at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, cs with list, base, ringA, sh, pt
+    have nNat := nat.omega.backward with nN
+    have monic := (uni.monic_of at Algebra.base(A), p, n with pIn, base, polys, top, vanish).left
+    unfold IntegralElement
+    refine ⟨algebra, member, p, monic, ?_⟩
+    unfold polyAeval
+    rw ev
+    exact value
 
 -- isIntegral_algebraMap, isIntegral_zero, isIntegral_one.
 theorem IntegralElement.algebra_map (a : Set)
