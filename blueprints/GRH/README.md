@@ -322,11 +322,11 @@ graph TD
 | GRH.Topology.Compactness | 67 | 31 | 36 |
 | GRH.Topology.Groups | 52 | 10 | 42 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
-| GRH.Normed.Groups | 80 | 65 | 15 |
+| GRH.Normed.Groups | 88 | 75 | 13 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
-| GRH.Normed.Spaces | 42 | 22 | 20 |
-| GRH.Normed.InnerProduct | 68 | 16 | 52 |
-| GRH.Calculus.Frechet | 50 | 19 | 31 |
+| GRH.Normed.Spaces | 59 | 51 | 8 |
+| GRH.Normed.InnerProduct | 69 | 31 | 38 |
+| GRH.Calculus.Frechet | 47 | 23 | 24 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6339** | **4249** | **2090** |
+| **total** | **6362** | **4307** | **2055** |
 <!-- /blueprint-status -->
