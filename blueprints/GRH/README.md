@@ -320,13 +320,13 @@ graph TD
 | GRH.Integral | 154 | 154 | 0 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
 | GRH.Topology.Compactness | 67 | 31 | 36 |
-| GRH.Topology.Groups | 52 | 10 | 42 |
+| GRH.Topology.Groups | 58 | 25 | 33 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
-| GRH.Normed.Groups | 88 | 75 | 13 |
+| GRH.Normed.Groups | 118 | 110 | 8 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
-| GRH.Normed.Spaces | 59 | 51 | 8 |
-| GRH.Normed.InnerProduct | 69 | 31 | 38 |
-| GRH.Calculus.Frechet | 47 | 23 | 24 |
+| GRH.Normed.Spaces | 60 | 53 | 7 |
+| GRH.Normed.InnerProduct | 86 | 62 | 24 |
+| GRH.Calculus.Frechet | 51 | 32 | 19 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6595** | **4636** | **1959** |
+| **total** | **6653** | **4728** | **1925** |
 <!-- /blueprint-status -->
