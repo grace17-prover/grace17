@@ -294,7 +294,7 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | GRH.Linear.Modules | 313 | 313 | 0 |
-| GRH.Linear.Dimension | 117 | 105 | 12 |
+| GRH.Linear.Dimension | 117 | 107 | 10 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6285** | **4112** | **2173** |
+| **total** | **6285** | **4114** | **2171** |
 <!-- /blueprint-status -->
