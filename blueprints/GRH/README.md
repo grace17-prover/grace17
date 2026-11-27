@@ -335,9 +335,9 @@ graph TD
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 494 | 494 | 0 |
 | GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
-| GRH.Measure.Spaces | 230 | 173 | 57 |
+| GRH.Measure.Spaces | 230 | 174 | 56 |
 | GRH.Measure.Lebesgue | 131 | 89 | 42 |
-| GRH.Measure.LIntegral | 87 | 42 | 45 |
+| GRH.Measure.LIntegral | 130 | 94 | 36 |
 | GRH.Measure.Bochner | 100 | 0 | 100 |
 | GRH.Measure.Product | 42 | 0 | 42 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7197** | **6059** | **1138** |
+| **total** | **7240** | **6112** | **1128** |
 <!-- /blueprint-status -->
