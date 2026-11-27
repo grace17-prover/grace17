@@ -305,7 +305,7 @@ graph TD
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
-| GRH.Linear.Tensor | 54 | 1 | 53 |
+| GRH.Linear.Tensor | 186 | 175 | 11 |
 | GRH.Polynomial.Multivariate | 69 | 1 | 68 |
 | GRH.Algebra.Finiteness | 76 | 1 | 75 |
 | GRH.Algebra.Completion | 37 | 0 | 37 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6463** | **4462** | **2001** |
+| **total** | **6595** | **4636** | **1959** |
 <!-- /blueprint-status -->
