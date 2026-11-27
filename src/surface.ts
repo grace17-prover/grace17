@@ -18749,8 +18749,10 @@ function parseFormula(
         })
         : [];
       const fallback = candidates.filter(item => !notationIsTyped(item));
-      // With no carrier information on either side, the natural-number
-      // reading is the library's default, as it is for bare numerals.
+      // With no carrier information on either side, the natural order is
+      // read between variables, or when an operand is placed in ℕ, by a
+      // fact, a result sort, or a typing rule, or is a plain numeral; an
+      // application placed nowhere is an error.
       const evidenced = candidates.filter(item => {
         const [leftType, rightType] = notationOperandTypes(item);
         return (leftType !== undefined && informativeLeft.has(leftType)) ||
@@ -18835,8 +18837,24 @@ function parseFormula(
         : exactTyped.length === 0 && sidedTyped.length === 1 ? sidedTyped[0]
         : refinedTyped.length === 1 ? refinedTyped[0]
         : compatibleTyped.length === 0 && fallback.length === 1 ? fallback[0]
-        : compatibleTyped.length === 0 && fallback.length === 0 && natDefault.length === 1 ? natDefault[0]
+        : compatibleTyped.length === 0 && fallback.length === 0 && natDefault.length === 1 &&
+            naturallyPlaced(kernel, scope, left, right, notationOperandTypes(natDefault[0]!)[0]!) ? natDefault[0]
         : undefined;
+      if (!notation && compatibleTyped.length === 0 && fallback.length === 0 && natDefault.length === 1) {
+        // Neither operand is placed in a sort the token orders: no syntax,
+        // fact, result sort, or typing rule says which order is meant, and
+        // the natural one is not guessed.
+        const sorts = [...new Set(candidates.map(notationOperandTypes)
+          .flatMap(([leftType, rightType]) => leftType && leftType === rightType ? [leftType] : []))];
+        const orList = (items: readonly string[]): string =>
+          items.length < 3 ? items.join(" or ") : `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
+        const operand = left.tag === "app" && naturalValue(left) === undefined ? left : right;
+        throw new SurfaceError(line,
+          `cannot read ${formatTerm(left)} ${token} ${formatTerm(right)}: ${formatTerm(left)} and ${formatTerm(right)} ` +
+          `are placed in no ordered sort, so the ${token} of ${orList(sorts.map(sort => sort.split(".").at(-1)!))} is not chosen; ` +
+          `annotate an operand, as in ${orList(sorts.map(sort => `(${formatTerm(operand)}:${annotationLabel(sort)})`))}, ` +
+          "or place it by a fact, a result sort, or a typing rule");
+      }
       if (!notation) {
         const display = (types: ReadonlySet<string>): string =>
           [...types].map(item => item.split(".").at(-1)!).join("|") || "?";
@@ -19321,6 +19339,24 @@ function placementSorts(
     }
   }
   return [...found];
+}
+
+/**
+ * Whether a comparison neither of whose operands has a sort by its syntax
+ * reads in the natural sort `natural`: when its operands are variables and
+ * numerals, or an operand is a plain numeral or a term a fact, a result
+ * sort, a typing rule, or the refinement search places there.
+ */
+function naturallyPlaced(kernel: Kernel, scope: SurfaceScope, left: Term, right: Term, natural: string): boolean {
+  const numeral = (term: Term): boolean => naturalValue(term) !== undefined && !bareRingNumerals.has(term);
+  const operands = [left, right].filter(term => naturalValue(term) === undefined);
+  // Variables with no evidence either way keep the natural reading; an
+  // application placed nowhere does not.
+  if (operands.every(term => term.tag === "var")) return true;
+  if (numeral(left) || numeral(right) || operands.some(term => placementSorts(kernel, scope, term, [natural]).length > 0)) return true;
+  // A term the refinement search types, succ(h) for a natural h, is placed
+  // too; the search runs only once every cheaper placement has failed.
+  return operands.some(term => termHasType(kernel, term, natural, scope));
 }
 
 /**
