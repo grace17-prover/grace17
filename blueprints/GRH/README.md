@@ -357,13 +357,18 @@ graph TD
 | GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
-| GRH.NumberField.Basic | 67 | 1 | 66 |
+| GRH.NumberField.Basic | 65 | 1 | 64 |
 | GRH.NumberField.Dedekind | 95 | 5 | 90 |
 | GRH.NumberField.Discriminant | 25 | 1 | 24 |
 | GRH.NumberField.Places | 56 | 4 | 52 |
 | GRH.NumberField.Adeles | 30 | 1 | 29 |
 | GRH.NumberField.CM | 23 | 0 | 23 |
+| GRH.Padic.Numbers | 88 | 6 | 82 |
+| GRH.Padic.Valuation | 63 | 8 | 55 |
+| GRH.Padic.Cp | 33 | 1 | 32 |
+| GRH.Padic.Witt | 43 | 4 | 39 |
+| GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **8032** | **6573** | **1459** |
+| **total** | **8293** | **6594** | **1699** |
 <!-- /blueprint-status -->
