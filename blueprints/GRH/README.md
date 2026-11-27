@@ -327,13 +327,20 @@ graph TD
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 90 | 70 | 20 |
 | GRH.Calculus.Frechet | 70 | 55 | 15 |
-| GRH.DirichletCharacter | 188 | 188 | 0 |
+| GRH.Field.Galois | 79 | 1 | 78 |
+| GRH.Matrix.Groups | 92 | 82 | 10 |
+| GRH.Field.Finite | 62 | 2 | 60 |
+| GRH.Cyclotomy.RootsOfUnity | 45 | 1 | 44 |
+| GRH.Field.InfiniteGalois | 22 | 0 | 22 |
+| GRH.Cyclotomy.Fields | 21 | 1 | 20 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
 | GRH.Gamma | 229 | 229 | 0 |
 | GRH.Zeta | 98 | 98 | 0 |
+| GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 494 | 494 | 0 |
+| GRH.Characters.Mul | 36 | 0 | 36 |
 | GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
 | GRH.Measure.Spaces | 225 | 174 | 51 |
 | GRH.Measure.Lebesgue | 131 | 89 | 42 |
@@ -350,8 +357,7 @@ graph TD
 | GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
-| GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7471** | **6556** | **915** |
+| **total** | **7736** | **6561** | **1175** |
 <!-- /blueprint-status -->

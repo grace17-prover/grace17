@@ -1,0 +1,875 @@
+-- Finite Galois theory: field extensions as algebras between fields, the
+-- degree [L : K], intermediate fields and adjunction, the minimal
+-- polynomial, separable polynomials and extensions, splitting of
+-- polynomials, normal and Galois extensions, the Galois group
+-- Gal(L/K) = Aut_K(L), fixed fields and fixing subgroups, the fundamental
+-- theorem, restriction to normal subextensions, primitive elements,
+-- splitting fields, algebraically closed fields and algebraic closures.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Field/Galois.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Field.Galois
+import GRH.Algebra.Integral
+import Grace.Cumulus.Algebra.Group.Lagrange
+import Grace.Cumulus.Algebra.Group.Normal
+
+-- Section: Field extensions
+-- An extension L/K is a Cumulus Algebra E whose base K = Algebra.base(E)
+-- and ring L = Algebra.ring(E) are fields; the structure map
+-- Algebra.map(E) : K → L is Mathlib's algebraMap K L. Mathlib's
+-- typeclass pair [Field K] [Field L] [Algebra K L] is this one set.
+predicate FieldExtension (E : Set) :=
+  Algebra(E) ∧ Field(Algebra.base(E)) ∧ Field(Algebra.ring(E))
+
+-- The degree [L : K] (Module.finrank K L), meaningful when the extension
+-- is finite; and finite and algebraic extensions (FiniteDimensional K L,
+-- Algebra.IsAlgebraic K L).
+def extensionDegree (E : Set) : Set := finrank(algebraModule(E), Algebra.base(E))
+
+predicate FiniteExtension (E : Set) :=
+  FieldExtension(E) ∧ FiniteDimensional(algebraModule(E), Algebra.base(E))
+
+predicate AlgebraicExtension (E : Set) :=
+  FieldExtension(E) ∧ AlgebraicAlgebra(E)
+
+-- The polynomials K[X] over a ring, as a carrier.
+def uniPolys (R : Set) : Set := Ring.carrier(polynomialRing(R, {0}))
+
+-- Section: Intermediate fields
+-- An intermediate field K ≤ F ≤ L (Mathlib's IntermediateField K L) is a
+-- subset F of L that is a K-subalgebra closed under inverses.
+predicate IntermediateField (E F : Set) :=
+  FieldExtension(E) ∧ SubalgebraOf(E, F) ∧
+  (∀ x ∈ F, x ≠ Ring.zero(Algebra.ring(E)) →
+    (∃ y ∈ F, call2(Ring.mul(Algebra.ring(E)), x, y) = Ring.one(Algebra.ring(E))))
+
+def intermediateFields (E : Set) : Set :=
+  { F ∈ 𝒫(algebraCarrier(E)) | IntermediateField(E, F) }
+
+-- ⊥ = the image of K (IntermediateField ⊥); ⊤ is algebraCarrier(E).
+def bottomField (E : Set) : Set :=
+  functionImage(Algebra.map(E), Ring.carrier(Algebra.base(E)), algebraCarrier(E))
+
+-- K(S), the least intermediate field containing S (IntermediateField.adjoin);
+-- the join F ⊔ G is fieldAdjoin(E, F ∪ G).
+def fieldAdjoin (E S : Set) : Set :=
+  { x ∈ algebraCarrier(E) | ∀ F ∈ intermediateFields(E), S ⊆ F → x ∈ F }
+
+-- An intermediate field F as the extension F/K (Mathlib's coercion of F
+-- to a field with its K-algebra structure), and L as the extension L/F
+-- (the tower K ≤ F ≤ L, IsScalarTower K F L).
+def subextension (E F : Set) : Set :=
+  Algebra.mk(Algebra.base(E), subringRing(Algebra.ring(E), F), Algebra.map(E))
+
+def overExtension (E F : Set) : Set :=
+  Algebra.mk(subringRing(Algebra.ring(E), F), Algebra.ring(E), identity(F))
+
+-- Section: The Galois group
+-- Gal(L/K) = L ≃ₐ[K] L, the K-algebra automorphisms of L, under
+-- composition: (σ τ)(x) = σ(τ(x)), as Mathlib's AlgEquiv.aut.
+def algebraAutomorphisms (E : Set) : Set :=
+  { σ ∈ functionSpace(algebraCarrier(E), algebraCarrier(E)) | AlgebraIso(σ, E, E) }
+
+def autComposition (E : Set) : Set :=
+  { p ∈ (algebraAutomorphisms(E) × algebraAutomorphisms(E)) × algebraAutomorphisms(E) |
+    snd(p) = compose(fst(fst(p)), snd(fst(p)), algebraCarrier(E),
+      algebraCarrier(E), algebraCarrier(E)) }
+
+def autInverse (E : Set) : Set :=
+  { p ∈ algebraAutomorphisms(E) × algebraAutomorphisms(E) |
+    snd(p) = converse(fst(p), algebraCarrier(E), algebraCarrier(E)) }
+
+def galoisGroup (E : Set) : Set :=
+  Group.mk(algebraAutomorphisms(E), autComposition(E),
+    identity(algebraCarrier(E)), autInverse(E))
+
+-- The fixed field of a set H of automorphisms (IntermediateField.fixedField,
+-- FixedPoints.intermediateField) and the fixing subgroup of a subset F
+-- of L (IntermediateField.fixingSubgroup, fixingSubgroup).
+def fixedField (E H : Set) : Set :=
+  { x ∈ algebraCarrier(E) | ∀ σ ∈ H, σ(x) = x }
+
+def fixingSubgroup (E F : Set) : Set :=
+  { σ ∈ algebraAutomorphisms(E) | ∀ x ∈ F, σ(x) = x }
+
+-- The image σ(F) of a subset (IntermediateField.map).
+def autImage (E σ F : Set) : Set := functionImage(σ, F, algebraCarrier(E))
+
+-- Restriction of automorphisms to a normal intermediate field F
+-- (AlgEquiv.restrictNormalHom): σ ↦ σ|_F, an automorphism of F/K.
+def galoisRestrict (E F : Set) : Set :=
+  { p ∈ algebraAutomorphisms(E) × algebraAutomorphisms(subextension(E, F)) |
+    ∃ σ ∈ algebraAutomorphisms(E), p = (σ, restrict(σ, F)) }
+
+-- Section: Minimal polynomials, separability, splitting
+-- The minimal polynomial of x ∈ L over K (minpoly K x): the monic
+-- generator of the polynomials vanishing at x. Defined for x integral
+-- over K; Mathlib's value 0 at a transcendental x is not part of the
+-- definition.
+defunique minpoly (E x : Set) (p ∈ uniPolys(Algebra.base(E))) :=
+  PolyMonic(Algebra.base(E), p) ∧ polyAeval(E, x, p) = Ring.zero(Algebra.ring(E)) ∧
+  (∀ q ∈ uniPolys(Algebra.base(E)), polyAeval(E, x, q) = Ring.zero(Algebra.ring(E)) →
+    RingDvd(polynomialRing(Algebra.base(E), {0}), p, q))
+requires extension : FieldExtension(E)
+requires integral : IntegralElement(E, x)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- p is separable: p and its derivative are coprime, a p + b p' = 1
+-- (Polynomial.Separable, IsCoprime p (derivative p)).
+predicate PolySeparable (R p : Set) :=
+  p ∈ uniPolys(R) ∧ (∃ a ∈ uniPolys(R), ∃ b ∈ uniPolys(R),
+    call2(Ring.add(polynomialRing(R, {0})),
+      call2(Ring.mul(polynomialRing(R, {0})), a, p),
+      call2(Ring.mul(polynomialRing(R, {0})), b, polyDerivative(R)(p))) =
+    Ring.one(polynomialRing(R, {0})))
+
+-- p ∈ K[X] splits along f : K →+* L (Polynomial.Splits f p): its image
+-- in L[X] is zero or a constant times a product of linear factors.
+predicate PolySplits (K L f p : Set) :=
+  p ∈ uniPolys(K) ∧ (polyMap(K, L, f)(p) = Ring.zero(polynomialRing(L, {0})) ∨
+    (∃ n ∈ ℕ, ∃ a, FunctionBetween(a, n, Ring.carrier(L)) ∧
+      polyMap(K, L, f)(p) = call2(Ring.mul(polynomialRing(L, {0})),
+        polyC(L, polyLeadingCoeff(L, polyMap(K, L, f)(p))), polyLinearProduct(L, a, n))))
+
+-- x is separable over K (IsSeparable K x); separable, normal and Galois
+-- extensions (Algebra.IsSeparable, Normal, IsGalois).
+predicate SeparableElement (E x : Set) :=
+  IntegralElement(E, x) ∧ PolySeparable(Algebra.base(E), minpoly(E, x))
+
+predicate SeparableExtension (E : Set) :=
+  FieldExtension(E) ∧ (∀ x ∈ algebraCarrier(E), SeparableElement(E, x))
+
+predicate NormalExtension (E : Set) :=
+  AlgebraicExtension(E) ∧ (∀ x ∈ algebraCarrier(E),
+    PolySplits(Algebra.base(E), Algebra.ring(E), Algebra.map(E), minpoly(E, x)))
+
+predicate GaloisExtension (E : Set) := SeparableExtension(E) ∧ NormalExtension(E)
+
+-- L is a splitting field of p over K (Polynomial.IsSplittingField): p
+-- splits in L and L is generated by its roots; for p = 0, whose root set
+-- Mathlib takes empty, L = K. Gal(L/K) of a splitting field is Mathlib's
+-- Polynomial.Gal p, up to the isomorphism of splitting fields.
+predicate IsSplittingField (E p : Set) :=
+  FieldExtension(E) ∧ PolySplits(Algebra.base(E), Algebra.ring(E), Algebra.map(E), p) ∧
+  (p ≠ Ring.zero(polynomialRing(Algebra.base(E), {0})) →
+    fieldAdjoin(E, polyAlgebraRootSet(E, p)) = algebraCarrier(E)) ∧
+  (p = Ring.zero(polynomialRing(Algebra.base(E), {0})) →
+    bottomField(E) = algebraCarrier(E))
+
+-- L is an algebraic closure of K (IsAlgClosure K L); algebraic
+-- closedness of the field L is Cumulus's AlgebraicallyClosed (IsAlgClosed).
+predicate IsAlgebraicClosure (E : Set) :=
+  AlgebraicExtension(E) ∧ AlgebraicallyClosed(Algebra.ring(E))
+
+-- Section: Extensions
+section Extensions
+variable (E : Set)
+hypothesis extension : FieldExtension(E)
+
+-- algebraMap K L is injective (RingHom.injective of a field).
+theorem FieldExtension.map_injective
+  shows InjectiveBetween(Algebra.map(E), Ring.carrier(Algebra.base(E)), algebraCarrier(E))
+proof
+  sorry
+
+-- Module.finrank_pos and the degree one case (IntermediateField.finrank_eq_one_iff,
+-- Algebra.finrank_eq_one_iff for ⊥ = ⊤).
+theorem extensionDegree.pos
+  requires finite : FiniteExtension(E)
+  shows 0 < extensionDegree(E)
+proof
+  sorry
+
+theorem extensionDegree.eq_one_iff
+  requires finite : FiniteExtension(E)
+  shows extensionDegree(E) = 1 ↔ bottomField(E) = algebraCarrier(E)
+proof
+  sorry
+
+-- A finite extension is algebraic (Algebra.IsAlgebraic.of_finite).
+theorem FiniteExtension.algebraic
+  requires finite : FiniteExtension(E)
+  shows AlgebraicExtension(E)
+proof
+  sorry
+
+-- A finite extension has a finite Galois group (AlgEquiv.fintype), of
+-- order at most the degree (AlgEquiv.card_le).
+theorem FiniteExtension.galois_finite
+  requires finite : FiniteExtension(E)
+  shows Finite(algebraAutomorphisms(E)) ∧ order(galoisGroup(E)) ≤ extensionDegree(E)
+proof
+  sorry
+
+theorem galoisGroup.group
+  shows Group(galoisGroup(E))
+proof
+  sorry
+
+-- AlgEquiv.mul_apply, AlgEquiv.one_apply.
+theorem galoisGroup.mul_apply (σ τ x : Set)
+  requires first : σ ∈ algebraAutomorphisms(E)
+  requires second : τ ∈ algebraAutomorphisms(E)
+  requires point : x ∈ algebraCarrier(E)
+  shows Group.mul(galoisGroup(E))(σ, τ)(x) = σ(τ(x))
+proof
+  sorry
+
+theorem galoisGroup.one_apply (x : Set)
+  requires point : x ∈ algebraCarrier(E)
+  shows Group.one(galoisGroup(E))(x) = x
+proof
+  sorry
+
+-- An algebra endomorphism of an algebraic extension is an automorphism
+-- (Algebra.IsAlgebraic.algHom_bijective; Normal.algHomEquivAut).
+theorem AlgebraicExtension.endomorphism_bijective (f : Set)
+  requires algebraic : AlgebraicExtension(E)
+  requires hom : f : E →ₐ E
+  shows f ∈ algebraAutomorphisms(E)
+proof
+  sorry
+
+-- AlgEquiv.ext: automorphisms agreeing pointwise are equal.
+theorem galoisGroup.ext (σ τ : Set)
+  requires first : σ ∈ algebraAutomorphisms(E)
+  requires second : τ ∈ algebraAutomorphisms(E)
+  requires agree : ∀ x ∈ algebraCarrier(E), σ(x) = τ(x)
+  shows σ = τ
+proof
+  sorry
+
+end Extensions
+
+-- Section: Intermediate fields
+section Intermediate
+variable (E : Set)
+hypothesis extension : FieldExtension(E)
+
+theorem IntermediateField.bottom
+  shows IntermediateField(E, bottomField(E))
+proof
+  sorry
+
+theorem IntermediateField.top
+  shows IntermediateField(E, algebraCarrier(E))
+proof
+  sorry
+
+-- IntermediateField.algebraMap_mem: K ⊆ F.
+theorem IntermediateField.bottom_subset (F : Set)
+  requires intermediate : IntermediateField(E, F)
+  shows bottomField(E) ⊆ F
+proof
+  sorry
+
+-- F/K and L/F are field extensions, and the tower law
+-- [F : K] [L : F] = [L : K] (Module.finrank_mul_finrank).
+theorem IntermediateField.subextension_field (F : Set)
+  requires intermediate : IntermediateField(E, F)
+  shows FieldExtension(subextension(E, F)) ∧ FieldExtension(overExtension(E, F))
+proof
+  sorry
+
+theorem extensionDegree.tower (F : Set)
+  requires finite : FiniteExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows FiniteExtension(subextension(E, F)) ∧ FiniteExtension(overExtension(E, F)) ∧
+    extensionDegree(subextension(E, F)) * extensionDegree(overExtension(E, F)) =
+      extensionDegree(E)
+proof
+  sorry
+
+-- Transitivity of algebraicity in K ≤ F ≤ L (Algebra.IsAlgebraic.trans,
+-- Algebra.IsAlgebraic.tower_top).
+theorem AlgebraicExtension.trans (F : Set)
+  requires intermediate : IntermediateField(E, F)
+  requires lower : AlgebraicExtension(subextension(E, F))
+  requires upper : AlgebraicExtension(overExtension(E, F))
+  shows AlgebraicExtension(E)
+proof
+  sorry
+
+theorem AlgebraicExtension.tower_top (F : Set)
+  requires intermediate : IntermediateField(E, F)
+  requires algebraic : AlgebraicExtension(E)
+  shows AlgebraicExtension(overExtension(E, F)) ∧ AlgebraicExtension(subextension(E, F))
+proof
+  sorry
+
+-- K(S) is an intermediate field containing S, the least one
+-- (IntermediateField.subset_adjoin, adjoin_le_iff).
+theorem fieldAdjoin.intermediate (S : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  shows IntermediateField(E, fieldAdjoin(E, S))
+proof
+  sorry
+
+theorem fieldAdjoin.subset_adjoin (S : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  shows S ⊆ fieldAdjoin(E, S)
+proof
+  sorry
+
+theorem fieldAdjoin.le_iff (S F : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  requires intermediate : IntermediateField(E, F)
+  shows fieldAdjoin(E, S) ⊆ F ↔ S ⊆ F
+proof
+  sorry
+
+-- adjoin_union: K(S ∪ T) = K(S) ⊔ K(T).
+theorem fieldAdjoin.union (S T : Set)
+  requires first : S ⊆ algebraCarrier(E)
+  requires second : T ⊆ algebraCarrier(E)
+  shows fieldAdjoin(E, S ∪ T) = fieldAdjoin(E, fieldAdjoin(E, S) ∪ fieldAdjoin(E, T))
+proof
+  sorry
+
+-- IntermediateField.exists_finset_of_mem_adjoin.
+theorem fieldAdjoin.finite_support (S x : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  requires member : x ∈ fieldAdjoin(E, S)
+  shows ∃ T, T ⊆ S ∧ Finite(T) ∧ x ∈ fieldAdjoin(E, T)
+proof
+  sorry
+
+-- For algebraic S the adjoined field is the adjoined algebra
+-- (IntermediateField.adjoin_algebraic_toSubalgebra, adjoin_toSubalgebra).
+theorem fieldAdjoin.eq_algebra_adjoin (S : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  requires algebraic : ∀ x ∈ S, IntegralElement(E, x)
+  shows fieldAdjoin(E, S) = adjoinOf(E, S)
+proof
+  sorry
+
+-- K(x) is finite of degree deg minpoly(x) (IntermediateField.adjoin.finiteDimensional,
+-- IntermediateField.adjoin.finrank).
+theorem fieldAdjoin.simple_finite (x : Set)
+  requires integral : IntegralElement(E, x)
+  shows FiniteExtension(subextension(E, fieldAdjoin(E, {x}))) ∧
+    extensionDegree(subextension(E, fieldAdjoin(E, {x}))) =
+      polyNatDegree(Algebra.base(E), minpoly(E, x))
+proof
+  sorry
+
+-- The join of two finite intermediate fields is finite
+-- (IntermediateField.finiteDimensional_sup), and K(S) for finite S of
+-- integral elements is finite (IntermediateField.finiteDimensional_adjoin).
+theorem fieldAdjoin.finite_of_finite (S : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  requires finite : Finite(S)
+  requires integral : ∀ x ∈ S, IntegralElement(E, x)
+  shows FiniteExtension(subextension(E, fieldAdjoin(E, S)))
+proof
+  sorry
+
+theorem IntermediateField.sup_finite (F G : Set)
+  requires first : IntermediateField(E, F)
+  requires second : IntermediateField(E, G)
+  requires firstFinite : FiniteExtension(subextension(E, F))
+  requires secondFinite : FiniteExtension(subextension(E, G))
+  shows FiniteExtension(subextension(E, fieldAdjoin(E, F ∪ G)))
+proof
+  sorry
+
+-- The primitive element theorem (Field.exists_primitive_element,
+-- Field.powerBasisOfFiniteOfSeparable).
+theorem FiniteExtension.primitive_element
+  requires finite : FiniteExtension(E)
+  requires separable : SeparableExtension(E)
+  shows ∃ x ∈ algebraCarrier(E), fieldAdjoin(E, {x}) = algebraCarrier(E)
+proof
+  sorry
+
+end Intermediate
+
+-- Section: Minimal polynomials
+section MinimalPolynomial
+variable (E : Set)
+hypothesis extension : FieldExtension(E)
+
+-- minpoly.monic, minpoly.aeval, minpoly.ne_zero.
+theorem minpoly.spec (x : Set)
+  requires integral : IntegralElement(E, x)
+  shows minpoly(E, x) ∈ uniPolys(Algebra.base(E)) ∧
+    PolyMonic(Algebra.base(E), minpoly(E, x)) ∧
+    polyAeval(E, x, minpoly(E, x)) = Ring.zero(Algebra.ring(E)) ∧
+    minpoly(E, x) ≠ Ring.zero(polynomialRing(Algebra.base(E), {0}))
+proof
+  sorry
+
+-- minpoly.dvd_iff: q(x) = 0 iff minpoly(x) ∣ q.
+theorem minpoly.dvd_iff (x q : Set)
+  requires integral : IntegralElement(E, x)
+  requires member : q ∈ uniPolys(Algebra.base(E))
+  shows polyAeval(E, x, q) = Ring.zero(Algebra.ring(E)) ↔
+    RingDvd(polynomialRing(Algebra.base(E), {0}), minpoly(E, x), q)
+proof
+  sorry
+
+-- minpoly.irreducible.
+theorem minpoly.irreducible (x : Set)
+  requires integral : IntegralElement(E, x)
+  shows RingIrreducible(polynomialRing(Algebra.base(E), {0}), minpoly(E, x))
+proof
+  sorry
+
+-- minpoly.eq_of_irreducible_of_monic: a monic irreducible polynomial
+-- vanishing at x is the minimal polynomial.
+theorem minpoly.eq_of_irreducible_monic (x p : Set)
+  requires integral : IntegralElement(E, x)
+  requires irreducible : RingIrreducible(polynomialRing(Algebra.base(E), {0}), p)
+  requires monic : PolyMonic(Algebra.base(E), p)
+  requires root : polyAeval(E, x, p) = Ring.zero(Algebra.ring(E))
+  shows minpoly(E, x) = p
+proof
+  sorry
+
+-- minpoly.min: the minimal polynomial has least degree among the nonzero
+-- polynomials vanishing at x.
+theorem minpoly.degree_le (x p : Set)
+  requires integral : IntegralElement(E, x)
+  requires member : p ∈ uniPolys(Algebra.base(E))
+  requires nonzero : p ≠ Ring.zero(polynomialRing(Algebra.base(E), {0}))
+  requires root : polyAeval(E, x, p) = Ring.zero(Algebra.ring(E))
+  shows polyNatDegree(Algebra.base(E), minpoly(E, x)) ≤ polyNatDegree(Algebra.base(E), p)
+proof
+  sorry
+
+-- minpoly.natDegree_le: in a finite extension deg minpoly(x) ≤ [L : K];
+-- minpoly.ne_zero_of_finite: every element is integral.
+theorem minpoly.natDegree_le (x : Set)
+  requires finite : FiniteExtension(E)
+  requires point : x ∈ algebraCarrier(E)
+  shows IntegralElement(E, x) ∧
+    polyNatDegree(Algebra.base(E), minpoly(E, x)) ≤ extensionDegree(E)
+proof
+  sorry
+
+-- minpoly.eq_X_sub_C: the minimal polynomial of a ∈ K is X − a.
+theorem minpoly.algebra_map (a : Set)
+  requires scalar : a ∈ Ring.carrier(Algebra.base(E))
+  shows minpoly(E, Algebra.map(E)(a)) = polyXSubC(Algebra.base(E), a)
+proof
+  sorry
+
+-- minpoly.algHom_eq: an injective K-algebra map keeps minimal polynomials.
+theorem minpoly.algebra_hom (E2 f x : Set)
+  requires target : FieldExtension(E2)
+  requires hom : f : E →ₐ E2
+  requires integral : IntegralElement(E, x)
+  shows minpoly(E2, f(x)) = minpoly(E, x)
+proof
+  sorry
+
+-- minpoly.exists_algEquiv_of_root: in a normal extension the roots of
+-- minpoly(x) are the conjugates σ(x).
+theorem minpoly.conjugate_of_root (x y : Set)
+  requires normal : NormalExtension(E)
+  requires point : x ∈ algebraCarrier(E)
+  requires target : y ∈ algebraCarrier(E)
+  requires root : polyAeval(E, y, minpoly(E, x)) = Ring.zero(Algebra.ring(E))
+  shows ∃ σ ∈ algebraAutomorphisms(E), σ(x) = y
+proof
+  sorry
+
+-- Automorphisms send x to roots of minpoly(x) (minpoly.algHom_eq with
+-- aeval_algHom_apply).
+theorem minpoly.root_of_conjugate (x σ : Set)
+  requires integral : IntegralElement(E, x)
+  requires automorphism : σ ∈ algebraAutomorphisms(E)
+  shows polyAeval(E, σ(x), minpoly(E, x)) = Ring.zero(Algebra.ring(E))
+proof
+  sorry
+
+-- IsIntegral.mem_intermediateField_of_minpoly_splits: if minpoly(x)
+-- splits in F then x ∈ F.
+theorem minpoly.mem_of_splits (F x : Set)
+  requires intermediate : IntermediateField(E, F)
+  requires integral : IntegralElement(E, x)
+  requires splits : PolySplits(Algebra.base(E), subringRing(Algebra.ring(E), F),
+    Algebra.map(E), minpoly(E, x))
+  shows x ∈ F
+proof
+  sorry
+
+end MinimalPolynomial
+
+-- Section: Separable polynomials
+section Separable
+variable (K : Set)
+hypothesis field : Field(K)
+
+-- Polynomial.separable_X_sub_C, Polynomial.Separable.ne_zero.
+theorem PolySeparable.X_sub_C (a : Set)
+  requires point : a ∈ Ring.carrier(K)
+  shows PolySeparable(K, polyXSubC(K, a))
+proof
+  sorry
+
+theorem PolySeparable.ne_zero (p : Set)
+  requires separable : PolySeparable(K, p)
+  shows p ≠ Ring.zero(polynomialRing(K, {0}))
+proof
+  sorry
+
+-- Polynomial.separable_map: separability does not change along a field
+-- homomorphism.
+theorem PolySeparable.map_iff (L f p : Set)
+  requires target : Field(L)
+  requires hom : f : K →+* L
+  requires member : p ∈ uniPolys(K)
+  shows PolySeparable(L, polyMap(K, L, f)(p)) ↔ PolySeparable(K, p)
+proof
+  sorry
+
+-- Polynomial.separable_prod_X_sub_C_iff: Π (X − aᵢ) is separable iff the
+-- aᵢ are distinct.
+theorem PolySeparable.linear_product_iff (a : Set) (n : Nat)
+  requires points : a : n → Ring.carrier(K)
+  shows PolySeparable(K, polyLinearProduct(K, a, n)) ↔
+    InjectiveBetween(a, n, Ring.carrier(K))
+proof
+  sorry
+
+-- Polynomial.nodup_roots, card_rootSet_eq_natDegree: a separable
+-- polynomial that splits has deg p distinct roots.
+theorem PolySeparable.card_roots (E p : Set)
+  requires extension : FieldExtension(E)
+  requires base : Algebra.base(E) = K
+  requires separable : PolySeparable(K, p)
+  requires splits : PolySplits(K, Algebra.ring(E), Algebra.map(E), p)
+  shows HasCardinality(polyAlgebraRootSet(E, p), polyNatDegree(K, p))
+proof
+  sorry
+
+-- An irreducible polynomial over a field of characteristic zero is
+-- separable (Irreducible.separable with CharZero), stated as: if
+-- n·1 ≠ 0 for every n ≥ 1.
+theorem PolySeparable.of_irreducible_char_zero (p : Set)
+  requires charZero : ∀ n ∈ ℕ, 0 < n →
+    ringNat(Ring.add(K), Ring.zero(K), Ring.one(K), n) ≠ Ring.zero(K)
+  requires irreducible : RingIrreducible(polynomialRing(K, {0}), p)
+  shows PolySeparable(K, p)
+proof
+  sorry
+
+end Separable
+
+-- Section: Galois theory
+section GaloisTheory
+variable (E : Set)
+hypothesis extension : FieldExtension(E)
+
+-- The fixed field is an intermediate field; the fixing subgroup is a
+-- subgroup (FixedPoints.intermediateField, IntermediateField.fixingSubgroup).
+theorem fixedField.intermediate (H : Set)
+  requires subset : H ⊆ algebraAutomorphisms(E)
+  shows IntermediateField(E, fixedField(E, H))
+proof
+  sorry
+
+theorem fixingSubgroup.subgroup (F : Set)
+  requires subset : F ⊆ algebraCarrier(E)
+  shows Subgroup(fixingSubgroup(E, F), galoisGroup(E))
+proof
+  sorry
+
+-- mem_fixingSubgroup_iff and the Galois connection
+-- (IntermediateField.gc): F ⊆ fixedField(H) iff H ⊆ fixingSubgroup(F).
+theorem fixingSubgroup.galois_connection (F H : Set)
+  requires fieldSubset : F ⊆ algebraCarrier(E)
+  requires groupSubset : H ⊆ algebraAutomorphisms(E)
+  shows F ⊆ fixedField(E, H) ↔ H ⊆ fixingSubgroup(E, F)
+proof
+  sorry
+
+-- IntermediateField.forall_mem_adjoin_smul_eq_self_iff: σ fixes K(S)
+-- iff σ fixes S.
+theorem fixingSubgroup.adjoin (S : Set)
+  requires subset : S ⊆ algebraCarrier(E)
+  shows fixingSubgroup(E, fieldAdjoin(E, S)) = fixingSubgroup(E, S)
+proof
+  sorry
+
+-- IsGalois.card_aut_eq_finrank: |Gal(L/K)| = [L : K] for a finite
+-- Galois extension, and the converse (IsGalois.of_card_aut_eq_finrank).
+theorem GaloisExtension.card_aut
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  shows order(galoisGroup(E)) = extensionDegree(E)
+proof
+  sorry
+
+theorem GaloisExtension.of_card_aut
+  requires finite : FiniteExtension(E)
+  requires card : order(galoisGroup(E)) = extensionDegree(E)
+  shows GaloisExtension(E)
+proof
+  sorry
+
+-- IsGalois.mem_bot_iff_fixed, IsGalois.fixedField_top: the elements
+-- fixed by all of Gal(L/K) are those of K.
+theorem GaloisExtension.fixed_iff_bottom (x : Set)
+  requires galois : GaloisExtension(E)
+  requires point : x ∈ algebraCarrier(E)
+  shows x ∈ bottomField(E) ↔ (∀ σ ∈ algebraAutomorphisms(E), σ(x) = x)
+proof
+  sorry
+
+-- The fundamental theorem for finite Galois extensions
+-- (IsGalois.fixedField_fixingSubgroup, IsGalois.fixingSubgroup_fixedField,
+-- IsGalois.intermediateFieldEquivSubgroup).
+theorem GaloisExtension.fixedField_fixingSubgroup (F : Set)
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows fixedField(E, fixingSubgroup(E, F)) = F
+proof
+  sorry
+
+theorem GaloisExtension.fixingSubgroup_fixedField (H : Set)
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  requires subgroup : Subgroup(H, galoisGroup(E))
+  shows fixingSubgroup(E, fixedField(E, H)) = H
+proof
+  sorry
+
+-- [F : K] = [Gal(L/K) : Gal(L/F)] (IntermediateField.finrank_eq_fixingSubgroup_index)
+-- and [L : F] = |Gal(L/F)| (IntermediateField.finrank_fixedField_eq_card,
+-- IsGalois.card_fixingSubgroup_eq_finrank).
+theorem GaloisExtension.degree_eq_index (F : Set)
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows extensionDegree(subextension(E, F)) =
+      index(galoisGroup(E), fixingSubgroup(E, F)) ∧
+    extensionDegree(overExtension(E, F)) =
+      cardinality(fixingSubgroup(E, F))
+proof
+  sorry
+
+-- Restricting scalars to F: Gal(L/F) is the fixing subgroup
+-- (IntermediateField.fixingSubgroupEquiv), as sets of maps.
+theorem fixingSubgroup.over_automorphisms (F : Set)
+  requires intermediate : IntermediateField(E, F)
+  shows algebraAutomorphisms(overExtension(E, F)) = fixingSubgroup(E, F)
+proof
+  sorry
+
+-- IsGalois.tower_top_of_isGalois, IsGalois.tower_top_intermediateField:
+-- L/F is Galois when L/K is.
+theorem GaloisExtension.tower_top (F : Set)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows GaloisExtension(overExtension(E, F))
+proof
+  sorry
+
+-- Artin's theorem (IsGalois.of_fixed_field, FixedPoints.finrank_eq_card):
+-- for a finite group H of automorphisms, L is Galois over the fixed field
+-- of degree |H|.
+theorem GaloisExtension.of_fixed_field (H : Set)
+  requires subgroup : Subgroup(H, galoisGroup(E))
+  requires finiteGroup : Finite(H)
+  shows GaloisExtension(overExtension(E, fixedField(E, H))) ∧
+    FiniteExtension(overExtension(E, fixedField(E, H))) ∧
+    extensionDegree(overExtension(E, fixedField(E, H))) = cardinality(H)
+proof
+  sorry
+
+-- Normal intermediate fields: F/K is normal iff σ(F) ⊆ F for every σ
+-- (IntermediateField.normal_iff_forall_map_le), iff Gal(L/F) is normal
+-- in Gal(L/K) (IsGalois.normal_iff_fixingSubgroup_normal).
+theorem GaloisExtension.normal_iff_stable (F : Set)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows NormalExtension(subextension(E, F)) ↔
+    (∀ σ ∈ algebraAutomorphisms(E), autImage(E, σ, F) ⊆ F)
+proof
+  sorry
+
+theorem GaloisExtension.normal_iff_normal_subgroup (F : Set)
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  shows NormalExtension(subextension(E, F)) ↔
+    NormalSubgroup(fixingSubgroup(E, F), galoisGroup(E))
+proof
+  sorry
+
+-- A normal subextension of a Galois extension is Galois
+-- (IsGalois.tower_bot with Normal).
+theorem GaloisExtension.of_normal_sub (F : Set)
+  requires galois : GaloisExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  requires normal : NormalExtension(subextension(E, F))
+  shows GaloisExtension(subextension(E, F))
+proof
+  sorry
+
+-- Restriction to a normal subextension (AlgEquiv.restrictNormalHom,
+-- AlgHom.restrictNormal_commutes): a homomorphism Gal(L/K) → Gal(F/K)
+-- agreeing with σ on F, surjective, with kernel Gal(L/F)
+-- (AlgEquiv.restrictNormalHom_surjective, IsGalois.normalAutEquivQuotient).
+theorem galoisRestrict.hom (F : Set)
+  requires algebraic : AlgebraicExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  requires normal : NormalExtension(subextension(E, F))
+  shows GroupHom(galoisRestrict(E, F), galoisGroup(E), galoisGroup(subextension(E, F)))
+proof
+  sorry
+
+theorem galoisRestrict.apply (F σ x : Set)
+  requires algebraic : AlgebraicExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  requires normal : NormalExtension(subextension(E, F))
+  requires automorphism : σ ∈ algebraAutomorphisms(E)
+  requires point : x ∈ F
+  shows galoisRestrict(E, F)(σ)(x) = σ(x)
+proof
+  sorry
+
+theorem galoisRestrict.surjective (F : Set)
+  requires normal : NormalExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  requires normalSub : NormalExtension(subextension(E, F))
+  shows SurjectiveBetween(galoisRestrict(E, F), algebraAutomorphisms(E),
+    algebraAutomorphisms(subextension(E, F)))
+proof
+  sorry
+
+theorem galoisRestrict.kernel (F : Set)
+  requires algebraic : AlgebraicExtension(E)
+  requires intermediate : IntermediateField(E, F)
+  requires normal : NormalExtension(subextension(E, F))
+  shows kernel(galoisRestrict(E, F), galoisGroup(E), galoisGroup(subextension(E, F))) =
+    fixingSubgroup(E, F)
+proof
+  sorry
+
+end GaloisTheory
+
+-- Section: Splitting fields and algebraic closures
+section Closures
+variable (K : Set)
+hypothesis field : Field(K)
+
+-- Polynomial.SplittingField with its IsSplittingField instance: every
+-- polynomial has a splitting field (a theorem; no field is chosen).
+theorem IsSplittingField.exists (p : Set)
+  requires member : p ∈ uniPolys(K)
+  shows ∃ E, Algebra.base(E) = K ∧ IsSplittingField(E, p)
+proof
+  sorry
+
+-- A splitting field is finite and normal (IsSplittingField.finiteDimensional,
+-- Normal.of_isSplittingField), Galois when p is separable
+-- (IsGalois.of_separable_splitting_field), and unique up to K-isomorphism
+-- (IsSplittingField.algEquiv).
+theorem IsSplittingField.finite_normal (E p : Set)
+  requires base : Algebra.base(E) = K
+  requires splitting : IsSplittingField(E, p)
+  shows FiniteExtension(E) ∧ NormalExtension(E)
+proof
+  sorry
+
+theorem IsSplittingField.galois (E p : Set)
+  requires base : Algebra.base(E) = K
+  requires splitting : IsSplittingField(E, p)
+  requires separable : PolySeparable(K, p)
+  shows GaloisExtension(E)
+proof
+  sorry
+
+theorem IsSplittingField.unique (E E2 p : Set)
+  requires base : Algebra.base(E) = K
+  requires baseTwo : Algebra.base(E2) = K
+  requires first : IsSplittingField(E, p)
+  requires second : IsSplittingField(E2, p)
+  shows ∃ f, f : E ≃ₐ E2
+proof
+  sorry
+
+-- IsAlgClosed.exists_root, IsAlgClosed.splits, IsAlgClosed.exists_pow_nat_eq.
+theorem AlgebraicallyClosed.exists_root (p : Set)
+  requires closed : AlgebraicallyClosed(K)
+  requires member : p ∈ uniPolys(K)
+  requires degree : polyNatDegree(K, p) ≠ 0
+  shows ∃ a ∈ Ring.carrier(K), PolyIsRoot(K, p, a)
+proof
+  sorry
+
+theorem AlgebraicallyClosed.splits (p : Set)
+  requires closed : AlgebraicallyClosed(K)
+  requires member : p ∈ uniPolys(K)
+  shows PolySplits(K, K, identity(Ring.carrier(K)), p)
+proof
+  sorry
+
+theorem AlgebraicallyClosed.exists_pow_eq (x : Set) (n : Nat)
+  requires closed : AlgebraicallyClosed(K)
+  requires point : x ∈ Ring.carrier(K)
+  requires positive : 0 < n
+  shows ∃ z ∈ Ring.carrier(K), Ring.pow(K, z, n) = x
+proof
+  sorry
+
+-- An algebraically closed field has no proper algebraic extension
+-- (IsAlgClosed.algebraMap_surjective_of_isIntegral).
+theorem AlgebraicallyClosed.algebraic_surjective (E : Set)
+  requires closed : AlgebraicallyClosed(K)
+  requires base : Algebra.base(E) = K
+  requires algebraic : AlgebraicExtension(E)
+  shows bottomField(E) = algebraCarrier(E)
+proof
+  sorry
+
+-- AlgebraicClosure K with IsAlgClosure: every field has an algebraic
+-- closure (a theorem; no closure is chosen in a definition), unique up to
+-- K-isomorphism (IsAlgClosure.equiv).
+theorem IsAlgebraicClosure.exists
+  shows ∃ E, Algebra.base(E) = K ∧ IsAlgebraicClosure(E)
+proof
+  sorry
+
+theorem IsAlgebraicClosure.unique (E E2 : Set)
+  requires base : Algebra.base(E) = K
+  requires baseTwo : Algebra.base(E2) = K
+  requires first : IsAlgebraicClosure(E)
+  requires second : IsAlgebraicClosure(E2)
+  shows ∃ f, f : E ≃ₐ E2
+proof
+  sorry
+
+-- IsAlgClosed.lift: an algebraic extension of K embeds over K into any
+-- algebraically closed extension of K.
+theorem AlgebraicallyClosed.lift (E E2 : Set)
+  requires base : Algebra.base(E) = K
+  requires baseTwo : Algebra.base(E2) = K
+  requires algebraic : AlgebraicExtension(E)
+  requires target : FieldExtension(E2)
+  requires closed : AlgebraicallyClosed(Algebra.ring(E2))
+  shows ∃ f, f : E →ₐ E2
+proof
+  sorry
+
+-- An algebraic closure is normal and, over a field where every
+-- irreducible polynomial is separable, Galois; an algebraic extension
+-- of K embeds into it with image an intermediate field.
+theorem IsAlgebraicClosure.normal (E : Set)
+  requires base : Algebra.base(E) = K
+  requires closure : IsAlgebraicClosure(E)
+  shows NormalExtension(E)
+proof
+  sorry
+
+end Closures
