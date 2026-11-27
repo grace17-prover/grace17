@@ -17,6 +17,7 @@
 module GRH.Measure.Spaces
 import GRH.Normed.InnerProduct
 import Grace.Cumulus.Cardinal.Countable
+import Grace.Cumulus.Geometry.Absorption.CountableUnion
 
 section MeasurableSpaces
 notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
@@ -256,44 +257,257 @@ def ennRays : Set := { E ∈ 𝒫(ennreal) | ∃ t ∈ ennreal, E = ennIoi(t) }
 def ennMeasurableSpace : Set := generatedSpace(ennreal, ennRays)
 def ennGtSet (f A t : Set) : Set := { x ∈ A | ¬EnnLe(f(x), t) }
 
+-- Section: Helpers
+-- The graph x ↦ f(x) on I onto the values of f on I.
+defgraph valuesMap (f I : Set) (x ∈ I) : valuesOn(f, I) := f(x)
+proof
+  exact valuesOn.membership.backward with ⟨x, member, rfl⟩
+
+theorem valuesOn.countable (f I : Set)
+  requires countable : Countable(I)
+  shows Countable(valuesOn(f, I))
+proof
+  have fn := valuesMap.function at f, I
+  have surj : SurjectiveBetween(valuesMap(f, I), I, valuesOn(f, I))
+    unfold SurjectiveBetween
+    refine ⟨fn, ?_⟩
+    intros y hy
+    obtain ⟨x, xI, e⟩ := hy
+    refine ⟨x, xI, ?_⟩
+    have r := valuesMap.relates at f, I, x with xI
+    rw e at r
+    exact r
+  exact Countable.of_surjection with countable, surj
+
+theorem Countable.pair_set (S T : Set)
+  shows Countable({S, T})
+proof
+  have e : {S, T} = {S} ∪ {T}
+    ext z
+    simp
+  have fa := Finite.singleton at S
+  have fb := Finite.singleton at T
+  have a := Countable.of_finite with fa
+  have b := Countable.of_finite with fb
+  have u := Countable.union2 with a, b
+  rw e
+  exact u
+
+theorem MeasurableSet.countable_union_helper (X C : Set)
+  requires space : MeasurableSpace(X)
+  requires countable : Countable(C)
+  requires measurable : ∀ S ∈ C, MeasurableSet(X, S)
+  shows MeasurableSet(X, ⋃(C))
+proof
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  have inside : C ⊆ MeasurableSpace.sets(X)
+    intros S hS
+    have m := measurable with S, hS
+    unfold MeasurableSet at m
+    exact m
+  unfold MeasurableSet
+  exact union with C, inside, countable
+
+theorem MeasurableSet.indexed_union_helper (X I f : Set)
+  requires space : MeasurableSpace(X)
+  requires countable : Countable(I)
+  requires measurable : ∀ i ∈ I, MeasurableSet(X, f(i))
+  shows MeasurableSet(X, ⋃(valuesOn(f, I)))
+proof
+  have c := valuesOn.countable at f, I with countable
+  have all : ∀ S ∈ valuesOn(f, I), MeasurableSet(X, S)
+    intros S hS
+    obtain ⟨i, iI, e⟩ := hS
+    rw ← e
+    exact measurable with i, iI
+  exact MeasurableSet.countable_union_helper with space, c, all
+
+-- The complements A ∖ f(n) of a sequence of sets.
+defgraph complementSequence (A f : Set) (n ∈ ℕ) : 𝒫(A) := A ∖ f(n)
+proof
+  have sub : A ∖ f(n) ⊆ A
+    intros x hx
+    simp at hx
+    exact hx.left
+  exact (powerset.membership_iff at A ∖ f(n), A).backward with sub
+
+-- The preimages along f of the members of C, as a graph on C.
+defgraph preimageMap (f D C : Set) (B ∈ C) : 𝒫(D) := functionPreimage(f, D, B)
+proof
+  have sub : functionPreimage(f, D, B) ⊆ D
+    intros x hx
+    obtain ⟨xD, rest⟩ := hx
+    exact xD
+  exact (powerset.membership_iff at functionPreimage(f, D, B), D).backward with sub
+
+-- The sets of A whose preimage along f is measurable in X: a σ-algebra
+-- on A when f maps the carrier of X into A.
+def pullbackSets (f X A : Set) : Set :=
+  { B ∈ 𝒫(A) | functionPreimage(f, MeasurableSpace.carrier(X), B) ∈ MeasurableSpace.sets(X) }
+
+theorem pullbackSets.sigma (f X A : Set)
+  requires space : MeasurableSpace(X)
+  requires maps : MapsInto(f, MeasurableSpace.carrier(X), A)
+  shows SigmaAlgebra(A, pullbackSets(f, X, A))
+proof
+  have sp := space
+  obtain ⟨shape, sub, carr, compl, unionClosed⟩ := space
+  have refl := Subset.reflexive at A
+  have pA := (powerset.membership_iff at A, A).backward with refl
+  unfold SigmaAlgebra
+  refine ⟨?_, ?_, ?_, ?_⟩
+  . intros B hB
+    obtain ⟨p, rest⟩ := hB
+    exact p
+  . have e : functionPreimage(f, MeasurableSpace.carrier(X), A) = MeasurableSpace.carrier(X)
+      ext x
+      constructor
+      . intro h
+        obtain ⟨a, rest⟩ := h
+        exact a
+      . intro h
+        have fx := maps with x, h
+        exact functionPreimage.membership.backward with ⟨h, fx⟩
+    apply pullbackSets.membership.backward
+    refine ⟨pA, ?_⟩
+    rw e
+    exact carr
+  . intros B hB
+    obtain ⟨p, pre⟩ := hB
+    have e : functionPreimage(f, MeasurableSpace.carrier(X), A ∖ B) = MeasurableSpace.carrier(X) ∖ functionPreimage(f, MeasurableSpace.carrier(X), B)
+      ext x
+      constructor
+      . intro h
+        obtain ⟨xX, fx⟩ := h
+        obtain ⟨fA, fnB⟩ := difference.membership.forward with fx
+        have notPre : x ∉ functionPreimage(f, MeasurableSpace.carrier(X), B)
+          intro hp
+          obtain ⟨xX2, fB⟩ := hp
+          exact fnB with fB
+        exact difference.membership.backward with ⟨xX, notPre⟩
+      . intro h
+        obtain ⟨xX, notPre⟩ := difference.membership.forward with h
+        have fx := maps with x, xX
+        have fnB : f(x) ∉ B
+          intro fB
+          have pr := functionPreimage.membership.backward with ⟨xX, fB⟩
+          exact notPre with pr
+        have fd := difference.membership.backward with ⟨fx, fnB⟩
+        exact functionPreimage.membership.backward with ⟨xX, fd⟩
+    have sub2 : A ∖ B ⊆ A
+      intros x hx
+      simp at hx
+      exact hx.left
+    have pc := (powerset.membership_iff at A ∖ B, A).backward with sub2
+    apply pullbackSets.membership.backward
+    refine ⟨pc, ?_⟩
+    rw e
+    exact compl with functionPreimage(f, MeasurableSpace.carrier(X), B), pre
+  . intros C CSub countable
+    have all : ∀ B ∈ C, MeasurableSet(X, preimageMap(f, MeasurableSpace.carrier(X), C)(B))
+      intros B BC
+      have v := preimageMap.value at f, MeasurableSpace.carrier(X), C, B with BC
+      have Bp := CSub with B, BC
+      obtain ⟨p, pre⟩ := Bp
+      rw v
+      unfold MeasurableSet
+      exact pre
+    have u := MeasurableSet.indexed_union_helper with sp, countable, all
+    have e : ⋃(valuesOn(preimageMap(f, MeasurableSpace.carrier(X), C), C)) = functionPreimage(f, MeasurableSpace.carrier(X), ⋃(C))
+      ext x
+      constructor
+      . intro h
+        obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+        obtain ⟨B, BC, eB⟩ := EIn
+        have v := preimageMap.value at f, MeasurableSpace.carrier(X), C, B with BC
+        rw [← eB, v] at xE
+        obtain ⟨xX, fx⟩ := xE
+        have fu := union.membership.backward with ⟨B, BC, fx⟩
+        exact functionPreimage.membership.backward with ⟨xX, fu⟩
+      . intro h
+        obtain ⟨xX, fx⟩ := h
+        obtain ⟨B, BC, fB⟩ := union.membership.forward with fx
+        have v := preimageMap.value at f, MeasurableSpace.carrier(X), C, B with BC
+        have inV : preimageMap(f, MeasurableSpace.carrier(X), C)(B) ∈ valuesOn(preimageMap(f, MeasurableSpace.carrier(X), C), C)
+          exact valuesOn.membership.backward with ⟨B, BC, rfl⟩
+        have xE : x ∈ preimageMap(f, MeasurableSpace.carrier(X), C)(B)
+          rw v
+          exact functionPreimage.membership.backward with ⟨xX, fB⟩
+        exact union.membership.backward with ⟨preimageMap(f, MeasurableSpace.carrier(X), C)(B), inV, xE⟩
+    rw e at u
+    unfold MeasurableSet at u
+    have sub2 : ⋃(C) ⊆ A
+      intros x hx
+      obtain ⟨B, BC, xB⟩ := union.membership.forward with hx
+      have Bp := CSub with B, BC
+      obtain ⟨p, pre⟩ := Bp
+      have BA := (powerset.membership_iff at B, A).forward with p
+      exact BA with x, xB
+    have pc := (powerset.membership_iff at ⋃(C), A).backward with sub2
+    exact pullbackSets.membership.backward with ⟨pc, u⟩
+
 -- Section: Laws of σ-algebras
 theorem SigmaAlgebra.of_space (X : Set)
   requires space : MeasurableSpace(X)
   shows SigmaAlgebra(MeasurableSpace.carrier(X), MeasurableSpace.sets(X))
 proof
-  sorry
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  unfold SigmaAlgebra
+  exact ⟨sub, carr, compl, union⟩
 
 theorem MeasurableSpace.of_sigma (A M : Set)
   requires sigma : SigmaAlgebra(A, M)
   shows MeasurableSpace(MeasurableSpace.mk(A, M))
 proof
-  sorry
+  obtain ⟨sub, carr, compl, union⟩ := sigma
+  exact MeasurableSpace.intro with sub, carr, compl, union
 
 theorem MeasurableSet.subset (X S : Set)
   requires space : MeasurableSpace(X)
   requires measurable : MeasurableSet(X, S)
   shows S ⊆ MeasurableSpace.carrier(X)
 proof
-  sorry
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  have m : S ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at measurable
+    exact measurable
+  have p : S ∈ 𝒫(MeasurableSpace.carrier(X)) by exact sub with m
+  have iff := powerset.membership_iff at S, MeasurableSpace.carrier(X)
+  exact iff.forward with p
 
 theorem MeasurableSet.empty (X : Set)
   requires space : MeasurableSpace(X)
   shows MeasurableSet(X, ∅)
 proof
-  sorry
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  have c := compl with MeasurableSpace.carrier(X), carr
+  have e : MeasurableSpace.carrier(X) ∖ MeasurableSpace.carrier(X) = ∅
+    ext x
+    simp
+    intro h
+    obtain ⟨a, b⟩ := h
+    exact b with a
+  rw e at c
+  unfold MeasurableSet
+  exact c
 
 theorem MeasurableSet.univ (X : Set)
   requires space : MeasurableSpace(X)
   shows MeasurableSet(X, MeasurableSpace.carrier(X))
 proof
-  sorry
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  unfold MeasurableSet
+  exact carr
 
 theorem MeasurableSet.compl (X S : Set)
   requires space : MeasurableSpace(X)
   requires measurable : MeasurableSet(X, S)
   shows MeasurableSet(X, MeasurableSpace.carrier(X) ∖ S)
 proof
-  sorry
+  obtain ⟨shape, sub, carr, compl, union⟩ := space
+  unfold MeasurableSet at measurable
+  unfold MeasurableSet
+  exact compl with S, measurable
 
 theorem MeasurableSet.union (X S T : Set)
   requires space : MeasurableSpace(X)
@@ -301,7 +515,18 @@ theorem MeasurableSet.union (X S T : Set)
   requires measurableT : MeasurableSet(X, T)
   shows MeasurableSet(X, S ∪ T)
 proof
-  sorry
+  have pc := Countable.pair_set at S, T
+  have all : ∀ U ∈ {S, T}, MeasurableSet(X, U)
+    intros U hU
+    simp at hU
+    cases hU with a | b
+    . rw a
+      exact measurableS
+    . rw b
+      exact measurableT
+  have u := MeasurableSet.countable_union_helper with space, pc, all
+  rw union.pair at u
+  exact u
 
 theorem MeasurableSet.inter (X S T : Set)
   requires space : MeasurableSpace(X)
@@ -309,7 +534,17 @@ theorem MeasurableSet.inter (X S T : Set)
   requires measurableT : MeasurableSet(X, T)
   shows MeasurableSet(X, S ∩ T)
 proof
-  sorry
+  have sS := MeasurableSet.subset with space, measurableS
+  have sT := MeasurableSet.subset with space, measurableT
+  have cS := MeasurableSet.compl with space, measurableS
+  have cT := MeasurableSet.compl with space, measurableT
+  have u := MeasurableSet.union with space, cS, cT
+  have c := MeasurableSet.compl with space, u
+  have e : MeasurableSpace.carrier(X) ∖ ((MeasurableSpace.carrier(X) ∖ S) ∪ (MeasurableSpace.carrier(X) ∖ T)) = S ∩ T
+    ext x
+    simp
+  rw e at c
+  exact c
 
 theorem MeasurableSet.diff (X S T : Set)
   requires space : MeasurableSpace(X)
@@ -317,7 +552,14 @@ theorem MeasurableSet.diff (X S T : Set)
   requires measurableT : MeasurableSet(X, T)
   shows MeasurableSet(X, S ∖ T)
 proof
-  sorry
+  have sS := MeasurableSet.subset with space, measurableS
+  have cT := MeasurableSet.compl with space, measurableT
+  have i := MeasurableSet.inter with space, measurableS, cT
+  have e : S ∩ (MeasurableSpace.carrier(X) ∖ T) = S ∖ T
+    ext x
+    simp
+  rw e at i
+  exact i
 
 -- Mathlib's MeasurableSet.iUnion and MeasurableSet.iInter over ℕ.
 theorem MeasurableSet.sequence_union (X f : Set)
@@ -325,14 +567,56 @@ theorem MeasurableSet.sequence_union (X f : Set)
   requires measurable : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
   shows MeasurableSet(X, sequenceUnion(f))
 proof
-  sorry
+  have c := naturals.countable
+  have u := MeasurableSet.indexed_union_helper with space, c, measurable
+  unfold sequenceUnion
+  exact u
 
 theorem MeasurableSet.sequence_inter (X f : Set)
   requires space : MeasurableSpace(X)
   requires measurable : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
   shows MeasurableSet(X, sequenceInter(MeasurableSpace.carrier(X), f))
 proof
-  sorry
+  have cm : ∀ n ∈ ℕ, MeasurableSet(X, complementSequence(MeasurableSpace.carrier(X), f)(n))
+    intros n hn
+    have m := measurable with n, hn
+    have v := complementSequence.value at MeasurableSpace.carrier(X), f, n with hn
+    rw v
+    exact MeasurableSet.compl with space, m
+  have u := MeasurableSet.sequence_union with space, cm
+  have c := MeasurableSet.compl with space, u
+  have e : MeasurableSpace.carrier(X) ∖ sequenceUnion(complementSequence(MeasurableSpace.carrier(X), f)) = sequenceInter(MeasurableSpace.carrier(X), f)
+    ext x
+    unfold sequenceUnion
+    unfold sequenceInter
+    constructor
+    . intro h
+      obtain ⟨xA, notU⟩ := h
+      refine ⟨xA, ?_⟩
+      intros n hn
+      by_contra out
+      apply notU
+      have v := complementSequence.value at MeasurableSpace.carrier(X), f, n with hn
+      have inV : complementSequence(MeasurableSpace.carrier(X), f)(n) ∈ valuesOn(complementSequence(MeasurableSpace.carrier(X), f), ℕ)
+        exact valuesOn.membership.backward with ⟨n, hn, rfl⟩
+      have xIn : x ∈ complementSequence(MeasurableSpace.carrier(X), f)(n)
+        rw v
+        simp
+      exact union.membership.backward with ⟨complementSequence(MeasurableSpace.carrier(X), f)(n), inV, xIn⟩
+    . intro h
+      obtain ⟨xA, all⟩ := h
+      have notU : x ∉ ⋃(valuesOn(complementSequence(MeasurableSpace.carrier(X), f), ℕ))
+        intro hU
+        obtain ⟨S, SIn, xS⟩ := union.membership.forward with hU
+        obtain ⟨n, hn, e⟩ := SIn
+        have v := complementSequence.value at MeasurableSpace.carrier(X), f, n with hn
+        rw [← e, v] at xS
+        simp at xS
+        have a := all with n, hn
+        exact xS.right with a
+      exact difference.membership.backward with ⟨xA, notU⟩
+  rw e at c
+  exact c
 
 -- Mathlib's MeasurableSet.biUnion and Finset.measurableSet: a union over a
 -- countable index set.
@@ -342,7 +626,7 @@ theorem MeasurableSet.countable_union (X C : Set)
   requires measurable : ∀ S ∈ C, MeasurableSet(X, S)
   shows MeasurableSet(X, ⋃(C))
 proof
-  sorry
+  exact MeasurableSet.countable_union_helper with space, countable, measurable
 
 theorem MeasurableSet.indexed_union (X I f : Set)
   requires space : MeasurableSpace(X)
@@ -350,7 +634,7 @@ theorem MeasurableSet.indexed_union (X I f : Set)
   requires measurable : ∀ i ∈ I, MeasurableSet(X, f(i))
   shows MeasurableSet(X, ⋃(valuesOn(f, I)))
 proof
-  sorry
+  exact MeasurableSet.indexed_union_helper with space, countable, measurable
 
 -- Mathlib's measurableSet_setOfPred for a set cut out of the carrier by a
 -- measurable map to a two-point space is replaced by: a set cut out by a
@@ -386,12 +670,57 @@ proof
 theorem generatedSigma.sigma (A G : Set)
   shows SigmaAlgebra(A, generatedSigma(A, G))
 proof
-  sorry
+  have refl := Subset.reflexive at A
+  have pA := (powerset.membership_iff at A, A).backward with refl
+  unfold SigmaAlgebra
+  refine ⟨?_, ?_, ?_, ?_⟩
+  . intros S hS
+    obtain ⟨p, rest⟩ := hS
+    exact p
+  . apply generatedSigma.membership.backward
+    refine ⟨pA, ?_⟩
+    intros M hM sigma gens
+    obtain ⟨sub, carr, compl, unionClosed⟩ := sigma
+    exact carr
+  . intros S hS
+    obtain ⟨p, all⟩ := hS
+    have sub : A ∖ S ⊆ A
+      intros x hx
+      simp at hx
+      exact hx.left
+    have pc := (powerset.membership_iff at A ∖ S, A).backward with sub
+    apply generatedSigma.membership.backward
+    refine ⟨pc, ?_⟩
+    intros M hM sigma gens
+    have SM := all with M, hM, sigma, gens
+    obtain ⟨sub2, carr, compl, unionClosed⟩ := sigma
+    exact compl with S, SM
+  . intros C CSub countable
+    have sub : ⋃(C) ⊆ A
+      intros x hx
+      obtain ⟨S, SC, xS⟩ := union.membership.forward with hx
+      have Sg := CSub with S, SC
+      obtain ⟨p, all⟩ := Sg
+      have SA := (powerset.membership_iff at S, A).forward with p
+      exact SA with x, xS
+    have pc := (powerset.membership_iff at ⋃(C), A).backward with sub
+    apply generatedSigma.membership.backward
+    refine ⟨pc, ?_⟩
+    intros M hM sigma gens
+    have CM : C ⊆ M
+      intros S SC
+      have Sg := CSub with S, SC
+      obtain ⟨p, all⟩ := Sg
+      exact all with M, hM, sigma, gens
+    obtain ⟨sub2, carr, compl, unionClosed⟩ := sigma
+    exact unionClosed with C, CM, countable
 
 theorem generatedSpace.space (A G : Set)
   shows MeasurableSpace(generatedSpace(A, G))
 proof
-  sorry
+  have sigma := generatedSigma.sigma at A, G
+  unfold generatedSpace
+  exact MeasurableSpace.of_sigma with sigma
 
 -- Mathlib's measurableSet_generateFrom.
 theorem generatedSigma.generator (A G S : Set)
@@ -399,7 +728,13 @@ theorem generatedSigma.generator (A G S : Set)
   requires inside : S ⊆ A
   shows S ∈ generatedSigma(A, G)
 proof
-  sorry
+  have pS := (powerset.membership_iff at S, A).backward with inside
+  apply generatedSigma.membership.backward
+  refine ⟨pS, ?_⟩
+  intros M hM sigma gens
+  have both : S ∈ G ∩ 𝒫(A)
+    simp
+  exact gens with S, both
 
 -- Mathlib's generateFrom_le: the generated σ-algebra is the least one.
 theorem generatedSigma.least (A G M : Set)
@@ -407,13 +742,30 @@ theorem generatedSigma.least (A G M : Set)
   requires generators : G ∩ 𝒫(A) ⊆ M
   shows generatedSigma(A, G) ⊆ M
 proof
-  sorry
+  intros S hS
+  obtain ⟨p, all⟩ := hS
+  have sig := sigma
+  obtain ⟨sub, carr, compl, unionClosed⟩ := sig
+  have hM := (powerset.membership_iff at M, 𝒫(A)).backward with sub
+  exact all with M, hM, sigma, generators
 
 theorem generatedSigma.mono (A G H : Set)
   requires inside : G ⊆ H
   shows generatedSigma(A, G) ⊆ generatedSigma(A, H)
 proof
-  sorry
+  intros S hS
+  obtain ⟨p, all⟩ := hS
+  apply generatedSigma.membership.backward
+  refine ⟨p, ?_⟩
+  intros M hM sigma gens
+  have gensG : G ∩ 𝒫(A) ⊆ M
+    intros T hT
+    simp at hT
+    have hT2 : T ∈ H ∩ 𝒫(A)
+      have TH := inside with T, hT.left
+      simp
+    exact gens with T, hT2
+  exact all with M, hM, sigma, gensG
 
 -- A map into a generated σ-algebra is measurable when the preimages of the
 -- generators are (Mathlib's measurable_generateFrom).
@@ -424,7 +776,26 @@ theorem Measurable.of_generators (f X A G : Set)
     functionPreimage(f, MeasurableSpace.carrier(X), S) ∈ MeasurableSpace.sets(X)
   shows Measurable(f, X, generatedSpace(A, G))
 proof
-  sorry
+  have pull := pullbackSets.sigma with space, maps
+  have gens : G ∩ 𝒫(A) ⊆ pullbackSets(f, X, A)
+    intros S hS
+    simp at hS
+    have SA := (powerset.membership_iff at S, A).forward with hS.right
+    have pre := generators with S, hS.left, SA
+    exact pullbackSets.membership.backward with ⟨hS.right, pre⟩
+  have least := generatedSigma.least with pull, gens
+  have gsp := generatedSpace.space at A, G
+  unfold Measurable
+  refine ⟨space, gsp, ?_, ?_⟩
+  . unfold generatedSpace
+    rw MeasurableSpace.mk.carrier
+    exact maps
+  . intros B hB
+    unfold generatedSpace at hB
+    rw MeasurableSpace.mk.sets at hB
+    have Bp := least with B, hB
+    obtain ⟨p, pre⟩ := Bp
+    exact pre
 
 -- Dynkin's π-λ theorem: a Dynkin system containing a π-system contains the
 -- σ-algebra it generates (Mathlib's MeasurableSpace.induction_on_inter).
@@ -448,14 +819,18 @@ theorem Measurable.maps (f X Y x : Set)
   requires member : x ∈ MeasurableSpace.carrier(X)
   shows f(x) ∈ MeasurableSpace.carrier(Y)
 proof
-  sorry
+  obtain ⟨sX, sY, maps, pre⟩ := measurable
+  exact maps with x, member
 
 theorem Measurable.preimage (f X Y B : Set)
   requires measurable : Measurable(f, X, Y)
   requires set : MeasurableSet(Y, B)
   shows MeasurableSet(X, functionPreimage(f, MeasurableSpace.carrier(X), B))
 proof
-  sorry
+  obtain ⟨sX, sY, maps, pre⟩ := measurable
+  unfold MeasurableSet at set
+  unfold MeasurableSet
+  exact pre with B, set
 
 theorem Measurable.identity (X : Set)
   requires space : MeasurableSpace(X)
