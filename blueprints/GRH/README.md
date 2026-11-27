@@ -307,10 +307,10 @@ graph TD
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
 | GRH.Polynomial.Multivariate | 79 | 57 | 22 |
-| GRH.Algebra.Finiteness | 76 | 5 | 71 |
+| GRH.Algebra.Finiteness | 95 | 56 | 39 |
 | GRH.Algebra.Completion | 37 | 0 | 37 |
 | GRH.Algebra.Integral | 37 | 0 | 37 |
-| GRH.Algebra.DVR | 37 | 2 | 35 |
+| GRH.Algebra.DVR | 51 | 42 | 9 |
 | GRH.Algebra.Flat | 31 | 0 | 31 |
 | GRH.Bernoulli | 176 | 176 | 0 |
 | GRH.Exp | 217 | 217 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **7329** | **6257** | **1072** |
+| **total** | **7362** | **6348** | **1014** |
 <!-- /blueprint-status -->
