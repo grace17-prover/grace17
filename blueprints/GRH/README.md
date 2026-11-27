@@ -296,7 +296,7 @@ graph TD
 | GRH.Linear.Modules | 313 | 313 | 0 |
 | GRH.Linear.Dimension | 130 | 125 | 5 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
-| GRH.Linear.Exterior | 51 | 10 | 41 |
+| GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
@@ -305,7 +305,7 @@ graph TD
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
-| GRH.Linear.Tensor | 186 | 175 | 11 |
+| GRH.Linear.Tensor | 214 | 206 | 8 |
 | GRH.Polynomial.Multivariate | 69 | 1 | 68 |
 | GRH.Algebra.Finiteness | 76 | 1 | 75 |
 | GRH.Algebra.Completion | 37 | 0 | 37 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6595** | **4636** | **1959** |
+| **total** | **6752** | **4817** | **1935** |
 <!-- /blueprint-status -->
