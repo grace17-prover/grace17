@@ -298,10 +298,10 @@ graph TD
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
-| GRH.Algebra.Divisibility | 108 | 105 | 3 |
-| GRH.Algebra.Ideals | 163 | 96 | 67 |
-| GRH.Algebra.Localization | 59 | 26 | 33 |
-| GRH.Algebra.LocalRings | 47 | 27 | 20 |
+| GRH.Algebra.Divisibility | 108 | 106 | 2 |
+| GRH.Algebra.Ideals | 171 | 143 | 28 |
+| GRH.Algebra.Localization | 84 | 70 | 14 |
+| GRH.Algebra.LocalRings | 47 | 34 | 13 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 96 | 6 | 90 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
@@ -334,10 +334,10 @@ graph TD
 | GRH.Zeta | 98 | 98 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 494 | 494 | 0 |
-| GRH.Fourier.FiniteAbelian | 29 | 0 | 29 |
-| GRH.Measure.Spaces | 145 | 5 | 140 |
-| GRH.Measure.Lebesgue | 96 | 0 | 96 |
-| GRH.Measure.LIntegral | 60 | 0 | 60 |
+| GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
+| GRH.Measure.Spaces | 219 | 155 | 64 |
+| GRH.Measure.Lebesgue | 120 | 67 | 53 |
+| GRH.Measure.LIntegral | 64 | 7 | 57 |
 | GRH.Measure.Bochner | 100 | 0 | 100 |
 | GRH.Measure.Product | 42 | 0 | 42 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6882** | **5271** | **1611** |
+| **total** | **7017** | **5596** | **1421** |
 <!-- /blueprint-status -->
