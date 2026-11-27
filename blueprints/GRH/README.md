@@ -299,18 +299,18 @@ graph TD
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 164 | 163 | 1 |
 | GRH.Algebra.Divisibility | 108 | 106 | 2 |
-| GRH.Algebra.Ideals | 171 | 143 | 28 |
-| GRH.Algebra.Localization | 84 | 70 | 14 |
+| GRH.Algebra.Ideals | 171 | 144 | 27 |
+| GRH.Algebra.Localization | 84 | 71 | 13 |
 | GRH.Algebra.LocalRings | 47 | 34 | 13 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
-| GRH.Polynomial.Univariate | 96 | 6 | 90 |
+| GRH.Polynomial.Univariate | 139 | 134 | 5 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
-| GRH.Polynomial.Multivariate | 69 | 1 | 68 |
-| GRH.Algebra.Finiteness | 76 | 1 | 75 |
+| GRH.Polynomial.Multivariate | 79 | 57 | 22 |
+| GRH.Algebra.Finiteness | 76 | 5 | 71 |
 | GRH.Algebra.Completion | 37 | 0 | 37 |
 | GRH.Algebra.Integral | 37 | 0 | 37 |
-| GRH.Algebra.DVR | 37 | 1 | 36 |
+| GRH.Algebra.DVR | 37 | 2 | 35 |
 | GRH.Algebra.Flat | 31 | 0 | 31 |
 | GRH.Bernoulli | 176 | 176 | 0 |
 | GRH.Exp | 217 | 217 | 0 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6871** | **5261** | **1610** |
+| **total** | **6924** | **5452** | **1472** |
 <!-- /blueprint-status -->
