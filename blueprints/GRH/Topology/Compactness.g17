@@ -1164,7 +1164,36 @@ theorem IsLocallyConstant.iff_nhds (f X : Set)
   shows IsLocallyConstant(f, X) ↔
     (∀ x ∈ X.carrier, ∃ U ∈ nhds(X, x), ∀ y ∈ U, f(y) = f(x))
 proof
-  sorry
+  constructor
+  . intro locally
+    obtain ⟨_, pre⟩ := locally
+    intros x hx
+    have op := pre with {f(x)}
+    have self : f(x) ∈ {f(x)} by simp
+    have xU := functionPreimage.of_apply with hx, self
+    have nb := nhds.open_mem with space, op, xU
+    refine ⟨functionPreimage(f, X.carrier, {f(x)}), nb, ?_⟩
+    intros y hy
+    obtain ⟨yIn, yval⟩ := functionPreimage.membership.forward with hy
+    simp at yval
+    exact yval
+  . intro near
+    unfold IsLocallyConstant
+    refine ⟨space, ?_⟩
+    intro B
+    apply Open.of_local with space
+    intros x hx
+    obtain ⟨xIn, val⟩ := functionPreimage.membership.forward with hx
+    obtain ⟨U, hU, const⟩ := near with x, xIn
+    obtain ⟨UP, V, hV, xV, VU⟩ := nhds.membership.forward with hU
+    have Usub := powerset.membership_iff.forward with UP
+    refine ⟨V, hV, xV, ?_⟩
+    intros z hz
+    have zU := VU with z, hz
+    have zIn := Usub with z, zU
+    apply functionPreimage.of_apply with zIn
+    rw (const with z, zU)
+    exact val
 
 theorem IsLocallyConstant.iff_fibers_open (f X Y : Set)
   requires space : TopologicalSpace(X)
@@ -1381,6 +1410,56 @@ proof
   rw [hzv, fz, gz, ← hxv]
   exact val
 
+-- Helpers for IsLocallyConstant.finite_range: finite unions of sets with
+-- finite images have finite images.
+def cptImageFamilies (f Y F : Set) : Set :=
+  { G ∈ 𝒫(F) | Finite(imageIn(f, ⋃(G), Y)) }
+def cptFiniteImageOpens (f X Y : Set) : Set :=
+  { U ∈ TopologicalSpace.opens(X) | Finite(imageIn(f, U, Y)) }
+
+theorem cptImage.finite_union (f Y F : Set)
+  requires finite : Finite(F)
+  requires each : ∀ W ∈ F, Finite(imageIn(f, W, Y))
+  shows Finite(imageIn(f, ⋃(F), Y))
+proof
+  have base : ∅ ∈ cptImageFamilies(f, Y, F)
+    apply cptImageFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), ?_⟩
+    have sub : imageIn(f, ⋃(∅), Y) ⊆ ∅
+      intros y hy
+      obtain ⟨yY, x, hx, eq⟩ := imageIn.membership.forward with hy
+      obtain ⟨U, hU, _⟩ := union.membership.forward with hx
+      simp at hU
+    exact Finite.subset with Finite.empty, sub
+  have step : ∀ G ⊆ F, Finite(G) → ∀ W ∈ F, W ∉ G →
+      G ∈ cptImageFamilies(f, Y, F) → G ∪ {W} ∈ cptImageFamilies(f, Y, F)
+    intros G hG finiteG W hW fresh known
+    obtain ⟨_, finG⟩ := cptImageFamilies.membership.forward with known
+    have finW := each with W, hW
+    have bound : G ∪ {W} ⊆ F
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isW
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isW)
+    have sub : imageIn(f, ⋃(G ∪ {W}), Y) ⊆ imageIn(f, ⋃(G), Y) ∪ imageIn(f, W, Y)
+      intros y hy
+      obtain ⟨yY, x, hx, eq⟩ := imageIn.membership.forward with hy
+      obtain ⟨U, hU, xU⟩ := union.membership.forward with hx
+      cases (union2.membership.forward with hU) with inG | isW
+      . apply union2.left
+        apply imageIn.membership.backward
+        exact ⟨yY, x, (union.membership.backward with ⟨U, inG, xU⟩), eq⟩
+      . apply union2.right
+        rw (singleton.membership.forward with isW) at xU
+        apply imageIn.membership.backward
+        exact ⟨yY, x, xU, eq⟩
+    apply cptImageFamilies.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), ?_⟩
+    exact Finite.subset with (Finite.union with finG, finW), sub
+  have all := Finite.induction with base, step
+  have member := all with F, (Subset.reflexive at F), finite
+  exact (cptImageFamilies.membership.forward with member).right
+
 -- On a compact space a locally constant map takes finitely many values.
 theorem IsLocallyConstant.finite_range (f X Y : Set)
   requires locally : IsLocallyConstant(f, X)
@@ -1388,7 +1467,40 @@ theorem IsLocallyConstant.finite_range (f X Y : Set)
   requires function : f : X.carrier → Y
   shows Finite(imageIn(f, X.carrier, Y))
 proof
-  sorry
+  have l2 := locally
+  obtain ⟨space, pre⟩ := l2
+  have ic := Compact.space_parts at X with compact
+  have cover : OpenCover(X.opens, X.carrier, cptFiniteImageOpens(f, X, Y))
+    unfold OpenCover
+    constructor
+    . intros U hU
+      exact (cptFiniteImageOpens.membership.forward with hU).left
+    . intros x hx
+      have fx := FunctionBetween.apply_closed with function, hx
+      have op := pre with {f(x)}
+      have self : f(x) ∈ {f(x)} by simp
+      have xU := functionPreimage.of_apply with hx, self
+      have sub : imageIn(f, functionPreimage(f, X.carrier, {f(x)}), Y) ⊆ {f(x)}
+        intros y hy
+        obtain ⟨yY, z, hz, eq⟩ := imageIn.membership.forward with hy
+        obtain ⟨zIn, zval⟩ := functionPreimage.membership.forward with hz
+        rw eq
+        exact zval
+      have mem : functionPreimage(f, X.carrier, {f(x)}) ∈ cptFiniteImageOpens(f, X, Y)
+        apply cptFiniteImageOpens.membership.backward
+        exact ⟨op, (Finite.subset with (Finite.singleton at f(x)), sub)⟩
+      exact union.membership.backward with ⟨functionPreimage(f, X.carrier, {f(x)}), mem, xU⟩
+  obtain ⟨G, GC, finG, XG⟩ := IsCompact.subcover with ic, cover
+  have each : ∀ W ∈ G, Finite(imageIn(f, W, Y))
+    intros W hW
+    exact (cptFiniteImageOpens.membership.forward with (GC with W, hW)).right
+  have fin := cptImage.finite_union with finG, each
+  have sub : imageIn(f, X.carrier, Y) ⊆ imageIn(f, ⋃(G), Y)
+    intros y hy
+    obtain ⟨yY, x, hx, eq⟩ := imageIn.membership.forward with hy
+    apply imageIn.membership.backward
+    exact ⟨yY, x, (XG with x, hx), eq⟩
+  exact Finite.subset with fin, sub
 
 -- On a connected space a locally constant map is constant.
 theorem IsLocallyConstant.constant (f X : Set)
@@ -1564,14 +1676,21 @@ theorem Profinite.clopen_compact (X U : Set)
   requires clopen : Clopen(X, U)
   shows Compact(X, U)
 proof
-  sorry
+  obtain ⟨space, compact, haus, totally⟩ := profinite
+  obtain ⟨op, closed⟩ := clopen
+  have cc := (Compact.space_iff at X with space).forward with compact
+  obtain ⟨Usub, _⟩ := closed
+  exact Compact.of_closed_subset at X, X.carrier, U with space, cc, closed, Usub
 
 theorem Profinite.finite_discrete (X : Set)
   requires discrete : DiscreteTopology(X)
   requires finite : Finite(X.carrier)
   shows Profinite(X)
 proof
-  sorry
+  have d2 := discrete
+  obtain ⟨space, opensEq⟩ := d2
+  unfold Profinite
+  refine ⟨space, (Compact.space_of_finite at X with space, finite), (DiscreteTopology.hausdorff with discrete), (TotallyDisconnected.discrete with discrete)⟩
 
 theorem Profinite.closed_subspace (X A : Set)
   requires profinite : Profinite(X)
