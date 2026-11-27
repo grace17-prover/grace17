@@ -327,6 +327,9 @@ graph TD
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 90 | 70 | 20 |
 | GRH.Calculus.Frechet | 70 | 55 | 15 |
+| GRH.Category.Basic | 119 | 0 | 119 |
+| GRH.Category.Abelian | 45 | 1 | 44 |
+| GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Field.Galois | 79 | 1 | 78 |
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Field.Finite | 62 | 2 | 60 |
@@ -364,6 +367,9 @@ graph TD
 | GRH.NumberField.Adeles | 30 | 1 | 29 |
 | GRH.NumberField.CM | 23 | 0 | 23 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Scheme.Basic | 63 | 7 | 56 |
+| GRH.Scheme.Morphisms | 56 | 0 | 56 |
+| GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **8032** | **6573** | **1459** |
+| **total** | **8381** | **6582** | **1799** |
 <!-- /blueprint-status -->
