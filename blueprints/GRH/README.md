@@ -297,7 +297,7 @@ graph TD
 | GRH.Linear.Dimension | 109 | 91 | 18 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 51 | 10 | 41 |
-| GRH.Matrix.Determinant | 51 | 2 | 49 |
+| GRH.Matrix.Determinant | 51 | 7 | 44 |
 | GRH.Algebra.Divisibility | 94 | 0 | 94 |
 | GRH.Algebra.Ideals | 152 | 0 | 152 |
 | GRH.Algebra.Localization | 58 | 1 | 57 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 45 | 0 | 45 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6064** | **3588** | **2476** |
+| **total** | **6064** | **3593** | **2471** |
 <!-- /blueprint-status -->
