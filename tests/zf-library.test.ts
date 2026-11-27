@@ -19,9 +19,12 @@ test("the ordinary mathematics imports and every migrated selection law check un
     "Combinatorics/Multinomial", "Combinatorics/ErdosSzekeres", "Combinatorics/DerangementCount",
     "Combinatorics/DerangementFormula", "Combinatorics/MoebiusInversion", "Combinatorics/MoebiusMultiplicative",
     "Combinatorics/CoprimeDivisors", "NumberTheory/FibonacciGCD",
-    // Point-set topology through bases, the real line, Heine–Borel, and Cantor–Bendixson loads under ZF;
-    // only the chosen originals of a cover (CompactImage, CompactMore, Tube) and what imports them select.
+    // Point-set topology loads under ZF: bases, the real line, Heine–Borel, Cantor–Bendixson, compact images,
+    // finite unions and Hausdorff separation of compact sets (by induction on finite sets, no chosen originals),
+    // the bundled spaces and maps, and metric spaces. Only the uncountability of perfect sets (NestedChoice)
+    // selects.
     "Topology/CantorBendixson", "Topology/Real/RationalBase", "Topology/HeineBorel",
+    "Topology/CompactImage", "Topology/CompactMore", "Topology/Spaces", "Metric",
     // Real analysis through derivatives, the intermediate value theorem, and induction along an interval
     // (boundedness, extreme values, uniform continuity on [A, B]) loads under ZF; the extreme value theorem's
     // module also holds the countable-choice results on arbitrary sequentially compact sets, so it and what
