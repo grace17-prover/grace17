@@ -324,9 +324,9 @@ graph TD
 | GRH.Topology.Sums | 138 | 137 | 1 |
 | GRH.Normed.Groups | 118 | 110 | 8 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
-| GRH.Normed.Spaces | 60 | 53 | 7 |
-| GRH.Normed.InnerProduct | 86 | 62 | 24 |
-| GRH.Calculus.Frechet | 51 | 32 | 19 |
+| GRH.Normed.Spaces | 62 | 55 | 7 |
+| GRH.Normed.InnerProduct | 90 | 70 | 20 |
+| GRH.Calculus.Frechet | 70 | 54 | 16 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
@@ -348,10 +348,10 @@ graph TD
 | GRH.LSeries.Completed | 73 | 21 | 52 |
 | GRH.LSeries.NonVanishing | 50 | 12 | 38 |
 | GRH.LSeries.VonMangoldt | 53 | 15 | 38 |
-| GRH.SpecialFunctions.More | 81 | 13 | 68 |
+| GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6838** | **5162** | **1676** |
+| **total** | **6882** | **5271** | **1611** |
 <!-- /blueprint-status -->
