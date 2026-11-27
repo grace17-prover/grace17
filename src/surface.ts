@@ -7,7 +7,7 @@ import { NameResolutionIndex, AmbiguousNameError } from "./name-resolution.ts";
 import { resolveImportName } from "./module-names.ts";
 import { and, app, bottom, canonical, canonicalDigest, containsFunction, eq, exists, forall, foralls, formulaEquals, formulaCanonical, freeFormulaVariables, freeTermVariables, iff, imp, nat, naturalValue, not, or, pred, substituteFormula, substituteTerm, termCanonical, termEquals, v, type Formula, type Term } from "./ast.ts";
 import { sha256Hex } from "./hash.ts";
-import { bind, ctor, Kernel, KernelError, type ConstructorSpec, type DatatypeRecord, type DefinitionRecord, type EvaluationStats, type Pattern, type RecursiveEquation } from "./kernel.ts";
+import { bind, ctor, Kernel, KernelError, type ConstructorSpec, type DatatypeRecord, type DefinitionRecord, type EvaluationStats, type KernelAdmissionEvent, type Pattern, type RecursiveEquation } from "./kernel.ts";
 import { compute,
   andElimLeft, andElimRight, andIntro, assume, at, axiom, calc, congr, definition, dne, eqElim, existsElim, existsIntro,
   falseElim, forallElim, forallIntro, iffIntro, iffElimLeft, iffElimRight, impElim, impIntro, induction, orElim,
@@ -508,7 +508,20 @@ interface CachedAuxiliaryTheorem {
   readonly statement: Formula;
   readonly proof: Proof;
 }
+/**
+ * A separation a tactic defined while proving a theorem, such as the family
+ * `name.family` of `induction finite`: the proof refers to its membership
+ * law, so a reused proof needs it defined again first.
+ */
+interface CachedAuxiliarySubset {
+  readonly name: string;
+  readonly parameters: readonly string[];
+  readonly element: string;
+  readonly bound: Term;
+  readonly condition: Formula;
+}
 interface CachedTheoremDeclaration {
+  readonly subsets?: readonly CachedAuxiliarySubset[];
   readonly auxiliary?: CachedAuxiliaryTheorem;
   readonly name: string;
   readonly statement: Formula;
@@ -521,6 +534,25 @@ interface CachedTheoremDeclaration {
   /** Expression carrier annotations recorded while elaborating the declaration. */
   readonly annotations: readonly (readonly [string, string])[];
   readonly warnings?: readonly SurfaceWarning[];
+}
+/**
+ * The separations named `defined`, in the order the kernel admitted them, or
+ * undefined when one of them was defined otherwise and cannot be replayed.
+ */
+function auxiliarySubsets(kernel: Kernel, defined: readonly string[]): CachedAuxiliarySubset[] | undefined {
+  const wanted = new Set(defined);
+  const events = kernel.admissionEventsSince({ eventCount: 0, environment: "" });
+  const found: CachedAuxiliarySubset[] = [];
+  for (let index = events.length - 1; index >= 0 && wanted.size; index -= 1) {
+    const event: KernelAdmissionEvent = events[index]!;
+    const payload = event.payload as Partial<CachedAuxiliarySubset> & { readonly options?: { readonly name?: string } };
+    const name = payload.name ?? payload.options?.name;
+    if (name === undefined || !wanted.has(name) || event.operation === "addTheorem") continue;
+    if (event.operation !== "defineSubset") return undefined;
+    wanted.delete(name);
+    found.push(payload as CachedAuxiliarySubset);
+  }
+  return wanted.size ? undefined : found.reverse();
 }
 const theoremDeclarationCaches = new WeakMap<object, Map<string, CachedTheoremDeclaration>>();
 const maximumTheoremDeclarations = 2_048;
@@ -1616,7 +1648,11 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
       let name: string;
       if (cached) {
         // Generalized induction may introduce a dependency before the public
-        // theorem. Replay both through the kernel, in admission order.
+        // theorem, and a tactic a separation the proof uses. Replay them all
+        // through the kernel, in admission order.
+        for (const subset of cached.subsets ?? []) {
+          kernel.defineSubset(subset.name, subset.parameters, subset.element, subset.bound, subset.condition);
+        }
         if (cached.auxiliary) {
           const auxiliary = cached.auxiliary;
           kernel.addTheorem(auxiliary.name, auxiliary.statement, auxiliary.proof);
@@ -1638,6 +1674,7 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
         const profileStart = globalThis.performance?.now();
         const sorryCount = surfaceSorries.get(kernel)?.length ?? 0;
         const theoremCount = kernel.theorems.size;
+        const definitionCount = kernel.definitions.size;
         const annotationsBefore = new Set(kernelAnnotations.get(kernel)?.keys() ?? []);
         try { name = elaborateTheorem(kernel, block, scope()); }
         catch (error) {
@@ -1674,8 +1711,11 @@ export function elaborateModule(kernel: Kernel, source: string, options: Elabora
         const theoremWarnings = sections.length
           ? unusedSectionHypothesisWarnings(kernel, name, line.text.split(/\s+/)[1] ?? name, sectionHypotheses(), line.number) : [];
         warnings.push(...theoremWarnings);
-        if ((surfaceSorries.get(kernel)?.length ?? 0) === sorryCount) {
+        const subsets = kernel.definitions.size > definitionCount
+          ? auxiliarySubsets(kernel, [...kernel.definitions.keys()].slice(definitionCount)) : [];
+        if ((surfaceSorries.get(kernel)?.length ?? 0) === sorryCount && subsets) {
           declarationCache.set(declarationKey, {
+            ...(subsets.length ? { subsets } : {}),
             name, statement, proof, signature,
             ...(theoremWarnings.length ? { warnings: theoremWarnings } : {}),
             capturesTacticTrace: environment.captureTacticTraces && kernel.theoremTacticTraces.has(name),

@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createZfKernel, loadModuleGraph, formatFormula, exportTheorem, verifyExportedProof } from "../src/index.ts";
+import { handleMachineRequest } from "../src/machine-interface.ts";
 
 const header = `module FiniteInductionTest
 import Grace.Cumulus.Cardinal.Counting
@@ -134,4 +135,23 @@ proof
   | insert using ih => rfl
   | empty => rfl
 `), /expected the `\| empty =>` case/u);
+});
+
+test("a served check reuses a finite induction and its family on every recheck", () => {
+  // A recheck in one serve session takes the theorem from the declaration
+  // cache; the family its proof unpacks must be defined again with it.
+  const check = (id: number, body: string, more: object) => handleMachineRequest({
+    id, method: "check",
+    params: { files: [{ name: "FiniteInductionTest.g17", source: header + body }], ...more },
+  }) as { ok: boolean; result: { status: string; diagnostics: { severity: string; message: string }[] } };
+  const edited = closed + count.replace("count_exists", "count_exists_edited");
+  for (const more of [{ continue: true }, {}]) {
+    for (const [id, body] of [[1, closed], [2, closed], [3, edited]] as const) {
+      const response = check(id, body, more);
+      assert.ok(response.ok);
+      const errors = response.result.diagnostics.filter(item => item.severity === "error").map(item => item.message);
+      assert.deepEqual(errors, [], `check ${id} ${JSON.stringify(more)}`);
+      assert.equal(response.result.status, "checked");
+    }
+  }
 });
