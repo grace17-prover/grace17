@@ -19,6 +19,7 @@ import GRH.Matrix.Spectral
 import GRH.Algebra.Divisibility
 import Grace.Cumulus.Algebra.Polynomial.Algebra
 import Grace.Cumulus.Algebra.Polynomial.Derivative
+import Grace.Cumulus.Combinatorics.ErdosSzekeres
 
 -- Section: Constants, the variable, monomials
 -- R[X] is polynomialRing(R, {0}); a polynomial is a finitely supported map
@@ -37,6 +38,98 @@ def polyMonomial (R a : Set, n : Nat) : Set :=
 def polyXSubC (R a : Set) : Set :=
   Ring.sub(polynomialRing(R, {0}), polyX(R), polyC(R, a))
 
+-- Helpers: univariate monomials are the sets {(0, k)}, k ∈ ℕ.
+theorem uni.monomial_value (k : Nat)
+  shows {(0, k)}(0) = k
+proof
+  have kN : k ∈ ℕ by typecheck
+  have same := constantFunction.univariate at ℕ, k with kN
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have v := constantFunction.apply at {0}, ℕ, 0, k with zero, kN
+  rw same at v
+  exact v
+
+theorem uni.monomial_shape (m : Set)
+  requires member : m ∈ monomials({0})
+  shows Nat(m(0)) ∧ m = {(0, m(0))}
+proof
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have e := monomials.exponent at {0}, m, 0 with member, zero
+  have single := monomials.univariate at m(0)
+  have eq : m = {(0, m(0))}
+    apply monomials.ext at {0}, m, {(0, m(0))} with member, single
+    intros i hi
+    rw singleton.membership at hi
+    rw hi
+    rw (uni.monomial_value at m(0))
+  exact ⟨e, eq⟩
+
+theorem uni.monomial_inj (j k : Nat)
+  requires equal : {(0, j)} = {(0, k)}
+  shows j = k
+proof
+  have a := uni.monomial_value at j
+  have b := uni.monomial_value at k
+  rw equal at a
+  cc
+
+theorem uni.monomial_mul (j k : Nat)
+  shows monomialProduct({0}, {(0, j)}, {(0, k)}) = {(0, j + k)}
+proof
+  have mj := monomials.univariate at j
+  have mk := monomials.univariate at k
+  have mjk := monomials.univariate at j + k
+  have prod := monomialProduct.member at {0}, {(0, j)}, {(0, k)} with mj, mk
+  apply monomials.ext at {0}, monomialProduct({0}, {(0, j)}, {(0, k)}), {(0, j + k)} with prod, mjk
+  intros i hi
+  have v := monomialProduct.value at {0}, {(0, j)}, {(0, k)}, i with mj, mk, hi
+  rw v
+  rw singleton.membership at hi
+  rw hi
+  rw [(uni.monomial_value at j), (uni.monomial_value at k), (uni.monomial_value at j + k)]
+
+theorem uni.coeff_mem (R p : Set) (k : Nat)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows polyCoeff(p, k) ∈ R.carrier
+proof
+  have pc := polynomialRing.comm_ring at R, {0} with comm
+  have mk := monomials.univariate at k
+  unfold polyCoeff
+  exact polynomialRing.coefficient_mem at R, {0}, p, {(0, k)} with comm, pc, member, mk
+
+theorem uni.degrees_finite (R p : Set)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows Finite(polyDegrees(R, p)) ∧ polyDegrees(R, p) ⊆ ℕ
+proof
+  have pc := polynomialRing.comm_ring at R, {0} with comm
+  have parts := polynomialRing.member_parts at R, {0}, p with comm, pc, member
+  have finite := polynomials.finite_support with parts
+  have domain := functionSupport.subset at p, monomials({0}), R.zero
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have exponents := monomialExponent.function at {0}, 0 with zero
+  have imageFinite := Finite.function_image with exponents, finite, domain
+  have sub : polyDegrees(R, p) ⊆ functionImage(monomialExponent({0}, 0), functionSupport(p, monomials({0}), R.zero), ℕ)
+    intros k hk
+    unfold polyDegrees at hk
+    obtain ⟨kN, nz⟩ := hk
+    have kNat := nat.omega.backward with kN
+    have mk := monomials.univariate at k
+    have supp : {(0, k)} ∈ functionSupport(p, monomials({0}), R.zero)
+      exact functionSupport.membership.backward with ⟨mk, nz⟩
+    have ev := monomialExponent.value at {0}, 0, {(0, k)} with zero, mk
+    rw (uni.monomial_value at k) at ev
+    apply functionImage.membership.backward
+    refine ⟨kN, {(0, k)}, supp, ?_⟩
+    rw ev
+  have nat : polyDegrees(R, p) ⊆ ℕ
+    intros k hk
+    unfold polyDegrees at hk
+    exact hk.left
+  have fs := Finite.subset with imageFinite, sub
+  exact ⟨fs, nat⟩
+
 -- Section: Degree and leading coefficient
 -- The natural degree: the largest k with a nonzero coefficient, and 0 for
 -- the zero polynomial (Polynomial.natDegree).
@@ -46,9 +139,52 @@ defunique polyNatDegree (R p : Set) (d ∈ ℕ) :=
 requires ring : CommRing(R)
 requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
 proof
-  sorry
+  have fin := uni.degrees_finite at R, p with ring, member
+  obtain ⟨finite, naturals⟩ := fin
+  by_cases empty : polyDegrees(R, p) = ∅
+  . witness 0
+    have zN : (0:Nat) ∈ ℕ by typecheck
+    refine ⟨zN, ?_⟩
+    left
+    exact ⟨empty, rfl⟩
+  . have inhabited := Nonempty.of_ne_empty with empty
+    obtain ⟨n, nN, nIn, below⟩ := Finite.greatest_natural with inhabited, naturals, finite
+    witness n
+    refine ⟨nN, ?_⟩
+    right
+    refine ⟨nIn, ?_⟩
+    intros k hk
+    have nNat := nat.omega.backward with nN
+    have kNat := nat.omega.backward with (naturals with k, hk)
+    have kIn := below with k, hk
+    have kLess := Less.of_membership at k, succ(n)
+    have lt := kLess with kIn
+    exact Less.successor_upper with lt
 uniqueness
-  sorry
+  intros u hu first v hv second
+  have uNat := nat.omega.backward with hu
+  have vNat := nat.omega.backward with hv
+  cases first with fe | fm
+  . cases second with se | sm
+    . have a := fe.right
+      have b := se.right
+      cc
+    . have e := fe.left
+      have m := sm.left
+      rw e at m
+      have no := empty.membership at v
+      exfalso
+      exact no with m
+  . cases second with se | sm
+    . have e := se.left
+      have m := fm.left
+      rw e at m
+      have no := empty.membership at u
+      exfalso
+      exact no with m
+    . have a := fm.right with v, sm.left
+      have b := sm.right with u, fm.left
+      exact LessEqual.antisymmetric with b, a
 
 -- The leading coefficient (Polynomial.leadingCoeff) and monic polynomials
 -- (Polynomial.Monic).
@@ -200,42 +336,172 @@ variable (R : Set)
 hypothesis comm : CommRing(R)
 hypothesis polys : CommRing(polynomialRing(R, {0}))
 
+-- Helpers: terms a·X^n as sparse polynomials and their coefficients.
+theorem uni.term_coeff (a : R) (n k : Nat)
+  shows (k = n → polyCoeff(polynomialTerm({0}, R.carrier, R.zero, a, {(0, n)}), k) = a) ∧
+    (k ≠ n → polyCoeff(polynomialTerm({0}, R.carrier, R.zero, a, {(0, n)}), k) = R[0])
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have aIn : a ∈ R.carrier by typecheck
+  have mn := monomials.univariate at n
+  have mk := monomials.univariate at k
+  unfold polyCoeff
+  constructor
+  . intro e
+    rw e
+    exact polynomialTerm.same at {0}, R.carrier, R.zero, a, {(0, n)} with zeroIn, aIn, mn
+  . intro ne
+    have diff : {(0, k)} ≠ {(0, n)}
+      intro eq
+      apply ne
+      exact uni.monomial_inj at k, n with eq
+    exact polynomialTerm.other at {0}, R.carrier, R.zero, a, {(0, n)}, {(0, k)} with zeroIn, aIn, mk, diff
+
+theorem uni.term_mem (a : R) (n : Nat)
+  shows polynomialTerm({0}, R.carrier, R.zero, a, {(0, n)}) ∈ Ring.carrier(polynomialRing(R, {0}))
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have aIn : a ∈ R.carrier by typecheck
+  have t := polynomialTerm.member at {0}, R.carrier, R.zero, a, {(0, n)} with zeroIn, aIn
+  exact polynomialRing.member_of_parts at R, {0}, polynomialTerm({0}, R.carrier, R.zero, a, {(0, n)}) with comm, polys, t
+
+theorem uni.variable_monomial
+  shows monomialVariable({0}, 0) = {(0, 1)}
+proof
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have mv := monomialVariable.member at {0}, 0
+  have m1 := monomials.univariate at 1
+  apply monomials.ext at {0}, monomialVariable({0}, 0), {(0, 1)} with mv, m1
+  intros i hi
+  rw singleton.membership at hi
+  rw hi
+  rw (monomialVariable.same at {0}, 0 with zero)
+  rw (uni.monomial_value at 1)
+
+theorem uni.X_term
+  shows polyX(R) = polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, 1)})
+proof
+  unfold polyX
+  rw X.value
+  unfold polynomialVariable
+  rw uni.variable_monomial
+
+theorem uni.X_pow (n : Nat)
+  shows Ring.pow(polynomialRing(R, {0}), polyX(R), n) =
+    polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, n)})
+proof
+  induction n
+  | zero =>
+    have pr := CommRing.to_ring with polys
+    have xIn : polyX(R) ∈ Ring.carrier(polynomialRing(R, {0}))
+      unfold polyX
+      exact X.mem at R, {0}, 0 with comm
+    have oneIn : R.one ∈ R.carrier by typecheck
+    rw (Ring.pow_zero at polynomialRing(R, {0}), polyX(R) with pr, xIn)
+    rw (polynomialRing.oneOf at R, {0})
+    unfold polynomialConstant
+    rw monomialOne.univariate
+  | succ(m) using ih =>
+    have pr := CommRing.to_ring with polys
+    have xIn : polyX(R) ∈ Ring.carrier(polynomialRing(R, {0}))
+      unfold polyX
+      exact X.mem at R, {0}, 0 with comm
+    have oneIn : R.one ∈ R.carrier by typecheck
+    have step := Ring.pow_succ at polynomialRing(R, {0}), polyX(R), m with pr, xIn
+    have sn : succ(m) = m + 1 by arith
+    rw sn
+    rw step
+    rw ih
+    rw (uni.X_term at R with comm, polys)
+    have t1 := uni.term_mem at R, R.one, m with comm, polys, oneIn
+    have t2 := uni.term_mem at R, R.one, 1 with comm, polys, oneIn
+    rw (polynomialRing.mul_apply at R, {0}, polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, m)}), polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, 1)}) with comm, polys, t1, t2)
+    have parts := CommRing.parts with comm
+    have mn := monomials.univariate at m
+    have m1 := monomials.univariate at 1
+    have e := polynomialProduct.terms at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, R.one, R.one, {(0, m)}, {(0, 1)} with parts, oneIn, oneIn, mn, m1
+    have oo := IsCommRing.one_left at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, R.one with parts, oneIn
+    rw (uni.monomial_mul at m, 1) at e
+    rw oo at e
+    exact e
+
 -- The constants form a homomorphism (Polynomial.C, C_1, C_mul, C_add),
 -- injective (Polynomial.C_injective), with coefficients a at 0 and 0
 -- elsewhere (Polynomial.coeff_C).
 theorem polyC.hom
   shows polynomialConstant(R, {0}) : R →+* polynomialRing(R, {0})
 proof
-  sorry
+  exact polynomialConstant.hom at R, {0} with comm
 
 theorem polyC.mem (a : R)
   shows polyC(R, a) ∈ Ring.carrier(polynomialRing(R, {0}))
 proof
-  sorry
+  unfold polyC
+  exact polynomialConstant.mem at R, {0}, a with comm
 
 theorem polyC.coeff (a : R) (k : Nat)
   shows (k = 0 → polyCoeff(polyC(R, a), k) = a) ∧
     (k ≠ 0 → polyCoeff(polyC(R, a), k) = R[0])
 proof
-  sorry
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have aIn : a ∈ R.carrier by typecheck
+  have mk := monomials.univariate at k
+  unfold polyC
+  rw (polynomialConstant.apply at R, {0}, a with comm)
+  unfold polyCoeff
+  constructor
+  . intro e
+    rw e
+    rw ← monomialOne.univariate
+    unfold polynomialConstant
+    have m1 := monomialOne.member at {0}
+    exact polynomialTerm.same at {0}, R.carrier, R.zero, a, monomialOne({0}) with zeroIn, aIn, m1
+  . intro ne
+    have diff : {(0, k)} ≠ monomialOne({0})
+      rw monomialOne.univariate
+      intro eq
+      apply ne
+      exact uni.monomial_inj at k, 0 with eq
+    unfold polynomialConstant
+    exact polynomialTerm.other at {0}, R.carrier, R.zero, a, monomialOne({0}), {(0, k)} with zeroIn, aIn, mk, diff
 
 theorem polyC.injective (a b : R)
   requires equal : polyC(R, a) = polyC(R, b)
   shows a = b
 proof
-  sorry
+  unfold polyC at equal
+  exact polynomialConstant.inj at R, {0}, a, b with comm, equal
 
 -- Polynomial.coeff_X_pow, coeff_monomial.
 theorem polyMonomial.coeff (a : R) (n k : Nat)
   shows (k = n → polyCoeff(polyMonomial(R, a, n), k) = a) ∧
     (k ≠ n → polyCoeff(polyMonomial(R, a, n), k) = R[0])
 proof
-  sorry
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have t := uni.term_mem at R, R.one, n with comm, polys, oneIn
+  have mk := monomials.univariate at k
+  have tc := uni.term_coeff at R, R.one, n, k with comm, polys, oneIn
+  unfold polyMonomial
+  rw (uni.X_pow at R, n with comm, polys)
+  unfold polyC
+  have cm := polynomialRing.constant_mul at R, {0}, a, polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, n)}), {(0, k)} with comm, polys, t, mk
+  unfold polyCoeff at tc
+  unfold polyCoeff
+  rw cm
+  constructor
+  . intro e
+    rw (tc.left with e)
+    ring
+  . intro ne
+    rw (tc.right with ne)
+    ring
 
 theorem polyX.mem
   shows polyX(R) ∈ Ring.carrier(polynomialRing(R, {0}))
 proof
-  sorry
+  unfold polyX
+  exact X.mem at R, {0}, 0 with comm
 
 -- Polynomial.ext and Polynomial.ext_iff: polynomials with equal
 -- coefficients are equal.
@@ -243,7 +509,14 @@ theorem polynomial.ext (p q : polynomialRing(R, {0}))
   requires agree : ∀ k ∈ ℕ, polyCoeff(p, k) = polyCoeff(q, k)
   shows p = q
 proof
-  sorry
+  apply polynomialRing.ext at R, {0}, p, q with comm, polys
+  intros m hm
+  obtain ⟨kNat, shape⟩ := uni.monomial_shape at m with hm
+  have kN := nat.omega.forward with kNat
+  have e := agree with m(0), kN
+  unfold polyCoeff at e
+  rw shape
+  exact e
 
 -- Coefficients of sums, of a constant multiple (Polynomial.coeff_C_mul),
 -- of X times p (coeff_X_mul), and of a product (Polynomial.coeff_mul) as a
@@ -251,18 +524,36 @@ proof
 theorem polyCoeff.add (p q : polynomialRing(R, {0})) (k : Nat)
   shows polyCoeff(p + q, k) = call2(R.add, polyCoeff(p, k), polyCoeff(q, k))
 proof
-  sorry
+  have mk := monomials.univariate at k
+  unfold polyCoeff
+  exact polynomialRing.coefficient_add at R, {0}, p, q, {(0, k)} with comm, polys, mk
 
 theorem polyCoeff.C_mul (a : R) (p : polynomialRing(R, {0})) (k : Nat)
   shows polyCoeff(polyC(R, a) * p, k) = call2(R.mul, a, polyCoeff(p, k))
 proof
-  sorry
+  have mk := monomials.univariate at k
+  unfold polyC
+  unfold polyCoeff
+  exact polynomialRing.constant_mul at R, {0}, a, p, {(0, k)} with comm, polys, mk
 
 theorem polyCoeff.X_pow_mul (p : polynomialRing(R, {0})) (n k : Nat)
   shows polyCoeff(Ring.pow(polynomialRing(R, {0}), polyX(R), n) * p, k + n) =
     polyCoeff(p, k)
 proof
-  sorry
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have parts := CommRing.parts with comm
+  have t := uni.term_mem at R, R.one, n with comm, polys, oneIn
+  have mn := monomials.univariate at n
+  have mk := monomials.univariate at k
+  rw (uni.X_pow at R, n with comm, polys)
+  rw (polynomialRing.mul_apply at R, {0}, polynomialTerm({0}, R.carrier, R.zero, R.one, {(0, n)}), p with comm, polys, t)
+  have pp := polynomialRing.member_parts at R, {0}, p with comm, polys
+  have shift := polynomialProduct.monomial_shift at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, {(0, n)}, {(0, k)}, p with parts, mn, mk, pp
+  rw (uni.monomial_mul at n, k) at shift
+  have c : k + n = n + k by arith
+  unfold polyCoeff
+  rw c
+  exact shift
 
 theorem polyCoeff.mul (p q : polynomialRing(R, {0})) (k : Nat)
   shows polyCoeff(p * q, k) = finiteRingSum(antidiagonal(k), R.carrier, R.add,
@@ -412,32 +703,57 @@ theorem polyEval.hom (a : R)
   shows RingHom(evaluationAt(R, {0}, constantFunction({0}, R.carrier, a)),
     polynomialRing(R, {0}), R)
 proof
-  sorry
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have v := constantFunction.function at {0}, R.carrier, a with *
+  exact evaluationAt.hom at R, {0}, constantFunction({0}, R.carrier, a) with comm, v
 
 theorem polyEval.mul (p q : polynomialRing(R, {0})) (a : R)
   shows polyEval(R, p * q, a) = call2(R.mul, polyEval(R, p, a), polyEval(R, q, a))
 proof
-  sorry
+  have h := polyEval.hom at R, a with comm, polys
+  unfold polyEval
+  exact RingHom.map_mul at evaluationAt(R, {0}, constantFunction({0}, R.carrier, a)), polynomialRing(R, {0}), R, p, q with h
 
 theorem polyEval.add (p q : polynomialRing(R, {0})) (a : R)
   shows polyEval(R, p + q, a) = call2(R.add, polyEval(R, p, a), polyEval(R, q, a))
 proof
-  sorry
+  have h := polyEval.hom at R, a with comm, polys
+  unfold polyEval
+  exact RingHom.map_add at evaluationAt(R, {0}, constantFunction({0}, R.carrier, a)), polynomialRing(R, {0}), R, p, q with h
 
 theorem polyEval.C (a b : R)
   shows polyEval(R, polyC(R, a), b) = a
 proof
-  sorry
+  have v := constantFunction.function at {0}, R.carrier, b with *
+  unfold polyEval
+  unfold polyC
+  exact evaluationAt.map_constant at R, {0}, constantFunction({0}, R.carrier, b), a with comm, v
 
 theorem polyEval.X (b : R)
   shows polyEval(R, polyX(R), b) = b
 proof
-  sorry
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have bIn : b ∈ R.carrier by typecheck
+  have v := constantFunction.function at {0}, R.carrier, b with *
+  unfold polyEval
+  unfold polyX
+  rw (evaluationAt.map_X at R, {0}, constantFunction({0}, R.carrier, b), 0 with comm, v, zero)
+  exact constantFunction.apply at {0}, R.carrier, 0, b with zero, bIn
 
 theorem polyEval.X_sub_C (a b : R)
   shows polyEval(R, polyXSubC(R, a), b) = b - a
 proof
-  sorry
+  have h := polyEval.hom at R, b with comm, polys
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys
+  have e1 := polyEval.X at R, b with comm, polys
+  have e2 := polyEval.C at R, a, b with comm, polys
+  unfold polyEval at e1
+  unfold polyEval at e2
+  unfold polyXSubC
+  unfold polyEval
+  rw (RingHom.map_sub at evaluationAt(R, {0}, constantFunction({0}, R.carrier, b)), polynomialRing(R, {0}), R, polyX(R), polyC(R, a) with h)
+  rw [e1, e2]
 
 -- Polynomial.eval_eq_sum_range and coeff_zero_eq_eval_zero.
 theorem polyEval.as_sum (p : polynomialRing(R, {0})) (b : R)
@@ -472,7 +788,8 @@ theorem polyEval2.hom (S f x : Set)
   shows RingHom(evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x)),
     polynomialRing(R, {0}), S)
 proof
-  sorry
+  have v := constantFunction.function at {0}, S.carrier, x with *
+  exact evaluationHom.hom at R, S, {0}, f, constantFunction({0}, S.carrier, x) with comm, target, hom, v
 
 theorem polyEval2.C (S f x a : Set)
   requires target : CommRing(S)
@@ -481,7 +798,10 @@ theorem polyEval2.C (S f x a : Set)
   requires scalar : a ∈ R.carrier
   shows polyEval2(R, S, f, x, polyC(R, a)) = f(a)
 proof
-  sorry
+  have v := constantFunction.function at {0}, S.carrier, x with *
+  unfold polyEval2
+  unfold polyC
+  exact evaluationHom.map_constant at R, S, {0}, f, constantFunction({0}, S.carrier, x), a with comm, target, hom, v, scalar
 
 theorem polyEval2.X (S f x : Set)
   requires target : CommRing(S)
@@ -489,7 +809,12 @@ theorem polyEval2.X (S f x : Set)
   requires point : x ∈ S.carrier
   shows polyEval2(R, S, f, x, polyX(R)) = x
 proof
-  sorry
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have v := constantFunction.function at {0}, S.carrier, x with *
+  unfold polyEval2
+  unfold polyX
+  rw (evaluationHom.map_X at R, S, {0}, f, constantFunction({0}, S.carrier, x), 0 with comm, target, hom, v, zero)
+  exact constantFunction.apply at {0}, S.carrier, 0, x with zero, point
 
 -- Polynomial.eval₂ is the unique homomorphism R[X] → S extending f with
 -- X ↦ x (Polynomial.ringHom_ext).
@@ -501,7 +826,24 @@ theorem polyEval2.unique (S f x g : Set)
   requires variable : g(polyX(R)) = x
   shows g = evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x))
 proof
-  sorry
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have xIn := polyX.mem at R with comm, polys
+  have point : x ∈ S.carrier
+    rw ← variable
+    exact RingHom.map_mem at g, polynomialRing(R, {0}), S, polyX(R) with map, xIn
+  have v := constantFunction.function at {0}, S.carrier, x with *
+  apply evaluationHom.unique at R, S, {0}, f, constantFunction({0}, S.carrier, x), g with comm, target, hom, v, map
+  . intros a ha
+    have c := constants with a, ha
+    unfold polyC at c
+    exact c
+  . intros j hj
+    rw singleton.membership at hj
+    rw hj
+    have cv := constantFunction.apply at {0}, S.carrier, 0, x with zero, point
+    rw cv
+    unfold polyX at variable
+    exact variable
 
 -- Polynomial.hom_eval₂: composing evaluation with a homomorphism.
 theorem polyEval2.compose (S T f g x p : Set)
@@ -537,7 +879,8 @@ theorem polyMap.hom (S f : Set)
   requires hom : f : R →+* S
   shows polyMap(R, S, f) : polynomialRing(R, {0}) →+* polynomialRing(S, {0})
 proof
-  sorry
+  unfold polyMap
+  exact polynomialMap.bundled_hom at R, S, f with comm, target, hom
 
 theorem polyMap.coeff (S f p : Set) (k : Nat)
   requires target : CommRing(S)
@@ -545,7 +888,8 @@ theorem polyMap.coeff (S f p : Set) (k : Nat)
   requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
   shows polyCoeff(polyMap(R, S, f)(p), k) = f(polyCoeff(p, k))
 proof
-  sorry
+  unfold polyMap
+  exact polyCoeff.polynomialMap at R, S, f, p, k with comm, target, hom, member
 
 theorem polyMap.X (S f : Set)
   requires target : CommRing(S)
