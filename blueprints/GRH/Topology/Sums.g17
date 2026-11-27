@@ -1915,6 +1915,74 @@ proof
   unfold realAdditiveGroup
   group_projections
 
+-- Helpers for real sums: the real line is Hausdorff, a real sum is the
+-- total value, and a sum of a nonnegative family is nonnegative.
+theorem realLine.hausdorff
+  shows Hausdorff(realLine)
+proof
+  have h := realTopology.hausdorff
+  unfold Hausdorff
+  rw [realLine.carrier, realLine.opens]
+  exact h
+
+theorem RealHasSum.tsum_eq (f I S : Set)
+  requires sum : RealHasSum(f, I, S)
+  shows realTsum(f, I) = S
+proof
+  have top := realAdditiveGroup.topological
+  have abelian := realAdditiveGroup.abelian
+  have haus := realLine.hausdorff
+  unfold RealHasSum at sum
+  unfold realTsum
+  exact tsum.eq_of_hasSum with top, abelian, haus, sum
+
+theorem RealHasSum.real (f I S : Set)
+  requires sum : RealHasSum(f, I, S)
+  shows S ∈ ℝ
+proof
+  unfold RealHasSum at sum
+  have sIn := sum.left
+  rw realAdditiveGroup.carrier at sIn
+  exact sIn
+
+theorem RealHasSum.nonneg (f I S : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
+  requires sum : RealHasSum(f, I, S)
+  shows realZero ≤ S
+proof
+  have SIn := RealHasSum.real with sum
+  have SR : Real(S) by exact SIn
+  by_contra notLe
+  have neg : (S:R) < (0:R) by linarith
+  have pos : (0:R) < (0:R) - (S:R) by linarith
+  have eR : Real(R[0 - S]) by typecheck
+  have eIn : R[0 - S] ∈ ℝ by typecheck
+  have sub := openBall.subset_reals at S, R[0 - S]
+  have self : openBall(S, R[0 - S]) ⊆ openBall(S, R[0 - S]) by simp
+  have iff := realLine.nhds_iff at S, openBall(S, R[0 - S]) with SIn
+  have Bn := iff.backward with ⟨sub, R[0 - S], eIn, pos, self⟩
+  unfold RealHasSum at sum
+  obtain ⟨sIn, tails⟩ := sum
+  obtain ⟨F0, F0I, F0fin, tail⟩ := tails with openBall(S, R[0 - S]), Bn
+  have self0 : F0 ⊆ F0 by simp
+  have inBall := tail with F0, F0I, F0fin, self0
+  have v0 : ∀ i ∈ F0, f(i) ∈ ℝ
+    intros i hi
+    exact values with i, (F0I with i, hi)
+  have n0 : ∀ i ∈ F0, realZero ≤ f(i)
+    intros i hi
+    exact nonneg with i, (F0I with i, hi)
+  have nn := realFiniteSum.nonneg with F0fin, v0, n0
+  have sR := realFiniteSum.real with F0fin, v0
+  have sRR : Real(realFiniteSum(f, F0)) by exact sR
+  have inBall2 : realFiniteSum(f, F0) ∈ openBall(S, R[0 - S])
+    unfold realFiniteSum
+    exact inBall
+  have bounds := (openBall.order_characterization at realFiniteSum(f, F0), S, R[0 - S]).forward with inBall2
+  have hi := bounds.right
+  linarith
+
 -- More helpers for real sums: both sides of a real inequality are reals,
 -- the least upper bound in ≤ form, monotonicity of finite sums in the
 -- family, and the finite sums of a family as a set of reals.
@@ -2132,13 +2200,90 @@ proof
     unfold realFiniteSum at inU
     exact inU
 
+-- The finite sums of a family over the finite subsets of I.
+def finiteSumSet (f I : Set) : Set :=
+  { x ∈ ℝ | ∃ F ∈ finiteSubsets(I), x = realFiniteSum(f, F) }
+
 theorem RealSummable.nonneg_iff (f I : Set)
   requires values : ∀ i ∈ I, f(i) ∈ ℝ
   requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
   shows RealSummable(f, I) ↔
     (∃ B ∈ ℝ, ∀ F ∈ finiteSubsets(I), realFiniteSum(f, F) ≤ B)
 proof
-  sorry
+  constructor
+  . intro summable
+    unfold RealSummable at summable
+    obtain ⟨S, SIn, sum⟩ := summable
+    have sumR : RealHasSum(f, I, S)
+      unfold RealHasSum
+      exact sum
+    have SR := RealHasSum.real with sumR
+    have SRR : Real(S) by exact SR
+    have iff := RealHasSum.nonneg_iff at f, I, S with values, nonneg
+    have both := iff.forward with sumR
+    refine ⟨S, SR, both.left⟩
+  . intro bounded
+    obtain ⟨B, BIn, bound⟩ := bounded
+    have sub : finiteSumSet(f, I) ⊆ ℝ
+      intros x hx
+      exact (finiteSumSet.membership.forward with hx).left
+    have emptyMem : ∅ ∈ finiteSubsets(I)
+      apply finiteSubsets.membership.backward
+      exact ⟨(powerset.empty_member at I), Finite.empty⟩
+    have zeroIn : realFiniteSum(f, ∅) ∈ finiteSumSet(f, I)
+      have e := realFiniteSum.empty at f
+      have zR : realFiniteSum(f, ∅) ∈ ℝ
+        rw e
+        typecheck
+      apply finiteSumSet.membership.backward
+      exact ⟨zR, ∅, emptyMem, rfl⟩
+    have ne : Nonempty(finiteSumSet(f, I))
+      unfold Nonempty
+      exact ⟨realFiniteSum(f, ∅), zeroIn⟩
+    have bdd : ∃ B ∈ ℝ, ∀ x ∈ finiteSumSet(f, I), x ≤ B
+      refine ⟨B, BIn, ?_⟩
+      intros x hx
+      have hx2 := finiteSumSet.membership.forward with hx
+      obtain ⟨xIn, F, hF, eq⟩ := hx2
+      rw eq
+      exact bound with F, hF
+    obtain ⟨U, UIn, upper, least⟩ := Real.sup_exists with sub, ne, bdd
+    have UR : Real(U) by exact UIn
+    have iff := RealHasSum.nonneg_iff at f, I, U with values, nonneg
+    have upper2 : ∀ F ∈ finiteSubsets(I), realFiniteSum(f, F) ≤ U
+      intros F hF
+      have hF2 := finiteSubsets.membership.forward with hF
+      have FI := powerset.membership_iff.forward with hF2.left
+      have vF : ∀ i ∈ F, f(i) ∈ ℝ
+        intros i hi
+        exact values with i, (FI with i, hi)
+      have sF := realFiniteSum.real with hF2.right, vF
+      have mem : realFiniteSum(f, F) ∈ finiteSumSet(f, I)
+        apply finiteSumSet.membership.backward
+        exact ⟨sF, F, hF, rfl⟩
+      exact upper with realFiniteSum(f, F), mem
+    have approach : ∀ T ∈ ℝ, T < U → ∃ F ∈ finiteSubsets(I), T < realFiniteSum(f, F)
+      intros T TIn lt
+      have TR : Real(T) by exact TIn
+      by_contra none
+      have boundT : ∀ x ∈ finiteSumSet(f, I), x ≤ T
+        intros x hx
+        have hx2 := finiteSumSet.membership.forward with hx
+        obtain ⟨xIn, F, hF, eq⟩ := hx2
+        have xR : Real(x) by exact xIn
+        by_contra notLe
+        apply none
+        refine ⟨F, hF, ?_⟩
+        rw ← eq
+        linarith
+      have le := least with T, TIn, boundT
+      linarith
+    have sum := iff.backward with ⟨upper2, approach⟩
+    have sum2 := sum
+    unfold RealHasSum at sum2
+    unfold RealSummable
+    unfold SummableFamily
+    refine ⟨U, sum2.left, sum2⟩
 
 -- In ℝ unconditional summability is absolute summability.
 theorem RealSummable.iff_abs (f g I : Set)
@@ -2282,74 +2427,6 @@ def ennMulReal (c a : Set) : Set :=
   ⋃({ S ∈ ennreal | (a ≠ ennTop ∧ S = R[c * a]) ∨
     (a = ennTop ∧ c = realZero ∧ S = realZero) ∨
     (a = ennTop ∧ c ≠ realZero ∧ S = ennTop) })
-
--- Helpers for real sums: the real line is Hausdorff, a real sum is the
--- total value, and a sum of a nonnegative family is nonnegative.
-theorem realLine.hausdorff
-  shows Hausdorff(realLine)
-proof
-  have h := realTopology.hausdorff
-  unfold Hausdorff
-  rw [realLine.carrier, realLine.opens]
-  exact h
-
-theorem RealHasSum.tsum_eq (f I S : Set)
-  requires sum : RealHasSum(f, I, S)
-  shows realTsum(f, I) = S
-proof
-  have top := realAdditiveGroup.topological
-  have abelian := realAdditiveGroup.abelian
-  have haus := realLine.hausdorff
-  unfold RealHasSum at sum
-  unfold realTsum
-  exact tsum.eq_of_hasSum with top, abelian, haus, sum
-
-theorem RealHasSum.real (f I S : Set)
-  requires sum : RealHasSum(f, I, S)
-  shows S ∈ ℝ
-proof
-  unfold RealHasSum at sum
-  have sIn := sum.left
-  rw realAdditiveGroup.carrier at sIn
-  exact sIn
-
-theorem RealHasSum.nonneg (f I S : Set)
-  requires values : ∀ i ∈ I, f(i) ∈ ℝ
-  requires nonneg : ∀ i ∈ I, realZero ≤ f(i)
-  requires sum : RealHasSum(f, I, S)
-  shows realZero ≤ S
-proof
-  have SIn := RealHasSum.real with sum
-  have SR : Real(S) by exact SIn
-  by_contra notLe
-  have neg : (S:R) < (0:R) by linarith
-  have pos : (0:R) < (0:R) - (S:R) by linarith
-  have eR : Real(R[0 - S]) by typecheck
-  have eIn : R[0 - S] ∈ ℝ by typecheck
-  have sub := openBall.subset_reals at S, R[0 - S]
-  have self : openBall(S, R[0 - S]) ⊆ openBall(S, R[0 - S]) by simp
-  have iff := realLine.nhds_iff at S, openBall(S, R[0 - S]) with SIn
-  have Bn := iff.backward with ⟨sub, R[0 - S], eIn, pos, self⟩
-  unfold RealHasSum at sum
-  obtain ⟨sIn, tails⟩ := sum
-  obtain ⟨F0, F0I, F0fin, tail⟩ := tails with openBall(S, R[0 - S]), Bn
-  have self0 : F0 ⊆ F0 by simp
-  have inBall := tail with F0, F0I, F0fin, self0
-  have v0 : ∀ i ∈ F0, f(i) ∈ ℝ
-    intros i hi
-    exact values with i, (F0I with i, hi)
-  have n0 : ∀ i ∈ F0, realZero ≤ f(i)
-    intros i hi
-    exact nonneg with i, (F0I with i, hi)
-  have nn := realFiniteSum.nonneg with F0fin, v0, n0
-  have sR := realFiniteSum.real with F0fin, v0
-  have sRR : Real(realFiniteSum(f, F0)) by exact sR
-  have inBall2 : realFiniteSum(f, F0) ∈ openBall(S, R[0 - S])
-    unfold realFiniteSum
-    exact inBall
-  have bounds := (openBall.order_characterization at realFiniteSum(f, F0), S, R[0 - S]).forward with inBall2
-  have hi := bounds.right
-  linarith
 
 theorem ennTop.not_real
   shows ennTop ∉ ℝ
