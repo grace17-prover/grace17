@@ -79,6 +79,54 @@ theorem Compact.iff_cluster (X A : Set)
 proof
   sorry
 
+-- Helpers for the family form of the subcover property: the family of
+-- the sets U(i), and finite subfamilies of it, each set named by an index.
+def cptFamily (I U : Set) : Set := { U(i) | i ∈ I }
+def cptNamed (I U F : Set) : Set :=
+  { G ∈ 𝒫(F) | ∃ J, J ⊆ I ∧ Finite(J) ∧ (∀ V ∈ G, ∃ i ∈ J, V = U(i)) }
+
+theorem cptFamily.finite_indices (I U F : Set)
+  requires inside : F ⊆ cptFamily(I, U)
+  requires finite : Finite(F)
+  shows ∃ J, J ⊆ I ∧ Finite(J) ∧ (∀ V ∈ F, ∃ i ∈ J, V = U(i))
+proof
+  have base : ∅ ∈ cptNamed(I, U, F)
+    apply cptNamed.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (empty.subset at F)), ∅,
+      (empty.subset at I), Finite.empty, ?_⟩
+    intros P hP
+    simp at hP
+  have step : ∀ G ⊆ F, Finite(G) → ∀ W ∈ F, W ∉ G →
+      G ∈ cptNamed(I, U, F) → G ∪ {W} ∈ cptNamed(I, U, F)
+    intros G hG finiteG W hW fresh known
+    obtain ⟨_, J, hJ, finiteJ, found⟩ := cptNamed.membership.forward with known
+    obtain ⟨k, hk, shape⟩ := cptFamily.membership.forward with (inside with W, hW)
+    have bound : G ∪ {W} ⊆ F
+      intros Z hZ
+      cases (union2.membership.forward with hZ) with inG | isW
+      . exact hG with Z, inG
+      . rwa (singleton.membership.forward with isW)
+    apply cptNamed.membership.backward
+    refine ⟨(powerset.membership_iff.backward with bound), J ∪ {k}, ?_,
+      (Finite.union with finiteJ, (Finite.singleton at k)), ?_⟩
+    . intros Z hZ
+      cases (union2.membership.forward with hZ) with inJ | isk
+      . exact hJ with Z, inJ
+      . rwa (singleton.membership.forward with isk)
+    . intros P hP
+      cases (union2.membership.forward with hP) with inG | isW
+      . obtain ⟨i, hi, eq⟩ := found with P, inG
+        exact ⟨i, (union2.left with hi), eq⟩
+      . have member : k ∈ J ∪ {k} :=
+          union2.right with (singleton.membership.backward with rfl)
+        rw (singleton.membership.forward with isW)
+        rw ← shape
+        exact ⟨k, member, rfl⟩
+  have all := Finite.induction with base, step
+  have member := all with F, (Subset.reflexive at F), finite
+  obtain ⟨_, rest⟩ := cptNamed.membership.forward with member
+  exact rest
+
 -- Mathlib's IsCompact.elim_finite_subcover in the family form: an open
 -- cover indexed by I has a finite subfamily that covers.
 theorem Compact.finite_subcover (X K I U : Set)
@@ -87,7 +135,37 @@ theorem Compact.finite_subcover (X K I U : Set)
   requires covers : ∀ x ∈ K, ∃ i ∈ I, x ∈ U(i)
   shows ∃ J ⊆ I, Finite(J) ∧ (∀ x ∈ K, ∃ i ∈ J, x ∈ U(i))
 proof
-  sorry
+  have ic := compact
+  unfold Compact at ic
+  have cover : OpenCover(X.opens, K, cptFamily(I, U))
+    unfold OpenCover
+    constructor
+    . intros V hV
+      obtain ⟨i, hi, eq⟩ := cptFamily.membership.forward with hV
+      rw ← eq
+      exact open with i, hi
+    . intros x hx
+      obtain ⟨i, hi, xi⟩ := covers with x, hx
+      have mem : U(i) ∈ cptFamily(I, U)
+        apply cptFamily.membership.backward
+        exact ⟨i, hi, rfl⟩
+      exact union.membership.backward with ⟨U(i), mem, xi⟩
+  obtain ⟨F, FC, finF, KF⟩ := IsCompact.subcover with ic, cover
+  obtain ⟨J, JI, finJ, named⟩ := cptFamily.finite_indices with FC, finF
+  refine ⟨J, JI, finJ, ?_⟩
+  intros x hx
+  obtain ⟨V, hV, xV⟩ := union.membership.forward with (KF with x, hx)
+  obtain ⟨i, hi, eq⟩ := named with V, hV
+  rw eq at xV
+  exact ⟨i, hi, xV⟩
+
+-- The complements of a sequence of sets, as a sequence.
+defgraph cptComplements (X C : Set) (n ∈ ℕ) : 𝒫(TopologicalSpace.carrier(X)) :=
+  complement(TopologicalSpace.carrier(X), C(n))
+proof
+  apply powerset.membership_iff.backward
+  intros y hy
+  exact (complement.membership.forward with hy).left
 
 -- Mathlib's IsCompact.elim_directed_cover: a cover by an increasing
 -- sequence of open sets is covered by one of them.
@@ -98,7 +176,17 @@ theorem Compact.directed_cover (X K U : Set)
   requires covers : ∀ x ∈ K, ∃ n ∈ ℕ, x ∈ U(n)
   shows ∃ n ∈ ℕ, K ⊆ U(n)
 proof
-  sorry
+  obtain ⟨J, JI, finJ, cov⟩ := Compact.finite_subcover at X, K, ℕ, U with compact, open, covers
+  obtain ⟨b, bNat, bound⟩ := Finite.naturals_bounded with JI, finJ
+  have bIn : b ∈ ℕ by exact bNat
+  refine ⟨b, bIn, ?_⟩
+  intros x hx
+  obtain ⟨i, hi, xi⟩ := cov with x, hx
+  have isb := bound with i, hi
+  have iNat := natural.member at succ(b) with isb
+  have ib := LessEqual.of_membership_successor at i, b with isb
+  have iIn := JI with i, hi
+  exact (increasing with i, iIn, b, bIn, ib) with x, xi
 
 -- A decreasing sequence of nonempty closed subsets of a compact set has
 -- a common point (Cantor's intersection theorem).
@@ -110,7 +198,45 @@ theorem Compact.nested_closed (X K C : Set)
   requires nonempty : ∀ n ∈ ℕ, Nonempty(C(n))
   shows ∃ x ∈ K, ∀ n ∈ ℕ, x ∈ C(n)
 proof
-  sorry
+  by_contra bad
+  have cov : ∀ x ∈ K, ∃ n ∈ ℕ, x ∈ cptComplements(X, C)(n)
+    intros x hx
+    by_contra none
+    apply bad
+    refine ⟨x, hx, ?_⟩
+    intros n hn
+    by_contra notIn
+    apply none
+    refine ⟨n, hn, ?_⟩
+    rw (cptComplements.value with hn)
+    obtain ⟨Csub, Copen⟩ := closed with n, hn
+    have ic := compact
+    unfold Compact at ic
+    obtain ⟨Ksub, _⟩ := ic
+    exact complement.membership.backward with ⟨(Ksub with x, hx), notIn⟩
+  have opens : ∀ n ∈ ℕ, cptComplements(X, C)(n) ∈ X.opens
+    intros n hn
+    rw (cptComplements.value with hn)
+    obtain ⟨Csub, Copen⟩ := closed with n, hn
+    exact Copen
+  have incr : ∀ m ∈ ℕ, ∀ n ∈ ℕ, m ≤ n →
+      cptComplements(X, C)(m) ⊆ cptComplements(X, C)(n)
+    intros m hm n hn mn
+    rw [(cptComplements.value with hm), (cptComplements.value with hn)]
+    intros y hy
+    obtain ⟨yX, yNot⟩ := complement.membership.forward with hy
+    have sub := decreasing with m, hm, n, hn, mn
+    have yNot2 : y ∉ C(n)
+      intro yn
+      exact yNot with (sub with y, yn)
+    exact complement.membership.backward with ⟨yX, yNot2⟩
+  obtain ⟨n, hn, Kn⟩ := Compact.directed_cover at X, K, cptComplements(X, C) with compact, opens, incr, cov
+  obtain ⟨y, hy⟩ := nonempty with n, hn
+  have yK := inside with n, hn, y, hy
+  have yc := Kn with y, yK
+  rw (cptComplements.value with hn) at yc
+  obtain ⟨yX, yNot⟩ := complement.membership.forward with yc
+  exact yNot with hy
 
 -- Compact metric spaces are sequentially compact.
 theorem Compact.metric_subsequence (M K u : Set)
