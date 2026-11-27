@@ -108,10 +108,603 @@ def matDiagProduct (R n A : Set) : Set :=
   finiteRingProduct(n, Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R),
     Ring.mul(R), Ring.one(R), matDiag(R, n, A))
 
+-- Section: Determinants on a natural number
+-- Helpers at an index set k ∈ ℕ, where Cumulus's sign is the true sign:
+-- the transpose, a permutation of the columns, and conjugation by a
+-- permutation σ (A ↦ A ∘ (σ × σ)) keep the determinant, and the adjugate
+-- commutes with that conjugation.
+
+-- Row i of M replaced by row r of Q.
+defunique matrixReplaceRowEntry (I A M Q i r p : Set) (a ∈ A) :=
+  ∃ k ∈ I, ∃ j ∈ I, p = (k, j) ∧
+    (k = i → a = Q[r, j]) ∧ (k ≠ i → a = M[k, j])
+requires matrix : RingMatrix(I, A, M)
+requires source : RingMatrix(I, A, Q)
+requires sourceRow : r ∈ I
+requires pair : p ∈ I × I
+proof
+  obtain ⟨bound, k, hk, j, hj, shape⟩ := product.membership.forward at
+    I, I, p with pair
+  have original := RingMatrix.entry at I, A, M, k, j with matrix, hk, hj
+  have copied := RingMatrix.entry at I, A, Q, r, j with source, sourceRow, hj
+  have alternatives : k = i ∨ k ≠ i
+    tauto
+  cases alternatives with same | different
+  . refine ⟨Q[r, j], copied, k, hk, j, hj, shape, ?_⟩
+    constructor
+    . intro equal
+      rfl
+    . intro unequal
+      exfalso
+      exact unequal with same
+  . refine ⟨M[k, j], original, k, hk, j, hj, shape, ?_⟩
+    constructor
+    . intro equal
+      exfalso
+      exact different with equal
+    . intro unequal
+      rfl
+uniqueness
+  intros u hu first v hv second
+  obtain ⟨k, hk, j, hj, shapeU, sameU, otherU⟩ := first
+  obtain ⟨l, hl, s, hs, shapeV, sameV, otherV⟩ := second
+  have pairs : (k, j) = (l, s)
+    cc
+  have coordinates := orderedPair.injective at k, j, l, s with pairs
+  have alternatives : k = i ∨ k ≠ i
+    tauto
+  cases alternatives with same | different
+  . have left : u = Q[r, j]
+      exact sameU with same
+    have right : v = Q[r, s]
+      apply sameV
+      cc
+    cc
+  . have left : u = M[k, j]
+      exact otherU with different
+    have distinct : l ≠ i
+      intro equal
+      apply different
+      cc
+    have right := otherV with distinct
+    cc
+
+defgraph matrixReplaceRow (I A M Q i r : Set) (p ∈ I × I) : A :=
+  matrixReplaceRowEntry(I, A, M, Q, i, r, p)
+requires matrix : RingMatrix(I, A, M)
+requires source : RingMatrix(I, A, Q)
+requires sourceRow : r ∈ I
+proof
+  have selected := matrixReplaceRowEntry.selected at I, A, M, Q, i, r, p with *
+  exact selected.left
+
+theorem matrixReplaceRow.matrix (I A M Q i r : Set)
+  requires matrix : RingMatrix(I, A, M)
+  requires source : RingMatrix(I, A, Q)
+  requires sourceRow : r ∈ I
+  shows RingMatrix(I, A, matrixReplaceRow(I, A, M, Q, i, r))
+proof
+  unfold RingMatrix
+  exact matrixReplaceRow.function with *
+
+theorem matrixReplaceRow.entry (I A M Q i r k j : Set)
+  requires matrix : RingMatrix(I, A, M)
+  requires source : RingMatrix(I, A, Q)
+  requires sourceRow : r ∈ I
+  requires row : k ∈ I
+  requires column : j ∈ I
+  shows (k = i → matrixReplaceRow(I, A, M, Q, i, r)[k, j] = Q[r, j]) ∧
+    (k ≠ i → matrixReplaceRow(I, A, M, Q, i, r)[k, j] = M[k, j])
+proof
+  have pair := product.pair at k, j, I, I with row, column
+  have value := matrixReplaceRow.value at I, A, M, Q, i, r, (k, j) with *
+  have selected := matrixReplaceRowEntry.selected at I, A, M, Q, i, r, (k, j)
+    with *
+  obtain ⟨l, hl, s, hs, shape, same, other⟩ := selected.right
+  have coordinates := orderedPair.injective with shape
+  rw value
+  constructor
+  . intro equal
+    have match : l = i by cc
+    have result := same with match
+    cc
+  . intro different
+    have distinct : l ≠ i
+      intro equal
+      apply different
+      cc
+    have result := other with distinct
+    cc
+
+-- Inversion p ↦ p⁻¹ on the permutations of I.
+defgraph permutationInverseMap (I : Set) (p ∈ permutations(I)) : permutations(I) :=
+  converse(p, I, I)
+proof
+  exact permutations.converse with assumption
+
+theorem permutations.converse_converse (I p : Set)
+  requires hp : p ∈ permutations(I)
+  shows converse(converse(p, I, I), I, I) = p
+proof
+  have inverse := permutations.converse with hp
+  have twice := permutations.converse with inverse
+  have function := permutations.function with hp
+  have twiceFunction := permutations.function with twice
+  have same : ∀ x ∈ I, converse(converse(p, I, I), I, I)(x) = p(x)
+    intros x hx
+    have image := permutations.apply_closed with hp, hx
+    have back := permutations.inverse_apply at I, p, x with hp, hx
+    have again := permutations.inverse_apply at I, converse(p, I, I), p(x)
+      with inverse, image
+    rw back at again
+    exact again
+  exact FunctionBetween.ext with twiceFunction, function, same
+
+theorem permutationInverseMap.bijective (I : Set)
+  shows BijectiveBetween(permutationInverseMap(I), permutations(I),
+    permutations(I))
+proof
+  have function := permutationInverseMap.function at I
+  have law : ∀ p ∈ permutations(I),
+      permutationInverseMap(I)(permutationInverseMap(I)(p)) = p
+    intros p hp
+    have inverse := permutations.converse with hp
+    have first := permutationInverseMap.value at I, p with hp
+    have second := permutationInverseMap.value at I, converse(p, I, I)
+      with inverse
+    rw [first, second]
+    exact permutations.converse_converse with hp
+  exact Bijective.of_two_sided_inverse with function, function, law, law
+
+section NatDeterminants
+variable (A add zero neg mul one : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+hypothesis ring : IsCommRing(R)
+
+theorem signPower.square (c : Nat)
+  shows monoidPow(mul, one, neg(one), c) * monoidPow(mul, one, neg(one), c) =
+    R[1]
+proof
+  induction c with
+  | zero =>
+    rw monoidPow.zero
+    ring
+  | succ(k) using ih =>
+    have ordinary := IsCommRing.ring with ring
+    have multiplicative := IsRing.multiplicative with ordinary
+    have unitIn := IsMonoid.unit_in_carrier with multiplicative
+    have negative := IsRing.neg_closed with ordinary, unitIn
+    have closed := monoidPow.closed at A, mul, one, neg(one), k
+      with multiplicative, negative
+    rw monoidPow.succ
+    have e : call2(mul, call2(mul, neg(one), monoidPow(mul, one, neg(one), k)),
+        call2(mul, neg(one), monoidPow(mul, one, neg(one), k))) =
+      call2(mul, monoidPow(mul, one, neg(one), k),
+        monoidPow(mul, one, neg(one), k)) by ring
+    rw [e, ih]
+
+theorem permutationSign.square (n : Nat) (p : Set)
+  shows permutationSign(n, R, p) * permutationSign(n, R, p) = R[1]
+proof
+  have finite := inversions.finite at n, p with (Finite.natural at n)
+  have count := cardinality.nat at inversions(n, p) with finite
+  unfold permutationSign
+  exact signPower.square at A, add, zero, neg, mul, one,
+    cardinality(inversions(n, p)) with ring
+
+theorem permutationSign.converse (n : Nat) (p : Set)
+  requires hp : p ∈ permutations(n)
+  shows permutationSign(n, R, converse(p, n, n)) = permutationSign(n, R, p)
+proof
+  have finite := Finite.natural at n
+  have inverse := permutations.converse with hp
+  have split := permutationSign.compose at A, add, zero, neg, mul, one, n, p,
+    converse(p, n, n) with ring, hp, inverse
+  have cancel := permutations.compose_converse at n, p with hp
+  have unit := permutationSign.identity at A, add, zero, neg, mul, one, n
+    with ring
+  rw [cancel, unit] at split
+  have square := permutationSign.square at A, add, zero, neg, mul, one, n, p
+    with ring
+  have s := permutationSign.closed at A, add, zero, neg, mul, one, n, p
+    with ring, finite
+  have t := permutationSign.closed at A, add, zero, neg, mul, one, n,
+    converse(p, n, n) with ring, finite
+  have e1 : permutationSign(n, R, converse(p, n, n)) =
+      permutationSign(n, R, converse(p, n, n)) *
+        (permutationSign(n, R, p) * permutationSign(n, R, p))
+    rw square
+    ring
+  have e2 : permutationSign(n, R, converse(p, n, n)) *
+      (permutationSign(n, R, p) * permutationSign(n, R, p)) =
+    (permutationSign(n, R, p) * permutationSign(n, R, converse(p, n, n))) *
+      permutationSign(n, R, p) by ring
+  have e3 : (permutationSign(n, R, p) * permutationSign(n, R, converse(p, n, n))) *
+      permutationSign(n, R, p) = permutationSign(n, R, p)
+    rw ← split
+    ring
+  rw [e1, e2, e3]
+
+theorem determinant.transpose (n : Nat) (M N : Set)
+  requires matrixM : RingMatrix(n, R, M)
+  requires matrixN : RingMatrix(n, R, N)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n, N[i, j] = M[j, i]
+  shows determinant(n, R, N) = determinant(n, R, M)
+proof
+  have finite := Finite.natural at n
+  have permutationsFinite := permutations.finite at n with finite
+  have termsN := determinantTerms.function at n, A, add, zero, neg, mul, one, N
+    with ring, finite, matrixN
+  have termsM := determinantTerms.function at n, A, add, zero, neg, mul, one, M
+    with ring, finite, matrixM
+  have inverseBijective := permutationInverseMap.bijective at n
+  have values : ∀ p ∈ permutations(n),
+      determinantTerms(n, R, N)(p) =
+      determinantTerms(n, R, M)(permutationInverseMap(n)(p))
+    intros p hp
+    have inverse := permutations.converse with hp
+    have mapValue := permutationInverseMap.value at n, p with hp
+    have termN := determinantTerms.value at n, A, add, zero, neg, mul, one, N, p
+      with ring, finite, matrixN, hp
+    have termM := determinantTerms.value at n, A, add, zero, neg, mul, one, M,
+      converse(p, n, n) with ring, finite, matrixM, inverse
+    have pBijective := permutations.bijective with hp
+    have qBijective := permutations.bijective with inverse
+    have entriesN := permutationEntries.function at n, A, N, p
+      with matrixN, pBijective
+    have entriesM := permutationEntries.function at n, A, M, converse(p, n, n)
+      with matrixM, qBijective
+    have products : ∀ i ∈ n, permutationEntries(n, A, N, p)(i) =
+        permutationEntries(n, A, M, converse(p, n, n))(p(i))
+      intros i hi
+      have image := permutations.apply_closed with hp, hi
+      have valueN := permutationEntries.value at n, A, N, p, i
+        with matrixN, pBijective, hi
+      have valueM := permutationEntries.value at n, A, M, converse(p, n, n), p(i)
+        with matrixM, qBijective, image
+      have cancel := permutations.inverse_apply at n, p, i with hp, hi
+      have swap := entries with i, hi, p(i), image
+      rw [valueN, valueM, cancel, swap]
+    have productEq := finiteRingProduct.reindex at n, n, A, add, zero, neg, mul,
+      one, permutationEntries(n, A, N, p),
+      permutationEntries(n, A, M, converse(p, n, n)), p
+      with ring, finite, entriesN, entriesM, pBijective, products
+    have sign := permutationSign.converse at A, add, zero, neg, mul, one, n, p
+      with ring, hp
+    rw [mapValue, termN, termM, productEq, sign]
+  have reindexed := finiteRingSum.reindex at permutations(n), permutations(n), A,
+    add, zero, neg, mul, one, determinantTerms(n, R, N), determinantTerms(n, R, M),
+    permutationInverseMap(n)
+    with ring, permutationsFinite, termsN, termsM, inverseBijective, values
+  unfold determinant
+  exact reindexed
+
+theorem determinant.column_permutation (n : Nat) (M N σ : Set)
+  requires matrixM : RingMatrix(n, R, M)
+  requires matrixN : RingMatrix(n, R, N)
+  requires permutation : σ ∈ permutations(n)
+  requires columns : ∀ i ∈ n, ∀ j ∈ n, N[i, j] = M[i, σ(j)]
+  shows determinant(n, R, N) = permutationSign(n, R, σ) * determinant(n, R, M)
+proof
+  have functionM := matrixM
+  unfold RingMatrix at functionM
+  have functionN := matrixN
+  unfold RingMatrix at functionN
+  have tM := transposedMatrix.function at n, n, A, M with functionM
+  have tN := transposedMatrix.function at n, n, A, N with functionN
+  have matrixTM : RingMatrix(n, R, transposedMatrix(n, n, A, M))
+    unfold RingMatrix
+    exact tM
+  have matrixTN : RingMatrix(n, R, transposedMatrix(n, n, A, N))
+    unfold RingMatrix
+    exact tN
+  have entriesM : ∀ i ∈ n, ∀ j ∈ n, transposedMatrix(n, n, A, M)[i, j] = M[j, i]
+    intros i hi j hj
+    exact transposedMatrix.pair at n, n, A, M, j, i with functionM, hj, hi
+  have entriesN : ∀ i ∈ n, ∀ j ∈ n, transposedMatrix(n, n, A, N)[i, j] = N[j, i]
+    intros i hi j hj
+    exact transposedMatrix.pair at n, n, A, N, j, i with functionN, hj, hi
+  have rows : ∀ i ∈ n, ∀ j ∈ n,
+      transposedMatrix(n, n, A, N)[i, j] = transposedMatrix(n, n, A, M)[σ(i), j]
+    intros i hi j hj
+    have image := permutations.apply_closed with permutation, hi
+    have left := entriesN with i, hi, j, hj
+    have right := entriesM with σ(i), image, j, hj
+    have middle := columns with j, hj, i, hi
+    rw [left, right, middle]
+  have permuted := determinant.row_permutation at A, add, zero, neg, mul, one, n,
+    transposedMatrix(n, n, A, M), transposedMatrix(n, n, A, N), σ
+    with ring, matrixTM, matrixTN, permutation, rows
+  have backN := determinant.transpose at A, add, zero, neg, mul, one, n, N,
+    transposedMatrix(n, n, A, N) with ring, matrixN, matrixTN, entriesN
+  have backM := determinant.transpose at A, add, zero, neg, mul, one, n, M,
+    transposedMatrix(n, n, A, M) with ring, matrixM, matrixTM, entriesM
+  rw [← backN, ← backM]
+  exact permuted
+
+-- Conjugating by a permutation keeps the determinant.
+theorem determinant.conjugate (n : Nat) (M N σ : Set)
+  requires matrixM : RingMatrix(n, R, M)
+  requires matrixN : RingMatrix(n, R, N)
+  requires permutation : σ ∈ permutations(n)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n, N[i, j] = M[σ(i), σ(j)]
+  shows determinant(n, R, N) = determinant(n, R, M)
+proof
+  have function := permutations.function with permutation
+  have rowsMatrix := selectedRows.matrix at n, A, M, σ with matrixM, function
+  have rows : ∀ i ∈ n, ∀ j ∈ n, selectedRows(n, A, M, σ)[i, j] = M[σ(i), j]
+    intros i hi j hj
+    exact selectedRows.entry at n, A, M, σ, i, j with matrixM, function, hi, hj
+  have columns : ∀ i ∈ n, ∀ j ∈ n, N[i, j] = selectedRows(n, A, M, σ)[i, σ(j)]
+    intros i hi j hj
+    have image := permutations.apply_closed with permutation, hj
+    have value := rows with i, hi, σ(j), image
+    have given := entries with i, hi, j, hj
+    rw [given, value]
+  have first := determinant.row_permutation at A, add, zero, neg, mul, one, n,
+    M, selectedRows(n, A, M, σ), σ with ring, matrixM, rowsMatrix, permutation, rows
+  have second := determinant.column_permutation at A, add, zero, neg, mul, one,
+    n, selectedRows(n, A, M, σ), N, σ
+    with ring, rowsMatrix, matrixN, permutation, columns
+  have square := permutationSign.square at A, add, zero, neg, mul, one, n, σ
+    with ring
+  have finite := Finite.natural at n
+  have s := permutationSign.closed at A, add, zero, neg, mul, one, n, σ
+    with ring, finite
+  have d := determinant.closed at A, add, zero, neg, mul, one, M, n
+    with ring, matrixM
+  rw [second, first]
+  have e : permutationSign(n, R, σ) * (permutationSign(n, R, σ) *
+      determinant(n, R, M)) =
+    (permutationSign(n, R, σ) * permutationSign(n, R, σ)) * determinant(n, R, M)
+    by ring
+  rw [e, square]
+  ring
+
+-- The cofactor at (b, a) is the determinant with row b replaced by the
+-- unit row e_a.
+theorem cofactorRow.unit_row (n : Nat) (M b a : Set)
+  requires matrix : RingMatrix(n, R, M)
+  requires row : b ∈ n
+  requires column : a ∈ n
+  shows cofactorRow(n, R, M, b)(a) = determinant(n, R,
+    matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a))
+proof
+  have finite := Finite.natural at n
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have identity := identityMatrix.matrix at A, add, zero, neg, mul, one, n
+    with ring
+  have replaced := matrixReplaceRow.matrix at n, A, M, identityMatrix(n, R), b, a
+    with matrix, identity, column
+  have outside : ∀ k ∈ n, k ≠ b → ∀ j ∈ n,
+      matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a)[k, j] = M[k, j]
+    intros k hk different j hj
+    have entry := matrixReplaceRow.entry at n, A, M, identityMatrix(n, R), b, a,
+      k, j with matrix, identity, column, hk, hj
+    exact entry.right with different
+  have expansion := determinant.row_expansion at A, add, zero, neg, mul, one, n,
+    M, matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a), b
+    with ring, matrix, replaced, row, outside
+  have weights := cofactorPairWeights.function at n, A, add, zero, neg, mul, one,
+    M, matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a), b, b
+    with ring, finite, matrix, replaced, row
+  have cofactors := cofactorRow.function at n, A, add, zero, neg, mul, one, M, b
+    with ring, finite, matrix
+  have cofactorIn := FunctionBetween.apply_closed with cofactors, column
+  have single := coefficientSingle.function at n, A, zero,
+    cofactorRow(n, R, M, b)(a), a with zeroIn, cofactorIn
+  have values : ∀ j ∈ n,
+      cofactorPairWeights(n, R, M,
+        matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a), b, b)(j) =
+      coefficientSingle(n, A, zero, cofactorRow(n, R, M, b)(a), a)(j)
+    intros j hj
+    have value := cofactorPairWeights.value at n, A, add, zero, neg, mul, one,
+      M, matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a), b, b, j
+      with ring, finite, matrix, replaced, row, hj
+    have entry := matrixReplaceRow.entry at n, A, M, identityMatrix(n, R), b, a,
+      b, j with matrix, identity, column, row, hj
+    have same : b = b by rfl
+    have rowValue := entry.left with same
+    have unitEntry := identityMatrix.entry at A, add, zero, neg, mul, one, n, a, j
+      with ring, column, hj
+    have cofactorJ := FunctionBetween.apply_closed with cofactors, hj
+    rw [value, rowValue, unitEntry]
+    have alternatives : j = a ∨ j ≠ a by tauto
+    cases alternatives with equal | different
+    . have reverse : a = j by cc
+      have delta := singleValue.same at A, zero, one, j, a
+        with zeroIn, oneIn, reverse
+      have picked := coefficientSingle.same at n, A, zero,
+        cofactorRow(n, R, M, b)(a), a with zeroIn, cofactorIn, column
+      rw [delta, equal, picked]
+      ring
+    . have reverse : a ≠ j
+        intro e
+        apply different
+        cc
+      have delta := singleValue.other at A, zero, one, j, a
+        with zeroIn, oneIn, reverse
+      have picked := coefficientSingle.other at n, A, zero,
+        cofactorRow(n, R, M, b)(a), a, j with zeroIn, cofactorIn, hj, different
+      rw [delta, picked]
+      ring
+  have congruent := finiteRingSum.congr at n, A, add, zero, neg, mul, one,
+    cofactorPairWeights(n, R, M,
+      matrixReplaceRow(n, A, M, identityMatrix(n, R), b, a), b, b),
+    coefficientSingle(n, A, zero, cofactorRow(n, R, M, b)(a), a)
+    with ring, finite, weights, single, values
+  have total := finiteRingSum.single at n, A, add, zero, neg, mul, one,
+    cofactorRow(n, R, M, b)(a), a with ring, finite, cofactorIn, column
+  unfold cofactorPairing at expansion
+  rw [expansion, congruent, total]
+
+-- The adjugate commutes with conjugation by a permutation.
+theorem adjugate.conjugate (n : Nat) (M N σ a b : Set)
+  requires matrixM : RingMatrix(n, R, M)
+  requires matrixN : RingMatrix(n, R, N)
+  requires permutation : σ ∈ permutations(n)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n, N[i, j] = M[σ(i), σ(j)]
+  requires row : a ∈ n
+  requires column : b ∈ n
+  shows adjugate(n, R, N)[a, b] = adjugate(n, R, M)[σ(a), σ(b)]
+proof
+  have finite := Finite.natural at n
+  have ordinary := IsCommRing.ring with ring
+  have zeroIn := IsRing.zero_in_carrier with ordinary
+  have multiplicative := IsRing.multiplicative with ordinary
+  have oneIn := IsMonoid.unit_in_carrier with multiplicative
+  have identity := identityMatrix.matrix at A, add, zero, neg, mul, one, n
+    with ring
+  have imageA := permutations.apply_closed with permutation, row
+  have imageB := permutations.apply_closed with permutation, column
+  have adjN := adjugate.entry at n, A, add, zero, neg, mul, one, N, a, b
+    with ring, finite, matrixN, row, column
+  have adjM := adjugate.entry at n, A, add, zero, neg, mul, one, M, σ(a), σ(b)
+    with ring, finite, matrixM, imageA, imageB
+  have cofactorN := cofactorRow.unit_row at A, add, zero, neg, mul, one, n, N, b, a
+    with ring, matrixN, column, row
+  have cofactorM := cofactorRow.unit_row at A, add, zero, neg, mul, one, n, M,
+    σ(b), σ(a) with ring, matrixM, imageB, imageA
+  have replacedN := matrixReplaceRow.matrix at n, A, N, identityMatrix(n, R), b, a
+    with matrixN, identity, row
+  have replacedM := matrixReplaceRow.matrix at n, A, M, identityMatrix(n, R),
+    σ(b), σ(a) with matrixM, identity, imageA
+  have conjugated : ∀ i ∈ n, ∀ j ∈ n,
+      matrixReplaceRow(n, A, N, identityMatrix(n, R), b, a)[i, j] =
+      matrixReplaceRow(n, A, M, identityMatrix(n, R), σ(b), σ(a))[σ(i), σ(j)]
+    intros i hi j hj
+    have imageI := permutations.apply_closed with permutation, hi
+    have imageJ := permutations.apply_closed with permutation, hj
+    have entryN := matrixReplaceRow.entry at n, A, N, identityMatrix(n, R), b, a,
+      i, j with matrixN, identity, row, hi, hj
+    have entryM := matrixReplaceRow.entry at n, A, M, identityMatrix(n, R),
+      σ(b), σ(a), σ(i), σ(j) with matrixM, identity, imageA, imageI, imageJ
+    have alternatives : i = b ∨ i ≠ b by tauto
+    cases alternatives with onRow | offRow
+    . have mapped : σ(i) = σ(b) by rw onRow
+      have leftValue := entryN.left with onRow
+      have rightValue := entryM.left with mapped
+      have unitN := identityMatrix.entry at A, add, zero, neg, mul, one, n, a, j
+        with ring, row, hj
+      have unitM := identityMatrix.entry at A, add, zero, neg, mul, one, n,
+        σ(a), σ(j) with ring, imageA, imageJ
+      rw [leftValue, rightValue, unitN, unitM]
+      have cases : a = j ∨ a ≠ j by tauto
+      cases cases with equal | different
+      . have equalImage : σ(a) = σ(j) by rw equal
+        have deltaN := singleValue.same at A, zero, one, j, a
+          with zeroIn, oneIn, equal
+        have deltaM := singleValue.same at A, zero, one, σ(j), σ(a)
+          with zeroIn, oneIn, equalImage
+        rw [deltaN, deltaM]
+      . have differentImage : σ(a) ≠ σ(j)
+          intro e
+          apply different
+          exact permutations.apply_cancel with permutation, row, hj, e
+        have deltaN := singleValue.other at A, zero, one, j, a
+          with zeroIn, oneIn, different
+        have deltaM := singleValue.other at A, zero, one, σ(j), σ(a)
+          with zeroIn, oneIn, differentImage
+        rw [deltaN, deltaM]
+    . have mapped : σ(i) ≠ σ(b)
+        intro e
+        apply offRow
+        exact permutations.apply_cancel with permutation, hi, column, e
+      have leftValue := entryN.right with offRow
+      have rightValue := entryM.right with mapped
+      have given := entries with i, hi, j, hj
+      rw [leftValue, rightValue, given]
+  have same := determinant.conjugate at A, add, zero, neg, mul, one, n,
+    matrixReplaceRow(n, A, M, identityMatrix(n, R), σ(b), σ(a)),
+    matrixReplaceRow(n, A, N, identityMatrix(n, R), b, a), σ
+    with ring, replacedM, replacedN, permutation, conjugated
+  rw [adjN, adjM, cofactorN, cofactorM, same]
+
+end NatDeterminants
+
+-- An enumeration card(n) → n of a finite set.
+theorem Finite.enumeration (n : Set)
+  requires finite : Finite(n)
+  shows ∃ e, BijectiveBetween(e, cardinality(n), n)
+proof
+  have correct := cardinality.correct with finite
+  obtain ⟨natural, f, bijective⟩ := correct
+  witness converse(f, n, cardinality(n))
+  exact converse.bijective with bijective
+
 -- Section: Laws of the determinant
 section Determinants
 variable (R : Set)
 hypothesis ring : CommRing(R)
+
+-- Every enumeration of n gives the same transported determinant.
+theorem matDet.enumerations_agree (n A e f : Set)
+  requires finite : Finite(n)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires first : BijectiveBetween(e, cardinality(n), n)
+  requires second : BijectiveBetween(f, cardinality(n), n)
+  shows determinant(cardinality(n), R.carrier, R.add, R.zero, R.neg, R.mul,
+      R.one, submatrix(R, cardinality(n), cardinality(n), A, f, f)) =
+    determinant(cardinality(n), R.carrier, R.add, R.zero, R.neg, R.mul,
+      R.one, submatrix(R, cardinality(n), cardinality(n), A, e, e))
+proof
+  have parts := CommRing.parts with ring
+  have count := cardinality.nat at n with finite
+  have eFunction := Injective.function with (Bijective.injective with first)
+  have fFunction := Injective.function with (Bijective.injective with second)
+  have inverse := converse.bijective with first
+  have inverseFunction := converse.function_of_bijective with first
+  have composed := compose.bijective at converse(e, cardinality(n), n), f,
+    cardinality(n), n, cardinality(n) with second, inverse
+  have permutation := permutations.of_bijective with composed
+  have matrixE := submatrix.mem_of at R, n, n, cardinality(n), cardinality(n),
+    A, e, e with matrix, eFunction, eFunction
+  have matrixF := submatrix.mem_of at R, n, n, cardinality(n), cardinality(n),
+    A, f, f with matrix, fFunction, fFunction
+  have ringE : RingMatrix(cardinality(n), R.carrier,
+      submatrix(R, cardinality(n), cardinality(n), A, e, e))
+    unfold RingMatrix
+    exact matrixSpace.function with matrixE
+  have ringF : RingMatrix(cardinality(n), R.carrier,
+      submatrix(R, cardinality(n), cardinality(n), A, f, f))
+    unfold RingMatrix
+    exact matrixSpace.function with matrixF
+  have entries : ∀ i ∈ cardinality(n), ∀ j ∈ cardinality(n),
+      submatrix(R, cardinality(n), cardinality(n), A, f, f)[i, j] =
+      submatrix(R, cardinality(n), cardinality(n), A, e, e)[
+        compose(converse(e, cardinality(n), n), f, cardinality(n), n,
+          cardinality(n))(i),
+        compose(converse(e, cardinality(n), n), f, cardinality(n), n,
+          cardinality(n))(j)]
+    intros i hi j hj
+    have si := compose.apply at converse(e, cardinality(n), n), f,
+      cardinality(n), n, cardinality(n), i with fFunction, inverseFunction, hi
+    have sj := compose.apply at converse(e, cardinality(n), n), f,
+      cardinality(n), n, cardinality(n), j with fFunction, inverseFunction, hj
+    have imageI := permutations.apply_closed with permutation, hi
+    have imageJ := permutations.apply_closed with permutation, hj
+    have fi := FunctionBetween.apply_closed with fFunction, hi
+    have fj := FunctionBetween.apply_closed with fFunction, hj
+    have backI := Bijective.apply_inverse at e, cardinality(n), n, f(i)
+      with first, fi
+    have backJ := Bijective.apply_inverse at e, cardinality(n), n, f(j)
+      with first, fj
+    have valueF := submatrix.at at R, n, n, cardinality(n), cardinality(n), A,
+      f, f, i, j with matrix, fFunction, fFunction, hi, hj
+    have valueE := submatrix.at at R, n, n, cardinality(n), cardinality(n), A,
+      e, e, compose(converse(e, cardinality(n), n), f, cardinality(n), n,
+        cardinality(n))(i),
+      compose(converse(e, cardinality(n), n), f, cardinality(n), n,
+        cardinality(n))(j) with matrix, eFunction, eFunction, imageI, imageJ
+    rw [valueF, valueE, si, sj, backI, backJ]
+  exact determinant.conjugate at R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+    cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e),
+    submatrix(R, cardinality(n), cardinality(n), A, f, f),
+    compose(converse(e, cardinality(n), n), f, cardinality(n), n,
+      cardinality(n)) with parts, ringE, ringF, permutation, entries
 
 theorem matDet.mem (n A : Set)
   requires finite : Finite(n)
@@ -130,7 +723,43 @@ theorem matDet.enumeration (n A e : Set)
     R.zero, R.neg, R.mul, R.one,
     submatrix(R, cardinality(n), cardinality(n), A, e, e))
 proof
-  sorry
+  have parts := CommRing.parts with ring
+  have count := cardinality.nat at n with finite
+  have eFunction := Injective.function with (Bijective.injective with enumeration)
+  have matrixE := submatrix.mem_of at R, n, n, cardinality(n), cardinality(n),
+    A, e, e with matrix, eFunction, eFunction
+  have ringE : RingMatrix(cardinality(n), R.carrier,
+      submatrix(R, cardinality(n), cardinality(n), A, e, e))
+    unfold RingMatrix
+    exact matrixSpace.function with matrixE
+  have value := determinant.closed at R.carrier, R.add, R.zero, R.neg, R.mul,
+    R.one, submatrix(R, cardinality(n), cardinality(n), A, e, e),
+    cardinality(n) with parts, ringE
+  have values : matDetValues(R, n, A) = {determinant(cardinality(n), R.carrier,
+      R.add, R.zero, R.neg, R.mul, R.one,
+      submatrix(R, cardinality(n), cardinality(n), A, e, e))}
+    ext d
+    constructor
+    . intro member
+      unfold matDetValues at member
+      obtain ⟨dIn, law⟩ := member
+      have equal := law with enumeration
+      rw singleton.membership
+      exact equal
+    . intro member
+      rw singleton.membership at member
+      unfold matDetValues
+      constructor
+      . rw member
+        exact value
+      . intros f hf
+        rw member
+        have agree := matDet.enumerations_agree at R, n, A, e, f
+          with ring, finite, matrix, enumeration, hf
+        symm
+        exact agree
+  unfold matDet
+  rw [values, union.singleton]
 
 -- adj A likewise, entrywise along any enumeration of n.
 theorem matAdjugate.enumeration (n A e : Set)
