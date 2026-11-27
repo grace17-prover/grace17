@@ -919,7 +919,34 @@ theorem realFiniteSum.prefix (u : Set, n : Nat)
   requires values : ∀ i ∈ n, u(i) ∈ ℝ
   shows realFiniteSum(u, n) = realPartialSum(u, n)
 proof
-  sorry
+  induction n
+  | zero =>
+    intro values
+    have e := realFiniteSum.empty at u
+    rw realPartialSum.zero
+    unfold zero
+    exact e
+  | succ(k) using ih =>
+    intro values
+    have valuesK : ∀ i ∈ k, u(i) ∈ ℝ
+      intros i hi
+      have sub : i ∈ succ(k) by simp [hi]
+      exact values with i, sub
+    have prev := ih with valuesK
+    have shape : succ(k) = k ∪ {k}
+      ext x
+      simp
+    have kIn : k ∈ succ(k) by simp
+    have uk := values with k, kIn
+    have fresh : k ∉ k
+      intro bad
+      exact membership.irreflexive with bad
+    have finK := Finite.natural at k
+    have ins := realFiniteSum.insert at u, k, k with finK, valuesK, uk, fresh
+    rw [realPartialSum.succ, shape, ins, prev]
+    have fReal := realFiniteSum.real at u, k with finK, valuesK
+    rw prev at fReal
+    linarith
 
 theorem realFiniteSum.nonneg (f F : Set)
   requires finite : Finite(F)
@@ -1613,6 +1640,76 @@ proof
   have inPre2 := functionPreimage.membership.forward with inPre
   exact inPre2.right
 
+-- A family extended by the identity off J sums over F as the family over
+-- F ∩ J.
+theorem groupFiniteSum.extend_one (G F J f g : Set)
+  requires abelian : AbelianGroup(G)
+  requires finite : Finite(F)
+  requires onJ : ∀ i ∈ F ∩ J, g(i) = f(i)
+  requires offJ : ∀ i ∈ F, i ∉ J → g(i) = G.one
+  requires values : ∀ i ∈ F ∩ J, f(i) ∈ G.carrier
+  shows groupFiniteSum(G, F, g) = groupFiniteSum(G, F ∩ J, f)
+proof
+  have group := AbelianGroup.to_group with abelian
+  have group2 := group
+  obtain ⟨gshape, mulF, oneIn, invF, assoc, oneMul, mulOne, invMul, mulInv⟩ := group2
+  have PF : F ∩ J ⊆ F
+    intros i hi
+    simp at hi
+    exact hi.left
+  have DF : F ∖ J ⊆ F
+    intros i hi
+    simp at hi
+    exact hi.left
+  have Pfin := Finite.subset with finite, PF
+  have Dfin := Finite.subset with finite, DF
+  have shape : F = (F ∩ J) ∪ (F ∖ J)
+    ext y
+    constructor
+    . intro hy
+      by_cases yJ : y ∈ J
+      . exact union2.left at y, F ∩ J, F ∖ J with (intersection.membership.backward with hy, yJ)
+      . have d : y ∈ F ∖ J by simp [hy, yJ]
+        exact union2.right at y, F ∩ J, F ∖ J with d
+    . intro hy
+      have c := union2.membership.forward with hy
+      cases c with a | b
+      . exact PF with y, a
+      . exact DF with y, b
+  have disjointPD : Disjoint(F ∩ J, F ∖ J)
+    unfold Disjoint
+    ext y
+    constructor
+    . intro hy
+      exfalso
+      simp at hy
+      exact hy.right.right with hy.left.right
+    . intro hy
+      exfalso
+      exact set.empty with hy
+  have vG : ∀ i ∈ (F ∩ J) ∪ (F ∖ J), g(i) ∈ G.carrier
+    intros i hi
+    have c := union2.membership.forward with hi
+    cases c with a | b
+    . have e := onJ with i, a
+      rw e
+      exact values with i, a
+    . simp at b
+      have e := offJ with i, b.left, b.right
+      rw e
+      exact oneIn
+  have split := groupFiniteSum.disjoint_union at G, F ∩ J, F ∖ J, g with abelian, Pfin, Dfin, disjointPD, vG
+  have zeroD : ∀ i ∈ F ∖ J, g(i) = G.one
+    intros i hi
+    simp at hi
+    exact offJ with i, hi.left, hi.right
+  have z := groupFiniteSum.zero at G, F ∖ J, g with abelian, Dfin, zeroD
+  have c := groupFiniteSum.congr at G, F ∩ J, g, f with onJ
+  have member := groupFiniteSum.member at G, F ∩ J, f with abelian, Pfin, values
+  rw ← shape at split
+  rw [split, z, c]
+  exact mulOne with groupFiniteSum(G, F ∩ J, f), member
+
 -- Mathlib's tsum_subtype: summing over a subset J of I is summing over I
 -- the family extended by 0.
 theorem HasSum.subset_iff (G X f g I J s : Set)
@@ -1624,7 +1721,107 @@ theorem HasSum.subset_iff (G X f g I J s : Set)
   requires values : ∀ i ∈ J, f(i) ∈ G.carrier
   shows HasSum(G, X, f, J, s) ↔ HasSum(G, X, g, I, s)
 proof
-  sorry
+  constructor
+  . intro sum
+    obtain ⟨sIn, tail⟩ := sum
+    unfold HasSum
+    refine ⟨sIn, ?_⟩
+    intros U hU
+    obtain ⟨F0, F0J, F0fin, tail0⟩ := tail with U, hU
+    have F0I : F0 ⊆ I
+      intros i hi
+      exact inside with i, (F0J with i, hi)
+    refine ⟨F0, F0I, F0fin, ?_⟩
+    intros F FI Ffin sub
+    have onJ2 : ∀ i ∈ F ∩ J, g(i) = f(i)
+      intros i hi
+      simp at hi
+      exact onJ with i, hi.right
+    have offJ2 : ∀ i ∈ F, i ∉ J → g(i) = G.one
+      intros i hi out
+      exact offJ with i, (FI with i, hi), out
+    have values2 : ∀ i ∈ F ∩ J, f(i) ∈ G.carrier
+      intros i hi
+      simp at hi
+      exact values with i, hi.right
+    have key := groupFiniteSum.extend_one at G, F, J, f, g with abelian, Ffin, onJ2, offJ2, values2
+    have PJ : F ∩ J ⊆ J
+      intros i hi
+      simp at hi
+      exact hi.right
+    have PF : F ∩ J ⊆ F
+      intros i hi
+      simp at hi
+      exact hi.left
+    have Pfin := Finite.subset with Ffin, PF
+    have sub0 : F0 ⊆ F ∩ J
+      intros i hi
+      exact intersection.membership.backward with (sub with i, hi), (F0J with i, hi)
+    rw key
+    exact tail0 with F ∩ J, PJ, Pfin, sub0
+  . intro sum
+    obtain ⟨sIn, tail⟩ := sum
+    unfold HasSum
+    refine ⟨sIn, ?_⟩
+    intros U hU
+    obtain ⟨F0, F0I, F0fin, tail0⟩ := tail with U, hU
+    have F0J : F0 ∩ J ⊆ J
+      intros i hi
+      simp at hi
+      exact hi.right
+    have F0JF : F0 ∩ J ⊆ F0
+      intros i hi
+      simp at hi
+      exact hi.left
+    have F0Jfin := Finite.subset with F0fin, F0JF
+    refine ⟨F0 ∩ J, F0J, F0Jfin, ?_⟩
+    intros F FJ Ffin sub
+    have DF0 : F0 ∖ J ⊆ F0
+      intros i hi
+      simp at hi
+      exact hi.left
+    have Dfin := Finite.subset with F0fin, DF0
+    have Efin := Finite.union with Ffin, Dfin
+    have EI : F ∪ (F0 ∖ J) ⊆ I
+      intros i hi
+      have c := union2.membership.forward with hi
+      cases c with a | b
+      . exact inside with i, (FJ with i, a)
+      . exact F0I with i, (DF0 with i, b)
+    have F0E : F0 ⊆ F ∪ (F0 ∖ J)
+      intros i hi
+      by_cases iJ : i ∈ J
+      . exact union2.left at i, F, F0 ∖ J with (sub with i, (intersection.membership.backward with hi, iJ))
+      . have d := difference.membership.backward with ⟨hi, iJ⟩
+        exact union2.right at i, F, F0 ∖ J with d
+    have inU := tail0 with F ∪ (F0 ∖ J), EI, Efin, F0E
+    have meet : (F ∪ (F0 ∖ J)) ∩ J = F
+      ext y
+      constructor
+      . intro hy
+        have hy2 := intersection.membership.forward with hy
+        have c := union2.membership.forward with hy2.left
+        cases c with a | b
+        . exact a
+        . exfalso
+          simp at b
+          exact b.right with hy2.right
+      . intro hy
+        exact intersection.membership.backward with (union2.left at y, F, F0 ∖ J with hy), (FJ with y, hy)
+    have onJ2 : ∀ i ∈ (F ∪ (F0 ∖ J)) ∩ J, g(i) = f(i)
+      intros i hi
+      simp at hi
+      exact onJ with i, hi.right
+    have offJ2 : ∀ i ∈ F ∪ (F0 ∖ J), i ∉ J → g(i) = G.one
+      intros i hi out
+      exact offJ with i, (EI with i, hi), out
+    have values2 : ∀ i ∈ (F ∪ (F0 ∖ J)) ∩ J, f(i) ∈ G.carrier
+      intros i hi
+      simp at hi
+      exact values with i, hi.right
+    have key := groupFiniteSum.extend_one at G, F ∪ (F0 ∖ J), J, f, g with abelian, Efin, onJ2, offJ2, values2
+    rw [key, meet] at inU
+    exact inU
 
 -- Reindexing along a bijection (Mathlib's Equiv.tsum_eq).
 theorem HasSum.reindex (G X e f h I J s : Set)
@@ -1656,7 +1853,87 @@ theorem HasSum.union (G X f I J s t : Set)
   requires second : HasSum(G, X, f, J, t)
   shows HasSum(G, X, f, I ∪ J, G.mul(s, t))
 proof
-  sorry
+  have group := AbelianGroup.to_group with abelian
+  obtain ⟨sIn, tailS⟩ := first
+  obtain ⟨tIn, tailT⟩ := second
+  have stIn := Group.mul_mem at G, s, t with group, sIn, tIn
+  unfold HasSum
+  refine ⟨stIn, ?_⟩
+  intros U hU
+  obtain ⟨A, hA, B, hB, AB⟩ := TopologicalGroup.mul_nhds with topological, sIn, tIn, hU
+  obtain ⟨F0, F0I, F0fin, tail0⟩ := tailS with A, hA
+  obtain ⟨F1, F1J, F1fin, tail1⟩ := tailT with B, hB
+  have FI : F0 ∪ F1 ⊆ I ∪ J
+    intros i hi
+    have hi2 := union2.membership.forward with hi
+    cases hi2 with a | b
+    . exact union2.left at i, I, J with (F0I with i, a)
+    . exact union2.right at i, I, J with (F1J with i, b)
+  have Ffin := Finite.union with F0fin, F1fin
+  refine ⟨F0 ∪ F1, FI, Ffin, ?_⟩
+  intros F FI2 Fin2 sub
+  have PI : F ∩ I ⊆ I
+    intros i hi
+    simp at hi
+    exact hi.right
+  have QJ : F ∩ J ⊆ J
+    intros i hi
+    simp at hi
+    exact hi.right
+  have PF : F ∩ I ⊆ F
+    intros i hi
+    simp at hi
+    exact hi.left
+  have QF : F ∩ J ⊆ F
+    intros i hi
+    simp at hi
+    exact hi.left
+  have Pfin := Finite.subset with Fin2, PF
+  have Qfin := Finite.subset with Fin2, QF
+  have sub0 : F0 ⊆ F ∩ I
+    intros i hi
+    have iF := sub with i, (union2.left at i, F0, F1 with hi)
+    exact intersection.membership.backward with iF, (F0I with i, hi)
+  have sub1 : F1 ⊆ F ∩ J
+    intros i hi
+    have iF := sub with i, (union2.right at i, F0, F1 with hi)
+    exact intersection.membership.backward with iF, (F1J with i, hi)
+  have shape : F = (F ∩ I) ∪ (F ∩ J)
+    ext y
+    constructor
+    . intro hy
+      have yIJ := FI2 with y, hy
+      have c := union2.membership.forward with yIJ
+      cases c with yI | yJ
+      . exact union2.left at y, F ∩ I, F ∩ J with (intersection.membership.backward with hy, yI)
+      . exact union2.right at y, F ∩ I, F ∩ J with (intersection.membership.backward with hy, yJ)
+    . intro hy
+      have c := union2.membership.forward with hy
+      cases c with yP | yQ
+      . exact PF with y, yP
+      . exact QF with y, yQ
+  have disjointPQ : Disjoint(F ∩ I, F ∩ J)
+    unfold Disjoint
+    ext y
+    constructor
+    . intro hy
+      have hy2 := intersection.membership.forward with hy
+      have yI := PI with y, hy2.left
+      have yJ := QJ with y, hy2.right
+      have both := intersection.membership.backward with yI, yJ
+      unfold Disjoint at disjoint
+      rw disjoint at both
+      exact both
+    . intro hy
+      exfalso
+      exact set.empty with hy
+  have vPQ : ∀ i ∈ (F ∩ I) ∪ (F ∩ J), f(i) ∈ G.carrier
+    intros i hi
+    rw ← shape at hi
+    exact values with i, (FI2 with i, hi)
+  have split := groupFiniteSum.disjoint_union at G, F ∩ I, F ∩ J, f with abelian, Pfin, Qfin, disjointPQ, vPQ
+  rw [shape, split]
+  exact AB with groupFiniteSum(G, F ∩ I, f), (tail0 with F ∩ I, PI, Pfin, sub0), groupFiniteSum(G, F ∩ J, f), (tail1 with F ∩ J, QJ, Qfin, sub1)
 
 -- Over ℕ the partial sums over {0, …, n − 1} tend to the sum.
 theorem HasSum.tendsto_prefix (G X f s u : Set)
