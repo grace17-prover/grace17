@@ -319,7 +319,7 @@ graph TD
 | GRH.Holomorphic | 515 | 515 | 0 |
 | GRH.Integral | 154 | 154 | 0 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
-| GRH.Topology.Compactness | 67 | 30 | 37 |
+| GRH.Topology.Compactness | 67 | 31 | 36 |
 | GRH.Topology.Groups | 52 | 10 | 42 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
 | GRH.Normed.Groups | 80 | 65 | 15 |
@@ -353,5 +353,5 @@ graph TD
 | GRH.Matrix.Groups | 92 | 78 | 14 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **6289** | **4180** | **2109** |
+| **total** | **6289** | **4181** | **2108** |
 <!-- /blueprint-status -->
