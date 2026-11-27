@@ -1,0 +1,699 @@
+-- Ext in the categories of abelian presheaves on small sites, by
+-- projective resolutions: the canonical resolution of an abelian presheaf
+-- N by the free presheaves on the elements of its successive syzygies;
+-- Extⁿ(N, F) as the cohomology of Hom(P•, F); Ext⁰ = Hom, vanishing on
+-- projectives and into injectives; the comparison theorem (chain maps
+-- over a morphism exist and are unique up to homotopy) and independence
+-- of the resolution; functoriality in both variables; the Yoneda product
+-- and the extension class of a short exact sequence; both long exact
+-- sequences; Ext along restriction to another site. This replaces
+-- Mathlib's Abelian.Ext (localization of the derived category, HasExt) in
+-- the source's `H := Ext N F n` (Etale/Defs.lean:59); every group here is
+-- a set, and no universe is involved.
+-- Part of the GRH blueprint.
+-- Planned home: Category/Ext and Category/Resolution.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Category.Ext
+import GRH.Category.Abelian
+
+-- Section: Hom groups
+-- Hom(G, F) between abelian presheaves on C, as an abelian group under
+-- componentwise addition, with its zero and negation.
+def zeroTransformation (C G F : Set) : Set :=
+  { (a, ((Functor.obj(G)(a), Functor.obj(F)(a)),
+      zeroGroupHom(Functor.obj(G)(a), Functor.obj(F)(a)))) | a ∈ Category.obj(C) }
+
+def negTransformation (C G F η : Set) : Set :=
+  { (a, ((Functor.obj(G)(a), Functor.obj(F)(a)),
+      negGroupHom(Functor.obj(G)(a), Functor.obj(F)(a), snd(η(a))))) |
+    a ∈ Category.obj(C) }
+
+def homAddPairs (C G F : Set) : Set :=
+  { (p, componentSum(C, groupHomAddition(valueStage), fst(p), snd(p))) |
+    p ∈ NatTrans(G, F) × NatTrans(G, F) }
+
+def homNegation (C G F : Set) : Set :=
+  { (η, negTransformation(C, G, F, η)) | η ∈ NatTrans(G, F) }
+
+def homGroup (C G F : Set) : Set :=
+  Group.mk(NatTrans(G, F), homAddPairs(C, G, F), zeroTransformation(C, G, F),
+    homNegation(C, G, F))
+
+-- Composition of transformations of abelian presheaves, componentwise:
+-- (θ ∘ η)(a) = θ(a) ∘ η(a) (the vertical composite).
+def transformationComp (η θ F G H : Set) : Set := verticalComposition(η, θ, F, G, H)
+
+-- Groups G and H are isomorphic (AddEquiv).
+predicate GroupIsomorphic (G H : Set) :=
+  ∃ f, AdditiveHom(f, G, H) ∧ BijectiveBetween(f, Group.carrier(G), Group.carrier(H))
+
+-- G is the trivial group (Subsingleton).
+predicate TrivialGroup (G : Set) := Group(G) ∧ Group.carrier(G) = {Group.one(G)}
+
+-- Section: The canonical resolution
+-- The syzygy of N: the kernel of the canonical cover ℤ[elements(N)] ⟶ N.
+def syzygy (N C : Set) : Set :=
+  kernelPresheaf(coverAugmentation(N, C), canonicalCover(N, C), N, C)
+
+-- The n-th syzygy Kₙ₋₁ (with K₋₁ = N).
+def syzygyPower (N C : Set, n : Nat) → Set
+  | N, C, zero => N
+  | N, C, succ(k) => syzygy(syzygyPower(N, C, k), C)
+
+-- Pₙ = ℤ[elements(Kₙ₋₁)], projective; the augmentation ε : P₀ ⟶ N; the
+-- differential dₙ : Pₙ₊₁ ⟶ Kₙ ↪ Pₙ.
+def resolutionObject (N C : Set, n : Nat) : Set :=
+  canonicalCover(syzygyPower(N, C, n), C)
+
+def resolutionObjects (N C : Set) : Set :=
+  { (n, resolutionObject(N, C, n)) | n ∈ ℕ }
+
+def resolutionDifferential (N C : Set, n : Nat) : Set :=
+  ((resolutionObject(N, C, succ(n)), resolutionObject(N, C, n)),
+    transformationComp(coverAugmentation(syzygyPower(N, C, succ(n)), C),
+      kernelInclusion(coverAugmentation(syzygyPower(N, C, n), C),
+        resolutionObject(N, C, n), syzygyPower(N, C, n), C),
+      resolutionObject(N, C, succ(n)), syzygyPower(N, C, succ(n)),
+      resolutionObject(N, C, n)))
+
+def resolutionDifferentials (N C : Set) : Set :=
+  { (n, resolutionDifferential(N, C, n)) | n ∈ ℕ }
+
+def resolutionAugmentation (N C : Set) : Set :=
+  ((canonicalCover(N, C), N), coverAugmentation(N, C))
+
+-- A projective resolution of N in the abelian presheaves on C
+-- (ProjectiveResolution): objects P(n), morphisms d(n) : P(n+1) ⟶ P(n)
+-- and ε : P(0) ⟶ N, each P(n) projective, with P(0) → N → 0 and the
+-- complex exact.
+predicate ProjectiveResolution (C N P d ε : Set) :=
+  SmallSite(C) ∧ (P : ℕ → Category.obj(coefficientCategory(C))) ∧
+  (d : ℕ → mor(coefficientCategory(C))) ∧
+  (∀ n ∈ ℕ, Projective(coefficientCategory(C), P(n))) ∧
+  (∀ n ∈ ℕ, d(n) ∈ hom(coefficientCategory(C), P(succ(n)), P(n))) ∧
+  ε ∈ hom(coefficientCategory(C), P(0), N) ∧
+  Epimorphism(coefficientCategory(C), ε) ∧
+  ExactAt(coefficientCategory(C), d(0), ε) ∧
+  (∀ n ∈ ℕ, ExactAt(coefficientCategory(C), d(succ(n)), d(n)))
+
+-- Section: Cohomology of Hom(P•, F)
+-- The cocycles: transformations P(n) ⟶ F vanishing on the image of d(n);
+-- the coboundaries: those of the form ψ ∘ d(n − 1) (none but 0 at n = 0);
+-- the cohomology Hⁿ(Hom(P•, F)) = Zⁿ ⧸ Bⁿ.
+def cocycles (C P d F : Set, n : Nat) : Set :=
+  { φ ∈ NatTrans(P(n), F) |
+    transformationComp(snd(d(n)), φ, P(succ(n)), P(n), F) =
+      zeroTransformation(C, P(succ(n)), F) }
+
+def coboundariesAbove (C P d F : Set, n : Nat) : Set :=
+  { transformationComp(snd(d(n)), ψ, P(succ(n)), P(n), F) | ψ ∈ NatTrans(P(n), F) }
+
+def coboundaries (C P d F : Set, n : Nat) → Set
+  | C, P, d, F, zero => {zeroTransformation(C, P(0), F)}
+  | C, P, d, F, succ(k) => coboundariesAbove(C, P, d, F, k)
+
+def cohomologyGroup (C P d F : Set, n : Nat) : Set :=
+  quotientGroup(restrictedGroup(homGroup(C, P(n), F), cocycles(C, P, d, F, n)),
+    coboundaries(C, P, d, F, n))
+
+-- Extⁿ(N, F): the cohomology of Hom(P•, F) for the canonical resolution P•
+-- of N (Abelian.Ext; the source's `H N F n := Ext N F n`).
+def ext (C N F : Set, n : Nat) : Set :=
+  cohomologyGroup(C, resolutionObjects(N, C), resolutionDifferentials(N, C), F, n)
+
+-- The class of a cocycle.
+def extClassOf (C N F φ : Set, n : Nat) : Set :=
+  ⟦φ⟧[cocycles(C, resolutionObjects(N, C), resolutionDifferentials(N, C), F, n),
+    cosetRelation(restrictedGroup(homGroup(C, resolutionObject(N, C, n), F),
+      cocycles(C, resolutionObjects(N, C), resolutionDifferentials(N, C), F, n)),
+      coboundaries(C, resolutionObjects(N, C), resolutionDifferentials(N, C), F, n))]
+
+-- Section: Chain maps and homotopies
+-- γ is a chain map over β : N ⟶ M between resolutions (P, d, ε) of N and
+-- (Q, e, η) of M: γ(n) : P(n) ⟶ Q(n), η ∘ γ(0) = β ∘ ε, e(n) ∘ γ(n+1) =
+-- γ(n) ∘ d(n) (ProjectiveResolution.lift).
+predicate ChainMapOver (C P d ε Q e η β γ : Set) :=
+  (γ : ℕ → mor(coefficientCategory(C))) ∧
+  (∀ n ∈ ℕ, γ(n) ∈ hom(coefficientCategory(C), P(n), Q(n))) ∧
+  call2(Category.comp(coefficientCategory(C)), η, γ(0)) =
+    call2(Category.comp(coefficientCategory(C)), β, ε) ∧
+  (∀ n ∈ ℕ, call2(Category.comp(coefficientCategory(C)), e(n), γ(succ(n))) =
+    call2(Category.comp(coefficientCategory(C)), γ(n), d(n)))
+
+-- γ and ζ are homotopic: γ(n) − ζ(n) = e(n) ∘ h(n) + h(n−1) ∘ d(n−1),
+-- with h(n) : P(n) ⟶ Q(n+1) (and the second term absent at n = 0).
+predicate ChainHomotopic (C P d Q e γ ζ : Set) :=
+  ∃ h, (h : ℕ → mor(coefficientCategory(C))) ∧
+    (∀ n ∈ ℕ, h(n) ∈ hom(coefficientCategory(C), P(n), Q(succ(n)))) ∧
+    γ(0) = coefficientAddition(C)((ζ(0),
+      call2(Category.comp(coefficientCategory(C)), e(0), h(0)))) ∧
+    (∀ n ∈ ℕ, γ(succ(n)) = coefficientAddition(C)((ζ(succ(n)),
+      coefficientAddition(C)((
+        call2(Category.comp(coefficientCategory(C)), e(succ(n)), h(succ(n))),
+        call2(Category.comp(coefficientCategory(C)), h(n), d(n)))))))
+
+-- A shifted lift of a cocycle a : P(m) ⟶ Y of a resolution of X through a
+-- resolution (Q, e, η) of Y: λ(k) : P(m + k) ⟶ Q(k), η ∘ λ(0) = a and
+-- e(k) ∘ λ(k+1) = λ(k) ∘ d(m + k). It exists, unique up to homotopy; it
+-- computes the Yoneda product.
+predicate ShiftedLift (C P d Q e η a λ : Set, m : Nat) :=
+  (λ : ℕ → mor(coefficientCategory(C))) ∧
+  (∀ k ∈ ℕ, λ(k) ∈ hom(coefficientCategory(C), P(m + k), Q(k))) ∧
+  call2(Category.comp(coefficientCategory(C)), η, λ(0)) = a ∧
+  (∀ k ∈ ℕ, call2(Category.comp(coefficientCategory(C)), e(k), λ(succ(k))) =
+    call2(Category.comp(coefficientCategory(C)), λ(k), d(m + k)))
+
+-- Section: Functoriality, products, classes and connecting maps
+-- Abbreviations for the canonical resolution of N.
+def resP (N C : Set) : Set := resolutionObjects(N, C)
+
+def resD (N C : Set) : Set := resolutionDifferentials(N, C)
+
+-- Postcomposition with α : F ⟶ G2 (Ext.postcomp, extFunctorObj): the class
+-- of φ goes to the class of α ∘ φ. The graph is defined on classes; that
+-- it is a function is a theorem.
+def extPostcomp (C N F G2 α : Set, n : Nat) : Set :=
+  { p ∈ Group.carrier(ext(C, N, F, n)) × Group.carrier(ext(C, N, G2, n)) |
+    ∃ φ ∈ fst(p), transformationComp(φ, snd(α), resolutionObject(N, C, n), F, G2) ∈ snd(p) }
+
+-- Precomposition with β : M ⟶ N (Ext.precomp): the class of φ goes to
+-- the class of φ ∘ γ(n), for a chain map γ over β between the canonical
+-- resolutions.
+def extPrecomp (C M N F β : Set, n : Nat) : Set :=
+  { p ∈ Group.carrier(ext(C, N, F, n)) × Group.carrier(ext(C, M, F, n)) |
+    ∃ γ, ChainMapOver(C, resP(M, C), resD(M, C), resolutionAugmentation(M, C),
+      resP(N, C), resD(N, C), resolutionAugmentation(N, C), β, γ) ∧
+    (∃ φ ∈ fst(p), transformationComp(snd(γ(n)), φ, resolutionObject(M, C, n),
+      resolutionObject(N, C, n), F) ∈ snd(p)) }
+
+-- The Yoneda product Extᵐ(X, Y) × Extⁿ(Y, Z) → Extᵐ⁺ⁿ(X, Z) (Ext.comp):
+-- for a cocycle a ∈ α and b ∈ β, the class of b ∘ λ(n) for a shifted lift
+-- λ of a.
+def extProduct (C X Y Z : Set, m n : Nat) : Set :=
+  { p ∈ (Group.carrier(ext(C, X, Y, m)) × Group.carrier(ext(C, Y, Z, n))) ×
+      Group.carrier(ext(C, X, Z, m + n)) |
+    ∃ a ∈ fst(fst(p)), ∃ b ∈ snd(fst(p)), ∃ λ,
+      ShiftedLift(C, resP(X, C), resD(X, C), resP(Y, C), resD(Y, C),
+        resolutionAugmentation(Y, C), ((resolutionObject(X, C, m), Y), a), λ, m) ∧
+      transformationComp(snd(λ(n)), b, resolutionObject(X, C, m + n),
+        resolutionObject(Y, C, n), Z) ∈ snd(p) }
+
+-- The class in Ext¹(H, F) of a short exact sequence 0 → F → G → H → 0
+-- with f = ((F, G), u) and g = ((G, H), v) (ShortExact.extClass): lift ε
+-- through g to w : P(0) ⟶ G; then w ∘ d(0) factors through f as x, and
+-- the class of x.
+def extensionClasses (C f g : Set) : Set :=
+  { c ∈ Group.carrier(ext(C, snd(fst(g)), fst(fst(f)), 1)) |
+    ∃ w ∈ hom(coefficientCategory(C), resolutionObject(snd(fst(g)), C, 0), fst(fst(g))),
+      call2(Category.comp(coefficientCategory(C)), g, w) =
+        resolutionAugmentation(snd(fst(g)), C) ∧
+      (∃ x ∈ c, call2(Category.comp(coefficientCategory(C)), f,
+        ((resolutionObject(snd(fst(g)), C, 1), fst(fst(f))), x)) =
+        call2(Category.comp(coefficientCategory(C)), w,
+          resolutionDifferential(snd(fst(g)), C, 0))) }
+
+defunique extClass (C f g : Set) (c ∈ extensionClasses(C, f, g)) := c ∈ extensionClasses(C, f, g)
+requires site : SmallSite(C)
+requires exact : ShortExact(coefficientCategory(C), f, g)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- The covariant connecting map Extⁿ(N, H) → Extⁿ⁺¹(N, F) of a short exact
+-- sequence 0 → F → G → H → 0 (the snake lemma on Hom(P•, −)): the class
+-- of z goes to the class of x, where z = g ∘ y and f ∘ x = y ∘ d(n).
+def extConnecting (C N f g : Set, n : Nat) : Set :=
+  { p ∈ Group.carrier(ext(C, N, snd(fst(g)), n)) ×
+      Group.carrier(ext(C, N, fst(fst(f)), succ(n))) |
+    ∃ z ∈ fst(p), ∃ y ∈ NatTrans(resolutionObject(N, C, n), fst(fst(g))),
+      ∃ x ∈ snd(p),
+      transformationComp(y, snd(g), resolutionObject(N, C, n), fst(fst(g)),
+        snd(fst(g))) = z ∧
+      transformationComp(x, snd(f), resolutionObject(N, C, succ(n)),
+        fst(fst(f)), fst(fst(g))) =
+        transformationComp(snd(resolutionDifferential(N, C, n)), y,
+          resolutionObject(N, C, succ(n)), resolutionObject(N, C, n), fst(fst(g))) }
+
+-- Ext along restriction to another site, Φ : E ⥤ C (the source's
+-- `Comparison.pull` through `mapExactFunctor`, Defs.lean:113): the class
+-- of φ goes to the class of (φ restricted) ∘ γ(n), for a chain map γ over
+-- the identity from the canonical resolution of N ∘ Φ to the restricted
+-- resolution of N.
+def restrictTransformation (Φ η : Set) : Set := whiskerComponents(Φ, η)
+
+def restrictedResolution (Φ N C : Set) : Set :=
+  { (n, composeFunctor(Φ, resolutionObject(N, C, n))) | n ∈ ℕ }
+
+def restrictedDifferentials (Φ N C : Set) : Set :=
+  { (n, ((composeFunctor(Φ, resolutionObject(N, C, succ(n))),
+      composeFunctor(Φ, resolutionObject(N, C, n))),
+      whiskerComponents(Φ, snd(resolutionDifferential(N, C, n))))) | n ∈ ℕ }
+
+def extRestrict (Φ E C N F : Set, n : Nat) : Set :=
+  { p ∈ Group.carrier(ext(C, N, F, n)) ×
+      Group.carrier(ext(E, composeFunctor(Φ, N), composeFunctor(Φ, F), n)) |
+    ∃ γ, ChainMapOver(E, resP(composeFunctor(Φ, N), E),
+      resD(composeFunctor(Φ, N), E),
+      resolutionAugmentation(composeFunctor(Φ, N), E),
+      restrictedResolution(Φ, N, C), restrictedDifferentials(Φ, N, C),
+      ((composeFunctor(Φ, canonicalCover(N, C)), composeFunctor(Φ, N)),
+        whiskerComponents(Φ, coverAugmentation(N, C))),
+      Category.id(coefficientCategory(E))(composeFunctor(Φ, N)), γ) ∧
+    (∃ φ ∈ fst(p), transformationComp(snd(γ(n)), whiskerComponents(Φ, φ),
+      resolutionObject(composeFunctor(Φ, N), E, n),
+      composeFunctor(Φ, resolutionObject(N, C, n)), composeFunctor(Φ, F)) ∈ snd(p)) }
+
+-- Section: The canonical resolution is a projective resolution
+-- Ext⁰(N, F) = Hom(N, F): composition with ε identifies the cocycles in
+-- degree 0 with the transformations N ⟶ F (Ext.homEquiv₀, Ext.addEquiv₀,
+-- Ext.mk₀_bijective).
+def extZeroMap (C N F : Set) : Set :=
+  { (θ, extClassOf(C, N, F, transformationComp(coverAugmentation(N, C), θ,
+      canonicalCover(N, C), N, F), 0)) | θ ∈ NatTrans(N, F) }
+
+section Resolution
+variable (C N : Set)
+hypothesis site : SmallSite(C)
+hypothesis presheaf : N : C ⥤ coefficientGroups
+
+theorem syzygy.presheaf (n : Nat)
+  shows syzygyPower(N, C, n) : C ⥤ coefficientGroups
+proof
+  sorry
+
+theorem resolution.projective_resolution
+  shows ProjectiveResolution(C, N, resolutionObjects(N, C),
+    resolutionDifferentials(N, C), resolutionAugmentation(N, C))
+proof
+  sorry
+
+-- Ext is an abelian group (Abelian.Ext.instAddCommGroup).
+theorem ext.abelian (F : Set, n : Nat)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows AbelianGroup(ext(C, N, F, n))
+proof
+  sorry
+
+theorem ext.zero_equiv (F : Set)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows AdditiveHom(extZeroMap(C, N, F), homGroup(C, N, F), ext(C, N, F, 0)) ∧
+    BijectiveBetween(extZeroMap(C, N, F), NatTrans(N, F), Group.carrier(ext(C, N, F, 0)))
+proof
+  sorry
+
+-- Extⁿ⁺¹(N, F) ≅ Hom(Kₙ, F) ⧸ (restrictions from Hom(Pₙ, F)): dimension
+-- shifting through the syzygies (the source's dimension_shift_induction,
+-- Functoriality.lean:31).
+theorem ext.dimension_shift (F : Set, n : Nat)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows GroupIsomorphic(ext(C, N, F, succ(succ(n))),
+    ext(C, syzygy(N, C), F, succ(n)))
+proof
+  sorry
+
+end Resolution
+
+-- Section: Vanishing
+-- Extⁿ⁺¹(P, F) = 0 for P projective, in particular for ℤ[h_A]
+-- (Ext.subsingleton_of_projective; WitnessCocycles.lean:35,
+-- AcyclicTests.lean:103).
+theorem ext.projective_vanishing (C P F : Set, n : Nat)
+  requires site : SmallSite(C)
+  requires projective : Projective(coefficientCategory(C), P)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows TrivialGroup(ext(C, P, F, succ(n)))
+proof
+  sorry
+
+theorem ext.representable_vanishing (C A F : Set, n : Nat)
+  requires site : SmallSite(C)
+  requires object : A ∈ Category.obj(C)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows TrivialGroup(ext(C, freeRepresentable(C, A), F, succ(n)))
+proof
+  sorry
+
+-- Ext⁰(ℤ[h_A], F) ≅ F(A) (homReprEquiv composed with Ext.addEquiv₀).
+theorem ext.representable_zero (C A F : Set)
+  requires site : SmallSite(C)
+  requires object : A ∈ Category.obj(C)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows GroupIsomorphic(ext(C, freeRepresentable(C, A), F, 0), Functor.obj(F)(A))
+proof
+  sorry
+
+-- Extⁿ⁺¹(N, I) = 0 for I injective (Ext.eq_zero_of_injective).
+theorem ext.injective_vanishing (C N I : Set, n : Nat)
+  requires site : SmallSite(C)
+  requires presheaf : N : C ⥤ coefficientGroups
+  requires injective : Injective(coefficientCategory(C), I)
+  shows TrivialGroup(ext(C, N, I, succ(n)))
+proof
+  sorry
+
+-- Section: The comparison theorem
+section Comparison
+variable (C : Set)
+hypothesis site : SmallSite(C)
+
+-- Chain maps over a morphism exist between projective resolutions
+-- (ProjectiveResolution.lift), and any two are homotopic
+-- (ProjectiveResolution.liftHomotopy).
+theorem ChainMapOver.exists (N P d ε M Q e η β : Set)
+  requires source : ProjectiveResolution(C, N, P, d, ε)
+  requires target : ProjectiveResolution(C, M, Q, e, η)
+  requires arrow : β ∈ hom(coefficientCategory(C), N, M)
+  shows ∃ γ, ChainMapOver(C, P, d, ε, Q, e, η, β, γ)
+proof
+  sorry
+
+theorem ChainMapOver.homotopic (N P d ε M Q e η β γ ζ : Set)
+  requires source : ProjectiveResolution(C, N, P, d, ε)
+  requires target : ProjectiveResolution(C, M, Q, e, η)
+  requires first : ChainMapOver(C, P, d, ε, Q, e, η, β, γ)
+  requires second : ChainMapOver(C, P, d, ε, Q, e, η, β, ζ)
+  shows ChainHomotopic(C, P, d, Q, e, γ, ζ)
+proof
+  sorry
+
+-- Shifted lifts of cocycles exist.
+theorem ShiftedLift.exists (X P d ε Y Q e η a : Set, m : Nat)
+  requires source : ProjectiveResolution(C, X, P, d, ε)
+  requires target : ProjectiveResolution(C, Y, Q, e, η)
+  requires cocycle : a ∈ hom(coefficientCategory(C), P(m), Y)
+  requires closed : ZeroMorphism(coefficientCategory(C),
+    call2(Category.comp(coefficientCategory(C)), a, d(m)))
+  shows ∃ λ, ShiftedLift(C, P, d, Q, e, η, a, λ, m)
+proof
+  sorry
+
+-- Any projective resolution computes Ext (ProjectiveResolution.isoExt).
+theorem ext.of_resolution (N P d ε F : Set, n : Nat)
+  requires resolution : ProjectiveResolution(C, N, P, d, ε)
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows GroupIsomorphic(cohomologyGroup(C, P, d, F, n), ext(C, N, F, n))
+proof
+  sorry
+
+-- The horseshoe lemma: a short exact sequence of presheaves has
+-- projective resolutions forming a short exact sequence of complexes,
+-- with the middle resolution objectwise the biproduct of the outer ones.
+theorem resolution.horseshoe (f g : Set)
+  requires exact : ShortExact(coefficientCategory(C), f, g)
+  shows ∃ P1, ∃ d1, ∃ ε1, ∃ P2, ∃ d2, ∃ ε2, ∃ P3, ∃ d3, ∃ ε3, ∃ i, ∃ q,
+    ProjectiveResolution(C, fst(fst(f)), P1, d1, ε1) ∧
+    ProjectiveResolution(C, snd(fst(f)), P2, d2, ε2) ∧
+    ProjectiveResolution(C, snd(fst(g)), P3, d3, ε3) ∧
+    ChainMapOver(C, P1, d1, ε1, P2, d2, ε2, f, i) ∧
+    ChainMapOver(C, P2, d2, ε2, P3, d3, ε3, g, q) ∧
+    (∀ n ∈ ℕ, ShortExact(coefficientCategory(C), i(n), q(n)))
+proof
+  sorry
+
+end Comparison
+
+-- Section: Functoriality
+section Functoriality
+variable (C N F : Set)
+hypothesis site : SmallSite(C)
+hypothesis presheaf : N : C ⥤ coefficientGroups
+hypothesis coefficients : F : C ⥤ coefficientGroups
+
+theorem extPostcomp.hom (G2 α : Set, n : Nat)
+  requires arrow : α ∈ hom(coefficientCategory(C), F, G2)
+  shows AdditiveHom(extPostcomp(C, N, F, G2, α, n), ext(C, N, F, n), ext(C, N, G2, n))
+proof
+  sorry
+
+theorem extPostcomp.id (n : Nat)
+  shows extPostcomp(C, N, F, F, Category.id(coefficientCategory(C))(F), n) =
+    identity(Group.carrier(ext(C, N, F, n)))
+proof
+  sorry
+
+theorem extPostcomp.comp (G2 G3 α α2 : Set, n : Nat)
+  requires first : α ∈ hom(coefficientCategory(C), F, G2)
+  requires second : α2 ∈ hom(coefficientCategory(C), G2, G3)
+  shows extPostcomp(C, N, F, G3, call2(Category.comp(coefficientCategory(C)), α2, α), n) =
+    compose(extPostcomp(C, N, G2, G3, α2, n), extPostcomp(C, N, F, G2, α, n),
+      Group.carrier(ext(C, N, F, n)), Group.carrier(ext(C, N, G2, n)),
+      Group.carrier(ext(C, N, G3, n)))
+proof
+  sorry
+
+theorem extPrecomp.hom (M β : Set, n : Nat)
+  requires source : M : C ⥤ coefficientGroups
+  requires arrow : β ∈ hom(coefficientCategory(C), M, N)
+  shows AdditiveHom(extPrecomp(C, M, N, F, β, n), ext(C, N, F, n), ext(C, M, F, n))
+proof
+  sorry
+
+theorem extPrecomp.comp (M L β β2 : Set, n : Nat)
+  requires sourceM : M : C ⥤ coefficientGroups
+  requires sourceL : L : C ⥤ coefficientGroups
+  requires first : β ∈ hom(coefficientCategory(C), M, N)
+  requires second : β2 ∈ hom(coefficientCategory(C), L, M)
+  shows extPrecomp(C, L, N, F, call2(Category.comp(coefficientCategory(C)), β, β2), n) =
+    compose(extPrecomp(C, L, M, F, β2, n), extPrecomp(C, M, N, F, β, n),
+      Group.carrier(ext(C, N, F, n)), Group.carrier(ext(C, M, F, n)),
+      Group.carrier(ext(C, L, F, n)))
+proof
+  sorry
+
+-- Pre- and postcomposition commute (the bifunctoriality of Ext).
+theorem ext.bifunctorial (M G2 β α : Set, n : Nat)
+  requires source : M : C ⥤ coefficientGroups
+  requires arrowβ : β ∈ hom(coefficientCategory(C), M, N)
+  requires arrowα : α ∈ hom(coefficientCategory(C), F, G2)
+  shows compose(extPostcomp(C, M, F, G2, α, n), extPrecomp(C, M, N, F, β, n),
+      Group.carrier(ext(C, N, F, n)), Group.carrier(ext(C, M, F, n)),
+      Group.carrier(ext(C, M, G2, n))) =
+    compose(extPrecomp(C, M, N, G2, β, n), extPostcomp(C, N, F, G2, α, n),
+      Group.carrier(ext(C, N, F, n)), Group.carrier(ext(C, N, G2, n)),
+      Group.carrier(ext(C, M, G2, n)))
+proof
+  sorry
+
+end Functoriality
+
+-- Section: The Yoneda product and extension classes
+-- The product is a well-defined biadditive map, associative, with Ext⁰
+-- acting by pre- and postcomposition (Ext.comp_assoc, Ext.mk₀_comp_mk₀,
+-- Ext.comp_add, Ext.add_comp).
+theorem extProduct.function (C X Y Z : Set, m n : Nat)
+  requires site : SmallSite(C)
+  requires presheaves : X : C ⥤ coefficientGroups ∧ Y : C ⥤ coefficientGroups ∧
+    Z : C ⥤ coefficientGroups
+  shows extProduct(C, X, Y, Z, m, n) :
+    Group.carrier(ext(C, X, Y, m)) × Group.carrier(ext(C, Y, Z, n)) →
+      Group.carrier(ext(C, X, Z, m + n))
+proof
+  sorry
+
+theorem extProduct.biadditive (C X Y Z α α2 β β2 : Set, m n : Nat)
+  requires site : SmallSite(C)
+  requires presheaves : X : C ⥤ coefficientGroups ∧ Y : C ⥤ coefficientGroups ∧
+    Z : C ⥤ coefficientGroups
+  requires classes : α ∈ Group.carrier(ext(C, X, Y, m)) ∧
+    α2 ∈ Group.carrier(ext(C, X, Y, m)) ∧ β ∈ Group.carrier(ext(C, Y, Z, n)) ∧
+    β2 ∈ Group.carrier(ext(C, Y, Z, n))
+  shows call2(extProduct(C, X, Y, Z, m, n), call2(Group.mul(ext(C, X, Y, m)), α, α2), β) =
+      call2(Group.mul(ext(C, X, Z, m + n)), call2(extProduct(C, X, Y, Z, m, n), α, β),
+        call2(extProduct(C, X, Y, Z, m, n), α2, β)) ∧
+    call2(extProduct(C, X, Y, Z, m, n), α, call2(Group.mul(ext(C, Y, Z, n)), β, β2)) =
+      call2(Group.mul(ext(C, X, Z, m + n)), call2(extProduct(C, X, Y, Z, m, n), α, β),
+        call2(extProduct(C, X, Y, Z, m, n), α, β2))
+proof
+  sorry
+
+theorem extProduct.associative (C W X Y Z α β κ : Set, l m n : Nat)
+  requires site : SmallSite(C)
+  requires presheaves : W : C ⥤ coefficientGroups ∧ X : C ⥤ coefficientGroups ∧
+    Y : C ⥤ coefficientGroups ∧ Z : C ⥤ coefficientGroups
+  requires classes : α ∈ Group.carrier(ext(C, W, X, l)) ∧
+    β ∈ Group.carrier(ext(C, X, Y, m)) ∧ κ ∈ Group.carrier(ext(C, Y, Z, n))
+  shows call2(extProduct(C, W, Y, Z, l + m, n),
+      call2(extProduct(C, W, X, Y, l, m), α, β), κ) =
+    call2(extProduct(C, W, X, Z, l, m + n), α,
+      call2(extProduct(C, X, Y, Z, m, n), β, κ))
+proof
+  sorry
+
+-- Postcomposition is the product with a class of degree 0 on the right
+-- (Ext.comp_mk₀ and the definition of postcomp).
+theorem extProduct.postcomp (C X Y Z α θ : Set, m : Nat)
+  requires site : SmallSite(C)
+  requires presheaves : X : C ⥤ coefficientGroups ∧ Y : C ⥤ coefficientGroups ∧
+    Z : C ⥤ coefficientGroups
+  requires natural : θ ∈ NatTrans(Y, Z)
+  requires class : α ∈ Group.carrier(ext(C, X, Y, m))
+  shows call2(extProduct(C, X, Y, Z, m, 0), α, extZeroMap(C, Y, Z)(θ)) =
+    extPostcomp(C, X, Y, Z, ((Y, Z), θ), m)(α)
+proof
+  sorry
+
+-- The connecting map is the product with the extension class
+-- (the covariant sequence of Ext.covariantSequence uses x.comp hS.extClass).
+theorem extConnecting.product (C N f g α : Set, n : Nat)
+  requires site : SmallSite(C)
+  requires presheaf : N : C ⥤ coefficientGroups
+  requires exact : ShortExact(coefficientCategory(C), f, g)
+  requires class : α ∈ Group.carrier(ext(C, N, snd(fst(g)), n))
+  shows extConnecting(C, N, f, g, n)(α) =
+    call2(extProduct(C, N, snd(fst(g)), fst(fst(f)), n, 1), α, extClass(C, f, g))
+proof
+  sorry
+
+-- extClass_naturality: a morphism of short exact sequences carries the
+-- extension classes to each other.
+theorem extClass.naturality (C f g f2 g2 a c : Set)
+  requires site : SmallSite(C)
+  requires first : ShortExact(coefficientCategory(C), f, g)
+  requires second : ShortExact(coefficientCategory(C), f2, g2)
+  requires left : a ∈ hom(coefficientCategory(C), fst(fst(f)), fst(fst(f2)))
+  requires right : c ∈ hom(coefficientCategory(C), snd(fst(g)), snd(fst(g2)))
+  requires commutes : ∃ b ∈ hom(coefficientCategory(C), snd(fst(f)), snd(fst(f2))),
+    call2(Category.comp(coefficientCategory(C)), b, f) =
+      call2(Category.comp(coefficientCategory(C)), f2, a) ∧
+    call2(Category.comp(coefficientCategory(C)), g2, b) =
+      call2(Category.comp(coefficientCategory(C)), c, g)
+  shows extPostcomp(C, snd(fst(g)), fst(fst(f)), fst(fst(f2)), a, 1)(extClass(C, f, g)) =
+    extPrecomp(C, snd(fst(g)), snd(fst(g2)), fst(fst(f2)), c, 1)(extClass(C, f2, g2))
+proof
+  sorry
+
+-- Section: The long exact sequences
+-- Ext(N, −) of a short exact sequence 0 → F → G → H → 0 is long exact:
+-- … → Extⁿ(N, F) → Extⁿ(N, G) → Extⁿ(N, H) → Extⁿ⁺¹(N, F) → …
+-- (Ext.covariant_sequence_exact₁, ₂, ₃).
+section CovariantSequence
+variable (C N f g : Set)
+hypothesis site : SmallSite(C)
+hypothesis presheaf : N : C ⥤ coefficientGroups
+hypothesis exact : ShortExact(coefficientCategory(C), f, g)
+
+theorem extConnecting.hom (n : Nat)
+  shows AdditiveHom(extConnecting(C, N, f, g, n), ext(C, N, snd(fst(g)), n),
+    ext(C, N, fst(fst(f)), succ(n)))
+proof
+  sorry
+
+-- Exactness at Extⁿ(N, G).
+theorem ext.covariant_exact_middle (n : Nat)
+  shows groupImage(extPostcomp(C, N, fst(fst(f)), snd(fst(f)), f, n),
+      ext(C, N, fst(fst(f)), n), ext(C, N, snd(fst(f)), n)) =
+    groupKernel(extPostcomp(C, N, fst(fst(g)), snd(fst(g)), g, n),
+      ext(C, N, fst(fst(g)), n), ext(C, N, snd(fst(g)), n))
+proof
+  sorry
+
+-- Exactness at Extⁿ(N, H).
+theorem ext.covariant_exact_right (n : Nat)
+  shows groupImage(extPostcomp(C, N, fst(fst(g)), snd(fst(g)), g, n),
+      ext(C, N, fst(fst(g)), n), ext(C, N, snd(fst(g)), n)) =
+    groupKernel(extConnecting(C, N, f, g, n),
+      ext(C, N, snd(fst(g)), n), ext(C, N, fst(fst(f)), succ(n)))
+proof
+  sorry
+
+-- Exactness at Extⁿ⁺¹(N, F).
+theorem ext.covariant_exact_left (n : Nat)
+  shows groupImage(extConnecting(C, N, f, g, n),
+      ext(C, N, snd(fst(g)), n), ext(C, N, fst(fst(f)), succ(n))) =
+    groupKernel(extPostcomp(C, N, fst(fst(f)), snd(fst(f)), f, succ(n)),
+      ext(C, N, fst(fst(f)), succ(n)), ext(C, N, snd(fst(f)), succ(n)))
+proof
+  sorry
+
+-- Hom(N, −) is left exact: Ext⁰(N, F) → Ext⁰(N, G) is injective.
+theorem ext.covariant_injective_zero
+  shows InjectiveBetween(extPostcomp(C, N, fst(fst(f)), snd(fst(f)), f, 0),
+    Group.carrier(ext(C, N, fst(fst(f)), 0)), Group.carrier(ext(C, N, snd(fst(f)), 0)))
+proof
+  sorry
+
+end CovariantSequence
+
+-- Ext(−, F) of a short exact sequence 0 → L → M → N → 0 is long exact:
+-- … → Extⁿ(N, F) → Extⁿ(M, F) → Extⁿ(L, F) → Extⁿ⁺¹(N, F) → …
+-- (Ext.contravariant_sequence_exact₁, ₂, ₃; through the horseshoe lemma).
+-- The connecting maps are those of the horseshoe; their existence with
+-- the exactness is stated.
+theorem ext.contravariant_sequence (C F f g : Set)
+  requires site : SmallSite(C)
+  requires coefficients : F : C ⥤ coefficientGroups
+  requires exact : ShortExact(coefficientCategory(C), f, g)
+  shows ∃ δ, (∀ n ∈ ℕ, AdditiveHom(δ(n), ext(C, fst(fst(f)), F, n),
+      ext(C, snd(fst(g)), F, succ(n)))) ∧
+    (∀ n ∈ ℕ, groupImage(extPrecomp(C, snd(fst(f)), snd(fst(g)), F, g, n),
+        ext(C, snd(fst(g)), F, n), ext(C, snd(fst(f)), F, n)) =
+      groupKernel(extPrecomp(C, fst(fst(f)), snd(fst(f)), F, f, n),
+        ext(C, snd(fst(f)), F, n), ext(C, fst(fst(f)), F, n))) ∧
+    (∀ n ∈ ℕ, groupImage(extPrecomp(C, fst(fst(f)), snd(fst(f)), F, f, n),
+        ext(C, snd(fst(f)), F, n), ext(C, fst(fst(f)), F, n)) =
+      groupKernel(δ(n), ext(C, fst(fst(f)), F, n), ext(C, snd(fst(g)), F, succ(n)))) ∧
+    (∀ n ∈ ℕ, groupImage(δ(n), ext(C, fst(fst(f)), F, n),
+        ext(C, snd(fst(g)), F, succ(n))) =
+      groupKernel(extPrecomp(C, snd(fst(f)), snd(fst(g)), F, g, succ(n)),
+        ext(C, snd(fst(g)), F, succ(n)), ext(C, snd(fst(f)), F, succ(n))))
+proof
+  sorry
+
+-- Section: Ext along restriction to another site
+-- Restriction along Φ : E ⥤ C is exact, so it acts on Ext
+-- (Ext.mapExactFunctor), additively, functorially, and compatibly with
+-- the long exact sequence (mapExactFunctor_extClass).
+section Restriction
+variable (Φ E C N F : Set)
+hypothesis siteE : SmallSite(E)
+hypothesis siteC : SmallSite(C)
+hypothesis along : Φ : E ⥤ C
+hypothesis presheaf : N : C ⥤ coefficientGroups
+hypothesis coefficients : F : C ⥤ coefficientGroups
+
+theorem extRestrict.hom (n : Nat)
+  shows AdditiveHom(extRestrict(Φ, E, C, N, F, n), ext(C, N, F, n),
+    ext(E, composeFunctor(Φ, N), composeFunctor(Φ, F), n))
+proof
+  sorry
+
+-- In degree 0 it is restriction of transformations.
+theorem extRestrict.zero (θ : Set)
+  requires natural : θ ∈ NatTrans(N, F)
+  shows extRestrict(Φ, E, C, N, F, 0)(extZeroMap(C, N, F)(θ)) =
+    extZeroMap(E, composeFunctor(Φ, N), composeFunctor(Φ, F))(whiskerComponents(Φ, θ))
+proof
+  sorry
+
+-- Naturality in the coefficients (Ext.mapExactFunctor_naturality).
+theorem extRestrict.naturality (G2 α : Set, n : Nat)
+  requires arrow : α ∈ hom(coefficientCategory(C), F, G2)
+  shows compose(extRestrict(Φ, E, C, N, G2, n), extPostcomp(C, N, F, G2, α, n),
+      Group.carrier(ext(C, N, F, n)), Group.carrier(ext(C, N, G2, n)),
+      Group.carrier(ext(E, composeFunctor(Φ, N), composeFunctor(Φ, G2), n))) =
+    compose(extPostcomp(E, composeFunctor(Φ, N), composeFunctor(Φ, F),
+        composeFunctor(Φ, G2),
+        ((composeFunctor(Φ, F), composeFunctor(Φ, G2)), whiskerComponents(Φ, snd(α))), n),
+      extRestrict(Φ, E, C, N, F, n),
+      Group.carrier(ext(C, N, F, n)),
+      Group.carrier(ext(E, composeFunctor(Φ, N), composeFunctor(Φ, F), n)),
+      Group.carrier(ext(E, composeFunctor(Φ, N), composeFunctor(Φ, G2), n)))
+proof
+  sorry
+
+end Restriction
+
+-- Restriction along the identity is the identity
+-- (Ext.mapExactFunctor_restrictAlong_id).
+theorem extRestrict.id (C N F : Set, n : Nat)
+  requires site : SmallSite(C)
+  requires presheaf : N : C ⥤ coefficientGroups
+  requires coefficients : F : C ⥤ coefficientGroups
+  shows extRestrict(identityFunctor(C), C, C, N, F, n) =
+    identity(Group.carrier(ext(C, N, F, n)))
+proof
+  sorry

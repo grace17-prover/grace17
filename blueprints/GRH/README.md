@@ -147,6 +147,17 @@ valuation subrings and Galois hulls, p-adic completion and ultrapowers over
 square-zero extensions, rings of locally constant functions, and bounded
 filtered colimits.
 
+The values of the region's functors need room above 𝒰. The canonical free
+cover of a functor and its injective envelope are a sum and a product
+indexed by the whole site, which leave V(ω·2) and every V(ω·n). Spaces and
+coefficients therefore take values in a second stage V(θ), where θ is the
+Hartogs ordinal of V(ω·2), the least ordinal that does not inject into it.
+Under ZFC θ is the successor cardinal of |V(ω·2)| = ℶ_ω, so it is regular,
+and V(θ) is closed under unions of families indexed by subsets of V(ω·2).
+V(θ) plays the part of Lean's `Type 1`; like V(ω·2) it is a set that ZFC
+proves exists, so the functor categories on 𝒰 and their Ext groups are
+sets, and no large cardinal enters (`GRH.Category`, `GRH.Scheme`).
+
 Writing the region over 𝒰 asks for a few changes to the Lean text: the
 continuity condition ranges over diagrams of bounded size, as every use of
 it already does; the ω-branching index type of the test envelopes is
@@ -275,8 +286,9 @@ graph TD
 - A definition that needs a choice of parameter (the order K of the
   Euler–Maclaurin expansion) makes it explicitly and proves independence,
   rather than choosing it with a selector.
-- Theorems that need universes take `TarskiGrothendieck()` as a section
-  hypothesis, never as an axiom; the audit shows where it is relied on.
+- No theorem takes a large cardinal hypothesis: the universe-polymorphic
+  parts of the source are written over the sets 𝒰 ⊆ V(ω·2) and V(θ)
+  (Universes above), and the axiom audit would show any reliance.
 - Statements of layer 5 keep the source's names where they read well, so
   the Lean text can be followed beside the port, and say in a comment which
   source declaration they correspond to.
@@ -327,6 +339,9 @@ graph TD
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 90 | 70 | 20 |
 | GRH.Calculus.Frechet | 70 | 55 | 15 |
+| GRH.Category.Basic | 119 | 0 | 119 |
+| GRH.Category.Abelian | 45 | 1 | 44 |
+| GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Field.Galois | 79 | 1 | 78 |
 | GRH.Matrix.Groups | 92 | 82 | 10 |
 | GRH.Field.Finite | 62 | 2 | 60 |
@@ -369,6 +384,9 @@ graph TD
 | GRH.Padic.Witt | 43 | 4 | 39 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Scheme.Basic | 63 | 7 | 56 |
+| GRH.Scheme.Morphisms | 56 | 0 | 56 |
+| GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **8293** | **6594** | **1699** |
+| **total** | **8642** | **6603** | **2039** |
 <!-- /blueprint-status -->
