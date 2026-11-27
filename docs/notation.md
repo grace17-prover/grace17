@@ -865,8 +865,10 @@ but no `CommRing(K)` is an error that names the operand, the carriers the
 hypotheses in scope supply the token on, and what the instance that would
 place it lacks, `X(K, 4, 1) ∈ Ring.carrier(polynomialRing(K, 4)) by X.mem needs
 CommRing(K)`. A numeral, an operand whose sort is `Nat` by a binder, a
-fact, a typing rule, or an annotation such as `(cardinality(S):N)`, and a
-variable with no evidence either way keep the natural reading.
+fact such as `a ∈ ℕ`, a typing rule, or an annotation such as
+`(cardinality(S):N)` keeps the natural reading. An order between operands
+none of which is placed, two bare variables included, is an error that
+suggests an annotation.
 
 The ideal theory uses the same notation. `Ideal(R, I)`, `ProperIdeal(R, I)`,
 `MaximalIdeal(R, M)`, `PrimeIdeal(R, I)`, and `Subring(R, S)` take the ring
