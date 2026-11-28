@@ -1,0 +1,263 @@
+-- ℓ-adic Galois representations of a number field and the conditions the
+-- proof imposes on them: continuity, restriction to a decomposition
+-- group, unramified-or-crystalline and finite type at a place, a
+-- polynomial killing Frobenius, Hodge–Tate jumps related to a multiset,
+-- the spherical clause at a finite place, and representations attached
+-- to a family of Hecke polynomials through most Frobenii; with the
+-- uniqueness of traces of attached representations (Chebotarev) and the
+-- coefficient estimates it rests on.
+-- Source: grh-compact/src/Lib/GaloisRep/Main/LocalEmbedding.lean (GalRep,
+-- decompRep, IsGoodAt, IsFiniteTypeAt, PolyKillsAt, JumpsRelAt,
+-- HasJumpsAt, OccursIn, SphericalClause), Main/AttachedDefs.lean
+-- (Attached, isRoot_of_isRoot_charpoly), WeightCongruence/
+-- WeightCongruence.lean (norm_eq_one_of_continuous,
+-- norm_coeff_le_of_mul_monic, Attached.tendsto_charpoly_coeff,
+-- Attached.trace_eq).
+-- Encoding. X is Ω/E (GRH.GaloisRep.Places), ℚ̄_ℓ an algebra Q over ℚ_ℓ
+-- with its spectral norm, and ι : ℂ ≃ ℚ̄_ℓ the fixed isomorphism. A Galois
+-- representation of rank m is a group homomorphism Gal(Ω/E) → GL_m(ℚ̄_ℓ)
+-- with m a finite index set. The source's crystalline and potentially
+-- crystalline conditions, Hodge–Tate jump multiplicities and the
+-- polynomial killing a Weil pair (Lib/PadicHodge/Crystalline/Defs.lean)
+-- are read from a STAND-IN record csGRHodgeTheory, whose fields are the
+-- sets of data satisfying them; a multiset of integers is its count
+-- function ℤ → ℕ, and a relation between multiplicities a set of pairs
+-- of naturals. The source's polynomial map Polynomial.map ι is polyMap.
+-- Part of the GRH blueprint (layer 4, Lib/GaloisRep).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.GaloisRep.Attached
+import GRH.GaloisRep.Places
+import GRH.GaloisRep.Pseudocharacter
+
+section Attached
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: p-adic Hodge theory (stand-in)
+-- STAND-IN for PadicHodge/Crystalline/Defs.lean, IsCrystalline,
+-- IsPotCrys, jump and IsKilledBy. For a group record D, a homomorphism
+-- j : D → G_ℓ with open image and a representation ρ : D → GL_m(ℚ̄_ℓ):
+-- (D, j, ρ) ∈ crystalline when B_cris ⊗ ρ is spanned by its D-invariants;
+-- ∈ potCrys when it is spanned by the invariants of an open subgroup;
+-- jump((D, j, ρ, g, u)) is the multiplicity of the Hodge–Tate jump u
+-- along the embedding g ∈ G_ℓ; (D, j, ρ, s, k, P) ∈ killedBy when ρ is
+-- potentially crystalline and P kills the linear Frobenius φ^k j(s) on
+-- D_pcris. The real record needs B_cris (Lib/PadicHodge/PeriodRings).
+structure csGRHodgeTheory
+  | crystalline potCrys jump killedBy : Set
+
+predicate csGRIsCrystalline (H D j ρ : Set) := (D, (j, ρ)) ∈ csGRHodgeTheory.crystalline(H)
+
+predicate csGRIsPotCrys (H D j ρ : Set) := (D, (j, ρ)) ∈ csGRHodgeTheory.potCrys(H)
+
+def csGRJump (H D j ρ g u : Set) : Set := csGRHodgeTheory.jump(H)((D, (j, (ρ, (g, u)))))
+
+predicate csGRIsKilledBy (H D j ρ s k P : Set) :=
+  (D, (j, (ρ, (s, (k, P))))) ∈ csGRHodgeTheory.killedBy(H)
+
+-- Section: Galois representations
+-- LocalEmbedding.lean, GalRep ℓ E m: a homomorphism Gal(Ω/E) → GL_m(ℚ̄_ℓ);
+-- continuity is not part of the definition.
+predicate GalRep (X Q m r : Set) :=
+  GroupHom(r, galoisGroup(X), generalLinearGroup(Algebra.ring(Q), m))
+
+-- A homomorphism ρ from the group H with topology T into GL_m(ℚ̄_ℓ) is
+-- continuous: each matrix entry of ρ is continuous into ℚ̄_ℓ with its
+-- norm.
+predicate ContinuousRep (l : Nat, Q H T m ρ : Set) :=
+  ∀ σ ∈ Group.carrier(H), ∀ ε ∈ ℝ, (0:R) < ε →
+    (∃ U ∈ TopologicalSpace.opens(T), σ ∈ U ∧ (∀ τ ∈ U, ∀ i ∈ m, ∀ k ∈ m,
+      padicAlgClNorm(l, Q)(Ring.sub(Algebra.ring(Q), ρ(τ)[i, k], ρ(σ)[i, k])) < ε))
+
+-- LocalEmbedding.lean, decompRep r A: the restriction of r to the
+-- decomposition group of A.
+def decompRep (X r A : Set) : Set := restrict(r, csGRDecompGroup(X, A))
+
+-- ℓ is a unit at A (A.valuation ℓ = 1).
+predicate UnitAt (X A : Set, l : Nat) :=
+  natCast(Algebra.ring(X), l) ∈ valuationSubringUnits(Algebra.ring(X), A)
+
+-- Section: Local conditions
+-- LocalEmbedding.lean, IsGoodAt r A: r is trivial on the inertia group of
+-- A if ℓ is a unit at A, and crystalline along every embedding of Ω in
+-- ℚ̄_ℓ inducing A.
+predicate IsGoodAt (H X : Set, l : Nat, Q m r A : Set) :=
+  (UnitAt(X, A, l) → (∀ s ∈ csGRInertiaGroup(X, A), r(s) = matOne(Algebra.ring(Q), m))) ∧
+  (∀ e, ∀ j, csGRInducesPlace(X, A, l, Q, e, j) →
+    csGRIsCrystalline(H, csGRDecompGroupGroup(X, A), j, decompRep(X, r, A)))
+
+-- LocalEmbedding.lean, IsFiniteTypeAt r A: r is trivial on the inertia
+-- elements near 1 if ℓ is a unit at A, and potentially crystalline along
+-- every embedding inducing A.
+predicate IsFiniteTypeAt (H X : Set, l : Nat, Q m r A : Set) :=
+  (UnitAt(X, A, l) → (∃ U ∈ krullOpens(X), identity(algebraCarrier(X)) ∈ U ∧
+    (∀ s ∈ U, s ∈ csGRInertiaGroup(X, A) → r(s) = matOne(Algebra.ring(Q), m)))) ∧
+  (∀ e, ∀ j, csGRInducesPlace(X, A, l, Q, e, j) →
+    csGRIsPotCrys(H, csGRDecompGroupGroup(X, A), j, decompRep(X, r, A)))
+
+-- LocalEmbedding.lean, PolyKillsAt r A s P: P(r(s)) = 0 if ℓ is a unit at
+-- A, and P kills every Weil pair (s, k) along every embedding inducing A.
+predicate PolyKillsAt (H X : Set, l : Nat, Q m r A s P : Set) :=
+  (UnitAt(X, A, l) → matPolyEval(Algebra.ring(Q), m, r(s), P) =
+    matZero(Algebra.ring(Q), m, m)) ∧
+  (∀ e, ∀ j, csGRInducesPlace(X, A, l, Q, e, j) → s ∈ csGRDecompGroup(X, A) →
+    (∀ k ∈ ℕ, csGRIsWeilPair(l, Q, j(s), k) →
+      csGRIsKilledBy(H, csGRDecompGroupGroup(X, A), j, decompRep(X, r, A), s, k, P)))
+
+-- The embedding τ = ι⁻¹ ∘ g⁻¹ ∘ e ∘ (E → Ω) : E → ℂ (LocalEmbedding.lean,
+-- in JumpsRelAt).
+def complexOfPadic (Q ι y : Set) : Set := ⋃({ z ∈ complexCarrier | ι(z) = y })
+
+def embeddingVia (X Q ι e g : Set) : Set :=
+  { (x, complexOfPadic(Q, ι, Group.inv(galoisGroup(Q))(g)(e(Algebra.map(X)(x))))) |
+    x ∈ Ring.carrier(Algebra.base(X)) }
+
+-- LocalEmbedding.lean, JumpsRelAt r A R J: for every embedding inducing A,
+-- every g ∈ G_ℓ and every integer u, the multiplicity of u in J(τ) is
+-- related by R to the multiplicity of the Hodge–Tate jump u of r along g.
+predicate JumpsRelAt (H X : Set, l : Nat, Q ι r A Rel J : Set) :=
+  ∀ e, ∀ j, csGRInducesPlace(X, A, l, Q, e, j) → (∀ g ∈ algebraAutomorphisms(Q), ∀ u ∈ ℤ,
+    (J(embeddingVia(X, Q, ι, e, g))(u),
+      csGRJump(H, csGRDecompGroupGroup(X, A), j, decompRep(X, r, A), g, u)) ∈ Rel)
+
+-- Equality and occurrence (LocalEmbedding.lean, OccursIn m n: m ≠ 0 →
+-- n ≠ 0) as relations between multiplicities.
+def natEqualityRel : Set := { q ∈ ℕ × ℕ | fst(q) = snd(q) }
+
+def occursInRel : Set := { q ∈ ℕ × ℕ | fst(q) ≠ 0 → snd(q) ≠ 0 }
+
+-- LocalEmbedding.lean, HasJumpsAt r A J: the jumps of r along each
+-- embedding, with multiplicity, are J(τ).
+predicate HasJumpsAt (H X : Set, l : Nat, Q ι r A J : Set) :=
+  JumpsRelAt(H, X, l, Q, ι, r, A, natEqualityRel, J)
+
+-- LocalEmbedding.lean, SphericalClause r R J w P: at every place A of Ω
+-- above w, r is good, its jumps are related to J by R, and P kills every
+-- geometric Frobenius s (s⁻¹ a Frobenius for q_w).
+predicate SphericalClause (H X : Set, l : Nat, Q ι m r Rel J w P : Set) :=
+  ∀ A, csGRIsPlaceOver(X, A, w) → IsGoodAt(H, X, l, Q, m, r, A) ∧
+    JumpsRelAt(H, X, l, Q, ι, r, A, Rel, J) ∧
+    (∀ s ∈ algebraAutomorphisms(X), ∀ q ∈ ℕ, q = placeNorm(Algebra.base(X), w) →
+      csGRIsFrob(X, A, q, Group.inv(galoisGroup(X))(s)) → PolyKillsAt(H, X, l, Q, m, r, A, s, P))
+
+-- Section: Attached representations
+-- The Frobenius data (w, A, s) at which, for every x ∈ H with j(x) = s,
+-- the coefficients of det(X − ρ(x)) are within η of those of ιP(w).
+def closeFrobData (X l Q ι P G m ρ j η : Set) : Set :=
+  { d ∈ csGRFrobData(X) | ∀ x ∈ Group.carrier(G), j(x) = snd(d) → (∀ i ∈ ℕ,
+    padicAlgClNorm(l, Q)(Ring.sub(Algebra.ring(Q),
+      polyCoeff(matCharpoly(Algebra.ring(Q), m, ρ(x)), i),
+      polyCoeff(polyMap(complexRing, Algebra.ring(Q), ι)(P(fst(fst(d)))), i))) ≤ η) }
+
+-- AttachedDefs.lean, Attached P ρ j: for a group G with topology T and
+-- j : G → Gal(Ω/E), ρ : G → GL_m(ℚ̄_ℓ) is continuous and semisimple, j is
+-- open, and for each η > 0, for most Frobenii (w, A, s), the
+-- characteristic polynomial of ρ(x) is coefficientwise within η of
+-- ιP(w) whenever j(x) = s. The source's default j = id is
+-- AttachedGal below.
+predicate Attached (X : Set, l : Nat, Q ι P G T m ρ j : Set) :=
+  GroupHom(ρ, G, generalLinearGroup(Algebra.ring(Q), m)) ∧
+  ContinuousRep(l, Q, G, T, m, ρ) ∧
+  csGRIsTraceNondeg(G, Algebra.ring(Q), m, ρ) ∧
+  FunctionBetween(j, Group.carrier(G), algebraAutomorphisms(X)) ∧
+  (∀ U ∈ TopologicalSpace.opens(T), functionImage(j, U, algebraAutomorphisms(X)) ∈ krullOpens(X)) ∧
+  (∀ η ∈ ℝ, (0:R) < η → closeFrobData(X, l, Q, ι, P, G, m, ρ, j, η) ∈ csGRMostFrobenii(X))
+
+predicate AttachedGal (X : Set, l : Nat, Q ι P m r : Set) :=
+  Attached(X, l, Q, ι, P, galoisGroup(X), krullTopology(X), m, r,
+    identity(algebraAutomorphisms(X)))
+
+-- The Frobenius data whose Frobenius lies in the open set U.
+def frobDataNear (X U : Set) : Set := { d ∈ csGRFrobData(X) | snd(d) ∈ U }
+
+-- Section: Facts
+section Facts
+variable (X Q ι : Set, l : Nat)
+hypothesis closure : csGRClosure(X)
+hypothesis padic : csGRPadicIso(l, Q, ι)
+
+-- AttachedDefs.lean, isRoot_of_isRoot_charpoly: if P(M) = 0 then every
+-- root of the characteristic polynomial of M is a root of P.
+theorem matCharpoly.root_of_annihilator (K n M P x : Set)
+  requires field : Field(K)
+  requires finite : Finite(n)
+  requires matrix : M ∈ matrixSpace(K, n, n)
+  requires poly : P ∈ Ring.carrier(polynomialRing(K, {0}))
+  requires kills : matPolyEval(K, n, M, P) = matZero(K, n, n)
+  requires root : polyEval(K, matCharpoly(K, n, M), x) = Ring.zero(K)
+  requires member : x ∈ Ring.carrier(K)
+  shows polyEval(K, P, x) = Ring.zero(K)
+proof
+  sorry
+
+-- WeightCongruence.lean, norm_eq_one_of_continuous: a continuous
+-- character ψ of a compact group into ℚ̄_ℓ^× has |ψ| = 1.
+theorem continuous_character.norm_eq_one (G T ψ : Set)
+  requires topological : TopologicalGroup(G, T)
+  requires compact : Compact(T)
+  requires character : GroupHom(ψ, G, unitGroup(Algebra.ring(Q)))
+  requires continuous : ψ : T ⇒ normTopology(Ring.additive(Algebra.ring(Q)), padicAlgClNorm(l, Q))
+  shows ∀ g ∈ Group.carrier(G), padicAlgClNorm(l, Q)(ψ(g)) = (1:R)
+proof
+  sorry
+
+-- WeightCongruence.lean, norm_coeff_le_of_mul_monic: if R is monic and all
+-- coefficients of D R have norm at most η, so do those of D.
+theorem polyCoeff.norm_le_of_mul_monic (D Rp η : Set)
+  requires polyD : D ∈ Ring.carrier(polynomialRing(Algebra.ring(Q), {0}))
+  requires polyR : Rp ∈ Ring.carrier(polynomialRing(Algebra.ring(Q), {0}))
+  requires monic : PolyMonic(Algebra.ring(Q), Rp)
+  requires real : η ∈ ℝ
+  requires bound : ∀ i ∈ ℕ, padicAlgClNorm(l, Q)(polyCoeff(call2(Ring.mul(polynomialRing(
+    Algebra.ring(Q), {0})), D, Rp), i)) ≤ η
+  shows ∀ i ∈ ℕ, padicAlgClNorm(l, Q)(polyCoeff(D, i)) ≤ η
+proof
+  sorry
+
+-- WeightCongruence.lean, Attached.tendsto_charpoly_coeff: if ρ is
+-- attached to P, then for every x the coefficient ιP(w)ᵢ tends to the
+-- coefficient of det(X − ρ(x)) along most Frobenii (w, A, s) with s → j(x):
+-- for each ε > 0 some neighbourhood U of j(x) and some large set of most
+-- Frobenii bring them within ε on the data near U.
+theorem Attached.tendsto_charpoly_coeff (P G T m ρ j x ε : Set, i : Nat)
+  requires attached : Attached(X, l, Q, ι, P, G, T, m, ρ, j)
+  requires member : x ∈ Group.carrier(G)
+  requires real : ε ∈ ℝ
+  requires positive : (0:R) < ε
+  shows ∃ U ∈ krullOpens(X), j(x) ∈ U ∧ (∃ S ∈ csGRMostFrobenii(X), ∀ d ∈ S,
+    d ∈ frobDataNear(X, U) → padicAlgClNorm(l, Q)(Ring.sub(Algebra.ring(Q),
+      polyCoeff(polyMap(complexRing, Algebra.ring(Q), ι)(P(fst(fst(d)))), i),
+      polyCoeff(matCharpoly(Algebra.ring(Q), m, ρ(x)), i))) < ε)
+proof
+  sorry
+
+-- WeightCongruence.lean, Attached.trace_eq: two representations of the
+-- same rank attached to the same system P, through j and j', have equal
+-- traces at x and y whenever j(x) = j'(y) (Chebotarev uniqueness).
+theorem Attached.trace_eq (P G T G2 T2 m ρ σ j j2 x y : Set)
+  requires attached : Attached(X, l, Q, ι, P, G, T, m, ρ, j)
+  requires attached2 : Attached(X, l, Q, ι, P, G2, T2, m, σ, j2)
+  requires memberX : x ∈ Group.carrier(G)
+  requires memberY : y ∈ Group.carrier(G2)
+  requires same : j(x) = j2(y)
+  shows matTrace(Algebra.ring(Q), m, ρ(x)) = matTrace(Algebra.ring(Q), m, σ(y))
+proof
+  sorry
+
+-- With the Brauer–Nesbitt theorem: two Galois representations attached
+-- to the same system are conjugate (AttachedDefs.lean, the uniqueness
+-- the source uses through Attached.trace_eq and
+-- IsTraceNondeg.exists_conj_of_trace_eq).
+theorem AttachedGal.conj (P m r r2 : Set)
+  requires attached : AttachedGal(X, l, Q, ι, P, m, r)
+  requires attached2 : AttachedGal(X, l, Q, ι, P, m, r2)
+  shows ∃ M ∈ invertibleMatrices(Algebra.ring(Q), m), ∀ g ∈ algebraAutomorphisms(X),
+    matMul(Algebra.ring(Q), m, m, m, r(g), M) = matMul(Algebra.ring(Q), m, m, m, M, r2(g))
+proof
+  sorry
+
+end Facts
+
+end Attached
