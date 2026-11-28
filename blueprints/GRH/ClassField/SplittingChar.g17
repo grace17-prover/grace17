@@ -1,0 +1,418 @@
+-- The splitting character of a CM field and the L-function of a
+-- base-changed character of U(1): splitting characters υ (unitary Hecke
+-- characters with υ(x̄) = υ(x)⁻¹ and υ = ∏_τ x_τ/|x_τ| on ideles with unit
+-- finite part) and their existence for stably unramified E; the
+-- restriction of υ to U(1)(𝔸), its weight and powers, the rank twist
+-- a·υ^{⌊n/2⌋}; the base change at a local idele; υ(x)|x|^{−1/2} on finite
+-- ideles; the algebraic Hecke character ψ|·|^{k/2} of a character of type
+-- m(σ) − m(σ̄); the partial L-function L^{S ∪ S̄}(s, ν(x/x̄)) of a character
+-- ν of U(1)(𝔸), its type 2e, symmetry at w and w̄, and non-vanishing for
+-- s ≥ 1 when e ≠ 0.
+-- Source: grh-compact/src/Lib/ClassField/HeckeCharacter/SplittingCharOnU1.lean
+-- (HasWeight.of_weight_eq, exists_baseChange_finPart_locIdele,
+-- baseChange_finPart_locIdele, upsilonU1_hasWeight, hasWeight_upsilonU1_pow,
+-- mul_upsilonU1_pow, hasWeight_rankTwist, baseChange_upsilonU1,
+-- exists_chiFin_pow_eq_prod, norm_map_chiFin),
+-- HeckeCharacter/SplittingCharExists.lean (nonempty_splittingChar),
+-- HeckeL/AutCharLFunction.lean (IsHeckeOfType.toAlgebraic,
+-- toAlgebraic_locIdele, HeckeChar.isHeckeOfType_finPart,
+-- WeilData.charUnramifiedAt_upsilon, AutChar.L, baseChange_apply_inf,
+-- isHeckeOfType, L_ne_zero, charUnramifiedAt, atUnif_star, toAlgebraic,
+-- charUnramifiedAt_toAlgebraic), with Lib/General/NumberTheory/
+-- UpsilonValues.lean (SplittingChar, υ), Lib/Weil/Construction/PairDefs.lean
+-- (WeilData.upsilonU1, rankTwist) and FiniteMultiplier.lean (chiFin).
+-- Part of: "Algebraic Hecke characters (type A₀); extension of the
+-- quadratic character of a CM field (known result; see
+-- Lib.ClassField.HeckeCharacter.SplittingCharExists)" and "Hecke
+-- L-functions: Euler product, continuation to s = 1, non-vanishing, prime
+-- densities".
+-- Encoding. The source's SplittingChar E is a class on a CM field;
+-- GRH.Weil.Operators states it for Weil data W without the continuity of
+-- υ (SplittingChar(W, υ)). Here CMSplittingChar(E, Φ, υ) is the source's
+-- class in full, υ a unitary Hecke character (GRH.ClassField.HeckeCharacter),
+-- and CMSplittingChar.weil shows it gives SplittingChar(W, υ). The
+-- objects of WeilData (upsilonU1, rankTwist, chiFin) take υ as an argument.
+-- A finite place w is split when w̄ ≠ w (FinPlace.IsSplit). The source's
+-- AutChar.L S drops the Euler factors at S ∪ S̄ (Set.conjClosure); here
+-- placeConjClosure(E, S). The coefficients ψ(ϖ_v) use a uniformiser family
+-- ϖ for the source's chosen uniformisers.
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.SplittingChar
+import GRH.ClassField.HeckeCharacter
+import GRH.ClassField.AlgebraicHecke
+import GRH.Weil.Projections
+
+section SplittingChar
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Splitting characters
+-- The phases x_τ/|x_τ| of an idele at τ ∈ Φ.
+def idelePhases (Φ x : Set) : Set :=
+  { (σ, complexDiv(fst(x)(σ), complexOfReal(complexAbs(fst(x)(σ))))) | σ ∈ Φ }
+
+-- UpsilonValues.lean, SplittingChar E: a unitary Hecke character υ with
+-- υ(x) = ∏_τ x_τ/|x_τ| when the finite part of x is a unit of Ô, and
+-- υ(x̄) = υ(x)⁻¹.
+predicate CMSplittingChar (E Φ υ : Set) :=
+  CMType(E, Φ) ∧ υ ∈ heckeChars(E, Φ) ∧
+  (∀ x ∈ cmIdeles(E, Φ), snd(x) ∈ idelesUnitOff(E, ∅) →
+    υ(x) = charProduct(Φ, idelePhases(Φ, x))) ∧
+  (∀ x ∈ cmIdeles(E, Φ), υ(cmAdeleStar(E, Φ)(x)) = complexInv(υ(x)))
+
+-- CoprimeValuation.lean, StablyUnram E: E contains a primitive 5040-th
+-- root of unity.
+predicate StablyUnram (E : Set) := ∃ ζ ∈ Ring.carrier(E), PrimitiveRootOf(E, ζ, 5040)
+
+-- CoprimeValuation.lean, FinPlace.IsSplit: w̄ ≠ w.
+predicate IsSplitPlace (E w : Set) := conjugatePlace(E, w) ≠ w
+
+-- PairDefs.lean, WeilData.upsilonU1: υ restricted to U(1)(𝔸).
+def upsilonU1 (E Φ υ : Set) : Set := { (u, υ(u)) | u ∈ unitaryAdeles(E, Φ) }
+
+-- PairDefs.lean, rankTwist a n: a·υ^{⌊|n|/2⌋} on U(1)(𝔸), for an index set
+-- of m elements.
+def rankTwist (E Φ υ a : Set, m : Nat) : Set :=
+  autCharMul(E, Φ, a, autCharPow(E, Φ, upsilonU1(E, Φ, υ), quotientNat(m, 2)))
+
+-- The constant weight z on Φ, and the weight z + e.
+def constWeight (Φ z : Set) : Set := { (τ, z) | τ ∈ Φ }
+
+def weightShift (Φ z e : Set) : Set := { (τ, integerAdd(z, e(τ))) | τ ∈ Φ }
+
+-- The square υ² of a Hecke character.
+def heckeCharSquare (E Φ υ : Set) : Set := { (x, ℂ[υ(x) * υ(x)]) | x ∈ cmIdeles(E, Φ) }
+
+-- FiniteMultiplier.lean, chiFin: x ↦ υ(x)|x|^{−1/2} on the finite ideles.
+def chiFin (E Φ υ x : Set) : Set :=
+  ℂ[υ(finIdeleIncl(Φ, x)) * complexOfReal(realInv(realSqrt(finIdeleAbs(E, x))))]
+
+-- The factors τ(ȳ) of ∏_τ τ(ȳ), and the ℂ_p-norm factors
+-- |x_{w_τ}| (weightEmbedding ι τ, the place of x ↦ ι(τ(x̄))).
+def conjEmbeddingFactors (E Φ y : Set) : Set := { (τ, τ(cmConjugation(E)(y))) | τ ∈ Φ }
+
+def chiFinPadicFactors (E Φ ι x : Set) : Set :=
+  { (τ, placeCpNorm(placePrime(ι), ι)(adeleExtension(E, ι, τ, x))) | τ ∈ Φ }
+
+-- Section: Algebraic Hecke characters from characters of type n
+-- AutCharLFunction.lean, IsHeckeOfType.toAlgebraic: ψ|·|^{k/2} (θ), of
+-- infinity type m.
+def heckeTwistAbs (E ψ k : Set) : Set :=
+  { (x, ℂ[ψ(x) * complexOfReal(realRpow(finIdeleAbs(E, x), R[realInt(k) / 2]))]) |
+    x ∈ finIdeleUnits(E) }
+
+-- The type m(Φ_w) − m(Φ̄_w) on Φ of an infinity type m on all embeddings.
+def typeDifference (E Φ m : Set) : Set :=
+  { (τ, integerAdd(m(τ), integerNegValue(m(conjugateEmbedding(E, τ))))) | τ ∈ Φ }
+
+-- AutCharLFunction.lean, toAlgebraic k j: the infinity type j + e − k on
+-- Φ and j − e on its conjugate.
+def phiTypePart (Φ e k j : Set) : Set :=
+  { (σ, integerAdd(j, integerAdd(e(σ), integerNegValue(k)))) | σ ∈ Φ }
+
+def conjTypePart (E Φ e j : Set) : Set :=
+  { (conjugateEmbedding(E, τ), integerAdd(j, integerNegValue(e(τ)))) | τ ∈ Φ }
+
+def toAlgebraicType (E Φ e k j : Set) : Set := phiTypePart(Φ, e, k, j) ∪ conjTypePart(E, Φ, e, j)
+
+-- The character ν(x/x̄) υ(x)^{−k} |x|^{j−k/2} of the finite ideles (k ≥ 0
+-- read through υ⁻¹; the source's k is an integer).
+def upsilonIntPow (υ x k : Set) : Set := complexIntPow(υ(x), integerNegValue(k))
+
+def toAlgebraicChar (E Φ υ ν k j : Set) : Set :=
+  { (x, ℂ[autCharBaseChange(E, Φ, ν)(finIdeleIncl(Φ, x)) *
+      upsilonIntPow(υ, finIdeleIncl(Φ, x), k) *
+      complexOfReal(realRpow(finIdeleAbs(E, x), R[realInt(j) - realInt(k) / 2]))]) |
+    x ∈ finIdeleUnits(E) }
+
+-- Section: The L-function of a base-changed character
+-- Set.conjClosure: S ∪ S̄.
+def placeConjugateSet (E S : Set) : Set := { conjugatePlace(E, w) | w ∈ S }
+
+def placeConjClosure (E S : Set) : Set := S ∪ placeConjugateSet(E, S)
+
+-- AutCharLFunction.lean, AutChar.L S: L^{S ∪ S̄}(s, ν(x/x̄)).
+def autCharL (E Φ ν ϖ S s : Set) : Set :=
+  eulerProd(E, heckeCoeff(E, heckeFinPart(Φ, autCharBaseChange(E, Φ, ν), E), ϖ,
+    placeConjClosure(E, S)), s)
+
+-- The value of ν(x/x̄) at the infinite idele (z, 1), and z ↦ ∏_τ phase^{2e}.
+def infiniteIdele (E z : Set) : Set := (z, finOne(E))
+
+def doubleWeight (Φ e : Set) : Set := typeScale(Φ, e, 2)
+
+def phaseFactorsAt (Φ n z : Set) : Set :=
+  { (σ, complexIntPow(complexDiv(z(σ), complexOfReal(complexAbs(z(σ)))), n(σ))) | σ ∈ Φ }
+
+-- The invertible infinite components ((ℂˣ)^Φ).
+def infiniteUnits (Φ : Set) : Set :=
+  { z ∈ functionSpace(Φ, complexCarrier) | ∀ σ ∈ Φ, z(σ) ≠ complexZero }
+
+end SplittingChar
+
+-- Section: Splitting characters
+section Splitting
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (E Φ : Set)
+hypothesis cmType : CMType(E, Φ)
+
+-- nonempty_splittingChar: if E is stably unramified and every root of
+-- unity y of E is δ/δ̄ for a unit δ with ∏_τ τ(δ) = 1, then E has a
+-- splitting character.
+theorem CMSplittingChar.exists
+  requires stably : StablyUnram(E)
+  requires roots : ∀ y ∈ torsionUnits(E), ∃ δ ∈ integerUnits(E),
+    charProduct(Φ, phiValues(Φ, δ)) = complexOne ∧
+    call2(Ring.mul(E), y, cmConjugation(E)(δ)) = δ
+  shows ∃ υ, CMSplittingChar(E, Φ, υ)
+proof
+  sorry
+
+-- A splitting character gives the splitting character of Weil data.
+theorem CMSplittingChar.weil (W υ : Set)
+  requires weil : IsWeilDatum(W)
+  requires field : WeilDatum.field(W) = E
+  requires type : WeilDatum.cmType(W) = Φ
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  shows SplittingChar(W, υ)
+proof
+  sorry
+
+-- WeilData.charUnramifiedAt_upsilon: υ is unramified at every finite
+-- place.
+theorem CMSplittingChar.unramified (υ v : Set)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires place : v ∈ finPlaces(E)
+  shows CharUnramifiedAt(E, heckeFinPart(Φ, υ, E), v)
+proof
+  sorry
+
+-- upsilonU1: υ on U(1)(𝔸) is a character of U(1) of weight 1 and trivial
+-- tame part (upsilonU1_hasWeight), υ^n has weight n
+-- (hasWeight_upsilonU1_pow), and baseChange_upsilonU1: its base change is
+-- υ².
+theorem upsilonU1.weight_one (υ : Set)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  shows HasWeight(E, Φ, upsilonU1(E, Φ, υ), constWeight(Φ, integerOne), trivialResidueFamily(E))
+proof
+  sorry
+
+theorem upsilonU1.pow_weight (υ : Set, n : Nat)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  shows HasWeight(E, Φ, autCharPow(E, Φ, upsilonU1(E, Φ, υ), n),
+    constWeight(Φ, integerOfNat(n)), trivialResidueFamily(E))
+proof
+  sorry
+
+theorem upsilonU1.base_change (υ : Set)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  shows autCharBaseChange(E, Φ, upsilonU1(E, Φ, υ)) = heckeCharSquare(E, Φ, υ)
+proof
+  sorry
+
+-- AutChar.HasWeight.mul_upsilonU1_pow: μ υⁿ has weight n + e and the tame
+-- part of μ; hasWeight_rankTwist: rankTwist μ n has weight ⌊|n|/2⌋ + e.
+theorem HasWeight.mul_upsilon_pow (υ μ e ψ : Set, n : Nat)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires weight : HasWeight(E, Φ, μ, e, ψ)
+  shows HasWeight(E, Φ, autCharMul(E, Φ, μ, autCharPow(E, Φ, upsilonU1(E, Φ, υ), n)),
+    weightShift(Φ, integerOfNat(n), e), ψ)
+proof
+  sorry
+
+theorem HasWeight.rank_twist (υ μ e ψ : Set, m : Nat)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires weight : HasWeight(E, Φ, μ, e, ψ)
+  shows HasWeight(E, Φ, rankTwist(E, Φ, υ, μ, m), weightShift(Φ, integerOfNat(quotientNat(m, 2)), e), ψ)
+proof
+  sorry
+
+-- exists_chiFin_pow_eq_prod: for a finite idele x there are n > 0 and
+-- y ∈ Eˣ with xⁿ and y of equal order at every place and
+-- (υ(x)|x|^{−1/2})ⁿ = ∏_τ τ(ȳ).
+theorem chiFin.exists_pow_eq_prod (υ x : Set)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires idele : x ∈ finIdeleUnits(E)
+  shows ∃ n ∈ ℕ, 0 < n ∧ ∃ y ∈ fieldUnits(E),
+    (∀ w ∈ finPlaces(E), completionOrder(E, w, Ring.pow(finiteAdeleRing(E), x, n)(w)) =
+      completionOrder(E, w, principalIdele(E, y)(w))) ∧
+    ℂ[chiFin(E, Φ, υ, x) ^ n] = charProduct(Φ, conjEmbeddingFactors(E, Φ, y))
+proof
+  sorry
+
+-- norm_map_chiFin: for ι : ℂ → ℂ_p, |ι(υ(x)|x|^{−1/2})| = ∏_τ |x_{w_τ}| with
+-- x_{w_τ} read through weightEmbedding ι τ.
+theorem chiFin.padic_abs (υ x ι : Set, p : Nat)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires idele : x ∈ finIdeleUnits(E)
+  requires prime : Prime(p)
+  requires place : ι ∈ padicPlaces(p)
+  shows padicPlaceNorm(p, ι, chiFin(E, Φ, υ, x)) =
+    finiteRingProduct(Φ, ℝ, realAdd, realZero, realNeg, realMul, realOne,
+      chiFinPadicFactors(E, Φ, ι, x))
+proof
+  sorry
+
+end Splitting
+
+-- Section: Base change at a place
+section LocalBaseChange
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (E Φ : Set)
+hypothesis cmType : CMType(E, Φ)
+
+-- AutChar.HasWeight.of_weight_eq.
+theorem HasWeight.of_weight_eq (μ e f ψ : Set)
+  requires weight : HasWeight(E, Φ, μ, e, ψ)
+  requires equal : e = f
+  shows HasWeight(E, Φ, μ, f, ψ)
+proof
+  sorry
+
+-- exists_baseChange_finPart_locIdele: with ψ trivial at w̄, and x ∈ E_wˣ a
+-- local unit if w is split, x/x̄ (x placed at w) has integral finite part
+-- and μ(x/x̄) = ψ_w(x/x̄ mod w).
+theorem HasWeight.base_change_locIdele (μ e ψ w x : Set)
+  requires weight : HasWeight(E, Φ, μ, e, ψ)
+  requires place : w ∈ finPlaces(E)
+  requires conj : ψ(conjugatePlace(E, w)) = trivialResidueChar(E, conjugatePlace(E, w))
+  requires local : x ∈ locUnits(E, w)
+  requires unit : IsSplitPlace(E, w) → x ∈ completionUnitsIn(E, w)
+  shows snd(divStar(E, Φ, finIdeleIncl(Φ, locIdele(E, w, x)))) ∈ finInt(E) ∧
+    heckeFinPart(Φ, autCharBaseChange(E, Φ, μ), E)(locIdele(E, w, x)) =
+      ψ(w)(reduceAt(E, w, snd(divStar(E, Φ, finIdeleIncl(Φ, locIdele(E, w, x))))))
+proof
+  sorry
+
+-- baseChange_finPart_locIdele: at a split w with ψ_{w̄} trivial, for a local
+-- unit x, μ(x/x̄) = ψ_w(x mod w).
+theorem HasWeight.base_change_split (μ e ψ w x : Set)
+  requires weight : HasWeight(E, Φ, μ, e, ψ)
+  requires place : w ∈ finPlaces(E)
+  requires split : IsSplitPlace(E, w)
+  requires conj : ψ(conjugatePlace(E, w)) = trivialResidueChar(E, conjugatePlace(E, w))
+  requires local : x ∈ locUnits(E, w)
+  requires unit : x ∈ completionUnitsIn(E, w)
+  shows heckeFinPart(Φ, autCharBaseChange(E, Φ, μ), E)(locIdele(E, w, x)) =
+    ψ(w)(reduceAt(E, w, locIdele(E, w, x)))
+proof
+  sorry
+
+end LocalBaseChange
+
+-- Section: The L-function of a base-changed character
+section BaseChangeL
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (E Φ : Set)
+hypothesis cmType : CMType(E, Φ)
+
+-- IsHeckeOfType.toAlgebraic: for ψ of type m(Φ_w) − m(Φ̄_w) with
+-- m(σ) + m(σ̄) = k constant, ψ|·|^{k/2} with infinity type m is an
+-- algebraic Hecke character.
+theorem IsHeckeOfType.to_algebraic (ψ m k : Set)
+  requires type : FunctionBetween(m, complexEmbeddings(E), ℤ)
+  requires constant : ∀ σ ∈ complexEmbeddings(E),
+    integerAdd(m(σ), m(conjugateEmbedding(E, σ))) = k
+  requires hecke : IsHeckeOfType(E, Φ, ψ, typeDifference(E, Φ, m))
+  shows csCFAlgHeckeChar(E, heckeTwistAbs(E, ψ, k), m)
+proof
+  sorry
+
+-- HeckeChar.isHeckeOfType_finPart: a unitary Hecke character equal to
+-- z ↦ ∏_τ (z_τ/|z_τ|)^{n_τ} at infinity has finite part of type n.
+theorem heckeFinPart.hecke_of_type (χ n : Set)
+  requires hecke : χ ∈ heckeChars(E, Φ)
+  requires type : FunctionBetween(n, Φ, ℤ)
+  requires infinity : ∀ z ∈ infiniteUnits(Φ),
+    χ(infiniteIdele(E, z)) = charProduct(Φ, phaseFactorsAt(Φ, n, z))
+  shows IsHeckeOfType(E, Φ, heckeFinPart(Φ, χ, E), n)
+proof
+  sorry
+
+-- baseChange_apply_inf, isHeckeOfType: ν(x/x̄) at infinity is
+-- ∏_τ phase^{2e(τ)}, so its finite part has type 2e.
+theorem HasWeight.base_change_infinity (ν e ψ z : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires infinite : z ∈ infiniteUnits(Φ)
+  shows autCharBaseChange(E, Φ, ν)(infiniteIdele(E, z)) =
+    charProduct(Φ, phaseFactorsAt(Φ, doubleWeight(Φ, e), z))
+proof
+  sorry
+
+theorem HasWeight.base_change_type (ν e ψ : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  shows IsHeckeOfType(E, Φ, heckeFinPart(Φ, autCharBaseChange(E, Φ, ν), E), doubleWeight(Φ, e))
+proof
+  sorry
+
+-- AutChar.HasWeight.L_ne_zero: for e ≠ 0 and S finite,
+-- L^{S ∪ S̄}(s, ν(x/x̄)) ≠ 0 for every real s ≥ 1.
+theorem HasWeight.L_ne_zero (ν e ψ ϖ S : Set, s : Real)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires uniformizers : UniformizerFamily(E, ϖ)
+  requires places : S ⊆ finPlaces(E)
+  requires finite : Finite(S)
+  requires nonzero : NonzeroType(Φ, e)
+  requires large : realOne ≤ s
+  shows autCharL(E, Φ, ν, ϖ, S, s) ≠ complexZero
+proof
+  sorry
+
+-- AutChar.HasWeight.charUnramifiedAt: with ψ_w and ψ_{w̄} trivial, ν(x/x̄)
+-- is unramified at w.
+theorem HasWeight.base_change_unramified (ν e ψ w : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires place : w ∈ finPlaces(E)
+  requires trivial : ψ(w) = trivialResidueChar(E, w)
+  requires conj : ψ(conjugatePlace(E, w)) = trivialResidueChar(E, conjugatePlace(E, w))
+  shows CharUnramifiedAt(E, heckeFinPart(Φ, autCharBaseChange(E, Φ, ν), E), w)
+proof
+  sorry
+
+-- AutChar.HasWeight.atUnif_star: then ν(x/x̄) takes inverse values at the
+-- uniformisers at w̄ and at w.
+theorem HasWeight.at_unif_conj (ν e ψ w ϖ : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires place : w ∈ finPlaces(E)
+  requires uniformizers : UniformizerFamily(E, ϖ)
+  requires trivial : ψ(w) = trivialResidueChar(E, w)
+  requires conj : ψ(conjugatePlace(E, w)) = trivialResidueChar(E, conjugatePlace(E, w))
+  shows heckeAtUnif(E, Φ, autCharBaseChange(E, Φ, ν), ϖ, conjugatePlace(E, w)) =
+    complexInv(heckeAtUnif(E, Φ, autCharBaseChange(E, Φ, ν), ϖ, w))
+proof
+  sorry
+
+-- AutChar.HasWeight.toAlgebraic: ν(x/x̄) υ(x)^{−k} |x|^{j−k/2} is an
+-- algebraic Hecke character of infinity type j + e − k on Φ and j − e on
+-- its conjugate; charUnramifiedAt_toAlgebraic: unramified where ψ_w and
+-- ψ_{w̄} are trivial.
+theorem HasWeight.to_algebraic (ν e ψ υ k j : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires integer : k ∈ ℤ
+  requires integer2 : j ∈ ℤ
+  shows csCFAlgHeckeChar(E, toAlgebraicChar(E, Φ, υ, ν, k, j), toAlgebraicType(E, Φ, e, k, j))
+proof
+  sorry
+
+theorem HasWeight.to_algebraic_unramified (ν e ψ υ k j w : Set)
+  requires weight : HasWeight(E, Φ, ν, e, ψ)
+  requires splitting : CMSplittingChar(E, Φ, υ)
+  requires integer : k ∈ ℤ
+  requires integer2 : j ∈ ℤ
+  requires place : w ∈ finPlaces(E)
+  requires trivial : ψ(w) = trivialResidueChar(E, w)
+  requires conj : ψ(conjugatePlace(E, w)) = trivialResidueChar(E, conjugatePlace(E, w))
+  shows CharUnramifiedAt(E, toAlgebraicChar(E, Φ, υ, ν, k, j), w)
+proof
+  sorry
+
+end BaseChangeL
