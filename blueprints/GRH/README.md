@@ -408,6 +408,8 @@ graph TD
 | GRH.Category.Abelian | 45 | 1 | 44 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
+| GRH.Cyclotomic.Stickelberger | 5 | 0 | 5 |
+| GRH.Cyclotomic.Voronoi | 4 | 0 | 4 |
 | GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
 | GRH.Fourier.Euclidean | 26 | 0 | 26 |
 | GRH.Fourier.Torus | 21 | 0 | 21 |
@@ -416,6 +418,15 @@ graph TD
 | GRH.GLn.WeightRep | 6 | 0 | 6 |
 | GRH.GLn.Branching | 7 | 0 | 7 |
 | GRH.GLn.Dual | 3 | 0 | 3 |
+| GRH.LocalGL.GroupChars | 9 | 0 | 9 |
+| GRH.LocalGL.Hall | 20 | 0 | 20 |
+| GRH.LocalGL.Cuspidal | 17 | 0 | 17 |
+| GRH.LocalGL.Green | 14 | 0 | 14 |
+| GRH.LocalGL.PadicGL | 3 | 0 | 3 |
+| GRH.LocalGL.Iwahori | 18 | 0 | 18 |
+| GRH.LocalGL.Labels | 18 | 0 | 18 |
+| GRH.LocalGL.Shintani | 22 | 0 | 22 |
+| GRH.LocalGL.TraceFormula | 1 | 0 | 1 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
@@ -461,7 +472,8 @@ graph TD
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
+| GRH.SiegelWeil.MassRatio | 1 | 0 | 1 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9761** | **7477** | **2284** |
+| **total** | **9893** | **7477** | **2416** |
 <!-- /blueprint-status -->
