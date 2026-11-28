@@ -1,0 +1,415 @@
+-- The adelic Heisenberg datum of a CM field with Weil data: the adeles
+-- 𝔸 = ℂ^Φ × 𝔸_f of a CM field E with a CM type Φ, complex conjugation on
+-- them, the standard additive character ψ = ψ_∞ ψ_f, the Weil data
+-- (ȷ, α), the bicharacter β(x, y) = ψ(½ȷ h_s(y, x)) of the standard
+-- hermitian form of signs s on 𝔸ⁿ, the vacuum e (a Gaussian at the
+-- infinite places times ψ_f(½c₀ȷ x_f*x_f) on αÔⁿ), the Haar measure
+-- under which e is a vacuum, and the finite Heisenberg datum on 𝔸_fⁿ with
+-- its semicharacter and finite vacuum.
+-- Source: grh-compact/src/Lib/Weil/Construction/AdelicHeisenberg.lean
+-- (vacuumFn, adelicHeis), Lib/Weil/Construction/FiniteHeisenberg.lean
+-- (stdLattice, psi₀, traceOneAdele, half, semichar, finVac, finHeis).
+-- Stated here with what they need from groups not yet written:
+-- Lib/Adelic/Adeles/CoprimeValuation.lean (PlaceEmbedding, CMType, 𝔸,
+-- 𝔸f, toAdele, StablyUnram), Lib/Adelic/Adeles/AdditiveCharDefs.lean
+-- (ψf, stdAddChar), Lib/General/NumberTheory/UpsilonValues.lean
+-- (WeilData, traceOne, scaleIdele); their homes are GRH.Adelic.Adeles
+-- and GRH.General.* when those exist. Part of: "Adelic Weil
+-- representation of a unitary group and the invariant theta functional
+-- (known result; see Lib.Weil.DualPair.PairSplitting)."
+-- The rest of the group GRH.Weil.Unramified (FiniteVacuum,
+-- FockHarmonicCoeff, ShearInvariance, RapidSections, HeckeGL,
+-- SphericalHecke) is not yet stated.
+-- Encoding. The source's 𝔸 E = (InfinitePlace E → ℂ) × 𝔸f E, read at the
+-- place w through the chosen embedding Φ w, is here functionSpace(Φ, ℂ) ×
+-- 𝔸f(E) with Φ the set of chosen embeddings. Index sets are sets (finite
+-- in use), vectors are functions on them. The Weil data is a record W =
+-- (E, Φ, ȷ, α); the splitting character υ of the source's WeilData is not
+-- part of it (it enters only the Weil multipliers, not the objects here),
+-- and the self-duality of α is stated in the form the source derives and
+-- uses (stdLattice.forall_psi₀_mul_eq_one_iff).
+-- Part of the GRH blueprint (layer 4, Lib/Weil, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Weil.Unramified
+import GRH.Weil.Construction
+import GRH.NumberField.CM
+import GRH.NumberField.Adeles
+
+section Unramified
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Notation
+-- e(X) = e^{2πiX} for real X (layer 1's expTwoPiI, Mathlib's 𝐞).
+def circleExp (X : Set) : Set :=
+  complexExp(ℂ[complexImaginaryUnit * complexOfReal(R[2 * realPi * X])])
+
+-- The inverse of a nonzero element of a field K (the unique b with ab = 1)
+-- and 2 = 1 + 1 in K.
+def fieldInv (K a : Set) : Set :=
+  ⋃({ b ∈ Ring.carrier(K) | call2(Ring.mul(K), a, b) = Ring.one(K) })
+def fieldTwo (K : Set) : Set := call2(Ring.add(K), Ring.one(K), Ring.one(K))
+
+-- ζ is a primitive k-th root of unity in K (IsPrimitiveRoot ζ k).
+predicate PrimitiveRootOf (K ζ : Set, k : Nat) :=
+  Ring.pow(K, ζ, k) = Ring.one(K) ∧
+  (∀ l ∈ ℕ, 0 < l → l < k → Ring.pow(K, ζ, l) ≠ Ring.one(K))
+
+-- Section: CM types and the adeles
+-- CoprimeValuation.lean, CMType E (NumberField, IsCMField, PlaceEmbedding):
+-- E is a CM number field and Φ contains exactly one of σ, σ̄ for each
+-- complex embedding σ (the embedding Φ w chosen at each infinite place w).
+predicate CMType (E Φ : Set) :=
+  NumberField(E) ∧ CMField(E) ∧ Φ ⊆ complexEmbeddings(E) ∧
+  (∀ σ ∈ complexEmbeddings(E), σ ∈ Φ ∨ conjugateEmbedding(E, σ) ∈ Φ) ∧
+  (∀ σ ∈ Φ, conjugateEmbedding(E, σ) ∉ Φ)
+
+-- The finite adeles 𝔸f(E) (CoprimeValuation.lean, 𝔸f), their carrier and
+-- operations, and Ô = Π 𝓞_w (the integral finite adeles).
+def finAdeles (E : Set) : Set := Ring.carrier(finiteAdeleRing(E))
+def finAdd (E a b : Set) : Set := call2(Ring.add(finiteAdeleRing(E)), a, b)
+def finMul (E a b : Set) : Set := call2(Ring.mul(finiteAdeleRing(E)), a, b)
+def finNeg (E a : Set) : Set := apply(Ring.neg(finiteAdeleRing(E)), a)
+def finOne (E : Set) : Set := Ring.one(finiteAdeleRing(E))
+def finZero (E : Set) : Set := Ring.zero(finiteAdeleRing(E))
+def finInt (E : Set) : Set := integralFiniteAdeles(E)
+
+-- The image of a ∈ E in 𝔸f(E).
+def finOf (E a : Set) : Set := finiteAdeleEmbedding(E)(a)
+
+-- The inverse of a unit of 𝔸f(E), the unique b with ab = 1.
+def finInv (E a : Set) : Set :=
+  ⋃({ b ∈ finAdeles(E) | finMul(E, a, b) = finOne(E) })
+
+-- CoprimeValuation.lean, 𝔸 E = (InfinitePlace E → ℂ) × 𝔸f E, read through
+-- Φ: the ring ℂ^Φ × 𝔸f(E) and its product topology.
+def phiComplexRings (Φ : Set) : Set := { (σ, complexRing) | σ ∈ Φ }
+def phiComplexSpaces (Φ : Set) : Set := { (σ, complexSpace) | σ ∈ Φ }
+
+def cmAdeleRing (E Φ : Set) : Set :=
+  productRing(piRing(Φ, phiComplexRings(Φ)), finiteAdeleRing(E))
+
+def cmAdeleSpace (E Φ : Set) : Set :=
+  productSpace(piSpace(Φ, phiComplexSpaces(Φ)), finiteAdeleSpace(E))
+
+def cmAdeles (E Φ : Set) : Set := Ring.carrier(cmAdeleRing(E, Φ))
+
+-- CoprimeValuation.lean, toAdele: a ↦ ((σ(a))_{σ∈Φ}, a).
+def phiValues (Φ a : Set) : Set := { (σ, σ(a)) | σ ∈ Φ }
+
+def toCMAdele (E Φ a : Set) : Set := (phiValues(Φ, a), finOf(E, a))
+
+-- Complex conjugation on 𝔸f(E) (the star of the source's CM adeles): the
+-- unique continuous map 𝔸f(E) → 𝔸f(E) extending the conjugation c of E
+-- (E is dense in 𝔸f(E)).
+defunique finStar (E : Set) (t ∈ functionSpace(finAdeles(E), finAdeles(E))) :=
+  t : finiteAdeleSpace(E) ⇒ finiteAdeleSpace(E) ∧
+  ∀ a ∈ Ring.carrier(E), t(finOf(E, a)) = finOf(E, cmConjugation(E)(a))
+requires cm : CMField(E)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- Section: The standard additive character
+-- Tr_{E/ℚ}(a) as a real number: the real part of Σ_σ σ(a) over all complex
+-- embeddings (the sum is rational).
+def embeddingSumTerms (E a : Set) : Set := { (σ, σ(a)) | σ ∈ complexEmbeddings(E) }
+
+def traceReal (E a : Set) : Set :=
+  complexRe(groupFiniteSum(complexAdditiveGroup, complexEmbeddings(E),
+    embeddingSumTerms(E, a)))
+
+-- AdditiveCharDefs.lean, ψf: ψ_f(x) = e(Tr_{E/ℚ}(a)) for any a ∈ E with
+-- x − a ∈ Ô (the value does not depend on a, a theorem below).
+def finChar (E x : Set) : Set :=
+  ⋃({ w ∈ complexCarrier | ∃ a ∈ Ring.carrier(E),
+    finAdd(E, x, finNeg(E, finOf(E, a))) ∈ finInt(E) ∧ w = circleExp(traceReal(E, a)) })
+
+-- AdditiveCharDefs.lean, stdAddChar: ψ(x) = e(−Σ_{σ∈Φ} 2 re x_σ) ψ_f(x_f).
+def realPartTerms (Φ u : Set) : Set := { (σ, R[2 * complexRe(u(σ))]) | σ ∈ Φ }
+
+def adeleChar (E Φ x : Set) : Set :=
+  ℂ[circleExp(R[-realFiniteSum(realPartTerms(Φ, fst(x)), Φ)]) * finChar(E, snd(x))]
+
+-- AdditiveCharDefs.lean, ψf_eq: the value is well defined: for a ∈ E,
+-- ψ_f(a) = e(Tr a); ψ_f is a continuous character of 𝔸f(E) of modulus one.
+theorem finChar.of_field (E Φ a : Set)
+  requires cmType : CMType(E, Φ)
+  requires ha : a ∈ Ring.carrier(E)
+  shows finChar(E, finOf(E, a)) = circleExp(traceReal(E, a))
+proof
+  sorry
+
+theorem finChar.add (E Φ x y : Set)
+  requires cmType : CMType(E, Φ)
+  requires hx : x ∈ finAdeles(E)
+  requires hy : y ∈ finAdeles(E)
+  shows finChar(E, finAdd(E, x, y)) = ℂ[finChar(E, x) * finChar(E, y)] ∧
+    complexAbs(finChar(E, x)) = realOne
+proof
+  sorry
+
+-- AdditiveCharDefs.lean: ψ is trivial on E (the product formula for the
+-- additive character; stdAddChar_apply_toAdele).
+theorem adeleChar.of_field (E Φ a : Set)
+  requires cmType : CMType(E, Φ)
+  requires ha : a ∈ Ring.carrier(E)
+  shows adeleChar(E, Φ, toCMAdele(E, Φ, a)) = complexOne
+proof
+  sorry
+
+-- Section: Weil data
+-- UpsilonValues.lean, WeilData E: the record of the field E, the CM type
+-- Φ, ȷ ∈ E and the finite idele α.
+structure WeilDatum
+  | field cmType j alpha : Set
+
+-- c₀ = (1 − ȷ⁻¹)/2 (UpsilonValues.lean, WeilData.traceOne), in E.
+def traceOne (W : Set) : Set :=
+  call2(Ring.mul(WeilDatum.field(W)),
+    Ring.sub(WeilDatum.field(W), Ring.one(WeilDatum.field(W)),
+      fieldInv(WeilDatum.field(W), WeilDatum.j(W))),
+    fieldInv(WeilDatum.field(W), fieldTwo(WeilDatum.field(W))))
+
+-- FiniteHeisenberg.lean, psi₀: u ↦ ψ_f(ȷαᾱu).
+def psiZero (W u : Set) : Set :=
+  finChar(WeilDatum.field(W), finMul(WeilDatum.field(W),
+    finMul(WeilDatum.field(W), finMul(WeilDatum.field(W),
+      finOf(WeilDatum.field(W), WeilDatum.j(W)), WeilDatum.alpha(W)),
+      finStar(WeilDatum.field(W))(WeilDatum.alpha(W))), u))
+
+-- UpsilonValues.lean, WeilData (with StablyUnram): E contains a primitive
+-- 5040-th root of unity; ȷ̄ = −ȷ with im σ(ȷ) > 0 for σ ∈ Φ; c₀ is an
+-- algebraic integer; α is a finite idele making Ô self-dual for
+-- ψ_f(ȷαᾱ ·) (the source states this through valuations and the
+-- different, self_dual, and derives this form). The splitting character
+-- υ is omitted (see the module header).
+predicate IsWeilDatum (W : Set) :=
+  WeilDatum.Data(W) ∧ CMType(WeilDatum.field(W), WeilDatum.cmType(W)) ∧
+  (∃ ζ ∈ Ring.carrier(WeilDatum.field(W)), PrimitiveRootOf(WeilDatum.field(W), ζ, 5040)) ∧
+  WeilDatum.j(W) ∈ Ring.carrier(WeilDatum.field(W)) ∧
+  cmConjugation(WeilDatum.field(W))(WeilDatum.j(W)) =
+    apply(Ring.neg(WeilDatum.field(W)), WeilDatum.j(W)) ∧
+  (∀ σ ∈ WeilDatum.cmType(W), realZero < complexIm(σ(WeilDatum.j(W)))) ∧
+  traceOne(W) ∈ ringOfIntegers(WeilDatum.field(W)) ∧
+  WeilDatum.alpha(W) ∈ ringUnits(finiteAdeleRing(WeilDatum.field(W))) ∧
+  (∀ z ∈ finAdeles(WeilDatum.field(W)),
+    (∀ u ∈ finInt(WeilDatum.field(W)),
+      psiZero(W, finMul(WeilDatum.field(W), z, u)) = complexOne) ↔
+    z ∈ finInt(WeilDatum.field(W)))
+
+-- Section: Adelic vectors
+-- The adelic n-space 𝔸ⁿ: its additive group (in a group record), its
+-- product topology, and the finite adelic n-space 𝔸_fⁿ.
+def adelicVectors (W n : Set) : Set :=
+  functionSpace(n, cmAdeles(WeilDatum.field(W), WeilDatum.cmType(W)))
+
+def adelicVectorModule (W n : Set) : Set :=
+  coordinateModule(cmAdeleRing(WeilDatum.field(W), WeilDatum.cmType(W)), n)
+
+def adelicVectorGroup (W n : Set) : Set := Module.additive(adelicVectorModule(W, n))
+
+def constantSpaces (n X : Set) : Set := { (i, X) | i ∈ n }
+
+def adelicVectorSpace (W n : Set) : Set :=
+  piSpace(n, constantSpaces(n, cmAdeleSpace(WeilDatum.field(W), WeilDatum.cmType(W))))
+
+def finVectors (W n : Set) : Set := functionSpace(n, finAdeles(WeilDatum.field(W)))
+
+def finVectorModule (W n : Set) : Set :=
+  coordinateModule(finiteAdeleRing(WeilDatum.field(W)), n)
+
+def finVectorGroup (W n : Set) : Set := Module.additive(finVectorModule(W, n))
+
+def finVectorSpace (W n : Set) : Set :=
+  piSpace(n, constantSpaces(n, finiteAdeleSpace(WeilDatum.field(W))))
+
+-- FiniteHeisenberg.lean, stdLattice E ι: the lattice Ôⁿ in 𝔸_fⁿ.
+def stdLattice (W n : Set) : Set :=
+  { x ∈ finVectors(W, n) | ∀ i ∈ n, x(i) ∈ finInt(WeilDatum.field(W)) }
+
+-- Section: The adelic Heisenberg datum
+-- The finite adele ȷ/2 ȳ_i x_i s_i summed (the finite part of
+-- toAdele(ȷ/2) · y* stdForm(s) x; stdForm is 1 at the finite places).
+def finHermTerms (W n x y : Set) : Set :=
+  { (i, finMul(WeilDatum.field(W), finStar(WeilDatum.field(W))(snd(y(i))), snd(x(i)))) |
+    i ∈ n }
+
+def finHermSum (W n x y : Set) : Set :=
+  groupFiniteSum(Ring.additive(finiteAdeleRing(WeilDatum.field(W))), n,
+    finHermTerms(W, n, x, y))
+
+-- The infinite component at σ: σ(ȷ/2) Σ_i s_i conj(y_iσ) x_iσ.
+def infHermTerms (W n s x y σ : Set) : Set :=
+  { (i, ℂ[s(i) * (complexConj(fst(y(i))(σ)) * fst(x(i))(σ))]) | i ∈ n }
+
+def infHermComponent (W n s x y : Set) : Set :=
+  { (σ, ℂ[complexDiv(σ(WeilDatum.j(W)), ℂ[2]) *
+      groupFiniteSum(complexAdditiveGroup, n, infHermTerms(W, n, s, x, y, σ))]) |
+    σ ∈ WeilDatum.cmType(W) }
+
+-- The adele toAdele(ȷ/2) · y* stdForm(s) x.
+def halfHerm (W n s x y : Set) : Set :=
+  (infHermComponent(W, n, s, x, y),
+    finMul(WeilDatum.field(W),
+      finOf(WeilDatum.field(W), call2(Ring.mul(WeilDatum.field(W)), WeilDatum.j(W),
+        fieldInv(WeilDatum.field(W), fieldTwo(WeilDatum.field(W))))),
+      finHermSum(W, n, x, y)))
+
+-- AdelicHeisenberg.lean, adelicHeis E s: β(x, y) = ψ(½ȷ h_s(y, x)) on 𝔸ⁿ,
+-- h_s the standard hermitian form of signs s (diag(s) at the infinite
+-- places, 1 at the finite places).
+def adelicBeta (W n s : Set) : Set :=
+  { (p, adeleChar(WeilDatum.field(W), WeilDatum.cmType(W),
+      halfHerm(W, n, s, fst(p), snd(p)))) | p ∈ adelicVectors(W, n) × adelicVectors(W, n) }
+
+-- Signs: s : n → {1, −1} ⊆ ℂ (the source's n → ℤˣ read in ℂ).
+def signValues : Set := {complexOne, ℂ[-1]}
+
+predicate SignsOn (n s : Set) := FunctionBetween(s, n, signValues)
+
+-- AdelicHeisenberg.lean, vacuumFn: e(x) = exp(−π Σ_i Σ_σ im σ(ȷ) |x_iσ|²)
+-- times ψ_f(½c₀ȷ Σ_i x̄_if x_if) if α⁻¹ x_if ∈ Ô for every i, and 0
+-- otherwise.
+def weilGaussTerms (W n x : Set) : Set :=
+  { (q, R[complexIm(snd(q)(WeilDatum.j(W))) *
+      (complexAbs(fst(x(fst(q)))(snd(q))) * complexAbs(fst(x(fst(q)))(snd(q))))]) |
+    q ∈ n × WeilDatum.cmType(W) }
+
+def finNormTerms (W n x : Set) : Set :=
+  { (i, finMul(WeilDatum.field(W), finStar(WeilDatum.field(W))(snd(x(i))), snd(x(i)))) |
+    i ∈ n }
+
+def vacuumPhase (W n x : Set) : Set :=
+  finChar(WeilDatum.field(W), finMul(WeilDatum.field(W),
+    finOf(WeilDatum.field(W), call2(Ring.mul(WeilDatum.field(W)),
+      call2(Ring.mul(WeilDatum.field(W)), traceOne(W), WeilDatum.j(W)),
+      fieldInv(WeilDatum.field(W), fieldTwo(WeilDatum.field(W))))),
+    groupFiniteSum(Ring.additive(finiteAdeleRing(WeilDatum.field(W))), n,
+      finNormTerms(W, n, x))))
+
+predicate VacuumSupport (W n x : Set) :=
+  ∀ i ∈ n, finMul(WeilDatum.field(W), finInv(WeilDatum.field(W), WeilDatum.alpha(W)),
+    snd(x(i))) ∈ finInt(WeilDatum.field(W))
+
+def vacuumValue (W n x : Set) : Set :=
+  ⋃({ w ∈ complexCarrier |
+    (VacuumSupport(W, n, x) ∧
+      w = ℂ[complexOfReal(realExp(R[-(realPi * realFiniteSum(weilGaussTerms(W, n, x),
+        n × WeilDatum.cmType(W)))])) * vacuumPhase(W, n, x)]) ∨
+    (¬VacuumSupport(W, n, x) ∧ w = complexZero) })
+
+def vacuumFn (W n : Set) : Set := { (x, vacuumValue(W, n, x)) | x ∈ adelicVectors(W, n) }
+
+-- The Haar measure on 𝔸ⁿ under which ∫ |e|² = 1: the source's product of
+-- Lebesgue measure on ℂ^Φ and the Haar measure of 𝔸f(E) of total mass
+-- 2^{r₂}/√|d_E| on Ô (AdditiveCharDefs.lean, volÔ), which is this one by
+-- IsVacuum.integral_norm_sq_eq_one; the normalization names it without a
+-- choice.
+def vacuumMeasure (W n : Set) : Set :=
+  ⋃({ μ ∈ 𝒫(borelSigma(adelicVectorSpace(W, n)) × ennreal) |
+    RegularHaarMeasure(adelicVectorGroup(W, n), adelicVectorSpace(W, n), μ) ∧
+    hIntegral(adelicVectorSpace(W, n), μ,
+      vacuumNormSq(adelicVectorGroup(W, n), vacuumFn(W, n))) = complexOne })
+
+-- AdelicHeisenberg.lean, adelicHeis: a Heisenberg datum (β(x, x) = 1 by
+-- stdAddChar_half), and vacuumFn is a vacuum for it under the measure
+-- above (Lib/Weil/MixedModel/AdelicSum.lean, adelicSum.isVacuum, with
+-- the measure characterized by integral_norm_sq_eq_one).
+theorem adelicBeta.heisenberg (W n s : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  shows HeisenbergDatum(adelicVectorGroup(W, n), adelicVectorSpace(W, n), adelicBeta(W, n, s))
+proof
+  sorry
+
+theorem vacuumFn.vacuum (W n s : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  shows IsVacuum(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n))
+proof
+  sorry
+
+-- Section: The finite Heisenberg datum
+-- FiniteHeisenberg.lean, traceOneAdele and half: c₀ and ½ in 𝔸f(E).
+def traceOneAdele (W : Set) : Set := finOf(WeilDatum.field(W), traceOne(W))
+
+def halfAdele (W : Set) : Set :=
+  finOf(WeilDatum.field(W), fieldInv(WeilDatum.field(W), fieldTwo(WeilDatum.field(W))))
+
+-- x*y = Σ_i x̄_i y_i on 𝔸_fⁿ.
+def finDotTerms (W n x y : Set) : Set :=
+  { (i, finMul(WeilDatum.field(W), finStar(WeilDatum.field(W))(x(i)), y(i))) | i ∈ n }
+
+def finDot (W n x y : Set) : Set :=
+  groupFiniteSum(Ring.additive(finiteAdeleRing(WeilDatum.field(W))), n,
+    finDotTerms(W, n, x, y))
+
+-- FiniteHeisenberg.lean, semichar: sc(x) = ψ₀(½c₀ x*x).
+def semichar (W n x : Set) : Set :=
+  psiZero(W, finMul(WeilDatum.field(W), finMul(WeilDatum.field(W), traceOneAdele(W),
+    halfAdele(W)), finDot(W, n, x, x)))
+
+-- FiniteHeisenberg.lean, finVac: sc(x) on Ôⁿ and 0 off it.
+def finVacValue (W n x : Set) : Set :=
+  ⋃({ w ∈ complexCarrier | (x ∈ stdLattice(W, n) ∧ w = semichar(W, n, x)) ∨
+    (x ∉ stdLattice(W, n) ∧ w = complexZero) })
+
+def finVac (W n : Set) : Set := { (x, finVacValue(W, n, x)) | x ∈ finVectors(W, n) }
+
+-- FiniteHeisenberg.lean, finHeis: β_f(x, y) = ψ₀(½ y*x) on 𝔸_fⁿ.
+def finBeta (W n : Set) : Set :=
+  { (p, psiZero(W, finMul(WeilDatum.field(W), halfAdele(W), finDot(W, n, snd(p), fst(p))))) |
+    p ∈ finVectors(W, n) × finVectors(W, n) }
+
+theorem finBeta.heisenberg (W n : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  shows HeisenbergDatum(finVectorGroup(W, n), finVectorSpace(W, n), finBeta(W, n))
+proof
+  sorry
+
+-- FiniteHeisenberg.lean, stdLattice.norm_psi₀ and continuous_psi₀.
+theorem psiZero.abs (W u : Set)
+  requires weil : IsWeilDatum(W)
+  requires hu : u ∈ finAdeles(WeilDatum.field(W))
+  shows complexAbs(psiZero(W, u)) = realOne
+proof
+  sorry
+
+-- FiniteHeisenberg.lean, stdLattice.psi₀_eq_one_of_mem: ψ₀ is 1 on Ô.
+theorem psiZero.of_integral (W o : Set)
+  requires weil : IsWeilDatum(W)
+  requires ho : o ∈ finInt(WeilDatum.field(W))
+  shows psiZero(W, o) = complexOne
+proof
+  sorry
+
+-- FiniteHeisenberg.lean, stdLattice.traceOneAdele_mem and
+-- traceOneAdele_add_star: c₀ ∈ Ô and c₀ + c̄₀ = 1.
+theorem traceOneAdele.integral (W : Set)
+  requires weil : IsWeilDatum(W)
+  shows traceOneAdele(W) ∈ finInt(WeilDatum.field(W)) ∧
+    finAdd(WeilDatum.field(W), traceOneAdele(W),
+      finStar(WeilDatum.field(W))(traceOneAdele(W))) = finOne(WeilDatum.field(W))
+proof
+  sorry
+
+-- The semicharacter has modulus one (semichar_ne_zero).
+theorem semichar.abs (W n x : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires hx : x ∈ finVectors(W, n)
+  shows complexAbs(semichar(W, n, x)) = realOne
+proof
+  sorry
+
+end Unramified
