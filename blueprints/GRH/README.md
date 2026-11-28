@@ -384,9 +384,20 @@ graph TD
 | GRH.Padic.Witt | 43 | 4 | 39 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Proof.Forward | 2 | 2 | 0 |
+| GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
+| GRH.Proof.Data.Different | 13 | 5 | 8 |
+| GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
+| GRH.Proof.Endgame.OneSidedCriterion | 1 | 0 | 1 |
+| GRH.Proof.Forward.Lifts | 15 | 15 | 0 |
+| GRH.Proof.Data.Magnitudes | 11 | 0 | 11 |
+| GRH.Proof.Data.DataExist | 2 | 0 | 2 |
+| GRH.Proof.Endgame.ShortAndEnough | 4 | 0 | 4 |
+| GRH.Proof.Endgame.LongForms | 2 | 0 | 2 |
+| GRH.Statements | 7 | 6 | 1 |
+| GRH.Proof.Main | 11 | 6 | 5 |
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
-| GRH.Statements | 7 | 6 | 1 |
-| **total** | **8642** | **6603** | **2039** |
+| **total** | **8736** | **6649** | **2087** |
 <!-- /blueprint-status -->
