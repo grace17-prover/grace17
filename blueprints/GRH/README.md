@@ -436,7 +436,9 @@ graph TD
 | GRH.Proof.Curve.FrameSections | 3 | 0 | 3 |
 | GRH.Proof.Curve.JetDivisibility | 1 | 0 | 1 |
 | GRH.Proof.Curve.KatzDivisibility | 1 | 0 | 1 |
-| GRH.Proof.Endgame.CriterionTools | 17 | 16 | 1 |
+| GRH.Proof.Endgame.PolarLocal | 22 | 22 | 0 |
+| GRH.Proof.Endgame.PolarTools | 47 | 42 | 5 |
+| GRH.Proof.Endgame.CriterionTools | 17 | 17 | 0 |
 | GRH.Proof.Endgame.OneSidedCriterion | 1 | 1 | 0 |
 | GRH.Proof.Data.DataExist | 2 | 0 | 2 |
 | GRH.Proof.Endgame.ShortAndEnough | 5 | 0 | 5 |
@@ -449,5 +451,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9328** | **7005** | **2323** |
+| **total** | **9397** | **7070** | **2327** |
 <!-- /blueprint-status -->
