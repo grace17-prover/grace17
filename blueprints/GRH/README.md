@@ -315,22 +315,22 @@ graph TD
 | GRH.Algebra.Localization | 88 | 88 | 0 |
 | GRH.Algebra.LocalRings | 53 | 53 | 0 |
 | GRH.Matrix.Spectral | 117 | 115 | 2 |
-| GRH.Polynomial.Univariate | 145 | 143 | 2 |
+| GRH.Polynomial.Univariate | 154 | 154 | 0 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
-| GRH.Polynomial.Multivariate | 84 | 71 | 13 |
+| GRH.Polynomial.Multivariate | 114 | 114 | 0 |
 | GRH.Algebra.Finiteness | 104 | 72 | 32 |
 | GRH.Algebra.Integral | 61 | 50 | 11 |
 | GRH.Algebra.DVR | 51 | 42 | 9 |
-| GRH.Field.Galois | 79 | 1 | 78 |
+| GRH.Field.Galois | 222 | 210 | 12 |
 | GRH.Matrix.Groups | 111 | 110 | 1 |
-| GRH.Field.Finite | 65 | 3 | 62 |
-| GRH.Cyclotomy.RootsOfUnity | 45 | 1 | 44 |
+| GRH.Field.Finite | 157 | 151 | 6 |
+| GRH.Cyclotomy.RootsOfUnity | 76 | 65 | 11 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
 | GRH.Topology.Compactness | 100 | 91 | 9 |
 | GRH.Topology.Groups | 62 | 39 | 23 |
-| GRH.Field.InfiniteGalois | 22 | 0 | 22 |
-| GRH.Cyclotomy.Fields | 21 | 1 | 20 |
+| GRH.Field.InfiniteGalois | 29 | 21 | 8 |
+| GRH.Cyclotomy.Fields | 31 | 23 | 8 |
 | GRH.NumberField.Basic | 63 | 0 | 63 |
 | GRH.NumberField.Dedekind | 92 | 4 | 88 |
 | GRH.Exp | 217 | 217 | 0 |
@@ -392,7 +392,7 @@ graph TD
 | GRH.Analytic.QuadraticTwist | 7 | 1 | 6 |
 | GRH.CM.Lattice | 19 | 7 | 12 |
 | GRH.CM.Sigma | 7 | 0 | 7 |
-| GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Polynomial.PowerSeries | 181 | 179 | 2 |
 | GRH.CM.CurveTheta | 15 | 0 | 15 |
 | GRH.CM.LocalHeight | 11 | 0 | 11 |
 | GRH.CM.FormalGroup | 6 | 0 | 6 |
@@ -466,5 +466,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **10308** | **8292** | **2016** |
 <!-- /blueprint-status -->
