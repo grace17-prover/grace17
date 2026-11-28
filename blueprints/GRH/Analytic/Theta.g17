@@ -1,0 +1,278 @@
+-- Theta series of a Dirichlet character: g_j(x) = x^j e^(−πx²), the
+-- series θ_c(t) = Σ_{n ≥ 1} c(n) g_j(n t), its tail integrals
+-- ∫_r^∞ |θ(t)| dt/√t, the gamma factor Γ_j = Mellin transform of g_j;
+-- the trivial bound, Riemann's formula (Mellin of θ_c is Γ_j L(c)),
+-- Poisson summation, the theta transformation in absolute value, and the
+-- Mellin transform Γ_j(s) L(s, χ) of θ_χ for re s > 0.
+-- Source: grh-compact/src/Lib/Analytic/DirichletTheta/MellinTheta.lean.
+-- "Known result: the transformation formula and the Mellin transform of
+-- the theta series of a Dirichlet character." Related work: Davenport,
+-- Multiplicative Number Theory; Montgomery-Vaughan, ch. 10.
+-- Part of the GRH blueprint (layer 4, Lib/Analytic).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Analytic.Theta
+import GRH.Analytic.PolyaVinogradov
+
+section Theta
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- MellinTheta.lean, gaussianMonomial: g_j(x) = x^j e^(−πx²) (j ∈ {0, 1},
+-- the source's Fin 2).
+def gaussianMonomial (j : Nat, X : Real) : Set :=
+  R[X ^ j * realExp(R[-(realPi * X ^ 2)])]
+
+-- x ↦ g_j(x) as a complex-valued function on ℝ.
+def gaussianMonomialMap (j : Nat) : Set :=
+  { (X, complexOfReal(gaussianMonomial(j, X))) | X ∈ ℝ }
+
+-- The terms c(n) g_j(n t), n = 1, 2, …, indexed from 0 as n + 1.
+def gaussianThetaTerms (j : Nat, c : Set, T : Real) : Set :=
+  { (n, ℂ[c(succ(n)) *
+      complexOfReal(gaussianMonomial(j, R[realNat(succ(n)) * T]))]) |
+    n ∈ ℕ }
+
+-- MellinTheta.lean, gaussianTheta: θ(t) = Σ'_{n ≥ 1} c(n) g_j(n t), the
+-- unconditional sum (0 where it does not converge, as Mathlib's tsum).
+def gaussianTheta (j : Nat, c : Set, T : Real) : Set :=
+  complexTsum(gaussianThetaTerms(j, c, T), ℕ)
+
+-- t ↦ θ(t) as a function on ℝ.
+def gaussianThetaMap (j : Nat, c : Set) : Set :=
+  { (T, gaussianTheta(j, c, T)) | T ∈ ℝ }
+
+-- t ↦ |θ(t)|/√t on ℝ, and MellinTheta.lean, thetaTailIntegral:
+-- ∫_{(r,∞)} |θ(t)| dt/√t.
+def thetaTailIntegrand (j : Nat, c : Set) : Set :=
+  { (T, R[complexAbs(gaussianTheta(j, c, T)) / realSqrt(T)]) | T ∈ ℝ }
+
+def thetaTailIntegral (j : Nat, c : Set, r : Real) : Set :=
+  realSetIntegral(realMeasurableSpace, realVolume, thetaTailIntegrand(j, c),
+    realIoi(r))
+
+-- MellinTheta.lean, gaussianMellin: Γ_j(s) = ∫₀^∞ g_j(t) t^(s−1) dt.
+def gaussianMellin (j : Nat, s : Set) : Set :=
+  mellin(gaussianMonomialMap(j), s)
+
+-- s ↦ Γ_j(s) on ℂ.
+def gaussianMellinMap (j : Nat) : Set :=
+  { (s, gaussianMellin(j, s)) | s ∈ complexCarrier }
+
+-- The terms e^(2πi a n/q) χ(a), a = 0, …, q − 1, of the inverse discrete
+-- Fourier transform at n, and that transform
+-- (𝓕⁻χ)(n) = q⁻¹ Σ_{a mod q} e^(2πi a n/q) χ(a) (Mathlib's ZMod.invDFT
+-- with stdAddChar), as coefficients n ↦ (𝓕⁻χ)(n) on ℕ.
+def invDFTTerms (q : Nat, χ n : Set) : Set :=
+  { (a, ℂ[expTwoPiI(R[realNat(a) * realNat(n) / realNat(q)]) *
+      χ(integerOfNat(a))]) | a ∈ ℕ }
+
+def characterInvDFT (q : Nat, χ : Set) : Set :=
+  { (n, ℂ[complexInv(complexOfReal(realNat(q))) *
+      complexPartialSum(invDFTTerms(q, χ, n), q)]) | n ∈ ℕ }
+
+-- The terms Φ(n) g_j(n t) over n ∈ ℤ, and g_j((n + a) t), and
+-- e^(2πi a n) g_j(n/t), for Poisson summation.
+def integerThetaTerms (j : Nat, Φ : Set, T : Real) : Set :=
+  { (n, ℂ[Φ(n) * complexOfReal(gaussianMonomial(j, R[realInt(n) * T]))]) |
+    n ∈ ℤ }
+
+def shiftedGaussianTerms (j : Nat, A T : Real) : Set :=
+  { (n, complexOfReal(gaussianMonomial(j, R[(realInt(n) + A) * T]))) |
+    n ∈ ℤ }
+
+def twistedGaussianTerms (j : Nat, A T : Real) : Set :=
+  { (n, ℂ[expTwoPiI(R[A * realInt(n)]) *
+      complexOfReal(gaussianMonomial(j, R[realInt(n) / T]))]) | n ∈ ℤ }
+
+-- Section: Bounds
+-- MellinTheta.lean, mellin_differentiableOn_and_bounded: if f : ℝ → ℂ is
+-- measurable with |f(t)| ≤ D e^(−t) for t > 0, its Mellin transform is
+-- holomorphic on re s > 0 and bounded on 1/2 ≤ re s ≤ 2.
+theorem mellin.holomorphic_and_bounded (f : Set, D : Real)
+  requires function : FunctionBetween(f, ℝ, complexCarrier)
+  requires measurable : Measurable(f, realMeasurableSpace,
+    complexMeasurableSpace)
+  requires bound : ∀ T ∈ ℝ, (0:R) < T →
+    complexAbs(f(T)) ≤ R[D * realExp(R[-T])]
+  shows HolomorphicOn(mellinMap(f), rightHalfPlane(R[0])) ∧
+    (∃ G ∈ ℝ, ∀ z ∈ complexCarrier, R[1 / 2] ≤ complexRe(z) →
+      complexRe(z) ≤ (2:R) → complexAbs(mellin(f, z)) ≤ G)
+proof
+  sorry
+
+-- MellinTheta.lean, norm_gaussianMonomial_le: |g_j(t)| ≤ 3 (e^(−t))² for
+-- t ≥ 0.
+theorem gaussianMonomial.abs_le (j : Nat, T : Real)
+  requires small : j ≤ (1:N)
+  requires nonneg : (0:R) ≤ T
+  shows abs(gaussianMonomial(j, T)) ≤ R[3 * realExp(R[-T]) ^ 2]
+proof
+  sorry
+
+-- MellinTheta.lean, summable_and_norm_gaussianTheta_le (the trivial
+-- bound): for |c(n)| ≤ 1 and t > 0 the series converges and
+-- |θ(t)| ≤ 3 e^(−t)/t.
+theorem gaussianTheta.summable_and_abs_le (j : Nat, c : Set, T : Real)
+  requires small : j ≤ (1:N)
+  requires coefficients : FunctionBetween(c, ℕ, complexCarrier)
+  requires bounded : ∀ n ∈ ℕ, complexAbs(c(n)) ≤ (1:R)
+  requires positive : (0:R) < T
+  shows ComplexSummableFamily(gaussianThetaTerms(j, c, T), ℕ) ∧
+    complexAbs(gaussianTheta(j, c, T)) ≤ R[3 * realExp(R[-T]) / T]
+proof
+  sorry
+
+-- Section: Mellin transforms
+-- MellinTheta.lean, gaussianMellin_eq: Γ_j(s) = Γ_ℝ(s + j)/2 for
+-- re s > 0.
+theorem gaussianMellin.eq_GammaReal (j : Nat, s : Set)
+  requires small : j ≤ (1:N)
+  requires hs : s ∈ complexCarrier
+  requires right : (0:R) < complexRe(s)
+  shows gaussianMellin(j, s) =
+    complexDiv(GammaReal(ℂ[s + complexOfReal(realNat(j))]), ℂ[2])
+proof
+  sorry
+
+-- MellinTheta.lean, mellin_gaussianTheta (Riemann's formula): for
+-- |c| ≤ 1 and re s > 1 the Mellin transform of θ_c at s is
+-- Γ_j(s) Σ_{n ≥ 1} c(n) n^(−s).
+theorem mellin.gaussianTheta (j : Nat, c s : Set)
+  requires small : j ≤ (1:N)
+  requires coefficients : FunctionBetween(c, ℕ, complexCarrier)
+  requires bounded : ∀ n ∈ ℕ, complexAbs(c(n)) ≤ (1:R)
+  requires hs : s ∈ complexCarrier
+  requires right : (1:R) < complexRe(s)
+  shows mellin(gaussianThetaMap(j, c), s) =
+    ℂ[gaussianMellin(j, s) * LSeries(c, s)]
+proof
+  sorry
+
+-- MellinTheta.lean, gaussianMellin_differentiableOn_and_bdd: Γ_j is
+-- holomorphic on re s > 0 and bounded on 1/2 ≤ re s ≤ 2.
+theorem gaussianMellin.holomorphic_and_bounded (j : Nat)
+  requires small : j ≤ (1:N)
+  shows HolomorphicOn(gaussianMellinMap(j), rightHalfPlane(R[0])) ∧
+    (∃ G ∈ ℝ, ∀ z ∈ complexCarrier, R[1 / 2] ≤ complexRe(z) →
+      complexRe(z) ≤ (2:R) → complexAbs(gaussianMellin(j, z)) ≤ G)
+proof
+  sorry
+
+-- MellinTheta.lean, exists_pos_le_norm_gaussianMellin: |Γ_j| has a
+-- positive lower bound on every compact subset of re s > 0.
+theorem gaussianMellin.exists_pos_le_abs (j : Nat, K : Set)
+  requires small : j ≤ (1:N)
+  requires compact : ComplexCompact(K)
+  requires right : ∀ s ∈ K, (0:R) < complexRe(s)
+  shows ∃ c ∈ ℝ, (0:R) < c ∧
+    (∀ s ∈ K, c ≤ complexAbs(gaussianMellin(j, s)))
+proof
+  sorry
+
+-- Section: Poisson summation
+-- MellinTheta.lean, two_mul_gaussianTheta: if Φ(−x) = (−1)^j Φ(x),
+-- Φ(0) = 0 and Σ_{n ∈ ℤ} Φ(n) g_j(n t) = S, then 2 θ_Φ(t) = S. (The
+-- source's Φ on ℤ/q is read through ℤ; the residue ring plays no role.)
+theorem gaussianTheta.two_mul (j : Nat, Φ S : Set, T : Real)
+  requires small : j ≤ (1:N)
+  requires function : FunctionBetween(Φ, ℤ, complexCarrier)
+  requires parity : ∀ x ∈ ℤ, Φ(integerNegValue(x)) = ℂ[(-1) ^ j * Φ(x)]
+  requires zero : Φ(integerZero) = ℂ[0]
+  requires sum : ComplexHasSum(integerThetaTerms(j, Φ, T), ℤ, S)
+  shows ℂ[2 * gaussianTheta(j, characterCoefficients(Φ), T)] = S
+proof
+  sorry
+
+-- MellinTheta.lean, poisson_summation_gaussianMonomial: for real a and
+-- t > 0, Σ_{n ∈ ℤ} g_j((n + a)t) converges to some S, and
+-- Σ_{n ∈ ℤ} e^(2πian) g_j(n/t) converges to i^j t S.
+theorem gaussianMonomial.poisson_summation (j : Nat, A T : Real)
+  requires small : j ≤ (1:N)
+  requires positive : (0:R) < T
+  shows ∃ S ∈ complexCarrier,
+    ComplexHasSum(shiftedGaussianTerms(j, A, T), ℤ, S) ∧
+    ComplexHasSum(twistedGaussianTerms(j, A, T), ℤ,
+      ℂ[complexImaginaryUnit ^ j * complexOfReal(T) * S])
+proof
+  sorry
+
+-- MellinTheta.lean, gaussianTheta_poisson_summation: for χ ≠ 1 modulo q
+-- of parity j and t > 0, t |θ_χ(t)| = |θ_(𝓕⁻χ)(1/(q t))|.
+theorem gaussianTheta.poisson_character (j q : Nat, χ : Set, T : Real)
+  requires positive : (1:N) ≤ q
+  requires character : DirichletCharacter(q, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(q)
+  requires parity : HasParity(χ, j)
+  requires tPositive : (0:R) < T
+  shows R[T * complexAbs(gaussianTheta(j, characterCoefficients(χ), T))] =
+    complexAbs(gaussianTheta(j, characterInvDFT(q, χ),
+      realInvValue(R[realNat(q) * T])))
+proof
+  sorry
+
+-- MellinTheta.lean, norm_gaussianTheta_functional_equation: for χ ≠ 1
+-- primitive modulo q of parity j and t > 0,
+-- √q t |θ_χ(t)| = |θ_χ(1/(q t))|.
+theorem gaussianTheta.functional_equation (j q : Nat, χ : Set, T : Real)
+  requires positive : (1:N) ≤ q
+  requires character : DirichletCharacter(q, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(q)
+  requires parity : HasParity(χ, j)
+  requires primitive : PrimitiveCharacter(q, χ)
+  requires tPositive : (0:R) < T
+  shows R[realSqrt(realNat(q)) * T *
+      complexAbs(gaussianTheta(j, characterCoefficients(χ), T))] =
+    complexAbs(gaussianTheta(j, characterCoefficients(χ),
+      realInvValue(R[realNat(q) * T])))
+proof
+  sorry
+
+-- MellinTheta.lean, norm_gaussianTheta_char_le: for χ ≠ 1 modulo q of
+-- parity j and t > 0, |θ_χ(t)| ≤ 3 q e e^(−t).
+theorem gaussianTheta.abs_character_le (j q : Nat, χ : Set, T : Real)
+  requires positive : (1:N) ≤ q
+  requires character : DirichletCharacter(q, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(q)
+  requires parity : HasParity(χ, j)
+  requires tPositive : (0:R) < T
+  shows complexAbs(gaussianTheta(j, characterCoefficients(χ), T)) ≤
+    R[3 * realNat(q) * realExp(1) * realExp(R[-T])]
+proof
+  sorry
+
+-- MellinTheta.lean, mellin_gaussianTheta_char: for χ ≠ 1 of parity j and
+-- re s > 0, the Mellin transform of θ_χ is Γ_j(s) L(s, χ).
+theorem mellin.gaussianTheta_character (j q : Nat, χ s : Set)
+  requires positive : (1:N) ≤ q
+  requires character : DirichletCharacter(q, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(q)
+  requires parity : HasParity(χ, j)
+  requires hs : s ∈ complexCarrier
+  requires right : (0:R) < complexRe(s)
+  shows mellin(gaussianThetaMap(j, characterCoefficients(χ)), s) =
+    ℂ[gaussianMellin(j, s) * LFunction(q, χ, s)]
+proof
+  sorry
+
+-- MellinTheta.lean, thetaTailIntegral_zero_le_two_mul: for χ ≠ 1
+-- primitive modulo q of parity j, T > 0 and q ≤ T²,
+-- ∫₀^∞ |θ_χ| dt/√t ≤ 2 ∫_{1/T}^∞ |θ_χ| dt/√t.
+theorem thetaTailIntegral.zero_le_two_mul (j q : Nat, χ : Set, T : Real)
+  requires positive : (1:N) ≤ q
+  requires character : DirichletCharacter(q, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(q)
+  requires parity : HasParity(χ, j)
+  requires primitive : PrimitiveCharacter(q, χ)
+  requires tPositive : (0:R) < T
+  requires level : realNat(q) ≤ R[T ^ 2]
+  shows thetaTailIntegral(j, characterCoefficients(χ), R[0]) ≤
+    R[2 * thetaTailIntegral(j, characterCoefficients(χ), realInvValue(T))]
+proof
+  sorry
+
+end Theta

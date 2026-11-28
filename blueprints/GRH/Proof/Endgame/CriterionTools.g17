@@ -2,11 +2,15 @@
 -- class whose quadratic twists have no zero on a half-strip (Jutila's
 -- zero-density bound), and Landau's lemma applied to the Mellin transform
 -- of the prime error R_M(e^v), whose poles in re s > 0 are the zeros of
--- the L-functions L̃(s, ξ) and L̃(s, ξ(·/d)).
+-- the L-functions L̃(s, ξ) and L̃(s, ξ(·/d)). Each is proved here from the
+-- statements of layer 4's GRH.Analytic (the source's Lib/Analytic) and
+-- the polarity of the prime error (isPolar_primeError, stated here).
 -- Source: grh-compact/src/Lib/Analytic/QuadraticTwist/ZeroFreeTwist.lean
 -- (exists_entireL_quadTwist_ne_zero), src/New/Endgame/PrimeError.lean
 -- (isPolar_primeError), src/Lib/Analytic/Landau/PolarLandau.lean
--- (IsPolar.landau, tendsto_sub_mul_logDeriv_entireL, entireL_ne_zero).
+-- (IsPolar.landau, tendsto_sub_mul_logDeriv_entireL, entireL_ne_zero),
+-- src/New/Endgame/OneSidedCriterion.lean (the residue bookkeeping in
+-- entireL_ne_zero_of_primeError_le).
 -- Related work: Jutila, On mean values of Dirichlet polynomials with real
 -- characters, Acta Arith. 27 (1975); Montgomery-Vaughan, Multiplicative
 -- Number Theory I, Lemma 15.1, 2007; Landau, Über einen Satz von
@@ -20,12 +24,201 @@
 
 module GRH.Proof.Endgame.CriterionTools
 import GRH.Proof.Endgame.PrimeError
+import GRH.Analytic.QuadraticTwist
 
 section CriterionTools
 notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
   complexMul, complexOne)
 notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
 
+-- Section: The prime error as a polar function
+-- The values R_M(e^w), w real, and v ↦ R_M(e^v) on ℝ.
+def primeErrorExpValues (d M : Nat) : Set :=
+  { primeError(d, M, realExp(W)) | W ∈ ℝ }
+
+defgraph primeErrorExp (d M : Nat) (V ∈ ℝ) : primeErrorExpValues(d, M) :=
+    primeError(d, M, realExp(V))
+proof
+  unfold primeErrorExpValues
+  simp
+
+-- ord_s L̃(ξ) − ord_s L̃(ξ(·/d)), as a function of the character ξ
+-- modulo M.
+def primeErrorOrderValue (d M : Nat, s ξ : Set) : Set :=
+  R[realNat(analyticOrderNat(entireLMap(M, ξ), s)) -
+    realNat(analyticOrderNat(entireLMap(M * d, quadTwist(M, ξ, d)), s))]
+
+def primeErrorOrderValues (d M : Nat, s : Set) : Set :=
+  { primeErrorOrderValue(d, M, s, ξ) | ξ ∈ dirichletCharacters(M) }
+
+defgraph primeErrorOrderTerms (d M : Nat, s : Set)
+    (ξ ∈ dirichletCharacters(M)) : primeErrorOrderValues(d, M, s) :=
+    primeErrorOrderValue(d, M, s, ξ)
+proof
+  unfold primeErrorOrderValues
+  simp
+
+-- The residue of the transform of R_M(e^v) at s (the source's residue
+-- function in isPolar_primeError):
+-- r(s) = Σ_ξ (ord_s L̃(ξ) − ord_s L̃(ξ(·/d))) / (φ(M) s (1 − s)), the sum
+-- of the integer orders taken in ℝ (the source sums their casts in ℂ;
+-- the values agree), with 0 where s(1 − s) = 0, as Lean divides by 0.
+def primeErrorResidueValue (d M : Nat, s : Set) : Set :=
+  complexDiv(complexOfReal(realFiniteSum(primeErrorOrderTerms(d, M, s),
+      dirichletCharacters(M))),
+    ℂ[complexOfReal(realNat(totient(M))) * (s * (1 - s))])
+
+def primeErrorResidueValues (d M : Nat) : Set :=
+  { primeErrorResidueValue(d, M, z) | z ∈ complexCarrier }
+
+defgraph primeErrorResidue (d M : Nat) (s ∈ complexCarrier) :
+    primeErrorResidueValues(d, M) := primeErrorResidueValue(d, M, s)
+proof
+  unfold primeErrorResidueValues
+  simp
+
+-- PrimeError.lean, isPolar_primeError: for d ≡ 7 mod 8 a prime to M,
+-- v ↦ R_M(e^v) is polar, with residue at s
+-- Σ_ξ (ord_s L̃(ξ) − ord_s L̃(ξ(·/d))) / (φ(M) s (1 − s)).
+theorem primeError.isPolar (d M : Nat)
+  requires prime : Prime(d)
+  requires sevenModEight : d % 8 = (7:N)
+  requires coprime : gcd(M, d) = (1:N)
+  requires positive : (1:N) ≤ M
+  shows IsPolar(primeErrorExp(d, M), primeErrorResidue(d, M))
+proof
+  sorry
+
+-- Section: The residue bookkeeping
+-- Where no twist vanishes, the terms are the orders of L̃(·, ξ), natural
+-- numbers.
+theorem primeErrorOrderTerms.of_twists (d M : Nat, s : Set)
+  requires prime : Prime(d)
+  requires positive : (1:N) ≤ M
+  requires hs : s ∈ complexCarrier
+  requires twists : ∀ ξ ∈ dirichletCharacters(M),
+    entireL(M * d, quadTwist(M, ξ, d), s) ≠ ℂ[0]
+  shows ∀ ξ ∈ dirichletCharacters(M),
+    primeErrorOrderTerms(d, M, s)(ξ) =
+      realNat(analyticOrderNat(entireLMap(M, ξ), s)) ∧
+    analyticOrderNat(entireLMap(M, ξ), s) ∈ ℕ
+proof
+  intros ξ hξ
+  have character := dirichletCharacters.membership.forward with hξ
+  have twistCharacter := quadTwist.character at M, d, ξ with prime, character
+  have dLarge := Prime.two_le with prime
+  have dPositive : (1:N) ≤ d by arith
+  have levelPositive := LessEqual.one_le_mul with positive, dPositive
+  have twistFacts := entireL.order_facts with levelPositive, twistCharacter, hs
+  have atξ := twists with hξ
+  have twistZero := twistFacts.right.backward with atξ
+  have facts := entireL.order_facts with positive, character, hs
+  have value := primeErrorOrderTerms.value at d, M, s, ξ with hξ
+  refine ⟨?_, facts.left⟩
+  rw value
+  unfold primeErrorOrderValue
+  rw [twistZero, realNat.zero]
+  ring
+
+-- The residue r(X) of the prime error at a real X > 0 where no twist
+-- vanishes has re r(X) ≥ 0: the orders of L̃(·, ξ) are ≥ 0, X(1 − X) > 0
+-- for X < 1, and all orders vanish for X ≥ 1.
+
+theorem primeErrorResidue.re_nonneg (d M : Nat, X : Real)
+  requires prime : Prime(d)
+  requires positive : (1:N) ≤ M
+  requires xPositive : (0:R) < X
+  requires twists : ∀ ξ ∈ dirichletCharacters(M),
+    entireL(M * d, quadTwist(M, ξ, d), complexOfReal(X)) ≠ ℂ[0]
+  shows (0:R) ≤ complexRe(primeErrorResidue(d, M)(complexOfReal(X)))
+proof
+  have point : complexOfReal(X) ∈ complexCarrier by typecheck
+  have value := primeErrorResidue.value at d, M, complexOfReal(X) with point
+  have terms := primeErrorOrderTerms.of_twists with prime, positive, point,
+    twists
+  have mPositive : 0 < M by arith
+  have finite := dirichletCharacters.finite with mPositive
+  have values : ∀ ξ ∈ dirichletCharacters(M),
+      primeErrorOrderTerms(d, M, complexOfReal(X))(ξ) ∈ ℝ by
+    intros ξ hξ
+    obtain ⟨equal, natural⟩ := terms with hξ
+    rw equal
+    typecheck
+  have nonneg : ∀ ξ ∈ dirichletCharacters(M),
+      realZero ≤ primeErrorOrderTerms(d, M, complexOfReal(X))(ξ) by
+    intros ξ hξ
+    obtain ⟨equal, natural⟩ := terms with hξ
+    rw equal
+    exact realNat.zero_le at analyticOrderNat(entireLMap(M, ξ), complexOfReal(X))
+  have sumReal := realFiniteSum.real with finite, values
+  have sumNonneg := realFiniteSum.nonneg with finite, values, nonneg
+  rw value
+  unfold primeErrorResidueValue
+  by_cases small : X < (1:R)
+  . have totientPositive := totient.positive with mPositive
+    have totientNonzero : totient(M) ≠ (0:N) by arith
+    have pPositive := realNat.positive at totient(M) with totientNonzero
+    have oneMinus : (0:R) < R[1 - X] by linarith
+    have first := realLess.mul_right_of_positive at (0:R), X, R[1 - X] with
+      xPositive, oneMinus
+    have zeroFirst : R[0 * (1 - X)] = (0:R) by ring
+    have xxPositive : (0:R) < R[X * (1 - X)] by linarith
+    have second := realLess.mul_right_of_positive at (0:R), R[X * (1 - X)],
+      realNat(totient(M)) with xxPositive, pPositive
+    have zeroSecond : R[0 * realNat(totient(M))] = (0:R) by ring
+    have swap : R[X * (1 - X) * realNat(totient(M))] =
+      R[realNat(totient(M)) * (X * (1 - X))] by ring
+    have dPositive : (0:R) < R[realNat(totient(M)) * (X * (1 - X))] by
+      linarith
+    have dNonzero : R[realNat(totient(M)) * (X * (1 - X))] ≠ (0:R) by
+      intro equal
+      linarith
+    have denominator : ℂ[complexOfReal(realNat(totient(M))) *
+        (complexOfReal(X) * (1 - complexOfReal(X)))] =
+        complexOfReal(R[realNat(totient(M)) * (X * (1 - X))]) by
+      rw [complexOfReal.mul, complexOfReal.mul, complexOfReal.sub,
+        complexOfReal.one]
+    rw denominator
+    unfold complexDiv
+    rw [← (complexOfReal.inv with dNonzero), ← complexOfReal.mul,
+      complexOfReal.re]
+    have invPositive := realInvValue.positive with dPositive
+    have invNonneg : (0:R) ≤ realInvValue(R[realNat(totient(M)) *
+      (X * (1 - X))]) by linarith
+    have product := realLe.mul_right_of_nonnegative at (0:R),
+      realFiniteSum(primeErrorOrderTerms(d, M, complexOfReal(X)),
+        dirichletCharacters(M)),
+      realInvValue(R[realNat(totient(M)) * (X * (1 - X))]) with sumNonneg,
+      invNonneg
+    have zeroProduct : R[0 * realInvValue(R[realNat(totient(M)) *
+      (X * (1 - X))])] = (0:R) by ring
+    linarith
+  . have allZero : ∀ ξ ∈ dirichletCharacters(M),
+        primeErrorOrderTerms(d, M, complexOfReal(X))(ξ) = realZero by
+      intros ξ hξ
+      obtain ⟨equal, natural⟩ := terms with hξ
+      have character := dirichletCharacters.membership.forward with hξ
+      have re := complexOfReal.re at X
+      have halfPlane : (1:R) ≤ complexRe(complexOfReal(X)) by
+        rw re
+        linarith
+      have nonzero := entireL.ne_zero with positive, character, point,
+        halfPlane
+      have facts := entireL.order_facts with positive, character, point
+      have zero := facts.right.backward with nonzero
+      rw [equal, zero, realNat.zero]
+    have sumZero := realFiniteSum.zero with finite, allZero
+    have denominatorIn : ℂ[complexOfReal(realNat(totient(M))) *
+      (complexOfReal(X) * (1 - complexOfReal(X)))] ∈ ℂ by typecheck
+    have inverseIn := complexInv.member with denominatorIn
+    have zeroLeft := complexMul.zero_left with inverseIn
+    rw [sumZero, complexOfReal.zero]
+    unfold complexDiv
+    rw [zeroLeft, ← complexOfReal.zero, complexOfReal.re]
+    linarith
+
+
+-- Section: The two helpers
 -- ZeroFreeTwist.lean, exists_entireL_quadTwist_ne_zero: let B > 1/2, Y
 -- real, and a a unit modulo M whose primes are all ≡ 7 mod 8 and prime to
 -- M. Some prime d ≡ a (mod M) has no L̃(s, ξ(·/d)), ξ modulo M, vanishing
@@ -43,7 +236,24 @@ theorem entireL.exists_quadTwist_ne_zero (M a : Nat, B Y : Real)
       B ≤ complexRe(s) → abs(complexIm(s)) ≤ Y →
       entireL(M * d, quadTwist(M, ξ, d), s) ≠ ℂ[0])
 proof
-  sorry
+  have integer : integerOfNat(a) ∈ ℤ by typecheck
+  have gcdValue := integerGCD.ofNat at a, M
+  have unitInteger : IntegerCoprime(integerOfNat(a), integerOfNat(M)) by
+    unfold IntegerCoprime
+    rw [gcdValue, unit]
+  have classIntegers : ∀ d ∈ ℕ, Prime(d) →
+      InResidueClass(M, d, integerOfNat(a)) →
+      d % 8 = (7:N) ∧ gcd(M, d) = (1:N) by
+    intros d hd dPrime dClass
+    unfold InResidueClass at dClass
+    have congruent := IntegerCongruent.ofNat_iff.forward at M, d, a with dClass
+    exact classPrimes with hd, dPrime, congruent
+  obtain ⟨d, hd, dPrime, dClass, zeroFree⟩ :=
+    entireL.exists_quadTwist_ne_zero_of_unit at M, integerOfNat(a), B, Y with
+      positive, half, integer, unitInteger, classIntegers
+  unfold InResidueClass at dClass
+  have congruent := IntegerCongruent.ofNat_iff.forward at M, d, a with dClass
+  exact ⟨d, hd, dPrime, congruent, zeroFree⟩
 
 -- Landau's lemma for the prime error. For d ≡ 7 mod 8 a prime to M,
 -- v ↦ R_M(e^v) is polar (isPolar_primeError): its transform
@@ -73,6 +283,138 @@ theorem primeError.landau (d M : Nat, B : Real, ρ χ : Set)
   requires character : DirichletCharacter(M, χ)
   shows entireL(M, χ, ρ) ≠ ℂ[0]
 proof
-  sorry
+  have polar := primeError.isPolar with prime, sevenModEight, coprime,
+    positive
+  -- R_M(e^v) ≤ e^((B−1)v) for large v.
+  have expBound : ∃ V ∈ ℝ, ∀ W ∈ ℝ, V ≤ W →
+      primeErrorExp(d, M)(W) ≤ realExp(R[(B - 1) * W]) by
+    obtain ⟨X, hX, eventually⟩ := bound
+    have absReal : abs(X) ∈ ℝ by typecheck
+    refine ⟨abs(X), absReal, ?_⟩
+    intros W hW le
+    have value := primeErrorExp.value at d, M, W with hW
+    have upper := abs.upper at X
+    have expLower := realExp.one_add_le at W
+    have expReal : realExp(W) ∈ ℝ by typecheck
+    have large : X ≤ realExp(W) by linarith
+    have atW := eventually with expReal, large
+    have logExp := realLog.of_exp at W
+    have power : realRpow(realExp(W), R[B - 1]) = realExp(R[(B - 1) * W]) by
+      unfold realRpow
+      rw logExp
+    rw [value, ← power]
+    exact atW
+  -- re r(X) ≥ 0 for real X > B.
+  have residues : ∀ X ∈ ℝ, B < X →
+      (0:R) ≤ complexRe(primeErrorResidue(d, M)(complexOfReal(X))) by
+    intros X hX less
+    have xPositive : (0:R) < X by linarith
+    have twists : ∀ ξ ∈ dirichletCharacters(M),
+        entireL(M * d, quadTwist(M, ξ, d), complexOfReal(X)) ≠ ℂ[0] by
+      intros ξ hξ
+      have atξ := realTwists with hξ
+      exact atξ with hX, less
+    exact primeErrorResidue.re_nonneg with prime, positive, xPositive, twists
+  have vanishes := IsPolar.landau with polar, bPositive, residues, expBound,
+    hρ, right
+  -- r(ρ) = 0 forces every order ord_ρ L̃(ξ) to vanish.
+  by_cases halfPlane : (1:R) ≤ complexRe(ρ)
+  . exact entireL.ne_zero with positive, character, hρ, halfPlane
+  have below : complexRe(ρ) < (1:R) by linarith
+  have value := primeErrorResidue.value at d, M, ρ with hρ
+  rw value at vanishes
+  unfold primeErrorResidueValue at vanishes
+  -- The denominator φ(M) ρ (1 − ρ) is not 0.
+  have mPositive : 0 < M by arith
+  have totientPositive := totient.positive with mPositive
+  have totientNonzero : totient(M) ≠ (0:N) by arith
+  have pPositive := realNat.positive at totient(M) with totientNonzero
+  have pIn : complexOfReal(realNat(totient(M))) ∈ ℂ by typecheck
+  have pNonzero : complexOfReal(realNat(totient(M))) ≠ ℂ[0] by
+    intro equal
+    rw ← complexOfReal.zero at equal
+    have same := complexOfReal.injective with equal
+    linarith
+  have ρNonzero : ρ ≠ ℂ[0] by
+    intro equal
+    have re := complexOfReal.re at R[0]
+    rw [complexOfReal.zero] at re
+    rw [equal, re] at right
+    linarith
+  have oneIn : ℂ[1] ∈ ℂ by typecheck
+  have reOneMinus := complexRe.sub with oneIn, hρ
+  have oneMinusNonzero : ℂ[1 - ρ] ≠ ℂ[0] by
+    intro equal
+    have re := complexOfReal.re at R[0]
+    rw [complexOfReal.zero] at re
+    rw [equal, re, complexRe.one] at reOneMinus
+    linarith
+  have oneMinusIn : ℂ[1 - ρ] ∈ ℂ by typecheck
+  have productIn : ℂ[ρ * (1 - ρ)] ∈ ℂ by typecheck
+  have productNonzero : ℂ[ρ * (1 - ρ)] ≠ ℂ[0] by
+    intro equal
+    have zero := complexMul.eq_zero_cancel_left with hρ, oneMinusIn, ρNonzero,
+      equal
+    exact oneMinusNonzero with zero
+  have denominatorNonzero : ℂ[complexOfReal(realNat(totient(M))) *
+      (ρ * (1 - ρ))] ≠ ℂ[0] by
+    intro equal
+    have zero := complexMul.eq_zero_cancel_left with pIn, productIn, pNonzero,
+      equal
+    exact productNonzero with zero
+  have denominatorIn : ℂ[complexOfReal(realNat(totient(M))) *
+    (ρ * (1 - ρ))] ∈ ℂ by typecheck
+  -- Hence the sum S of the terms is 0.
+  have finite := dirichletCharacters.finite with mPositive
+  have terms := primeErrorOrderTerms.of_twists with prime, positive, hρ,
+    twistsAtρ
+  have values : ∀ ξ ∈ dirichletCharacters(M),
+      primeErrorOrderTerms(d, M, ρ)(ξ) ∈ ℝ by
+    intros ξ hξ
+    obtain ⟨equal, natural⟩ := terms with hξ
+    rw equal
+    typecheck
+  have nonneg : ∀ ξ ∈ dirichletCharacters(M),
+      realZero ≤ primeErrorOrderTerms(d, M, ρ)(ξ) by
+    intros ξ hξ
+    obtain ⟨equal, natural⟩ := terms with hξ
+    rw equal
+    exact realNat.zero_le at analyticOrderNat(entireLMap(M, ξ), ρ)
+  have sumReal := realFiniteSum.real with finite, values
+  have sumIn : complexOfReal(realFiniteSum(primeErrorOrderTerms(d, M, ρ),
+    dirichletCharacters(M))) ∈ ℂ by typecheck
+  have cancel := complexDiv.mul_cancel with sumIn, denominatorIn,
+    denominatorNonzero
+  rw vanishes at cancel
+  have zeroLeft := complexMul.zero_left with denominatorIn
+  rw zeroLeft at cancel
+  rw ← complexOfReal.zero at cancel
+  have sumZero := complexOfReal.injective with cancel
+  -- The term at χ is at most S = 0.
+  have hχ := dirichletCharacters.membership.backward with character
+  have singleInside : {χ} ⊆ dirichletCharacters(M) by
+    intros ξ hξ
+    have same := singleton.membership.forward with hξ
+    rw same
+    exact hχ
+  have single := realFiniteSum.mono_set with finite, singleInside, values,
+    nonneg
+  obtain ⟨abelian, carrier, _, _⟩ := realAdditiveGroup.parts
+  obtain ⟨atχ, natural⟩ := terms with hχ
+  have atχReal := values with hχ
+  rw ← carrier at atχReal
+  have singleValue := groupFiniteSum.singleton at realAdditiveGroup, χ,
+    primeErrorOrderTerms(d, M, ρ) with abelian, atχReal
+  unfold realFiniteSum at single
+  unfold realFiniteSum at sumZero
+  rw [singleValue, atχ, ← sumZero] at single
+  have nonnegχ := realNat.zero_le at analyticOrderNat(entireLMap(M, χ), ρ)
+  have zeroReal : realNat(analyticOrderNat(entireLMap(M, χ), ρ)) =
+    realNat(0) by
+    rw realNat.zero
+    linarith
+  have orderZero := realNat.injective with zeroReal
+  have facts := entireL.order_facts with positive, character, hρ
+  exact facts.right.forward with orderZero
 
 end CriterionTools
