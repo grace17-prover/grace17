@@ -416,6 +416,13 @@ graph TD
 | GRH.GLn.WeightRep | 6 | 0 | 6 |
 | GRH.GLn.Branching | 7 | 0 | 7 |
 | GRH.GLn.Dual | 3 | 0 | 3 |
+| GRH.GaloisRep.Places | 13 | 1 | 12 |
+| GRH.GaloisRep.Pseudocharacter | 23 | 1 | 22 |
+| GRH.GaloisRep.Attached | 13 | 7 | 6 |
+| GRH.GaloisRep.Hilbert90 | 14 | 0 | 14 |
+| GRH.GaloisRep.HodgeTate | 1 | 0 | 1 |
+| GRH.GaloisRep.PseudoLimits | 7 | 0 | 7 |
+| GRH.GaloisRep.Spherical | 7 | 1 | 6 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
@@ -463,5 +470,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9761** | **7477** | **2284** |
+| **total** | **9839** | **7487** | **2352** |
 <!-- /blueprint-status -->
