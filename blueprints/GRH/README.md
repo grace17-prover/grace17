@@ -386,18 +386,21 @@ graph TD
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
+| GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 13 | 5 | 8 |
 | GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
 | GRH.Proof.Endgame.OneSidedCriterion | 1 | 0 | 1 |
-| GRH.Proof.Forward.Lifts | 15 | 15 | 0 |
 | GRH.Proof.Data.Magnitudes | 11 | 0 | 11 |
+| GRH.Proof.Seesaw.IndexTypes | 3 | 0 | 3 |
+| GRH.Proof.Forward.Automorphic | 6 | 6 | 0 |
+| GRH.Proof.Forward.Lifts | 0 | 0 | 0 |
 | GRH.Proof.Data.DataExist | 2 | 0 | 2 |
-| GRH.Proof.Endgame.ShortAndEnough | 4 | 0 | 4 |
+| GRH.Proof.Endgame.ShortAndEnough | 5 | 0 | 5 |
 | GRH.Proof.Endgame.LongForms | 2 | 0 | 2 |
 | GRH.Statements | 7 | 6 | 1 |
-| GRH.Proof.Main | 11 | 6 | 5 |
+| GRH.Proof.Main | 13 | 11 | 2 |
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
-| **total** | **8732** | **6642** | **2090** |
+| **total** | **8729** | **6638** | **2091** |
 <!-- /blueprint-status -->
