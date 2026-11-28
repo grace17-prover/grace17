@@ -217,13 +217,44 @@ information as `largeCardinals`. See
 
 ## Universes in the GRH port
 
-The Lean proof of the Generalized Riemann Hypothesis for Dirichlet
-L-functions that Grace17 is porting uses universe levels in one region, its
-étale and Hodge cohomology, where spaces are functors on the category of
-all commutative rings. The constructions in that region are bounded: every
-ring it forms has cardinality less than ℶ_ω, and no product, colimit, or
-sheafification ranges over a proper class. The region is therefore
-formulated over the set of rings whose carriers lie in V_{ω·2}, a stage of
-the cumulative hierarchy whose existence ZFC proves and which is a model of
-Zermelo set theory. The port uses no large cardinal hypothesis, and its
-certificate is to be a certificate from ZFC alone.
+The Grace17 ZFC proof of the Generalized Riemann Hypothesis for Dirichlet
+L-functions that <a class="profile" href="http://www.cl.cam.ac.uk/~gp351/" data-name="Grant Olney Passmore" data-photo="images/profiles/grant-passmore.jpg" data-line="www.cl.cam.ac.uk/~gp351" data-contact="Z3JhbnRAZ3JhY2UxNy5vcmc=">Grant Passmore</a>
+is working on is porting the compressed Lean proof, which uses universe
+levels in one region, its étale and Hodge cohomology. There a space is a
+functor on the category of all commutative rings, and the Ext groups of
+such functors are formed in a functor category one universe level higher.
+
+In set theory the commutative rings form a proper class, not a set, and a
+functor defined on a proper class is not a set either. Grothendieck's
+answer was to work inside a universe U: the U-small rings form a set, the
+functors on them are sets, and the category of those functors lies in a
+larger universe. Read literally, the Lean argument therefore asks for one
+Grothendieck universe, and so one inaccessible cardinal, for each universe
+level it uses, as in Carneiro's model of Lean's type theory.
+
+The port avoids them by bounding the rings instead of the universe. The
+proof never evaluates its functors on arbitrary rings. Every ring it uses
+is built from finitely many data by polynomial algebras, quotients,
+localizations, finite products, tensor products, and completions, and
+applied to rings of cardinality less than ℶ_ω each of these constructions
+yields a ring of cardinality less than ℶ_ω. No product, colimit, or
+sheafification in the region ranges over a proper class. The region is
+therefore formulated over the rings whose carriers lie in V_{ω·2}:
+
+- V_{ω·2} is a set, a stage of the cumulative hierarchy whose existence ZFC
+  proves by the axiom of replacement. It is a model of Zermelo set theory.
+- Every ring of cardinality less than ℶ_ω has an isomorphic copy with
+  carrier in V_{ω·2}, since a set of cardinality ℶ_n embeds in V_{ω+n+1}.
+- The class of these rings is closed under the constructions above, so the
+  theorems the rest of the proof takes from this region hold for them
+  exactly as stated.
+- The category of these rings is small, the functors on it are sets, and so
+  are the Ext groups between them. Everything is formed in ZFC.
+
+This is an instance of a general phenomenon: a given argument uses only
+boundedly many stages of the cumulative hierarchy, and McLarty (2020) shows
+that the large structures of Grothendieck's cohomology can be founded this
+way, without universes. The port uses no large cardinal hypothesis, and its
+certificate is to be a certificate from ZFC alone. Were a large cardinal
+hypothesis to enter anywhere, the axiom audit would report the reliance at
+every theorem above it, up to the main theorem.
