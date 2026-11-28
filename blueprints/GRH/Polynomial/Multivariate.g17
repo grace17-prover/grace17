@@ -2270,6 +2270,30 @@ proof
   refine ⟨pIn, ?_⟩
   exact Subset.transitive with sub, subset
 
+-- Helper: a monomial a X^m has total degree at most deg m.
+theorem tkJ.monomial_total_le (m a : Set)
+  requires monomial : m ∈ monomials(I)
+  requires scalar : a ∈ R.carrier
+  shows mvTotalDegree(R, I, mvMonomial(R, I, m, a)) ≤ monomialDegree(I, m)
+proof
+  have mIn := mvMonomial.mem at R, I, m, a with comm, polys, monomial, scalar
+  have mNat := mv.monomial_degree_nat at I, m with monomial
+  obtain ⟨_, spec⟩ := mvTotalDegree.selected at R, I, mvMonomial(R, I, m, a) with comm, mIn
+  cases spec with emp | b
+  . rw emp.right
+    arith
+  . obtain ⟨⟨n, nS, nd⟩, _⟩ := b
+    unfold mvSupport at nS
+    obtain ⟨nIn, nz⟩ := functionSupport.membership.forward at mvMonomial(R, I, m, a), monomials(I), R.zero, n with nS
+    by_cases nm : n = m
+    . rw nm at nd
+      rw ← nd
+      arith
+    . exfalso
+      have c := (mvMonomial.coeff at R, I, m, a, n with comm, polys, monomial, scalar, nIn).right with nm
+      unfold mvCoeff at c
+      exact nz with c
+
 -- Helpers: the monomial basis family m ↦ X^m, a monomial a X^m as the
 -- multiple a • X^m, and module sums of polynomials as ring sums.
 theorem tkJ.mv_basis_family
@@ -2901,6 +2925,204 @@ proof
   rw ← eq
   rw (compose.apply at evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier, p with rfn, efn, member)
 
+-- Helpers: a homomorphism R[I] → R[J] fixing the constants and sending
+-- each variable to a polynomial of degree at most 1 does not raise the
+-- total degree (on monomials by induction on their degree, then on the
+-- span of the monomials of bounded degree).
+def tkJDegreeAtMost (I n : Set) : Set :=
+  { m ∈ monomials(I) | monomialDegree(I, m) ∈ succ(n) }
+
+def tkJDegreePreimage (I J h n : Set) : Set :=
+  { q ∈ Ring.carrier(polynomialRing(R, I)) |
+    h(q) ∈ restrictSupport(R, J, tkJDegreeAtMost(R, J, n)) }
+
+theorem tkJ.degree_hom_monomial (I J h : Set) (k : Nat)
+  requires hom : h : polynomialRing(R, I) →+* polynomialRing(R, J)
+  requires constants : ∀ a ∈ R.carrier, h(mvC(R, I, a)) = mvC(R, J, a)
+  requires variables : ∀ i ∈ I, mvTotalDegree(R, J, h(X(R, I, i))) ≤ 1
+  shows ∀ m ∈ monomials(I), monomialDegree(I, m) = k → ∀ a ∈ R.carrier,
+    mvTotalDegree(R, J, h(mvMonomial(R, I, m, a))) ≤ k
+proof
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have one := monomialOne.member at I
+  induction k
+  | zero =>
+    intros m hm d a ha
+    have m1 := tkJ.degree_zero at I, m with hm, d
+    rw [m1, (mvMonomial.zero at R, I, a with comm, pcI, ha), (constants with a, ha), (mvTotalDegree.C at R, J, a with comm, pcJ, ha)]
+    arith
+  | succ(j) using ih =>
+    intros m hm d a ha
+    have ne : m ≠ monomialOne(I)
+      intro e
+      rw e at d
+      rw (rmEMv.one_degree at R, I with comm, pcI) at d
+      arith
+    have exists : ∃ i ∈ I, m(i) ≠ 0
+      by_contra none
+      apply ne
+      apply monomials.ext at I, m, monomialOne(I) with hm, one
+      intros i hi
+      rw (monomialOne.value at I, i with hi)
+      by_contra nz
+      exact none with ⟨i, hi, nz⟩
+    obtain ⟨i, iI, nz⟩ := exists
+    obtain ⟨n, nIn, mEq⟩ := monomials.unshift at I, i, m with iI, hm, nz
+    have vi := monomialVariable.member at I, i
+    rw (shiftMonomial.product at I, i, n with iI, nIn) at mEq
+    have deg := tkJ.degree_mul at I, monomialVariable(I, i), n with vi, nIn
+    rw [← mEq, (rmEMv.variable_degree at R, I, i with comm, pcI, iI), d] at deg
+    have nn := mv.monomial_degree_nat at I, n with nIn
+    have dn : monomialDegree(I, n) = j by arith
+    have le1 := ih with n, nIn, dn, a, ha
+    have inC := mvMonomial.mem at R, I, n, a with comm, pcI, nIn, ha
+    have xIn := X.mem at R, I, i with comm
+    have eqm : call2(Ring.mul(polynomialRing(R, I)), mvMonomial(R, I, n, a), X(R, I, i)) = mvMonomial(R, I, m, a)
+      rw [(X.eq_monomial at R, I, i with comm, pcI, iI), (mvMonomial.mul at R, I, n, monomialVariable(I, i), a, R.one with comm, pcI, nIn, vi, ha, oneIn)]
+      have mv := monomialMul.apply at I, n, monomialVariable(I, i) with nIn, vi
+      unfold call2 at mv
+      have r1 : call2(R.mul, a, R.one) = a by ring
+      rw [mv, r1, (monomialProduct.commutative at I, n, monomialVariable(I, i) with nIn, vi), ← mEq]
+    rw ← eqm
+    rw (RingHom.map_mul at h, polynomialRing(R, I), polynomialRing(R, J), mvMonomial(R, I, n, a), X(R, I, i) with hom, inC, xIn)
+    have hn := RingHom.map_mem at h, polynomialRing(R, I), polynomialRing(R, J), mvMonomial(R, I, n, a) with hom, inC
+    have hx := RingHom.map_mem at h, polynomialRing(R, I), polynomialRing(R, J), X(R, I, i) with hom, xIn
+    have ml := mvTotalDegree.mul_le at R, J, h(mvMonomial(R, I, n, a)), h(X(R, I, i)) with comm, pcJ, hn, hx
+    have vx := variables with i, iI
+    have d1 := (mvTotalDegree.selected at R, J, h(mvMonomial(R, I, n, a)) with comm, hn).left
+    have d2 := (mvTotalDegree.selected at R, J, h(X(R, I, i)) with comm, hx).left
+    have n1 := nat.omega.backward with d1
+    have n2 := nat.omega.backward with d2
+    have prodIn : call2(Ring.mul(polynomialRing(R, J)), h(mvMonomial(R, I, n, a)), h(X(R, I, i))) ∈ Ring.carrier(polynomialRing(R, J)) by typecheck
+    have d3 := (mvTotalDegree.selected at R, J, call2(Ring.mul(polynomialRing(R, J)), h(mvMonomial(R, I, n, a)), h(X(R, I, i))) with comm, prodIn).left
+    have n3 := nat.omega.backward with d3
+    arith
+
+theorem tkJ.degree_at_most (J x : Set) (d : Nat)
+  requires member : x ∈ Ring.carrier(polynomialRing(R, J))
+  shows x ∈ restrictSupport(R, J, tkJDegreeAtMost(R, J, d)) ↔
+    mvTotalDegree(R, J, x) ≤ d
+proof
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have xN := (mvTotalDegree.selected at R, J, x with comm, member).left
+  have xNat := nat.omega.backward with xN
+  constructor
+  . intro hx
+    obtain ⟨_, sub⟩ := restrictSupport.membership.forward with hx
+    obtain ⟨_, spec⟩ := mvTotalDegree.selected at R, J, x with comm, member
+    cases spec with emp | b
+    . rw emp.right
+      arith
+    . obtain ⟨⟨m, mS, md⟩, _⟩ := b
+      obtain ⟨mMon, mlt⟩ := tkJDegreeAtMost.membership.forward with (sub with m, mS)
+      have mNat := mv.monomial_degree_nat at J, m with mMon
+      have lt := Less.of_membership at monomialDegree(J, m), succ(d)
+      have l := lt with mlt
+      rw ← md
+      exact Less.successor_upper with l
+  . intro le
+    apply restrictSupport.membership.backward
+    refine ⟨member, ?_⟩
+    intros m mS
+    have mS2 := mS
+    unfold mvSupport at mS2
+    obtain ⟨mMon, _⟩ := functionSupport.membership.forward with mS2
+    have mNat := mv.monomial_degree_nat at J, m with mMon
+    have lm := mvTotalDegree.le at R, J, m, x with comm, pcJ, member, mS
+    have le2 : monomialDegree(J, m) ≤ d by arith
+    have lt : monomialDegree(J, m) < succ(d) by arith
+    have sNat : Nat(succ(d)) by typecheck
+    have mem := (membership.of_Less at monomialDegree(J, m), succ(d) with mNat, sNat) with lt
+    exact tkJDegreeAtMost.membership.backward with ⟨mMon, mem⟩
+
+theorem tkJ.degree_hom (I J h p : Set)
+  requires hom : h : polynomialRing(R, I) →+* polynomialRing(R, J)
+  requires constants : ∀ a ∈ R.carrier, h(mvC(R, I, a)) = mvC(R, J, a)
+  requires variables : ∀ i ∈ I, mvTotalDegree(R, J, h(X(R, I, i))) ≤ 1
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvTotalDegree(R, J, h(p)) ≤ mvTotalDegree(R, I, p)
+proof
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have ringR := CommRing.to_ring with comm
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have mmI := mvModule.module at R, I with comm, pcI
+  have mmJ := mvModule.module at R, J with comm, pcJ
+  obtain ⟨pcI2, paI, pzI⟩ := cldEMvModule.projections at R, I with comm, pcI
+  obtain ⟨pcJ2, paJ, pzJ⟩ := cldEMvModule.projections at R, J with comm, pcJ
+  obtain ⟨bF, bV⟩ := tkJ.mv_basis_family at R, I with comm, pcI
+  have dN := (mvTotalDegree.selected at R, I, p with comm, member).left
+  have dNat := nat.omega.backward with dN
+  have DIsub : tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)) ⊆ monomials(I)
+    intros m hm
+    exact (tkJDegreeAtMost.membership.forward with hm).left
+  have dle : mvTotalDegree(R, I, p) ≤ mvTotalDegree(R, I, p) by arith
+  have pD := (tkJ.degree_at_most at R, I, p, mvTotalDegree(R, I, p) with comm, member).backward with dle
+  rw (restrictSupport.span at R, I, tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)) with comm, pcI, DIsub) at pD
+  have Tsub := restrictSupport.submodule at R, J, tkJDegreeAtMost(R, J, mvTotalDegree(R, I, p)) with comm, pcJ
+  have imgSub : functionImage(monomialBasisFamily(R, I), tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)), Ring.carrier(polynomialRing(R, I))) ⊆ Module.carrier(mvModule(R, I))
+    rw pcI2
+    exact functionImage.subset at monomialBasisFamily(R, I), tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)), Ring.carrier(polynomialRing(R, I))
+  have base : functionImage(monomialBasisFamily(R, I), tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)), Ring.carrier(polynomialRing(R, I))) ⊆ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p))
+    intros u hu
+    obtain ⟨uIn, m, hm, eu⟩ := functionImage.membership.forward with hu
+    obtain ⟨mMon, mlt⟩ := tkJDegreeAtMost.membership.forward with hm
+    have mNat := mv.monomial_degree_nat at I, m with mMon
+    have lt := Less.of_membership at monomialDegree(I, m), succ(mvTotalDegree(R, I, p))
+    have l := lt with mlt
+    have mle := Less.successor_upper with l
+    rw (bV with m, mMon) at eu
+    rw eu
+    have monoIn := mvMonomial.mem at R, I, m, R.one with comm, pcI, mMon, oneIn
+    have hIn := RingHom.map_mem at h, polynomialRing(R, I), polynomialRing(R, J), mvMonomial(R, I, m, R.one) with hom, monoIn
+    have hle := (tkJ.degree_hom_monomial at R, I, J, h, monomialDegree(I, m) with comm, hom, constants, variables) with m, mMon, rfl, R.one, oneIn
+    have hN := (mvTotalDegree.selected at R, J, h(mvMonomial(R, I, m, R.one)) with comm, hIn).left
+    have hNat := nat.omega.backward with hN
+    have le : mvTotalDegree(R, J, h(mvMonomial(R, I, m, R.one))) ≤ mvTotalDegree(R, I, p) by arith
+    have inT := (tkJ.degree_at_most at R, J, h(mvMonomial(R, I, m, R.one)), mvTotalDegree(R, I, p) with comm, hIn).backward with le
+    exact tkJDegreePreimage.membership.backward with ⟨monoIn, inT⟩
+  have zeroIn : Module.zero(mvModule(R, I)) ∈ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p))
+    rw pzI
+    have zIn : Ring.zero(polynomialRing(R, I)) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have z0 := SubmoduleOf.zero_mem at R, mvModule(R, J), restrictSupport(R, J, tkJDegreeAtMost(R, J, mvTotalDegree(R, I, p))) with ringR, mmJ, Tsub
+    rw pzJ at z0
+    rw ← (RingHom.map_zero at h, polynomialRing(R, I), polynomialRing(R, J) with hom) at z0
+    exact tkJDegreePreimage.membership.backward with ⟨zIn, z0⟩
+  have addIn : ∀ v w ∈ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p)) ∩ Module.carrier(mvModule(R, I)), call2(Module.add(mvModule(R, I)), v, w) ∈ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p))
+    intros v hv w hw
+    obtain ⟨vP, _⟩ := intersection.membership.forward with hv
+    obtain ⟨wP, _⟩ := intersection.membership.forward with hw
+    obtain ⟨vIn, vT⟩ := tkJDegreePreimage.membership.forward with vP
+    obtain ⟨wIn, wT⟩ := tkJDegreePreimage.membership.forward with wP
+    rw paI
+    have sIn : call2(Ring.add(polynomialRing(R, I)), v, w) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have s := SubmoduleOf.add_mem at R, mvModule(R, J), restrictSupport(R, J, tkJDegreeAtMost(R, J, mvTotalDegree(R, I, p))), h(v), h(w) with ringR, mmJ, Tsub, vT, wT
+    rw paJ at s
+    rw ← (RingHom.map_add at h, polynomialRing(R, I), polynomialRing(R, J), v, w with hom, vIn, wIn) at s
+    exact tkJDegreePreimage.membership.backward with ⟨sIn, s⟩
+  have smulIn : ∀ r ∈ R.carrier, ∀ v ∈ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p)) ∩ Module.carrier(mvModule(R, I)), call2(Module.smul(mvModule(R, I)), r, v) ∈ tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p))
+    intros r hr v hv
+    obtain ⟨vP, _⟩ := intersection.membership.forward with hv
+    obtain ⟨vIn, vT⟩ := tkJDegreePreimage.membership.forward with vP
+    rw ← (mvC.mul_eq_smul at R, I, r, v with comm, pcI, hr, vIn)
+    have cIn : mvC(R, I, r) ∈ Ring.carrier(polynomialRing(R, I))
+      unfold mvC
+      exact polynomialConstant.mem at R, I, r with comm, hr
+    have sIn : call2(Ring.mul(polynomialRing(R, I)), mvC(R, I, r), v) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have hvIn := RingHom.map_mem at h, polynomialRing(R, I), polynomialRing(R, J), v with hom, vIn
+    have s := SubmoduleOf.smul_mem at R, mvModule(R, J), restrictSupport(R, J, tkJDegreeAtMost(R, J, mvTotalDegree(R, I, p))), r, h(v) with ringR, mmJ, Tsub, hr, vT
+    rw ← (mvC.mul_eq_smul at R, J, r, h(v) with comm, pcJ, hr, hvIn) at s
+    rw ← (constants with r, hr) at s
+    rw ← (RingHom.map_mul at h, polynomialRing(R, I), polynomialRing(R, J), mvC(R, I, r), v with hom, cIn, vIn) at s
+    exact tkJDegreePreimage.membership.backward with ⟨sIn, s⟩
+  have ind := moduleSpan.induction at R, mvModule(R, I), functionImage(monomialBasisFamily(R, I), tkJDegreeAtMost(R, I, mvTotalDegree(R, I, p)), Ring.carrier(polynomialRing(R, I))), tkJDegreePreimage(R, I, J, h, mvTotalDegree(R, I, p)) with ringR, mmI, imgSub, base, zeroIn, addIn, smulIn
+  have pP := ind with p, pD
+  obtain ⟨_, hT⟩ := tkJDegreePreimage.membership.forward with pP
+  have hpIn := RingHom.map_mem at h, polynomialRing(R, I), polynomialRing(R, J), p with hom, member
+  exact (tkJ.degree_at_most at R, J, h(p), mvTotalDegree(R, I, p) with comm, hpIn).forward with hT
+
 -- Renaming keeps the total degree.
 theorem polynomialRename.total_degree (I J σ p : Set)
   requires map : σ : I → J
@@ -2908,7 +3130,88 @@ theorem polynomialRename.total_degree (I J σ p : Set)
   requires member : p ∈ Ring.carrier(polynomialRing(R, I))
   shows mvTotalDegree(R, J, polynomialRename(R, I, J, σ)(p)) = mvTotalDegree(R, I, p)
 proof
-  sorry
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have oneIn : R.one ∈ R.carrier by typecheck
+  obtain ⟨wF, wV⟩ := cldERenameBack.function at R, I, J, σ with comm, map, injective
+  have algI := polynomialAlgebra.algebra at R, I with comm
+  have over := polynomialAlgebra.base at R, I
+  have values : cldERenameBack(R, I, J, σ) : J → algebraCarrier(polynomialAlgebra(R, I))
+    rw polynomialAlgebra.carrierOf
+    exact wF
+  have back := evaluationHom.algebra_hom at R, J, polynomialAlgebra(R, I), cldERenameBack(R, I, J, σ) with comm, algI, over, values
+  rw [polynomialAlgebra.ring, polynomialAlgebra.map] at back
+  have forward := polynomialRename.hom at R, I, J, σ with comm, map
+  have cstI := polynomialConstant.hom at R, I with comm
+  have vars : ∀ i ∈ I, evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ))(polynomialRename(R, I, J, σ)(X(R, I, i))) = X(R, I, i)
+    intros i hi
+    rw (polynomialRename.map_X at R, I, J, σ, i with comm, map, hi)
+    have si := FunctionBetween.apply_closed with map, hi
+    rw (evaluationHom.map_X at R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ), σ(i) with comm, pcI, cstI, wF, si)
+    exact wV with i, hi
+  have trip := AlgebraHom.polynomial_round_trip at R, I, polynomialAlgebra(R, J), polynomialRename(R, I, J, σ), evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ)) with comm, forward, back, vars
+  have fh := AlgebraHom.ring_hom at polynomialRename(R, I, J, σ), polynomialAlgebra(R, I), polynomialAlgebra(R, J) with forward
+  rw [polynomialAlgebra.ring, polynomialAlgebra.ring] at fh
+  have bh := AlgebraHom.ring_hom at evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ)), polynomialAlgebra(R, J), polynomialAlgebra(R, I) with back
+  rw [polynomialAlgebra.ring, polynomialAlgebra.ring] at bh
+  -- Renaming fixes constants and sends variables to variables.
+  have fc : ∀ a ∈ R.carrier, polynomialRename(R, I, J, σ)(mvC(R, I, a)) = mvC(R, J, a)
+    intros a ha
+    have ha2 : a ∈ Ring.carrier(Algebra.base(polynomialAlgebra(R, I)))
+      rw polynomialAlgebra.base
+      exact ha
+    have mb := AlgebraHom.map_base at polynomialRename(R, I, J, σ), polynomialAlgebra(R, I), polynomialAlgebra(R, J), a with forward, ha2
+    rw [polynomialAlgebra.map, polynomialAlgebra.map] at mb
+    unfold mvC
+    exact mb
+  have fv : ∀ i ∈ I, mvTotalDegree(R, J, polynomialRename(R, I, J, σ)(X(R, I, i))) ≤ 1
+    intros i hi
+    have si := FunctionBetween.apply_closed with map, hi
+    rw (polynomialRename.map_X at R, I, J, σ, i with comm, map, hi)
+    rw (X.eq_monomial at R, J, σ(i) with comm, pcJ, si)
+    have vm := monomialVariable.member at J, σ(i)
+    have le := tkJ.monomial_total_le at R, J, monomialVariable(J, σ(i)), R.one with comm, pcJ, vm, oneIn
+    rw (rmEMv.variable_degree at R, J, σ(i) with comm, pcJ, si) at le
+    exact le
+  -- Renaming back fixes constants and sends each variable to a variable
+  -- or to 0.
+  have bc : ∀ a ∈ R.carrier, evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ))(mvC(R, J, a)) = mvC(R, I, a)
+    intros a ha
+    unfold mvC
+    exact evaluationHom.map_constant at R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ), a with comm, pcI, cstI, wF, ha
+  have zeroDeg : mvTotalDegree(R, I, Ring.zero(polynomialRing(R, I))) = 0
+    have c0 := mvTotalDegree.C at R, I, R.zero with comm, pcI, zeroIn
+    unfold mvC at c0
+    rw (RingHom.map_zero at polynomialConstant(R, I), R, polynomialRing(R, I) with cstI) at c0
+    exact c0
+  have bv : ∀ j ∈ J, mvTotalDegree(R, I, evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ))(X(R, J, j))) ≤ 1
+    intros j hj
+    rw (evaluationHom.map_X at R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ), j with comm, pcI, cstI, wF, hj)
+    have r := FunctionBetween.relates_apply with wF, hj
+    unfold relates at r
+    obtain ⟨_, alt⟩ := cldERenameBack.membership.forward with r
+    rcases alt with ⟨i, hi, e⟩ | ⟨k, hk, out, e⟩
+    . obtain ⟨_, ye⟩ := orderedPair.injective with e
+      rw ye
+      rw (X.eq_monomial at R, I, i with comm, pcI, hi)
+      have vm := monomialVariable.member at I, i
+      have le := tkJ.monomial_total_le at R, I, monomialVariable(I, i), R.one with comm, pcI, vm, oneIn
+      rw (rmEMv.variable_degree at R, I, i with comm, pcI, hi) at le
+      exact le
+    . obtain ⟨_, ye⟩ := orderedPair.injective with e
+      rw [ye, zeroDeg]
+      arith
+  have le1 := tkJ.degree_hom at R, I, J, polynomialRename(R, I, J, σ), p with comm, fh, fc, fv, member
+  have rIn := RingHom.map_mem at polynomialRename(R, I, J, σ), polynomialRing(R, I), polynomialRing(R, J), p with fh, member
+  have le2 := tkJ.degree_hom at R, J, I, evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ)), polynomialRename(R, I, J, σ)(p) with comm, bh, bc, bv, rIn
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at R, I) at pmem
+  rw (trip with p, pmem) at le2
+  have n1 := nat.omega.backward with ((mvTotalDegree.selected at R, I, p with comm, member).left)
+  have d2 := (mvTotalDegree.selected at R, J, polynomialRename(R, I, J, σ)(p) with comm, rIn).left
+  have n2 := nat.omega.backward with d2
+  arith
 
 -- bind₁: a homomorphism R[I] → R[J] with Xᵢ ↦ g(i) (bind₁_X_right), bind
 -- of the variables is the identity (bind₁_X_left), substitution composes
