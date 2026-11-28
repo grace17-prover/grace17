@@ -331,17 +331,17 @@ graph TD
 | GRH.Topology.Groups | 62 | 39 | 23 |
 | GRH.Field.InfiniteGalois | 22 | 0 | 22 |
 | GRH.Cyclotomy.Fields | 21 | 1 | 20 |
-| GRH.NumberField.Basic | 63 | 0 | 63 |
-| GRH.NumberField.Dedekind | 92 | 4 | 88 |
+| GRH.NumberField.Basic | 73 | 45 | 28 |
+| GRH.NumberField.Dedekind | 103 | 54 | 49 |
 | GRH.Exp | 217 | 217 | 0 |
 | GRH.Trig | 128 | 128 | 0 |
 | GRH.Log | 108 | 108 | 0 |
-| GRH.NumberField.Discriminant | 25 | 1 | 24 |
+| GRH.NumberField.Discriminant | 29 | 13 | 16 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
 | GRH.Normed.Groups | 130 | 111 | 19 |
 | GRH.Algebra.Completion | 46 | 19 | 27 |
-| GRH.NumberField.Places | 56 | 4 | 52 |
-| GRH.NumberField.CM | 23 | 0 | 23 |
+| GRH.NumberField.Places | 69 | 38 | 31 |
+| GRH.NumberField.CM | 26 | 13 | 13 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 91 | 70 | 21 |
 | GRH.Measure.Spaces | 225 | 177 | 48 |
@@ -354,7 +354,7 @@ graph TD
 | GRH.Calculus.Frechet | 71 | 55 | 16 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
 | GRH.Measure.Haar | 56 | 0 | 56 |
-| GRH.NumberField.Adeles | 30 | 1 | 29 |
+| GRH.NumberField.Adeles | 37 | 13 | 24 |
 | GRH.Adelic.Adeles | 26 | 2 | 24 |
 | GRH.Adelic.QuotientMeasure | 13 | 0 | 13 |
 | GRH.Padic.Numbers | 76 | 5 | 71 |
@@ -466,5 +466,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **9924** | **7762** | **2162** |
 <!-- /blueprint-status -->
