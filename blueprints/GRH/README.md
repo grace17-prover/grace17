@@ -147,6 +147,17 @@ valuation subrings and Galois hulls, p-adic completion and ultrapowers over
 square-zero extensions, rings of locally constant functions, and bounded
 filtered colimits.
 
+The values of the region's functors need room above 𝒰. The canonical free
+cover of a functor and its injective envelope are a sum and a product
+indexed by the whole site, which leave V(ω·2) and every V(ω·n). Spaces and
+coefficients therefore take values in a second stage V(θ), where θ is the
+Hartogs ordinal of V(ω·2), the least ordinal that does not inject into it.
+Under ZFC θ is the successor cardinal of |V(ω·2)| = ℶ_ω, so it is regular,
+and V(θ) is closed under unions of families indexed by subsets of V(ω·2).
+V(θ) plays the part of Lean's `Type 1`; like V(ω·2) it is a set that ZFC
+proves exists, so the functor categories on 𝒰 and their Ext groups are
+sets, and no large cardinal enters (`GRH.Category`, `GRH.Scheme`).
+
 Writing the region over 𝒰 asks for a few changes to the Lean text: the
 continuity condition ranges over diagrams of bounded size, as every use of
 it already does; the ω-branching index type of the test envelopes is
@@ -275,8 +286,9 @@ graph TD
 - A definition that needs a choice of parameter (the order K of the
   Euler–Maclaurin expansion) makes it explicitly and proves independence,
   rather than choosing it with a selector.
-- Theorems that need universes take `TarskiGrothendieck()` as a section
-  hypothesis, never as an axiom; the audit shows where it is relied on.
+- No theorem takes a large cardinal hypothesis: the universe-polymorphic
+  parts of the source are written over the sets 𝒰 ⊆ V(ω·2) and V(θ)
+  (Universes above), and the axiom audit would show any reliance.
 - Statements of layer 5 keep the source's names where they read well, so
   the Lean text can be followed beside the port, and say in a comment which
   source declaration they correspond to.
@@ -372,9 +384,20 @@ graph TD
 | GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
+| GRH.Proof.Forward | 2 | 2 | 0 |
+| GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
+| GRH.Proof.Data.Different | 13 | 5 | 8 |
+| GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
+| GRH.Proof.Endgame.OneSidedCriterion | 1 | 0 | 1 |
+| GRH.Proof.Forward.Lifts | 15 | 15 | 0 |
+| GRH.Proof.Data.Magnitudes | 11 | 0 | 11 |
+| GRH.Proof.Data.DataExist | 2 | 0 | 2 |
+| GRH.Proof.Endgame.ShortAndEnough | 4 | 0 | 4 |
+| GRH.Proof.Endgame.LongForms | 2 | 0 | 2 |
+| GRH.Statements | 7 | 6 | 1 |
+| GRH.Proof.Main | 11 | 6 | 5 |
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
-| GRH.Statements | 7 | 6 | 1 |
-| **total** | **8638** | **6596** | **2042** |
+| **total** | **8732** | **6642** | **2090** |
 <!-- /blueprint-status -->
