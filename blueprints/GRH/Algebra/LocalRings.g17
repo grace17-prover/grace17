@@ -1,0 +1,1952 @@
+-- Local rings: a nontrivial commutative ring in which a + b = 1 forces a
+-- or b to be a unit (Mathlib's IsLocalRing), its maximal ideal of
+-- nonunits, the residue field and the residue map, local homomorphisms
+-- and the maps they induce on residue fields, quotients and localizations
+-- at primes as local rings, the residue field of a prime ideal, the
+-- Jacobson radical of a local ring, and Nakayama's lemma.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Ring/LocalRing.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Algebra.LocalRings
+import GRH.Algebra.Localization
+
+-- Section: Local rings and residue fields
+-- A local ring (IsLocalRing: Nontrivial and isUnit_or_isUnit_of_add_one).
+-- The maximal ideal is defined as the set of nonunits, so no ideal is
+-- chosen (IsLocalRing.maximalIdeal).
+predicate LocalRing (R : Set) :=
+  CommRing(R) ∧ Ring.zero(R) ≠ Ring.one(R) ∧
+  (∀ a b ∈ Ring.carrier(R), call2(Ring.add(R), a, b) = Ring.one(R) →
+    RingUnit(R, a) ∨ RingUnit(R, b))
+
+def ringNonunits (R : Set) : Set := Ring.carrier(R) ∖ ringUnits(R)
+
+def localMaximalIdeal (R : Set) : Set := ringNonunits(R)
+
+-- The residue field R ⧸ m and the residue map R → R ⧸ m
+-- (IsLocalRing.ResidueField, IsLocalRing.residue), and the residue field
+-- as an R-algebra.
+def residueField (R : Set) : Set := quotientRing(R, localMaximalIdeal(R))
+
+def residueMap (R : Set) : Set := quotientMk(R, localMaximalIdeal(R))
+
+def residueAlgebra (R : Set) : Set :=
+  Algebra.mk(R, residueField(R), residueMap(R))
+
+-- A local homomorphism reflects units (IsLocalHom), and the map it
+-- induces on residue fields (IsLocalRing.ResidueField.map).
+predicate LocalRingHom (f R S : Set) :=
+  RingHom(f, R, S) ∧
+  (∀ a ∈ Ring.carrier(R), RingUnit(S, f(a)) → RingUnit(R, a))
+
+def residueFieldMap (f R S : Set) : Set :=
+  quotientRingMap(R, S, f, localMaximalIdeal(R), localMaximalIdeal(S))
+
+-- The residue field of a prime P of any commutative ring: the residue
+-- field of the localization at P (Ideal.ResidueField), and the map from R.
+def primeResidueField (R P : Set) : Set :=
+  residueField(localizationAtPrime(R, P))
+
+def primeResidueMap (R P : Set) : Set :=
+  compose(residueMap(localizationAtPrime(R, P)),
+    localizationMap(R, primeComplement(R, P)), Ring.carrier(R),
+    Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(primeResidueField(R, P)))
+
+-- Section: Laws of local rings
+section LocalLaws
+variable (R : Set)
+hypothesis localRing : LocalRing(R)
+
+theorem localMaximalIdeal.mem_iff_helper (a : Set)
+  shows a ∈ localMaximalIdeal(R) ↔ a ∈ R.carrier ∧ ¬RingUnit(R, a)
+proof
+  unfold localMaximalIdeal
+  unfold ringNonunits
+  constructor
+  . intro h
+    obtain ⟨aIn, aOut⟩ := (difference.membership at R.carrier, ringUnits(R), a).forward with h
+    have nu : ¬RingUnit(R, a)
+      intro u
+      exact aOut with (ringUnits.membership.backward at R, a with ⟨aIn, u⟩)
+    exact ⟨aIn, nu⟩
+  . intro h
+    obtain ⟨aIn, nu⟩ := h
+    have aOut : a ∉ ringUnits(R)
+      intro m
+      exact nu with (ringUnits.membership.forward at R, a with m).right
+    exact (difference.membership at R.carrier, ringUnits(R), a).backward with ⟨aIn, aOut⟩
+
+theorem localMaximalIdeal.ideal
+  shows Ideal(R, localMaximalIdeal(R))
+proof
+  obtain ⟨comm, nt, split⟩ := localRing
+  have ringR := CommRing.to_ring with comm
+  apply Ideal.mk at R, localMaximalIdeal(R) with ringR
+  . intros z hz
+    exact ((localMaximalIdeal.mem_iff_helper at R, z with localRing).forward with hz).left
+  . have zeroIn : R[0] ∈ R.carrier by typecheck
+    have nu : ¬RingUnit(R, R[0])
+      intro u
+      have nz := RingUnit.ne_zero at R, R[0] with comm, nt, u
+      exact nz with rfl
+    exact (localMaximalIdeal.mem_iff_helper at R, R[0] with localRing).backward with ⟨zeroIn, nu⟩
+  . intros a ha b hb
+    obtain ⟨aIn, anu⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with ha
+    obtain ⟨bIn, bnu⟩ := (localMaximalIdeal.mem_iff_helper at R, b with localRing).forward with hb
+    have sIn : a + b ∈ R.carrier by typecheck
+    have nu : ¬RingUnit(R, a + b)
+      intro u
+      obtain ⟨vUnit, right⟩ := ringInverse.unit at R, a + b with comm, u
+      have vIn := ringInverse.mem at R, a + b with comm, u
+      have avIn : a * ringInverse(R, a + b) ∈ R.carrier by typecheck
+      have bvIn : b * ringInverse(R, a + b) ∈ R.carrier by typecheck
+      have sum : a * ringInverse(R, a + b) + b * ringInverse(R, a + b) = R[1]
+        rw ← right
+        ring
+      rcases split with a * ringInverse(R, a + b), avIn, b * ringInverse(R, a + b), bvIn, sum with ua | ub
+      . have d := RingDvd.mul_self_right at R, a, ringInverse(R, a + b) with comm
+        exact anu with (RingUnit.of_dvd_unit at R, a, a * ringInverse(R, a + b) with comm, d, ua)
+      . have d := RingDvd.mul_self_right at R, b, ringInverse(R, a + b) with comm
+        exact bnu with (RingUnit.of_dvd_unit at R, b, b * ringInverse(R, a + b) with comm, d, ub)
+    exact (localMaximalIdeal.mem_iff_helper at R, a + b with localRing).backward with ⟨sIn, nu⟩
+  . intros a ha
+    obtain ⟨aIn, anu⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with ha
+    have nIn : -a ∈ R.carrier by typecheck
+    have nu : ¬RingUnit(R, -a)
+      intro u
+      exact anu with ((RingUnit.neg at R, a with comm).forward with u)
+    exact (localMaximalIdeal.mem_iff_helper at R, -a with localRing).backward with ⟨nIn, nu⟩
+  . intros r hr a ha
+    obtain ⟨aIn, anu⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with ha
+    have p1 : r * a ∈ R.carrier by typecheck
+    have p2 : a * r ∈ R.carrier by typecheck
+    have nu1 : ¬RingUnit(R, r * a)
+      intro u
+      obtain ⟨_, ua⟩ := (RingUnit.mul_iff at R, r, a with comm).forward with u
+      exact anu with ua
+    have nu2 : ¬RingUnit(R, a * r)
+      intro u
+      obtain ⟨ua, _⟩ := (RingUnit.mul_iff at R, a, r with comm).forward with u
+      exact anu with ua
+    have m1 := (localMaximalIdeal.mem_iff_helper at R, r * a with localRing).backward with ⟨p1, nu1⟩
+    have m2 := (localMaximalIdeal.mem_iff_helper at R, a * r with localRing).backward with ⟨p2, nu2⟩
+    exact ⟨m1, m2⟩
+
+theorem LocalRing.comm_ring
+  shows CommRing(R)
+proof
+  exact localRing.left
+
+theorem LocalRing.nontrivial
+  shows R.zero ≠ R.one
+proof
+  obtain ⟨_, nt, _⟩ := localRing
+  exact nt
+
+-- IsLocalRing.isUnit_or_isUnit_one_sub_self.
+theorem LocalRing.unit_or_one_sub_unit (a : Set)
+  requires element : a ∈ R.carrier
+  shows RingUnit(R, a) ∨ RingUnit(R, Ring.sub(R, R.one, a))
+proof
+  obtain ⟨comm, nt, split⟩ := localRing
+  have dIn : Ring.sub(R, R.one, a) ∈ R.carrier by typecheck
+  have sum : a + Ring.sub(R, R.one, a) = R.one by ring
+  exact split with a, element, Ring.sub(R, R.one, a), dIn, sum
+
+-- IsLocalRing.isUnit_one_sub_self_of_mem_nonunits and
+-- isUnit_of_mem_nonunits_one_sub_self.
+theorem LocalRing.one_sub_nonunit (a : Set)
+  requires nonunit : a ∈ ringNonunits(R)
+  shows RingUnit(R, Ring.sub(R, R.one, a))
+proof
+  have m : a ∈ localMaximalIdeal(R)
+    unfold localMaximalIdeal
+    exact nonunit
+  obtain ⟨aIn, anu⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with m
+  rcases LocalRing.unit_or_one_sub_unit at R, a with localRing, aIn with u | v
+  . exfalso
+    exact anu with u
+  . exact v
+
+-- IsLocalRing.nonunits_add: the nonunits are closed under addition.
+theorem LocalRing.nonunits_add (a b : Set)
+  requires first : a ∈ ringNonunits(R)
+  requires second : b ∈ ringNonunits(R)
+  shows call2(R.add, a, b) ∈ ringNonunits(R)
+proof
+  have ideal := localMaximalIdeal.ideal at R with localRing
+  unfold localMaximalIdeal at ideal
+  exact Ideal.add_mem at R, ringNonunits(R), a, b with ideal, first, second
+
+-- A local ring is not the zero ring and its maximal ideal is proper.
+theorem localMaximalIdeal.proper
+  shows ProperIdeal(R, localMaximalIdeal(R))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have ringR := CommRing.to_ring with comm
+  have ideal := localMaximalIdeal.ideal at R with localRing
+  have oneOut : R[1] ∉ localMaximalIdeal(R)
+    intro m
+    have nu := ((localMaximalIdeal.mem_iff_helper at R, R[1] with localRing).forward with m).right
+    exact nu with (RingUnit.one at R with comm)
+  exact ProperIdeal.mk at R, localMaximalIdeal(R) with ringR, ideal, oneOut
+
+-- IsLocalRing.le_maximalIdeal: every proper ideal lies in m; m is the
+-- only maximal ideal (IsLocalRing.isMaximal_iff, eq_maximalIdeal).
+theorem localMaximalIdeal.contains_proper (I : Set)
+  requires proper : ProperIdeal(R, I)
+  shows I ⊆ localMaximalIdeal(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have idealI := ProperIdeal.to_ideal at R, I with proper
+  intros x xI
+  have xIn := Ideal.mem_carrier at R, I, x with idealI, xI
+  have nu : ¬RingUnit(R, x)
+    intro u
+    exact (ProperIdeal.not_mem_unit at R, I, x with comm, proper, u) with xI
+  exact (localMaximalIdeal.mem_iff_helper at R, x with localRing).backward with ⟨xIn, nu⟩
+
+-- IsLocalRing.maximalIdeal.isMaximal and the description of membership
+-- (IsLocalRing.mem_maximalIdeal, notMem_maximalIdeal).
+theorem localMaximalIdeal.maximal
+  shows MaximalIdeal(R, localMaximalIdeal(R))
+proof
+  have proper := localMaximalIdeal.proper at R with localRing
+  have maximality : ∀ J, ProperIdeal(R, J) → localMaximalIdeal(R) ⊆ J → J = localMaximalIdeal(R)
+    intros J properJ sub
+    have back := localMaximalIdeal.contains_proper at R, J with localRing, properJ
+    exact Subset.antisymmetric with back, sub
+  exact ⟨proper, maximality⟩
+
+theorem localMaximalIdeal.mem_iff (a : Set)
+  requires element : a ∈ R.carrier
+  shows a ∈ localMaximalIdeal(R) ↔ ¬RingUnit(R, a)
+proof
+  have h := localMaximalIdeal.mem_iff_helper at R, a with localRing
+  constructor
+  . intro m
+    exact (h.forward with m).right
+  . intro nu
+    exact h.backward with ⟨element, nu⟩
+
+theorem localMaximalIdeal.unique (M : Set)
+  requires maximal : MaximalIdeal(R, M)
+  shows M = localMaximalIdeal(R)
+proof
+  have proper := MaximalIdeal.to_proper at R, M with maximal
+  have sub := localMaximalIdeal.contains_proper at R, M with localRing, proper
+  have mp := localMaximalIdeal.proper at R with localRing
+  obtain ⟨_, maxM⟩ := maximal
+  have e := maxM with localMaximalIdeal(R), mp, sub
+  rw e
+
+-- IsLocalRing.jacobson_eq_maximalIdeal (of the zero ideal).
+theorem LocalRing.jacobson
+  shows jacobsonRadical(R, {R.zero}) = localMaximalIdeal(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mm := localMaximalIdeal.maximal at R with localRing
+  apply Subset.antisymmetric
+  . intros x hx
+    obtain ⟨_, all⟩ := jacobsonRadical.membership.forward at R, {R.zero}, x with hx
+    have mIdeal := MaximalIdeal.to_ideal at R, localMaximalIdeal(R) with mm
+    have z := Ideal.zero_mem at R, localMaximalIdeal(R) with mIdeal
+    have zs := (singleton.subset_iff at R.zero, localMaximalIdeal(R)).backward with z
+    exact all with localMaximalIdeal(R), mm, zs
+  . intros x hx
+    have xIn := ((localMaximalIdeal.mem_iff_helper at R, x with localRing).forward with hx).left
+    have all : ∀ M, MaximalIdeal(R, M) → {R.zero} ⊆ M → x ∈ M
+      intros M maxM sub
+      have e := localMaximalIdeal.unique at R, M with localRing, maxM
+      rw e
+      exact hx
+    exact jacobsonRadical.membership.backward at R, {R.zero}, x with ⟨xIn, all⟩
+
+-- IsLocalRing.maximalIdeal_eq_bot: m = 0 iff R is a field.
+theorem LocalRing.maximal_zero_iff
+  shows localMaximalIdeal(R) = {R.zero} ↔ Field(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have nt := LocalRing.nontrivial at R with localRing
+  constructor
+  . intro h
+    apply Field.of_ideals at R with comm, nt
+    intros I idealI
+    have ringR := CommRing.to_ring with comm
+    by_cases whole : I = R.carrier
+    . right
+      exact whole
+    . left
+      have properI := (ProperIdeal.iff_ne_carrier at R, I with ringR, idealI).backward with whole
+      have sub := localMaximalIdeal.contains_proper at R, I with localRing, properI
+      rw h at sub
+      have z := Ideal.zero_mem at R, I with idealI
+      have zs := (singleton.subset_iff at R.zero, I).backward with z
+      exact Subset.antisymmetric with sub, zs
+  . intro field
+    have ringR := CommRing.to_ring with comm
+    apply Subset.antisymmetric
+    . intros x hx
+      obtain ⟨xIn, nu⟩ := (localMaximalIdeal.mem_iff_helper at R, x with localRing).forward with hx
+      apply singleton.membership.backward
+      by_contra xnz
+      exact nu with ((Field.unit_iff at R, x with field, xIn).backward with xnz)
+    . have mIdeal := localMaximalIdeal.ideal at R with localRing
+      have z := Ideal.zero_mem at R, localMaximalIdeal(R) with mIdeal
+      exact (singleton.subset_iff at R.zero, localMaximalIdeal(R)).backward with z
+
+-- IsLocalRing.exists_of_isUnit_sum: a finite sum that is a unit has a
+-- unit term.
+theorem LocalRing.unit_of_sum (n w : Set)
+  requires natural : Nat(n)
+  requires terms : w : n → R.carrier
+  requires unit : RingUnit(R, finiteRingSum(n, R.carrier, R.add, R.zero,
+    R.neg, R.mul, R.one, w))
+  shows ∃ i ∈ n, RingUnit(R, w(i))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  by_contra none
+  have all : ∀ i ∈ n, w(i) ∈ localMaximalIdeal(R)
+    intros i hi
+    have wi := FunctionBetween.apply_closed with terms, hi
+    have nu : ¬RingUnit(R, w(i))
+      intro u
+      exact none with ⟨i, hi, u⟩
+    exact (localMaximalIdeal.mem_iff_helper at R, w(i) with localRing).backward with ⟨wi, nu⟩
+  have s := rmEIdeal.sum_mem at R, localMaximalIdeal(R), n with comm, mIdeal, w, terms, all
+  have nu := ((localMaximalIdeal.mem_iff_helper at R, finiteRingSum(n, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, w) with localRing).forward with s).right
+  exact nu with unit
+
+-- The residue field and map: a field (IsLocalRing.ResidueField.field), a
+-- surjective homomorphism (residue_surjective) with kernel m
+-- (ker_residue), vanishing exactly on m (residue_eq_zero_iff), nonzero
+-- exactly on units (residue_ne_zero_iff_isUnit).
+theorem residueField.field
+  shows Field(residueField(R))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mm := localMaximalIdeal.maximal at R with localRing
+  have mIdeal := MaximalIdeal.to_ideal at R, localMaximalIdeal(R) with mm
+  unfold residueField
+  exact (quotientRing.field_iff at R, localMaximalIdeal(R) with comm, mIdeal).backward with mm
+
+theorem residueMap.hom
+  shows residueMap(R) : R →+* residueField(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  unfold residueMap
+  unfold residueField
+  exact quotientMk.hom at R, localMaximalIdeal(R) with comm, mIdeal
+
+theorem residueMap.surjective
+  shows SurjectiveBetween(residueMap(R), R.carrier,
+    Ring.carrier(residueField(R)))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  unfold residueMap
+  unfold residueField
+  exact quotientMk.surjective at R, localMaximalIdeal(R) with comm, mIdeal
+
+theorem residueMap.kernel
+  shows ringKernel(residueMap(R), R.carrier, Ring.zero(residueField(R))) =
+    localMaximalIdeal(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  unfold residueMap
+  unfold residueField
+  exact quotientMk.kernel at R, localMaximalIdeal(R) with comm, mIdeal
+
+theorem residueMap.eq_zero_iff (a : Set)
+  requires element : a ∈ R.carrier
+  shows residueMap(R)(a) = Ring.zero(residueField(R)) ↔ a ∈ localMaximalIdeal(R)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  unfold residueMap
+  unfold residueField
+  exact quotientMk.eq_zero_iff at R, localMaximalIdeal(R), a with comm, mIdeal, element
+
+theorem residueMap.ne_zero_iff_unit (a : Set)
+  requires element : a ∈ R.carrier
+  shows residueMap(R)(a) ≠ Ring.zero(residueField(R)) ↔ RingUnit(R, a)
+proof
+  have e := residueMap.eq_zero_iff at R, a with localRing, element
+  have m := localMaximalIdeal.mem_iff at R, a with localRing, element
+  constructor
+  . intro ne
+    by_contra nu
+    exact ne with (e.backward with (m.backward with nu))
+  . intro u
+    intro z
+    exact (m.forward with (e.forward with z)) with u
+
+theorem residueAlgebra.algebra
+  shows Algebra(residueAlgebra(R))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have fld := residueField.field at R with localRing
+  have fc := Field.to_comm_ring at residueField(R) with fld
+  have h := residueMap.hom at R with localRing
+  unfold residueAlgebra
+  exact Algebra.intro with comm, fc, h
+
+-- A unit plus an element of m is a unit.
+theorem LocalRing.unit_add_maximal (u a : Set)
+  requires unit : RingUnit(R, u)
+  requires member : a ∈ localMaximalIdeal(R)
+  shows RingUnit(R, call2(R.add, u, a))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  obtain ⟨aIn, _⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with member
+  have uIn : u ∈ R.carrier by exact unit.left
+  by_contra nu
+  have sIn : u + a ∈ R.carrier by typecheck
+  have sm := (localMaximalIdeal.mem_iff_helper at R, u + a with localRing).backward with ⟨sIn, nu⟩
+  have d := Ideal.sub_mem at R, localMaximalIdeal(R), u + a, a with mIdeal, sm, member
+  have e : (u + a) - a = u by ring
+  rw e at d
+  have unu := ((localMaximalIdeal.mem_iff_helper at R, u with localRing).forward with d).right
+  exact unu with unit
+
+-- Helper: the quotient of a local ring by a proper ideal, stated with
+-- quotientRing written out (in this section R ⧸ I reads as the set
+-- quotient, since no ring hypothesis places R).
+theorem rmELocalRing.quotient (I : Set)
+  requires proper : ProperIdeal(R, I)
+  shows LocalRing(quotientRing(R, I)) ∧
+    localMaximalIdeal(quotientRing(R, I)) =
+      functionImage(quotientMk(R, I), localMaximalIdeal(R),
+        Ring.carrier(quotientRing(R, I)))
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have idealI := ProperIdeal.to_ideal at R, I with proper
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  have mProper := localMaximalIdeal.proper at R with localRing
+  have oneOut := ProperIdeal.one_not_mem at R, localMaximalIdeal(R) with mProper
+  have Isub := localMaximalIdeal.contains_proper at R, I with localRing, proper
+  have qc := quotientRing.comm_ring_of_ideal at R, I with comm, idealI
+  have hom := quotientMk.hom at R, I with comm, idealI
+  have surj := quotientMk.surjective at R, I with comm, idealI
+  obtain ⟨qF, onto⟩ := surj
+  have preimage : ∀ X ∈ Ring.carrier(quotientRing(R, I)), ∃ a ∈ R.carrier, X = quotientMk(R, I)(a)
+    intros X hX
+    obtain ⟨a, aIn, rel⟩ := onto with X, hX
+    have v := FunctionBetween.apply_value with qF, aIn, rel
+    refine ⟨a, aIn, ?_⟩
+    rw v
+  have unitBack : ∀ a ∈ R.carrier, RingUnit(quotientRing(R, I), quotientMk(R, I)(a)) → RingUnit(R, a)
+    intros a aIn u
+    by_contra anu
+    have am := (localMaximalIdeal.mem_iff_helper at R, a with localRing).backward with ⟨aIn, anu⟩
+    obtain ⟨_, B, BIn, right, _⟩ := u
+    obtain ⟨b, bIn, Bb⟩ := preimage with B, BIn
+    rw Bb at right
+    have mm := RingHom.map_mul at quotientMk(R, I), R, quotientRing(R, I), a, b with hom
+    rw ← mm at right
+    have abIn : a * b ∈ R.carrier by typecheck
+    have d := (quotientMk.eq_one_iff at R, I, a * b with comm, idealI).forward with right
+    have dm := Isub with d
+    have abm := Ideal.mul_right_mem at R, localMaximalIdeal(R), b, a with mIdeal, am
+    have one := Ideal.sub_mem at R, localMaximalIdeal(R), a * b, a * b - R[1] with mIdeal, abm, dm
+    have e : a * b - (a * b - R[1]) = R[1] by ring
+    rw e at one
+    exact oneOut with one
+  have localQ : LocalRing(quotientRing(R, I))
+    have nt := (quotientRing.nontrivial_iff at R, I with comm, idealI).backward with proper
+    refine ⟨qc, nt, ?_⟩
+    intros X hX Y hY sum
+    obtain ⟨a, aIn, Xa⟩ := preimage with X, hX
+    obtain ⟨b, bIn, Yb⟩ := preimage with Y, hY
+    rw [Xa, Yb] at sum
+    have ma := RingHom.map_add at quotientMk(R, I), R, quotientRing(R, I), a, b with hom
+    rw ← ma at sum
+    have abIn : a + b ∈ R.carrier by typecheck
+    have d := (quotientMk.eq_one_iff at R, I, a + b with comm, idealI).forward with sum
+    have dm := Isub with d
+    by_cases au : RingUnit(R, a)
+    . left
+      rw Xa
+      exact RingUnit.map at R, quotientRing(R, I), quotientMk(R, I), a with comm, qc, hom, au
+    . by_cases bu : RingUnit(R, b)
+      . right
+        rw Yb
+        exact RingUnit.map at R, quotientRing(R, I), quotientMk(R, I), b with comm, qc, hom, bu
+      . exfalso
+        have am := (localMaximalIdeal.mem_iff_helper at R, a with localRing).backward with ⟨aIn, au⟩
+        have bm := (localMaximalIdeal.mem_iff_helper at R, b with localRing).backward with ⟨bIn, bu⟩
+        have s := Ideal.add_mem at R, localMaximalIdeal(R), a, b with mIdeal, am, bm
+        have one := Ideal.sub_mem at R, localMaximalIdeal(R), a + b, a + b - R[1] with mIdeal, s, dm
+        have e : a + b - (a + b - R[1]) = R[1] by ring
+        rw e at one
+        exact oneOut with one
+  have eq : localMaximalIdeal(quotientRing(R, I)) = functionImage(quotientMk(R, I), localMaximalIdeal(R), Ring.carrier(quotientRing(R, I)))
+    apply Subset.antisymmetric
+    . intros X hX
+      obtain ⟨XIn, Xnu⟩ := (localMaximalIdeal.mem_iff_helper at quotientRing(R, I), X with localQ).forward with hX
+      obtain ⟨a, aIn, Xa⟩ := preimage with X, XIn
+      have anu : ¬RingUnit(R, a)
+        intro au
+        have qu := RingUnit.map at R, quotientRing(R, I), quotientMk(R, I), a with comm, qc, hom, au
+        rw ← Xa at qu
+        exact Xnu with qu
+      have am := (localMaximalIdeal.mem_iff_helper at R, a with localRing).backward with ⟨aIn, anu⟩
+      exact functionImage.membership.backward at quotientMk(R, I), localMaximalIdeal(R), Ring.carrier(quotientRing(R, I)), X with ⟨XIn, a, am, Xa⟩
+    . intros X hX
+      obtain ⟨XIn, a, am, Xa⟩ := functionImage.membership.forward at quotientMk(R, I), localMaximalIdeal(R), Ring.carrier(quotientRing(R, I)), X with hX
+      obtain ⟨aIn, anu⟩ := (localMaximalIdeal.mem_iff_helper at R, a with localRing).forward with am
+      have Xnu : ¬RingUnit(quotientRing(R, I), X)
+        intro Xu
+        rw Xa at Xu
+        exact anu with (unitBack with a, aIn, Xu)
+      exact (localMaximalIdeal.mem_iff_helper at quotientRing(R, I), X with localQ).backward with ⟨XIn, Xnu⟩
+  constructor
+  . exact localQ
+  . exact eq
+
+-- The quotient of a local ring by a proper ideal is local, with maximal
+-- ideal the image of m (IsLocalRing.of_surjective,
+-- IsLocalRing.map_maximalIdeal_of_surjective).
+theorem LocalRing.quotient (I : Set)
+  requires proper : ProperIdeal(R, I)
+  shows LocalRing(quotientRing(R, I)) ∧
+    localMaximalIdeal(quotientRing(R, I)) =
+      functionImage(quotientMk(R, I), localMaximalIdeal(R),
+        Ring.carrier(quotientRing(R, I)))
+proof
+  exact rmELocalRing.quotient with *
+
+end LocalLaws
+
+-- A ring is local iff its nonunits form an ideal (IsLocalRing.of_nonunits_add),
+-- iff it has exactly one maximal ideal (IsLocalRing.of_unique_max_ideal).
+-- The second converse puts a nonunit in a maximal ideal: Choice.
+theorem LocalRing.of_nonunits_ideal (R : Set)
+  requires comm : CommRing(R)
+  requires nontrivial : Ring.zero(R) ≠ Ring.one(R)
+  requires ideal : Ideal(R, ringNonunits(R))
+  shows LocalRing(R)
+proof
+  have split : ∀ a b ∈ Ring.carrier(R), call2(Ring.add(R), a, b) = Ring.one(R) → RingUnit(R, a) ∨ RingUnit(R, b)
+    intros a aIn b bIn sum
+    by_contra neither
+    have anu : ¬RingUnit(R, a)
+      intro u
+      have d : RingUnit(R, a) ∨ RingUnit(R, b) by left; exact u
+      exact neither with d
+    have bnu : ¬RingUnit(R, b)
+      intro u
+      have d : RingUnit(R, a) ∨ RingUnit(R, b) by right; exact u
+      exact neither with d
+    have aOut : a ∉ ringUnits(R)
+      intro m
+      exact anu with (ringUnits.membership.forward at R, a with m).right
+    have bOut : b ∉ ringUnits(R)
+      intro m
+      exact bnu with (ringUnits.membership.forward at R, b with m).right
+    have aN : a ∈ ringNonunits(R)
+      unfold ringNonunits
+      exact (difference.membership at Ring.carrier(R), ringUnits(R), a).backward with ⟨aIn, aOut⟩
+    have bN : b ∈ ringNonunits(R)
+      unfold ringNonunits
+      exact (difference.membership at Ring.carrier(R), ringUnits(R), b).backward with ⟨bIn, bOut⟩
+    have s := Ideal.add_mem at R, ringNonunits(R), a, b with ideal, aN, bN
+    rw sum at s
+    unfold ringNonunits at s
+    obtain ⟨_, oneOut⟩ := (difference.membership at Ring.carrier(R), ringUnits(R), Ring.one(R)).forward with s
+    have one := RingUnit.one at R with comm
+    exact oneOut with (ringUnits.mem_of_unit at R, Ring.one(R) with comm, one)
+  exact ⟨comm, nontrivial, split⟩
+
+theorem LocalRing.of_unique_maximal (R M : Set)
+  requires comm : CommRing(R)
+  requires maximal : MaximalIdeal(R, M)
+  requires unique : ∀ N, MaximalIdeal(R, N) → N = M
+  shows LocalRing(R)
+proof
+  have ringR := CommRing.to_ring with comm
+  have proper := MaximalIdeal.to_proper at R, M with maximal
+  have idM := MaximalIdeal.to_ideal at R, M with maximal
+  have oneOut := ProperIdeal.one_not_mem at R, M with proper
+  have nt : Ring.zero(R) ≠ Ring.one(R)
+    intro e
+    have z := Ideal.zero_mem at R, M with idM
+    rw e at z
+    exact oneOut with z
+  have inM : ∀ a ∈ Ring.carrier(R), ¬RingUnit(R, a) → a ∈ M
+    intros a aIn nu
+    by_contra aOut
+    have all : ∀ N, MaximalIdeal(R, N) → a ∉ N
+      intros N maxN aN
+      have e := unique with N, maxN
+      rw e at aN
+      exact aOut with aN
+    exact nu with ((RingUnit.iff_not_mem_maximal at R, a with comm).backward with all)
+  have split : ∀ a b ∈ Ring.carrier(R), call2(Ring.add(R), a, b) = Ring.one(R) → RingUnit(R, a) ∨ RingUnit(R, b)
+    intros a aIn b bIn sum
+    have ua : RingUnit(R, a) ∨ ¬RingUnit(R, a) by tauto
+    cases ua with yes | no
+    . left
+      exact yes
+    . have ub : RingUnit(R, b) ∨ ¬RingUnit(R, b) by tauto
+      cases ub with yes2 | no2
+      . right
+        exact yes2
+      . exfalso
+        have aM := inM with a, aIn, no
+        have bM := inM with b, bIn, no2
+        have s := Ideal.add_mem at R, M, a, b with idM, aM, bM
+        rw sum at s
+        exact oneOut with s
+  exact ⟨comm, nt, split⟩
+
+-- A field is local with maximal ideal 0 (Field.isLocalRing).
+theorem Field.local_ring (K : Set)
+  requires field : Field(K)
+  shows LocalRing(K) ∧ localMaximalIdeal(K) = {Ring.zero(K)}
+proof
+  have comm := Field.to_comm_ring at K with field
+  have dom := Field.domain at K with field
+  have nt := IntegralDomain.nontrivial at K with dom
+  have split : ∀ a b ∈ Ring.carrier(K), call2(Ring.add(K), a, b) = Ring.one(K) → RingUnit(K, a) ∨ RingUnit(K, b)
+    intros a aIn b bIn sum
+    by_cases az : a = Ring.zero(K)
+    . right
+      have bOne : b = Ring.one(K)
+        rw ← sum
+        rw az
+        ring
+      rw bOne
+      exact RingUnit.one at K with comm
+    . left
+      exact (Field.unit_iff at K, a with field, aIn).backward with az
+  have loc : LocalRing(K) by exact ⟨comm, nt, split⟩
+  have mz := (LocalRing.maximal_zero_iff at K with loc).backward with field
+  exact ⟨loc, mz⟩
+
+-- A local ring isomorphic to R is local.
+theorem LocalRing.of_iso (f R S : Set)
+  requires localRing : LocalRing(R)
+  requires target : CommRing(S)
+  requires iso : f : R ≃+* S
+  shows LocalRing(S)
+proof
+  have comm := LocalRing.comm_ring at R with localRing
+  have ntR := LocalRing.nontrivial at R with localRing
+  obtain ⟨hom, bij⟩ := iso
+  obtain ⟨inj, surj⟩ := bij
+  have hom0 := hom
+  obtain ⟨_, _, ffn, f0, f1, _⟩ := hom0
+  have injEq : ∀ x y ∈ R.carrier, f(x) = f(y) → x = y
+    intros x xIn y yIn e
+    have fxIn := FunctionBetween.apply_closed with ffn, xIn
+    have rx := FunctionBetween.relates_apply with ffn, xIn
+    have ry := FunctionBetween.relates_apply with ffn, yIn
+    rw ← e at ry
+    exact inj.right with x, xIn, y, yIn, f(x), fxIn, rx, ry
+  have zIn : R[0] ∈ R.carrier by typecheck
+  have oIn : R[1] ∈ R.carrier by typecheck
+  have nt : S[0] ≠ S[1]
+    intro e
+    have e2 : f(R[0]) = f(R[1])
+      rw [f0, f1, e]
+    exact ntR with (injEq with R[0], zIn, R[1], oIn, e2)
+  have split : ∀ a b ∈ Ring.carrier(S), call2(Ring.add(S), a, b) = Ring.one(S) → RingUnit(S, a) ∨ RingUnit(S, b)
+    intros a aIn b bIn sum
+    obtain ⟨a1, a1In, ra⟩ := surj.right with a, aIn
+    obtain ⟨b1, b1In, rb⟩ := surj.right with b, bIn
+    have fa := FunctionBetween.apply_value with ffn, a1In, ra
+    have fb := FunctionBetween.apply_value with ffn, b1In, rb
+    have sIn : a1 + b1 ∈ R.carrier by typecheck
+    have fs : f(a1 + b1) = f(R[1])
+      rw [(RingHom.map_add at f, R, S, a1, b1 with hom), fa, fb, sum, f1]
+    have s1 := injEq with a1 + b1, sIn, R[1], oIn, fs
+    obtain ⟨_, _, loc⟩ := localRing
+    rcases loc with a1, a1In, b1, b1In, s1 with ua | ub
+    . left
+      have m := RingUnit.map at R, S, f, a1 with comm, target, hom, ua
+      rw fa at m
+      exact m
+    . right
+      have m := RingUnit.map at R, S, f, b1 with comm, target, hom, ub
+      rw fb at m
+      exact m
+  exact ⟨target, nt, split⟩
+
+-- Section: Local homomorphisms
+section LocalHoms
+variable (f R S : Set)
+hypothesis localR : LocalRing(R)
+hypothesis localS : LocalRing(S)
+
+-- IsLocalHom: f is local iff f⁻¹(m_S) = m_R (IsLocalRing.maximalIdeal_comap)
+-- iff f(m_R) ⊆ m_S.
+theorem LocalRingHom.iff_comap
+  requires hom : f : R →+* S
+  shows LocalRingHom(f, R, S) ↔
+    idealComap(f, R.carrier, localMaximalIdeal(S)) = localMaximalIdeal(R)
+proof
+  have cR := LocalRing.comm_ring at R with localR
+  have cS := LocalRing.comm_ring at S with localS
+  constructor
+  . intro lh
+    obtain ⟨_, reflect⟩ := lh
+    apply Subset.antisymmetric
+    . intros x hx
+      obtain ⟨xIn, fxm⟩ := idealComap.membership.forward at f, R.carrier, localMaximalIdeal(S), x with hx
+      obtain ⟨_, fnu⟩ := (localMaximalIdeal.mem_iff_helper at S, f(x) with localS).forward with fxm
+      have nu : ¬RingUnit(R, x)
+        intro u
+        have fu := RingUnit.map at R, S, f, x with cR, cS, hom, u
+        exact fnu with fu
+      exact (localMaximalIdeal.mem_iff_helper at R, x with localR).backward with ⟨xIn, nu⟩
+    . intros x hx
+      obtain ⟨xIn, nu⟩ := (localMaximalIdeal.mem_iff_helper at R, x with localR).forward with hx
+      have fx : f(x) ∈ S.carrier by typecheck
+      have fnu : ¬RingUnit(S, f(x))
+        intro u
+        exact nu with (reflect with x, xIn, u)
+      have fm := (localMaximalIdeal.mem_iff_helper at S, f(x) with localS).backward with ⟨fx, fnu⟩
+      exact idealComap.membership.backward at f, R.carrier, localMaximalIdeal(S), x with ⟨xIn, fm⟩
+  . intro e
+    have reflect : ∀ a ∈ R.carrier, RingUnit(S, f(a)) → RingUnit(R, a)
+      intros a aIn u
+      by_contra nu
+      have am := (localMaximalIdeal.mem_iff_helper at R, a with localR).backward with ⟨aIn, nu⟩
+      rw ← e at am
+      obtain ⟨_, fam⟩ := idealComap.membership.forward at f, R.carrier, localMaximalIdeal(S), a with am
+      obtain ⟨_, fnu⟩ := (localMaximalIdeal.mem_iff_helper at S, f(a) with localS).forward with fam
+      exact fnu with u
+    exact ⟨hom, reflect⟩
+
+theorem LocalRingHom.iff_image
+  requires hom : f : R →+* S
+  shows LocalRingHom(f, R, S) ↔
+    functionImage(f, localMaximalIdeal(R), S.carrier) ⊆ localMaximalIdeal(S)
+proof
+  have cR := LocalRing.comm_ring at R with localR
+  have cS := LocalRing.comm_ring at S with localS
+  constructor
+  . intro lh
+    obtain ⟨_, reflect⟩ := lh
+    intros y hy
+    obtain ⟨yIn, x, xm, yx⟩ := functionImage.membership.forward at f, localMaximalIdeal(R), S.carrier, y with hy
+    obtain ⟨xIn, nu⟩ := (localMaximalIdeal.mem_iff_helper at R, x with localR).forward with xm
+    have fnu : ¬RingUnit(S, y)
+      intro u
+      rw yx at u
+      exact nu with (reflect with x, xIn, u)
+    exact (localMaximalIdeal.mem_iff_helper at S, y with localS).backward with ⟨yIn, fnu⟩
+  . intro sub
+    have reflect : ∀ a ∈ R.carrier, RingUnit(S, f(a)) → RingUnit(R, a)
+      intros a aIn u
+      by_contra nu
+      have am := (localMaximalIdeal.mem_iff_helper at R, a with localR).backward with ⟨aIn, nu⟩
+      have fa : f(a) ∈ S.carrier by typecheck
+      have img := functionImage.membership.backward at f, localMaximalIdeal(R), S.carrier, f(a) with ⟨fa, a, am, rfl⟩
+      have fam := sub with img
+      obtain ⟨_, fnu⟩ := (localMaximalIdeal.mem_iff_helper at S, f(a) with localS).forward with fam
+      exact fnu with u
+    exact ⟨hom, reflect⟩
+
+-- A surjective homomorphism of local rings is local
+-- (isLocalHom_of_surjective in the local case).
+theorem LocalRingHom.of_surjective
+  requires hom : f : R →+* S
+  requires surjective : SurjectiveBetween(f, R.carrier, S.carrier)
+  shows LocalRingHom(f, R, S)
+proof
+  have comm := LocalRing.comm_ring at R with localR
+  have commS := LocalRing.comm_ring at S with localS
+  have ntS := LocalRing.nontrivial at S with localS
+  have hom0 := hom
+  obtain ⟨_, _, ffn, _⟩ := hom0
+  have mIdeal := localMaximalIdeal.ideal at R with localR
+  have kerM : ∀ x ∈ R.carrier, f(x) = S[0] → x ∈ localMaximalIdeal(R)
+    intros x xIn fx
+    have nu : ¬RingUnit(R, x)
+      intro u
+      have fu := RingUnit.map at R, S, f, x with comm, commS, hom, u
+      rw fx at fu
+      have ne := RingUnit.ne_zero at S, S[0] with commS, ntS, fu
+      exact ne with rfl
+    exact (localMaximalIdeal.mem_iff_helper at R, x with localR).backward with ⟨xIn, nu⟩
+  have refl : ∀ a ∈ Ring.carrier(R), RingUnit(S, f(a)) → RingUnit(R, a)
+    intros a aIn u
+    obtain ⟨faIn, v, vIn, r1, r2⟩ := u
+    have onto := surjective.right
+    obtain ⟨b, bIn, rel⟩ := onto with v, vIn
+    have fb := FunctionBetween.apply_value with ffn, bIn, rel
+    have abIn : a * b ∈ R.carrier by typecheck
+    have dIn : a * b - R[1] ∈ R.carrier by typecheck
+    have fd : f(a * b - R[1]) = S[0]
+      rw [(RingHom.map_sub at f, R, S, a * b, R[1] with hom), (RingHom.map_mul at f, R, S, a, b with hom), (RingHom.map_one at f, R, S with hom), fb, r1]
+      ring
+    have dm := kerM with a * b - R[1], dIn, fd
+    have one := RingUnit.one at R with comm
+    have u1 := LocalRing.unit_add_maximal at R, R[1], a * b - R[1] with localR, one, dm
+    have e : R[1] + (a * b - R[1]) = a * b by ring
+    rw e at u1
+    exact ((RingUnit.mul_iff at R, a, b with comm).forward with u1).left
+  exact ⟨hom, refl⟩
+
+-- IsLocalRing.ResidueField.map: a homomorphism of fields, commuting with
+-- the residue maps.
+theorem residueFieldMap.hom
+  requires local : LocalRingHom(f, R, S)
+  shows RingHom(residueFieldMap(f, R, S), residueField(R), residueField(S)) ∧
+    (∀ a ∈ R.carrier,
+      residueFieldMap(f, R, S)(residueMap(R)(a)) = residueMap(S)(f(a)))
+proof
+  have cR := LocalRing.comm_ring at R with localR
+  have cS := LocalRing.comm_ring at S with localS
+  have local0 := local
+  obtain ⟨hom, _⟩ := local0
+  have e := (LocalRingHom.iff_comap at f, R, S with localR, localS, hom).forward with local
+  have mR := localMaximalIdeal.ideal at R with localR
+  have mS := localMaximalIdeal.ideal at S with localS
+  have compat : localMaximalIdeal(R) ⊆ idealComap(f, R.carrier, localMaximalIdeal(S))
+    rw e
+    exact Subset.reflexive at localMaximalIdeal(R)
+  have h := quotientRingMap.hom at f, R, S, localMaximalIdeal(R), localMaximalIdeal(S) with cR, cS, hom, mR, mS, compat
+  have ap : ∀ a ∈ R.carrier, residueFieldMap(f, R, S)(residueMap(R)(a)) = residueMap(S)(f(a))
+    intros a aIn
+    unfold residueFieldMap
+    unfold residueMap
+    exact quotientRingMap.apply_mk at f, R, S, localMaximalIdeal(R), localMaximalIdeal(S), a with cR, cS, hom, mR, mS, compat, aIn
+  have h2 : RingHom(residueFieldMap(f, R, S), residueField(R), residueField(S))
+    unfold residueFieldMap
+    unfold residueField
+    exact h
+  exact ⟨h2, ap⟩
+
+-- IsLocalRing.surjective_units_map_of_local_ringHom: a surjective local
+-- homomorphism is surjective on units.
+theorem LocalRingHom.units_surjective
+  requires local : LocalRingHom(f, R, S)
+  requires surjective : SurjectiveBetween(f, R.carrier, S.carrier)
+  shows ∀ v ∈ ringUnits(S), ∃ u ∈ ringUnits(R), f(u) = v
+proof
+  obtain ⟨hom, reflect⟩ := local
+  intros v hv
+  obtain ⟨vIn, vu⟩ := ringUnits.membership.forward at S, v with hv
+  obtain ⟨_, onto⟩ := surjective
+  obtain ⟨u, uIn, rel⟩ := onto with v, vIn
+  have hom0 := hom
+  obtain ⟨_, _, fn, _⟩ := hom0
+  have fu := FunctionBetween.apply_value with fn, uIn, rel
+  rw ← fu at vu
+  have uu := reflect with u, uIn, vu
+  have cR := LocalRing.comm_ring at R with localR
+  have um := ringUnits.mem_of_unit at R, u with cR, uu
+  exact ⟨u, um, fu⟩
+
+-- IsLocalRing.ResidueField.mapEquiv: an isomorphism of local rings
+-- induces an isomorphism of residue fields.
+theorem residueFieldMap.iso
+  requires iso : f : R ≃+* S
+  shows residueFieldMap(f, R, S) : residueField(R) ≃+* residueField(S)
+proof
+  have cR := LocalRing.comm_ring at R with localR
+  have cS := LocalRing.comm_ring at S with localS
+  obtain ⟨hom, bij⟩ := iso
+  obtain ⟨inj, surj⟩ := bij
+  have local := LocalRingHom.of_surjective at f, R, S with localR, localS, hom, surj
+  have e := (LocalRingHom.iff_comap at f, R, S with localR, localS, hom).forward with local
+  have mR := localMaximalIdeal.ideal at R with localR
+  have mS := localMaximalIdeal.ideal at S with localS
+  have compat : localMaximalIdeal(R) ⊆ idealComap(f, R.carrier, localMaximalIdeal(S))
+    rw e
+    exact Subset.reflexive at localMaximalIdeal(R)
+  have h := quotientRingMap.hom at f, R, S, localMaximalIdeal(R), localMaximalIdeal(S) with cR, cS, hom, mR, mS, compat
+  have i := quotientRingMap.injective at f, R, S, localMaximalIdeal(R), localMaximalIdeal(S) with cR, cS, hom, mR, mS, compat, e
+  have s := quotientRingMap.surjective at f, R, S, localMaximalIdeal(R), localMaximalIdeal(S) with cR, cS, hom, mR, mS, compat, surj
+  unfold residueFieldMap
+  unfold residueField
+  exact ⟨h, ⟨i, s⟩⟩
+
+end LocalHoms
+
+-- Composition of local homomorphisms and of residue maps
+-- (IsLocalRing.ResidueField.map_comp).
+theorem LocalRingHom.compose (f g R S T : Set)
+  requires first : LocalRingHom(f, R, S)
+  requires second : LocalRingHom(g, S, T)
+  shows LocalRingHom(compose(g, f, Ring.carrier(R), Ring.carrier(S),
+    Ring.carrier(T)), R, T)
+proof
+  obtain ⟨fh, frefl⟩ := first
+  obtain ⟨gh, grefl⟩ := second
+  have fh0 := fh
+  obtain ⟨rR, rS, ffn, f0, f1, fneg, fadd, fmul⟩ := fh0
+  have gh0 := gh
+  obtain ⟨_, rT, gfn, g0, g1, gneg, gadd, gmul⟩ := gh0
+  have cfn := compose.function at g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T) with ffn, gfn
+  have capp : ∀ x ∈ Ring.carrier(R), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(x) = g(f(x))
+    intros x xIn
+    exact compose.apply at g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T), x with ffn, gfn, xIn
+  have zR : Ring.zero(R) ∈ Ring.carrier(R) by typecheck
+  have oR : Ring.one(R) ∈ Ring.carrier(R) by typecheck
+  have c0 : compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(Ring.zero(R)) = Ring.zero(T)
+    rw [(capp with Ring.zero(R), zR), f0, g0]
+  have c1 : compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(Ring.one(R)) = Ring.one(T)
+    rw [(capp with Ring.one(R), oR), f1, g1]
+  have cneg : ∀ x ∈ Ring.carrier(R), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(apply(Ring.neg(R), x)) = apply(Ring.neg(T), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(x))
+    intros x xIn
+    have nIn : apply(Ring.neg(R), x) ∈ Ring.carrier(R) by typecheck
+    have fxIn := FunctionBetween.apply_closed with ffn, xIn
+    rw [(capp with apply(Ring.neg(R), x), nIn), (capp with x, xIn), (fneg with x, xIn), (gneg with f(x), fxIn)]
+  have cadd : ∀ x y ∈ Ring.carrier(R), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(call2(Ring.add(R), x, y)) = call2(Ring.add(T), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(x), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(y))
+    intros x xIn y yIn
+    have sIn : call2(Ring.add(R), x, y) ∈ Ring.carrier(R) by typecheck
+    have fxIn := FunctionBetween.apply_closed with ffn, xIn
+    have fyIn := FunctionBetween.apply_closed with ffn, yIn
+    rw [(capp with call2(Ring.add(R), x, y), sIn), (capp with x, xIn), (capp with y, yIn), (fadd with x, xIn, y, yIn), (gadd with f(x), fxIn, f(y), fyIn)]
+  have cmul : ∀ x y ∈ Ring.carrier(R), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(call2(Ring.mul(R), x, y)) = call2(Ring.mul(T), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(x), compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(y))
+    intros x xIn y yIn
+    have pIn : call2(Ring.mul(R), x, y) ∈ Ring.carrier(R) by typecheck
+    have fxIn := FunctionBetween.apply_closed with ffn, xIn
+    have fyIn := FunctionBetween.apply_closed with ffn, yIn
+    rw [(capp with call2(Ring.mul(R), x, y), pIn), (capp with x, xIn), (capp with y, yIn), (fmul with x, xIn, y, yIn), (gmul with f(x), fxIn, f(y), fyIn)]
+  have rh : RingHom(compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T)), R, T)
+    exact ⟨rR, rT, cfn, c0, c1, cneg, cadd, cmul⟩
+  have refl : ∀ a ∈ Ring.carrier(R), RingUnit(T, compose(g, f, Ring.carrier(R), Ring.carrier(S), Ring.carrier(T))(a)) → RingUnit(R, a)
+    intros a aIn u
+    rw (capp with a, aIn) at u
+    have faIn := FunctionBetween.apply_closed with ffn, aIn
+    have uf := grefl with f(a), faIn, u
+    exact frefl with a, aIn, uf
+  exact ⟨rh, refl⟩
+
+-- isLocalHom_of_le_jacobson_bot: a surjection with kernel in the Jacobson
+-- radical reflects units.
+theorem LocalRingHom.of_kernel_jacobson (f R S : Set)
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires surjective : SurjectiveBetween(f, Ring.carrier(R), Ring.carrier(S))
+  requires kernel : ringKernel(f, Ring.carrier(R), Ring.zero(S)) ⊆
+    jacobsonRadical(R, {Ring.zero(R)})
+  shows LocalRingHom(f, R, S)
+proof
+  have hom0 := hom
+  obtain ⟨_, _, ffn, _⟩ := hom0
+  have refl : ∀ a ∈ Ring.carrier(R), RingUnit(S, f(a)) → RingUnit(R, a)
+    intros a aIn u
+    obtain ⟨faIn, v, vIn, r1, r2⟩ := u
+    obtain ⟨_, onto⟩ := surjective
+    obtain ⟨b, bIn, rel⟩ := onto with v, vIn
+    have fb := FunctionBetween.apply_value with ffn, bIn, rel
+    have abIn : a * b ∈ R.carrier by typecheck
+    have dIn : a * b - R[1] ∈ R.carrier by typecheck
+    have fd : f(a * b - R[1]) = S[0]
+      rw [(RingHom.map_sub at f, R, S, a * b, R[1] with hom), (RingHom.map_mul at f, R, S, a, b with hom), (RingHom.map_one at f, R, S with hom), fb, r1]
+      ring
+    have dk := ringKernel.membership.backward at f, Ring.carrier(R), Ring.zero(S), a * b - R[1] with ⟨dIn, fd⟩
+    have dj := kernel with dk
+    have all := (jacobsonRadical.mem_zero_iff at R, a * b - R[1] with comm).forward with dj
+    have oneIn : R[1] ∈ R.carrier by typecheck
+    have u1 := all with R[1], oneIn
+    have e : R[1] + (a * b - R[1]) * R[1] = a * b by ring
+    rw e at u1
+    exact ((RingUnit.mul_iff at R, a, b with comm).forward with u1).left
+  exact ⟨hom, refl⟩
+
+-- Section: Localization at a prime
+-- The localization at a prime P is local, its maximal ideal is the
+-- extension of P, and the structure map is a local homomorphism from
+-- nothing but this case (Localization.AtPrime.isLocalRing,
+-- IsLocalization.AtPrime.isLocalRing, AtPrime.map_eq_maximalIdeal,
+-- Localization.localRingHom_to_map).
+theorem IsLocalizationAtPrime.local_ring (P A : Set)
+  requires atPrime : IsLocalizationAtPrime(P, A)
+  shows LocalRing(Algebra.ring(A)) ∧
+    localMaximalIdeal(Algebra.ring(A)) =
+      idealExtension(Algebra.map(A), Algebra.ring(A), P) ∧
+    idealComap(Algebra.map(A), Ring.carrier(Algebra.base(A)),
+      localMaximalIdeal(Algebra.ring(A))) = P
+proof
+  have atPrime0 := atPrime
+  obtain ⟨prime, loc⟩ := atPrime0
+  have alg := IsLocalization.algebra at primeComplement(Algebra.base(A), P), A with loc
+  have cA := Algebra.comm_ring at A with alg
+  have cB := Algebra.base_comm_ring at A with alg
+  have fh := Algebra.structure_hom at A with alg
+  have m := IsLocalization.multiplicative at primeComplement(Algebra.base(A), P), A with loc
+  obtain ⟨sub, oneS, closed⟩ := m
+  have idP := PrimeIdeal.to_ideal at Algebra.base(A), P with prime
+  have bP := Ideal.subset at Algebra.base(A), P with idP
+  have disj : P ∩ primeComplement(Algebra.base(A), P) = ∅
+    apply Subset.antisymmetric
+    . intros q hq
+      obtain ⟨qP, qC⟩ := (intersection.membership at P, primeComplement(Algebra.base(A), P), q).forward with hq
+      unfold primeComplement at qC
+      obtain ⟨_, qOut⟩ := (difference.membership at Ring.carrier(Algebra.base(A)), P, q).forward with qC
+      exfalso
+      exact qOut with qP
+    . exact empty.subset at P ∩ primeComplement(Algebra.base(A), P)
+  have pe := IsLocalization.prime_extension at primeComplement(Algebra.base(A), P), A, P with loc, prime, disj
+  obtain ⟨primeE, contr⟩ := pe
+  have eq : ringNonunits(Algebra.ring(A)) = idealExtension(Algebra.map(A), Algebra.ring(A), P)
+    apply Subset.antisymmetric
+    . intros z hz
+      unfold ringNonunits at hz
+      obtain ⟨zIn, zOut⟩ := (difference.membership at Ring.carrier(Algebra.ring(A)), ringUnits(Algebra.ring(A)), z).forward with hz
+      have zA : z ∈ algebraCarrier(A)
+        unfold algebraCarrier
+        exact zIn
+      obtain ⟨a, aIn, s, sS, za⟩ := IsLocalization.surj at primeComplement(Algebra.base(A), P), A, z with loc, zA
+      have sIn := sub with sS
+      have fsIn : Algebra.map(A)(s) ∈ Ring.carrier(Algebra.ring(A)) by typecheck
+      by_cases aP : a ∈ P
+      . exact (rmELocalization.extension_mem at primeComplement(Algebra.base(A), P), A, P, z with loc, idP).backward with ⟨zIn, a, aP, s, sS, za⟩
+      . exfalso
+        have ua := (IsLocalizationAtPrime.unit_iff at P, A, a with atPrime, aIn).backward with aP
+        rw ← za at ua
+        have zu := ((RingUnit.mul_iff at Algebra.ring(A), z, Algebra.map(A)(s) with cA).forward with ua).left
+        exact zOut with (ringUnits.mem_of_unit at Algebra.ring(A), z with cA, zu)
+    . intros z hz
+      obtain ⟨zIn, b, bP2, t, tS, zb⟩ := (rmELocalization.extension_mem at primeComplement(Algebra.base(A), P), A, P, z with loc, idP).forward with hz
+      have tIn := sub with tS
+      have bIn := bP with bP2
+      have ftIn : Algebra.map(A)(t) ∈ Ring.carrier(Algebra.ring(A)) by typecheck
+      have zOut : z ∉ ringUnits(Algebra.ring(A))
+        intro zU
+        have zu := (ringUnits.membership.forward at Algebra.ring(A), z with zU).right
+        have ut := IsLocalization.map_units at primeComplement(Algebra.base(A), P), A, t with loc, tS
+        have prod := (RingUnit.mul_iff at Algebra.ring(A), z, Algebra.map(A)(t) with cA).backward with ⟨zu, ut⟩
+        rw zb at prod
+        have bOut := (IsLocalizationAtPrime.unit_iff at P, A, b with atPrime, bIn).forward with prod
+        exact bOut with bP2
+      unfold ringNonunits
+      exact (difference.membership at Ring.carrier(Algebra.ring(A)), ringUnits(Algebra.ring(A)), z).backward with ⟨zIn, zOut⟩
+  have extIdeal := PrimeIdeal.to_ideal at Algebra.ring(A), idealExtension(Algebra.map(A), Algebra.ring(A), P) with primeE
+  have nuIdeal : Ideal(Algebra.ring(A), ringNonunits(Algebra.ring(A)))
+    rw eq
+    exact extIdeal
+  have nt : Ring.zero(Algebra.ring(A)) ≠ Ring.one(Algebra.ring(A))
+    intro e
+    have proper := PrimeIdeal.to_proper at Algebra.ring(A), idealExtension(Algebra.map(A), Algebra.ring(A), P) with primeE
+    have zE := Ideal.zero_mem at Algebra.ring(A), idealExtension(Algebra.map(A), Algebra.ring(A), P) with extIdeal
+    rw e at zE
+    exact (ProperIdeal.one_not_mem at Algebra.ring(A), idealExtension(Algebra.map(A), Algebra.ring(A), P) with proper) with zE
+  have localA := LocalRing.of_nonunits_ideal at Algebra.ring(A) with cA, nt, nuIdeal
+  have meq : localMaximalIdeal(Algebra.ring(A)) = idealExtension(Algebra.map(A), Algebra.ring(A), P)
+    unfold localMaximalIdeal
+    exact eq
+  have contrM : idealComap(Algebra.map(A), Ring.carrier(Algebra.base(A)), localMaximalIdeal(Algebra.ring(A))) = P
+    rw meq
+    exact contr
+  exact ⟨localA, meq, contrM⟩
+
+theorem localizationAtPrime.local_ring (R P : Set)
+  requires comm : CommRing(R)
+  requires prime : PrimeIdeal(R, P)
+  shows LocalRing(localizationAtPrime(R, P))
+proof
+  have ringR := CommRing.to_ring with comm
+  have mult := primeComplement.multiplicative at R, P with comm, prime
+  have cL := localizationRing.comm_ring at R, primeComplement(R, P) with comm, mult
+  obtain ⟨pc, pa, pz, pn, pm, po⟩ := localizationRing.projections at R, primeComplement(R, P)
+  have idP := PrimeIdeal.to_ideal at R, P with prime
+  have outP : ∀ s ∈ primeComplement(R, P), s ∉ P
+    intros s sS
+    unfold primeComplement at sS
+    exact ((difference.membership at R.carrier, P, s).forward with sS).right
+  have inS : ∀ s ∈ R.carrier, s ∉ P → s ∈ primeComplement(R, P)
+    intros s sIn sOut
+    unfold primeComplement
+    exact (difference.membership at R.carrier, P, s).backward with ⟨sIn, sOut⟩
+  obtain ⟨sub, oneS, closed⟩ := mult
+  have zeroIn : R[0] ∈ R.carrier by typecheck
+  have oneIn : R[1] ∈ R.carrier by typecheck
+  have nt : Ring.zero(localizationRing(R, primeComplement(R, P))) ≠ Ring.one(localizationRing(R, primeComplement(R, P)))
+    rw [pz, po]
+    intro e
+    obtain ⟨u, uS, law⟩ := (fraction.eq_iff_of at R, primeComplement(R, P), R[0], R[1], R[1], R[1] with comm, mult, zeroIn, oneS, oneIn, oneS).forward with e
+    have uIn := sub with uS
+    have e2 : u = -(u * Ring.sub(R, R[0] * R[1], R[1] * R[1])) by ring
+    rw law at e2
+    have e3 : u = R[0]
+      rw e2
+      ring
+    have z := Ideal.zero_mem at R, P with idP
+    rw ← e3 at z
+    exact (outP with u, uS) with z
+  have unitOf : ∀ a ∈ R.carrier, ∀ s ∈ primeComplement(R, P), a ∉ P → RingUnit(localizationRing(R, primeComplement(R, P)), fraction(R, primeComplement(R, P), a, s))
+    intros a aIn s sS aOut
+    have aS := inS with a, aIn, aOut
+    have sIn := sub with sS
+    have f1 := fraction.mem_carrier at R, primeComplement(R, P), a, s with comm, mult, aIn, sS
+    have f2 := fraction.mem_carrier at R, primeComplement(R, P), s, a with comm, mult, sIn, aS
+    rw ← pc at f1
+    rw ← pc at f2
+    have m1 := fraction.mul_of at R, primeComplement(R, P), a, s, s, a with comm, mult, aIn, sS, sIn, aS
+    have m2 := fraction.mul_of at R, primeComplement(R, P), s, a, a, s with comm, mult, sIn, aS, aIn, sS
+    have n1 : a * s ∈ R.carrier by typecheck
+    have n2 : s * a ∈ R.carrier by typecheck
+    have d1 := closed with s, sS, a, aS
+    have d2 := closed with a, aS, s, sS
+    have c1 : a * s * R[1] = R[1] * (s * a) by ring
+    have c2 : s * a * R[1] = R[1] * (a * s) by ring
+    have q1 := fraction.eq_of_cross at R, primeComplement(R, P), a * s, s * a, R[1], R[1] with comm, mult, n1, d1, oneIn, oneS, c1
+    have q2 := fraction.eq_of_cross at R, primeComplement(R, P), s * a, a * s, R[1], R[1] with comm, mult, n2, d2, oneIn, oneS, c2
+    rw q1 at m1
+    rw q2 at m2
+    rw [← pm, ← po] at m1
+    rw [← pm, ← po] at m2
+    exact ⟨f1, fraction(R, primeComplement(R, P), s, a), f2, m1, m2⟩
+  have split : ∀ X Y ∈ Ring.carrier(localizationRing(R, primeComplement(R, P))), call2(Ring.add(localizationRing(R, primeComplement(R, P))), X, Y) = Ring.one(localizationRing(R, primeComplement(R, P))) → RingUnit(localizationRing(R, primeComplement(R, P)), X) ∨ RingUnit(localizationRing(R, primeComplement(R, P)), Y)
+    intros X XIn Y YIn sum
+    rw pc at XIn
+    rw pc at YIn
+    obtain ⟨a, aIn, s, sS, xa⟩ := fraction.cases_of at R, primeComplement(R, P), X with comm, mult, XIn
+    obtain ⟨b, bIn, t, tS, yb⟩ := fraction.cases_of at R, primeComplement(R, P), Y with comm, mult, YIn
+    rw [xa, yb]
+    rw [xa, yb, pa, po, (fraction.add_of at R, primeComplement(R, P), a, s, b, t with comm, mult, aIn, sS, bIn, tS)] at sum
+    have sIn := sub with sS
+    have tIn := sub with tS
+    have nIn : a * t + b * s ∈ R.carrier by typecheck
+    have st := closed with s, sS, t, tS
+    obtain ⟨u, uS, law⟩ := (fraction.eq_iff_of at R, primeComplement(R, P), a * t + b * s, s * t, R[1], R[1] with comm, mult, nIn, st, oneIn, oneS).forward with sum
+    have uIn := sub with uS
+    have ca : a ∈ P ∨ a ∉ P by tauto
+    cases ca with aP | aOut
+    . have cb : b ∈ P ∨ b ∉ P by tauto
+      cases cb with bP | bOut
+      . exfalso
+        have at1 := Ideal.mul_right_mem at R, P, t, a with idP, tIn, aP
+        have bs1 := Ideal.mul_right_mem at R, P, s, b with idP, sIn, bP
+        have sum1 := Ideal.add_mem at R, P, a * t, b * s with idP, at1, bs1
+        have usum := Ideal.mul_left_mem at R, P, u, a * t + b * s with idP, uIn, sum1
+        have e : u * (s * t) = u * (a * t + b * s) - u * Ring.sub(R, (a * t + b * s) * R[1], R[1] * (s * t)) by ring
+        rw law at e
+        have e2 : u * (s * t) = u * (a * t + b * s)
+          rw e
+          ring
+        rw ← e2 at usum
+        have stIn : s * t ∈ R.carrier by typecheck
+        rcases PrimeIdeal.mem_or_mem at R, P, u, s * t with ringR, prime, uIn, stIn, usum with uP | stP
+        . exact (outP with u, uS) with uP
+        . rcases PrimeIdeal.mem_or_mem at R, P, s, t with ringR, prime, sIn, tIn, stP with sP | tP
+          . exact (outP with s, sS) with sP
+          . exact (outP with t, tS) with tP
+      . right
+        exact unitOf with b, bIn, t, tS, bOut
+    . left
+      exact unitOf with a, aIn, s, sS, aOut
+  unfold localizationAtPrime
+  exact ⟨cL, nt, split⟩
+
+-- The residue field of a prime: a field, receiving R with kernel P
+-- (Ideal.ker_algebraMap_residueField, algebraMap_residueField_eq_zero),
+-- and the fraction field of R ⧸ P (Ideal.ResidueField as
+-- FractionRing (R ⧸ P)).
+theorem primeResidueField.field (R P : Set)
+  requires comm : CommRing(R)
+  requires prime : PrimeIdeal(R, P)
+  shows Field(primeResidueField(R, P))
+proof
+  have l := localizationAtPrime.local_ring at R, P with comm, prime
+  unfold primeResidueField
+  exact residueField.field at localizationAtPrime(R, P) with l
+
+theorem primeResidueMap.kernel (R P : Set)
+  requires comm : CommRing(R)
+  requires prime : PrimeIdeal(R, P)
+  shows RingHom(primeResidueMap(R, P), R, primeResidueField(R, P)) ∧
+    ringKernel(primeResidueMap(R, P), Ring.carrier(R),
+      Ring.zero(primeResidueField(R, P))) = P
+proof
+  have mult := primeComplement.multiplicative at R, P with comm, prime
+  have localL := localizationAtPrime.local_ring at R, P with comm, prime
+  have same : localizationAtPrime(R, P) = localizationRing(R, primeComplement(R, P))
+    unfold localizationAtPrime
+    rfl
+  have lh := localizationMap.hom at R, primeComplement(R, P) with comm, mult
+  rw ← same at lh
+  have rh := residueMap.hom at localizationAtPrime(R, P) with localL
+  have hc := RingHom.comp at localizationMap(R, primeComplement(R, P)), residueMap(localizationAtPrime(R, P)), R, localizationAtPrime(R, P), residueField(localizationAtPrime(R, P)) with comm, lh, rh
+  have lh0 := lh
+  obtain ⟨_, _, lfn, _⟩ := lh0
+  have rh0 := rh
+  obtain ⟨_, _, rfn, _⟩ := rh0
+  obtain ⟨pb, pr, pm⟩ := localizationAlgebra.projections at R, primeComplement(R, P) with comm, mult
+  have isLoc := localizationAlgebra.is_localization at R, primeComplement(R, P) with comm, mult
+  have atPrime : IsLocalizationAtPrime(P, localizationAlgebra(R, primeComplement(R, P)))
+    unfold IsLocalizationAtPrime
+    rw pb
+    exact ⟨prime, isLoc⟩
+  have unitIff : ∀ x ∈ R.carrier, RingUnit(localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x)) ↔ x ∉ P
+    intros x xIn
+    have xB : x ∈ Ring.carrier(Algebra.base(localizationAlgebra(R, primeComplement(R, P))))
+      rw pb
+      exact xIn
+    have ui := IsLocalizationAtPrime.unit_iff at P, localizationAlgebra(R, primeComplement(R, P)), x with atPrime, xB
+    rw [pr, pm] at ui
+    rw ← same at ui
+    exact ui
+  have kernel : ringKernel(compose(residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P)))), Ring.carrier(R), Ring.zero(residueField(localizationAtPrime(R, P)))) = P
+    apply Subset.antisymmetric
+    . intros x hx
+      obtain ⟨xIn, zx⟩ := ringKernel.membership.forward at compose(residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P)))), Ring.carrier(R), Ring.zero(residueField(localizationAtPrime(R, P))), x with hx
+      rw (compose.apply at residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P))), x with lfn, rfn, xIn) at zx
+      have lx := FunctionBetween.apply_closed with lfn, xIn
+      have mx := (residueMap.eq_zero_iff at localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x) with localL, lx).forward with zx
+      have nu := (localMaximalIdeal.mem_iff at localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x) with localL, lx).forward with mx
+      by_contra xOut
+      exact nu with ((unitIff with x, xIn).backward with xOut)
+    . intros x xP
+      have idP := PrimeIdeal.to_ideal at R, P with prime
+      have xIn := Ideal.mem_carrier at R, P, x with idP, xP
+      have lx := FunctionBetween.apply_closed with lfn, xIn
+      have nu : ¬RingUnit(localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x))
+        intro u
+        exact ((unitIff with x, xIn).forward with u) with xP
+      have mx := (localMaximalIdeal.mem_iff at localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x) with localL, lx).backward with nu
+      have zx := (residueMap.eq_zero_iff at localizationAtPrime(R, P), localizationMap(R, primeComplement(R, P))(x) with localL, lx).backward with mx
+      rw ← (compose.apply at residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P))), x with lfn, rfn, xIn) at zx
+      exact ringKernel.membership.backward at compose(residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P)))), Ring.carrier(R), Ring.zero(residueField(localizationAtPrime(R, P))), x with ⟨xIn, zx⟩
+  unfold primeResidueMap
+  unfold primeResidueField
+  exact ⟨hc, kernel⟩
+
+-- Helper: the map R ⧸ P → κ(P) at a class, and its homomorphism facts.
+theorem cldEPrimeResidue.lift_mk (R P x : Set)
+  requires comm : CommRing(R)
+  requires prime : PrimeIdeal(R, P)
+  requires element : x ∈ R.carrier
+  shows quotientRingLift(R, primeResidueField(R, P), P,
+      primeResidueMap(R, P))(quotientMk(R, P)(x)) =
+    residueMap(localizationAtPrime(R, P))(fraction(R, primeComplement(R, P),
+      x, R[1]))
+proof
+  have mult := primeComplement.multiplicative at R, P with comm, prime
+  have idealP := PrimeIdeal.to_ideal at R, P with prime
+  have fld := primeResidueField.field at R, P with comm, prime
+  have Kc := Field.to_comm_ring at primeResidueField(R, P) with fld
+  obtain ⟨hc, ker⟩ := primeResidueMap.kernel at R, P with comm, prime
+  have killed : P ⊆ ringKernel(primeResidueMap(R, P), Ring.carrier(R), Ring.zero(primeResidueField(R, P)))
+    rw ker
+    intros y hy
+    exact hy
+  rw (quotientRingLift.apply_mk at R, P, primeResidueField(R, P), primeResidueMap(R, P), x with comm, idealP, Kc, hc, killed, element)
+  have localL := localizationAtPrime.local_ring at R, P with comm, prime
+  have same : localizationAtPrime(R, P) = localizationRing(R, primeComplement(R, P))
+    unfold localizationAtPrime
+    rfl
+  have lh := localizationMap.hom at R, primeComplement(R, P) with comm, mult
+  rw ← same at lh
+  obtain ⟨_, _, lfn, _⟩ := lh
+  have rh := residueMap.hom at localizationAtPrime(R, P) with localL
+  obtain ⟨_, _, rfn, _⟩ := rh
+  unfold primeResidueMap
+  unfold primeResidueField
+  rw (compose.apply at residueMap(localizationAtPrime(R, P)), localizationMap(R, primeComplement(R, P)), Ring.carrier(R), Ring.carrier(localizationAtPrime(R, P)), Ring.carrier(residueField(localizationAtPrime(R, P))), x with lfn, rfn, element)
+  rw (localizationMap.value at R, primeComplement(R, P), x with comm, mult, element)
+
+theorem primeResidueField.fraction_field (R P : Set)
+  requires comm : CommRing(R)
+  requires prime : PrimeIdeal(R, P)
+  shows IsFractionRing(Algebra.mk(R ⧸ P, primeResidueField(R, P),
+    quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))))
+proof
+  have ringR := CommRing.to_ring with comm
+  have mult := primeComplement.multiplicative at R, P with comm, prime
+  have idealP := PrimeIdeal.to_ideal at R, P with prime
+  have qc := quotientRing.comm_ring at R, P with comm, idealP
+  have dom := (quotientRing.domain_iff at R, P with comm, idealP).backward with prime
+  obtain ⟨_, zo, noZD⟩ := dom
+  have fld := primeResidueField.field at R, P with comm, prime
+  have Kc := Field.to_comm_ring at primeResidueField(R, P) with fld
+  obtain ⟨hc, ker⟩ := primeResidueMap.kernel at R, P with comm, prime
+  have killed : P ⊆ ringKernel(primeResidueMap(R, P), Ring.carrier(R), Ring.zero(primeResidueField(R, P)))
+    rw ker
+    intros y hy
+    exact hy
+  have Lh := quotientRingLift.hom at R, P, primeResidueField(R, P), primeResidueMap(R, P) with comm, idealP, Kc, hc, killed
+  have Lh2 := Lh
+  obtain ⟨_, _, Lfn, Lzero, Lone, _, _, Lmul⟩ := Lh2
+  have mkh := quotientMk.hom at R, P with comm, idealP
+  obtain ⟨_, _, mfn, _⟩ := mkh
+  obtain ⟨_, monto⟩ := quotientMk.surjective at R, P with comm, idealP
+  have localL := localizationAtPrime.local_ring at R, P with comm, prime
+  have same : localizationAtPrime(R, P) = localizationRing(R, primeComplement(R, P))
+    unfold localizationAtPrime
+    rfl
+  have rh := residueMap.hom at localizationAtPrime(R, P) with localL
+  have rh2 := rh
+  obtain ⟨_, _, rfn, _, _, _, _, rmul⟩ := rh2
+  obtain ⟨_, ronto⟩ := residueMap.surjective at localizationAtPrime(R, P) with localL
+  have alg := Algebra.intro at R ⧸ P, primeResidueField(R, P), quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P)) with qc, Kc, Lh
+  have nzd := nonZeroDivisors.multiplicative at R ⧸ P with qc
+  have oneR : R[1] ∈ R.carrier by typecheck
+  -- elements of R ⧸ P outside 0 come from the complement of P
+  have nzdOut : ∀ s ∈ nonZeroDivisors(R ⧸ P), ∃ x ∈ primeComplement(R, P), s = quotientMk(R, P)(x)
+    intros s hs
+    obtain ⟨sIn, sAll⟩ := nonZeroDivisors.membership.forward with hs
+    obtain ⟨x, xIn, rel⟩ := monto with s, sIn
+    have sv := FunctionBetween.apply_value with mfn, xIn, rel
+    have xOut : x ∉ P
+      intro xP
+      have z := (quotientMk.eq_zero_iff at R, P, x with comm, idealP, xIn).backward with xP
+      have oneQ : Ring.one(R ⧸ P) ∈ Ring.carrier(R ⧸ P) by typecheck
+      have m : call2(Ring.mul(R ⧸ P), Ring.one(R ⧸ P), s) = Ring.zero(R ⧸ P)
+        rw [← sv, z]
+        ring
+      have o := sAll with Ring.one(R ⧸ P), oneQ, m
+      symm at o
+      exact zo with o
+    have xC : x ∈ primeComplement(R, P)
+      unfold primeComplement
+      exact (difference.membership at R.carrier, P, x).backward with ⟨xIn, xOut⟩
+    symm at sv
+    exact ⟨x, xC, sv⟩
+  have units : ∀ s ∈ nonZeroDivisors(R ⧸ P), RingUnit(primeResidueField(R, P), quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(s))
+    intros s hs
+    obtain ⟨x, xC, sx⟩ := nzdOut with s, hs
+    unfold primeComplement at xC
+    obtain ⟨xIn, xOut⟩ := (difference.membership at R.carrier, P, x).forward with xC
+    have sIn := (nonZeroDivisors.membership.forward with hs).left
+    have Ls := FunctionBetween.apply_closed with Lfn, sIn
+    apply (Field.unit_iff at primeResidueField(R, P), quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(s) with fld, Ls).backward
+    intro z
+    rw sx at z
+    rw (quotientRingLift.apply_mk at R, P, primeResidueField(R, P), primeResidueMap(R, P), x with comm, idealP, Kc, hc, killed, xIn) at z
+    have kx := ringKernel.membership.backward at primeResidueMap(R, P), Ring.carrier(R), Ring.zero(primeResidueField(R, P)), x with ⟨xIn, z⟩
+    rw ker at kx
+    exact xOut with kx
+  have surj : ∀ z ∈ algebraCarrier(Algebra.mk(R ⧸ P, primeResidueField(R, P), quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P)))), ∃ a ∈ Ring.carrier(R ⧸ P), ∃ s ∈ nonZeroDivisors(R ⧸ P), call2(Ring.mul(primeResidueField(R, P)), z, quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(s)) = quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(a)
+    intros z hz
+    unfold algebraCarrier at hz
+    rw Algebra.mk.ring at hz
+    unfold primeResidueField at hz
+    obtain ⟨w, wIn, rel⟩ := ronto with z, hz
+    have zv := FunctionBetween.apply_value with rfn, wIn, rel
+    have wIn2 := wIn
+    rw same at wIn2
+    obtain ⟨b, bIn, t, tS, we⟩ := localizationRing.fraction_cases at R, primeComplement(R, P), w with comm, mult, wIn2
+    have tS2 := tS
+    unfold primeComplement at tS2
+    obtain ⟨tIn, tOut⟩ := (difference.membership at R.carrier, P, t).forward with tS2
+    obtain ⟨_, oneS, _⟩ := mult
+    have sIn := FunctionBetween.apply_closed with mfn, tIn
+    have aIn := FunctionBetween.apply_closed with mfn, bIn
+    have sNZ : ∀ y ∈ Ring.carrier(R ⧸ P), call2(Ring.mul(R ⧸ P), y, quotientMk(R, P)(t)) = Ring.zero(R ⧸ P) → y = Ring.zero(R ⧸ P)
+      intros y hy hm
+      rcases noZD with y, hy, quotientMk(R, P)(t), sIn, hm with y0 | s0
+      . exact y0
+      . exfalso
+        have tP := (quotientMk.eq_zero_iff at R, P, t with comm, idealP, tIn).forward with s0
+        exact tOut with tP
+    have sN := nonZeroDivisors.membership.backward at R ⧸ P, quotientMk(R, P)(t) with ⟨sIn, sNZ⟩
+    refine ⟨quotientMk(R, P)(b), aIn, quotientMk(R, P)(t), sN, ?_⟩
+    rw (cldEPrimeResidue.lift_mk at R, P, t with comm, prime, tIn)
+    rw (cldEPrimeResidue.lift_mk at R, P, b with comm, prime, bIn)
+    unfold primeResidueField
+    rw [← zv, we]
+    have bt := fraction.mem at R, primeComplement(R, P), b, t with comm, mult, bIn, tS
+    have t1 := fraction.mem at R, primeComplement(R, P), t, R[1] with comm, mult, tIn, oneS
+    rw ← same at bt
+    rw ← same at t1
+    have m := rmul with fraction(R, primeComplement(R, P), b, t), bt, fraction(R, primeComplement(R, P), t, R[1]), t1
+    rw ← m
+    unfold localizationAtPrime
+    rw (fraction.mul at R, primeComplement(R, P), b, t, t, R[1] with comm, mult, bIn, tS, tIn, oneS)
+    have btIn : b * t ∈ R.carrier by typecheck
+    have t1S : t * R[1] ∈ primeComplement(R, P)
+      have e1 : t * R[1] = t by ring
+      rw e1
+      exact tS
+    have ec : R[1] * ((b * t) * R[1] - b * (t * R[1])) = R[0]
+      rw Ring.sub.value
+      ring
+    have fe := (fraction.eq_iff at R, primeComplement(R, P), b * t, t * R[1], b, R[1] with comm, mult, btIn, t1S, bIn, oneS).backward with ⟨R[1], oneS, ec⟩
+    rw fe
+  have inj : ∀ a b ∈ Ring.carrier(R ⧸ P), quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(a) = quotientRingLift(R, primeResidueField(R, P), P, primeResidueMap(R, P))(b) → (∃ c ∈ nonZeroDivisors(R ⧸ P), call2(Ring.mul(R ⧸ P), c, a) = call2(Ring.mul(R ⧸ P), c, b))
+    intros a ha b hb e
+    obtain ⟨x, xIn, rx⟩ := monto with a, ha
+    obtain ⟨y, yIn, ry⟩ := monto with b, hb
+    have ax := FunctionBetween.apply_value with mfn, xIn, rx
+    have by0 := FunctionBetween.apply_value with mfn, yIn, ry
+    rw [← ax, ← by0] at e
+    rw (quotientRingLift.apply_mk at R, P, primeResidueField(R, P), primeResidueMap(R, P), x with comm, idealP, Kc, hc, killed, xIn) at e
+    rw (quotientRingLift.apply_mk at R, P, primeResidueField(R, P), primeResidueMap(R, P), y with comm, idealP, Kc, hc, killed, yIn) at e
+    have hc2 := hc
+    obtain ⟨_, _, pfn, _, _, pneg, padd, _⟩ := hc2
+    have nyIn : -y ∈ R.carrier by typecheck
+    have dIn : x + -y ∈ R.carrier by typecheck
+    have px := FunctionBetween.apply_closed with pfn, xIn
+    have py := FunctionBetween.apply_closed with pfn, yIn
+    have pd : primeResidueMap(R, P)(x + -y) = Ring.zero(primeResidueField(R, P))
+      rw (padd with x, xIn, -y, nyIn)
+      rw (pneg with y, yIn)
+      rw e
+      ring
+    have kd := ringKernel.membership.backward at primeResidueMap(R, P), Ring.carrier(R), Ring.zero(primeResidueField(R, P)), x + -y with ⟨dIn, pd⟩
+    rw ker at kd
+    have se : x - y = x + -y by rw Ring.sub.value
+    rw ← se at kd
+    have q := (quotientMk.eq_iff at R, P, x, y with comm, idealP, xIn, yIn).backward with kd
+    obtain ⟨_, oneN, _⟩ := nzd
+    rw [← ax, ← by0, q]
+    exact ⟨Ring.one(R ⧸ P), oneN, rfl⟩
+  unfold IsFractionRing
+  unfold IsLocalization
+  simp [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map]
+
+-- For a maximal ideal, the residue field of the prime is R ⧸ M itself.
+theorem primeResidueField.of_maximal (R M : Set)
+  requires comm : CommRing(R)
+  requires maximal : MaximalIdeal(R, M)
+  shows RingIso(quotientRingLift(R, primeResidueField(R, M), M,
+    primeResidueMap(R, M)), R ⧸ M, primeResidueField(R, M))
+proof
+  have ringR := CommRing.to_ring with comm
+  have prime := MaximalIdeal.prime at R, M with comm, maximal
+  have idealP := PrimeIdeal.to_ideal at R, M with prime
+  have qc := quotientRing.comm_ring at R, M with comm, idealP
+  have qf := (quotientRing.field_iff at R, M with comm, idealP).backward with maximal
+  have fld := primeResidueField.field at R, M with comm, prime
+  have Kc := Field.to_comm_ring at primeResidueField(R, M) with fld
+  obtain ⟨hc, ker⟩ := primeResidueMap.kernel at R, M with comm, prime
+  have killed : M ⊆ ringKernel(primeResidueMap(R, M), Ring.carrier(R), Ring.zero(primeResidueField(R, M)))
+    rw ker
+    intros y hy
+    exact hy
+  have Lh := quotientRingLift.hom at R, M, primeResidueField(R, M), primeResidueMap(R, M) with comm, idealP, Kc, hc, killed
+  have Lh2 := Lh
+  obtain ⟨_, _, Lfn, Lzero, Lone, _, _, Lmul⟩ := Lh2
+  have mkh := quotientMk.hom at R, M with comm, idealP
+  obtain ⟨_, _, mfn, _⟩ := mkh
+  obtain ⟨_, monto⟩ := quotientMk.surjective at R, M with comm, idealP
+  have ff := primeResidueField.fraction_field at R, M with comm, prime
+  unfold IsFractionRing at ff
+  unfold IsLocalization at ff
+  simp [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map] at ff
+  obtain ⟨_, _, _, surjF, injF⟩ := ff
+  have inj : InjectiveBetween(quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M)), Ring.carrier(R ⧸ M), Ring.carrier(primeResidueField(R, M)))
+    refine ⟨Lfn, ?_⟩
+    intros a ha b hb z hz ra rb
+    have va := FunctionBetween.apply_value with Lfn, ha, ra
+    have vb := FunctionBetween.apply_value with Lfn, hb, rb
+    rw ← vb at va
+    obtain ⟨c, cN, ce⟩ := injF with a, ha, b, hb, va
+    obtain ⟨cIn, cAll⟩ := nonZeroDivisors.membership.forward with cN
+    have dom := (quotientRing.domain_iff at R, M with comm, idealP).backward with prime
+    obtain ⟨_, zo, _⟩ := dom
+    have cNZ : c ≠ Ring.zero(R ⧸ M)
+      intro c0
+      have oneQ : Ring.one(R ⧸ M) ∈ Ring.carrier(R ⧸ M) by typecheck
+      have m : call2(Ring.mul(R ⧸ M), Ring.one(R ⧸ M), c) = Ring.zero(R ⧸ M)
+        rw c0
+        ring
+      have o := cAll with Ring.one(R ⧸ M), oneQ, m
+      symm at o
+      exact zo with o
+    have cu := (Field.unit_iff at R ⧸ M, c with qf, cIn).backward with cNZ
+    obtain ⟨_, d, dIn, _, dc⟩ := cu
+    have e1 : call2(Ring.mul(R ⧸ M), d, call2(Ring.mul(R ⧸ M), c, a)) = a
+      have assoc : call2(Ring.mul(R ⧸ M), d, call2(Ring.mul(R ⧸ M), c, a)) = call2(Ring.mul(R ⧸ M), call2(Ring.mul(R ⧸ M), d, c), a) by ring
+      rw [assoc, dc]
+      ring
+    have e2 : call2(Ring.mul(R ⧸ M), d, call2(Ring.mul(R ⧸ M), c, b)) = b
+      have assoc : call2(Ring.mul(R ⧸ M), d, call2(Ring.mul(R ⧸ M), c, b)) = call2(Ring.mul(R ⧸ M), call2(Ring.mul(R ⧸ M), d, c), b) by ring
+      rw [assoc, dc]
+      ring
+    rw ce at e1
+    rw e1 at e2
+    exact e2
+  have onto : ∀ z ∈ Ring.carrier(primeResidueField(R, M)), ∃ X ∈ Ring.carrier(R ⧸ M), relates(quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M)), X, z)
+    intros z hz
+    have hz2 : z ∈ algebraCarrier(Algebra.mk(R ⧸ M, primeResidueField(R, M), quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))))
+      unfold algebraCarrier
+      rw Algebra.mk.ring
+      exact hz
+    obtain ⟨a, aIn, s, sN, se⟩ := surjF with z, hz2
+    obtain ⟨sIn, sAll⟩ := nonZeroDivisors.membership.forward with sN
+    have dom := (quotientRing.domain_iff at R, M with comm, idealP).backward with prime
+    obtain ⟨_, zo, _⟩ := dom
+    have sNZ : s ≠ Ring.zero(R ⧸ M)
+      intro s0
+      have oneQ : Ring.one(R ⧸ M) ∈ Ring.carrier(R ⧸ M) by typecheck
+      have m : call2(Ring.mul(R ⧸ M), Ring.one(R ⧸ M), s) = Ring.zero(R ⧸ M)
+        rw s0
+        ring
+      have o := sAll with Ring.one(R ⧸ M), oneQ, m
+      symm at o
+      exact zo with o
+    have su := (Field.unit_iff at R ⧸ M, s with qf, sIn).backward with sNZ
+    obtain ⟨_, d, dIn, sd, _⟩ := su
+    have XIn : call2(Ring.mul(R ⧸ M), a, d) ∈ Ring.carrier(R ⧸ M) by typecheck
+    have Ls := FunctionBetween.apply_closed with Lfn, sIn
+    have Ld := FunctionBetween.apply_closed with Lfn, dIn
+    have m2 := Lmul with s, sIn, d, dIn
+    rw [sd, Lone] at m2
+    have v : quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))(call2(Ring.mul(R ⧸ M), a, d)) = z
+      rw (Lmul with a, aIn, d, dIn)
+      rw ← se
+      have e : call2(Ring.mul(primeResidueField(R, M)), call2(Ring.mul(primeResidueField(R, M)), z, quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))(s)), quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))(d)) = call2(Ring.mul(primeResidueField(R, M)), z, call2(Ring.mul(primeResidueField(R, M)), quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))(s), quotientRingLift(R, primeResidueField(R, M), M, primeResidueMap(R, M))(d))) by ring
+      rw [e, ← m2]
+      ring
+    have r := FunctionBetween.relates_apply with Lfn, XIn
+    rw v at r
+    exact ⟨call2(Ring.mul(R ⧸ M), a, d), XIn, r⟩
+  unfold Homomorphism.RingIso
+  exact ⟨Lh, inj, Lfn, onto⟩
+
+-- Helper: the vectors v with r • v ∈ K, for the proof of Nakayama's lemma.
+def cldESmulPreimage (M r K : Set) : Set :=
+  { v ∈ Module.carrier(M) | call2(Module.smul(M), r, v) ∈ K }
+
+-- Section: Nakayama's lemma
+section Nakayama
+variable (R M : Set)
+hypothesis comm : CommRing(R)
+hypothesis module : Module(M, R)
+
+-- Helper: the multiples c • a, c ∈ I, of one vector form a submodule.
+theorem cldEIdealMultiples.submodule (I a : Set)
+  requires ideal : Ideal(R, I)
+  requires vector : a ∈ M.carrier
+  shows SubmoduleOf(idealSmulGenerators(M, R, I, {a}), M, R)
+proof
+  have ringR := CommRing.to_ring with comm
+  have ideal2 := ideal
+  obtain ⟨iBound, iZero, iSums, iNeg, iProds⟩ := ideal2
+  have aSelf := singleton.self at a
+  unfold SubmoduleOf
+  refine ⟨module, ?_, ?_, ?_, ?_⟩
+  . intros w hw
+    exact (idealSmulGenerators.membership.forward with hw).left
+  . have zeroM := Module.zero_mem at R, M with *
+    have z := zero_smul at R, M, a with ringR, module, vector
+    symm at z
+    exact idealSmulGenerators.membership.backward with ⟨zeroM, R[0], iZero, a, aSelf, z⟩
+  . intros v hv w hw
+    obtain ⟨_, c, cI, a1, a1A, ve⟩ := idealSmulGenerators.membership.forward with hv
+    obtain ⟨_, d, dI, a2, a2A, we⟩ := idealSmulGenerators.membership.forward with hw
+    have e1 := singleton.membership.forward with a1A
+    have e2 := singleton.membership.forward with a2A
+    rw e1 at ve
+    rw e2 at we
+    have cIn := iBound with cI
+    have dIn := iBound with dI
+    have s := iSums with c, cI, d, dI
+    have sm := add_smul at R, M, c, d, a with ringR, module, cIn, dIn, vector
+    rw [ve, we]
+    rw ← sm
+    have out := Module.smul_mem at R, M, c + d, a with *
+    exact idealSmulGenerators.membership.backward with ⟨out, c + d, s, a, aSelf, rfl⟩
+  . intros b hb v hv
+    obtain ⟨_, c, cI, a1, a1A, ve⟩ := idealSmulGenerators.membership.forward with hv
+    have e1 := singleton.membership.forward with a1A
+    rw e1 at ve
+    have cIn := iBound with cI
+    have p := (iProds with b, hb, c, cI).left
+    have ms := mul_smul at R, M, b, c, a with ringR, module, hb, cIn, vector
+    rw ve
+    rw ← ms
+    have out := Module.smul_mem at R, M, b * c, a with *
+    exact idealSmulGenerators.membership.backward with ⟨out, b * c, p, a, aSelf, rfl⟩
+
+-- Helper: {v | r • v ∈ K} is a submodule when K is.
+theorem cldESmulPreimage.submodule (r K : Set)
+  requires scalar : r ∈ R.carrier
+  requires sub : SubmoduleOf(K, M, R)
+  shows SubmoduleOf(cldESmulPreimage(M, r, K), M, R)
+proof
+  have ringR := CommRing.to_ring with comm
+  have sub2 := sub
+  obtain ⟨_, kBound, kZero, kAdd, kSmul⟩ := sub2
+  unfold SubmoduleOf
+  refine ⟨module, ?_, ?_, ?_, ?_⟩
+  . intros w hw
+    exact (cldESmulPreimage.membership.forward with hw).left
+  . have zeroM := Module.zero_mem at R, M with *
+    have z := smul_zero at R, M, r with ringR, module, scalar
+    have m : call2(M.smul, r, M.zero) ∈ K
+      rw z
+      exact kZero
+    exact cldESmulPreimage.membership.backward with ⟨zeroM, m⟩
+  . intros v hv w hw
+    obtain ⟨vM, vK⟩ := cldESmulPreimage.membership.forward with hv
+    obtain ⟨wM, wK⟩ := cldESmulPreimage.membership.forward with hw
+    have out := Module.add_mem at R, M, v, w with *
+    have sa := smul_add at R, M, r, v, w with ringR, module, scalar, vM, wM
+    have m : call2(M.smul, r, call2(M.add, v, w)) ∈ K
+      rw sa
+      exact kAdd with call2(M.smul, r, v), vK, call2(M.smul, r, w), wK
+    exact cldESmulPreimage.membership.backward with ⟨out, m⟩
+  . intros b hb v hv
+    obtain ⟨vM, vK⟩ := cldESmulPreimage.membership.forward with hv
+    have out := Module.smul_mem at R, M, b, v with *
+    have m1 := mul_smul at R, M, r, b, v with ringR, module, scalar, hb, vM
+    have m2 := mul_smul at R, M, b, r, v with ringR, module, hb, scalar, vM
+    have c : r * b = b * r by ring
+    rw c at m1
+    have m : call2(M.smul, r, call2(M.smul, b, v)) ∈ K
+      rw ← m1
+      rw m2
+      exact kSmul with b, hb, call2(M.smul, r, v), vK
+    exact cldESmulPreimage.membership.backward with ⟨out, m⟩
+
+-- Helper: the induction behind Nakayama's lemma. If N together with the
+-- span of a finite S is M and N + I M = M, some r ≡ 1 mod I sends M
+-- into N.
+theorem cldENakayama.core (I S : Set)
+  requires ideal : Ideal(R, I)
+  requires subset : S ⊆ M.carrier
+  requires finite : Finite(S)
+  shows ∀ N, SubmoduleOf(N, M, R) →
+    submoduleSum(M, N, moduleSpan(M, R, S)) = M.carrier →
+    submoduleSum(M, N, idealSmul(M, R, I, M.carrier)) = M.carrier →
+    ∃ r ∈ R.carrier, Ring.sub(R, r, R.one) ∈ I ∧
+      (∀ v ∈ M.carrier, call2(M.smul, r, v) ∈ N)
+proof
+  have ringR := CommRing.to_ring with comm
+  have oneIn : R[1] ∈ R.carrier by typecheck
+  have ideal2 := ideal
+  obtain ⟨iBound, iZero, iSums, iNeg, iProds⟩ := ideal2
+  have zeroM := Module.zero_mem at R, M with *
+  have whole := SubmoduleOf.whole at R, M with ringR, module
+  induction finite with G a
+  | empty =>
+    intros N sub covers coversI
+    have emptyM := empty.subset at M.carrier
+    have emptyN := empty.subset at N
+    have spanSub := (moduleSpan.least at R, M, ∅, N with ringR, module, emptyM, sub).backward with emptyN
+    have e : Ring.sub(R, R[1], R.one) = R[0] by ring
+    have z : Ring.sub(R, R[1], R.one) ∈ I
+      rw e
+      exact iZero
+    have all : ∀ v ∈ M.carrier, call2(M.smul, R[1], v) ∈ N
+      intros v hv
+      rw (one_smul at R, M, v with ringR, module, hv)
+      rw ← covers at hv
+      obtain ⟨_, x, xN, y, yS, ve⟩ := submoduleSum.membership.forward with hv
+      rw ve
+      exact SubmoduleOf.add_mem at R, M, N, x, y with ringR, module, sub, xN, (spanSub with yS)
+    exact ⟨R[1], oneIn, z, all⟩
+  | insert using ih =>
+    intros N sub covers coversI
+    have sA := moduleSpan.submodule at R, M, {a} with ringR, module
+    have sG := moduleSpan.submodule at R, M, G with ringR, module
+    have sub1 := submoduleSum.submodule at R, M, N, moduleSpan(M, R, {a}) with ringR, module, sub, sA
+    have sGA := submoduleSum.submodule at R, M, moduleSpan(M, R, G), moduleSpan(M, R, {a}) with ringR, module, sG, sA
+    have aSelf := singleton.self at a
+    have aSub : {a} ⊆ M.carrier
+      intros z hz
+      rw (singleton.membership.forward with hz)
+      exact aMember
+    have aSpan := (moduleSpan.subset_span at R, M, {a} with ringR, module, aSub) with aSelf
+    have gaSub : G ∪ {a} ⊆ M.carrier
+      intros z hz
+      rcases (FiniteSet.union2.membership at z, G, {a}).forward with hz with zG | zA
+      . exact GSubset with zG
+      . rw (singleton.membership.forward with zA)
+        exact aMember
+    obtain ⟨_, _, zeroG, _, _⟩ := sG
+    obtain ⟨_, _, zeroA, _, _⟩ := sA
+    obtain ⟨_, _, zeroN, _, _⟩ := sub
+    have gen : G ∪ {a} ⊆ submoduleSum(M, moduleSpan(M, R, G), moduleSpan(M, R, {a}))
+      intros z hz
+      have zM := gaSub with hz
+      rcases (FiniteSet.union2.membership at z, G, {a}).forward with hz with zG | zA
+      . have zS := (moduleSpan.subset_span at R, M, G with ringR, module, GSubset) with zG
+        have e := Module.add_zero at R, M, z with ringR, module, zM
+        symm at e
+        exact submoduleSum.membership.backward with ⟨zM, z, zS, M.zero, zeroA, e⟩
+      . have za := singleton.membership.forward with zA
+        rw za
+        have e := Module.zero_add at R, M, a with ringR, module, aMember
+        symm at e
+        exact submoduleSum.membership.backward with ⟨aMember, M.zero, zeroG, a, aSpan, e⟩
+    have spanSub := (moduleSpan.least at R, M, G ∪ {a}, submoduleSum(M, moduleSpan(M, R, G), moduleSpan(M, R, {a})) with ringR, module, gaSub, sGA).backward with gen
+    have covers1 : submoduleSum(M, submoduleSum(M, N, moduleSpan(M, R, {a})), moduleSpan(M, R, G)) = M.carrier
+      apply Subset.antisymmetric
+      . intros v hv
+        exact (submoduleSum.membership.forward with hv).left
+      . intros v hv
+        have vM := hv
+        rw ← covers at hv
+        obtain ⟨_, x, xN, y, yS, ve⟩ := submoduleSum.membership.forward with hv
+        have yy := spanSub with yS
+        obtain ⟨_, g, gG, t, tA, ye⟩ := submoduleSum.membership.forward with yy
+        have xM := SubmoduleOf.subset at R, M, N with ringR, module, sub, xN
+        have gM := SubmoduleOf.subset at R, M, moduleSpan(M, R, G) with ringR, module, (moduleSpan.submodule at R, M, G with ringR, module), gG
+        have tM := SubmoduleOf.subset at R, M, moduleSpan(M, R, {a}) with ringR, module, (moduleSpan.submodule at R, M, {a} with ringR, module), tA
+        have xtM := Module.add_mem at R, M, x, t with *
+        have xt := submoduleSum.membership.backward at M, N, moduleSpan(M, R, {a}), call2(M.add, x, t) with ⟨xtM, x, xN, t, tA, rfl⟩
+        have c1 := Module.add_comm at R, M, g, t with ringR, module, gM, tM
+        have c2 := Module.add_assoc at R, M, x, t, g with ringR, module, xM, tM, gM
+        rw [ye, c1] at ve
+        rw ← c2 at ve
+        exact submoduleSum.membership.backward with ⟨vM, call2(M.add, x, t), xt, g, gG, ve⟩
+    have coversI1 : submoduleSum(M, submoduleSum(M, N, moduleSpan(M, R, {a})), idealSmul(M, R, I, M.carrier)) = M.carrier
+      apply Subset.antisymmetric
+      . intros v hv
+        exact (submoduleSum.membership.forward with hv).left
+      . intros v hv
+        have vM := hv
+        rw ← coversI at hv
+        obtain ⟨_, x, xN, y, yI, ve⟩ := submoduleSum.membership.forward with hv
+        have xM := SubmoduleOf.subset at R, M, N with ringR, module, sub, xN
+        have e := Module.add_zero at R, M, x with ringR, module, xM
+        symm at e
+        have x1 := submoduleSum.membership.backward at M, N, moduleSpan(M, R, {a}), x with ⟨xM, x, xN, M.zero, zeroA, e⟩
+        exact submoduleSum.membership.backward with ⟨vM, x, x1, y, yI, ve⟩
+    obtain ⟨r1, r1In, r1I, r1N⟩ := ih with submoduleSum(M, N, moduleSpan(M, R, {a})), sub1, covers1, coversI1
+    have sT := cldEIdealMultiples.submodule at R, M, I, a with comm, module, ideal, aMember
+    have sK := submoduleSum.submodule at R, M, N, idealSmulGenerators(M, R, I, {a}) with ringR, module, sub, sT
+    have sQ := cldESmulPreimage.submodule at R, M, r1, submoduleSum(M, N, idealSmulGenerators(M, R, I, {a})) with comm, module, r1In, sK
+    obtain ⟨_, _, zeroT, _, _⟩ := sT
+    have sK2 := sK
+    obtain ⟨_, kBound, zeroK, kAdd, kSmul⟩ := sK2
+    have gens : ∀ c ∈ I, ∀ v ∈ M.carrier, call2(M.smul, c, v) ∈ cldESmulPreimage(M, r1, submoduleSum(M, N, idealSmulGenerators(M, R, I, {a})))
+      intros c cI v vM
+      have cIn := iBound with cI
+      have cvM := Module.smul_mem at R, M, c, v with *
+      have rv := r1N with v, vM
+      obtain ⟨_, n, nN, s, sS, se⟩ := submoduleSum.membership.forward with rv
+      rw (moduleSpan.singleton at R, M, a with ringR, module, aMember) at sS
+      obtain ⟨_, b, bIn, sa⟩ := scalarMultiples.membership.forward with sS
+      have nM := SubmoduleOf.subset at R, M, N with ringR, module, sub, nN
+      have baM := Module.smul_mem at R, M, b, a with *
+      have m1 := mul_smul at R, M, r1, c, v with ringR, module, r1In, cIn, vM
+      have m2 := mul_smul at R, M, c, r1, v with ringR, module, cIn, r1In, vM
+      have cm : r1 * c = c * r1 by ring
+      rw cm at m1
+      rw m2 at m1
+      rw [se, sa] at m1
+      rw (smul_add at R, M, c, n, call2(M.smul, b, a) with ringR, module, cIn, nM, baM) at m1
+      rw ← (mul_smul at R, M, c, b, a with ringR, module, cIn, bIn, aMember) at m1
+      have cbI := (iProds with b, bIn, c, cI).right
+      have cbIn := iBound with cbI
+      have cnN := SubmoduleOf.smul_mem at R, M, N, c, n with ringR, module, sub, cIn, nN
+      have cnM := SubmoduleOf.subset at R, M, N with ringR, module, sub, cnN
+      have cbaM := Module.smul_mem at R, M, c * b, a with *
+      have cbaT := idealSmulGenerators.membership.backward at M, R, I, {a}, call2(M.smul, c * b, a) with ⟨cbaM, c * b, cbI, a, aSelf, rfl⟩
+      have sumM := Module.add_mem at R, M, call2(M.smul, c, n), call2(M.smul, c * b, a) with *
+      have inK := submoduleSum.membership.backward at M, N, idealSmulGenerators(M, R, I, {a}), call2(M.add, call2(M.smul, c, n), call2(M.smul, c * b, a)) with ⟨sumM, call2(M.smul, c, n), cnN, call2(M.smul, c * b, a), cbaT, rfl⟩
+      rw m1 at inK
+      exact cldESmulPreimage.membership.backward with ⟨cvM, inK⟩
+    have IMQ := (idealSmul.least at R, M, I, M.carrier, cldESmulPreimage(M, r1, submoduleSum(M, N, idealSmulGenerators(M, R, I, {a}))) with comm, module, ideal, whole, sQ).backward with gens
+    have aM := aMember
+    rw ← coversI at aM
+    obtain ⟨_, n0, n0N, y0, y0I, ae⟩ := submoduleSum.membership.forward with aM
+    have yQ := IMQ with y0I
+    obtain ⟨y0M, ry0K⟩ := cldESmulPreimage.membership.forward with yQ
+    have n0M := SubmoduleOf.subset at R, M, N with ringR, module, sub, n0N
+    have rn0N := SubmoduleOf.smul_mem at R, M, N, r1, n0 with ringR, module, sub, r1In, n0N
+    have rn0M := SubmoduleOf.subset at R, M, N with ringR, module, sub, rn0N
+    have e0 := Module.add_zero at R, M, call2(M.smul, r1, n0) with ringR, module, rn0M
+    symm at e0
+    have rn0K := submoduleSum.membership.backward at M, N, idealSmulGenerators(M, R, I, {a}), call2(M.smul, r1, n0) with ⟨rn0M, call2(M.smul, r1, n0), rn0N, M.zero, zeroT, e0⟩
+    have raK := kAdd with call2(M.smul, r1, n0), rn0K, call2(M.smul, r1, y0), ry0K
+    rw ← (smul_add at R, M, r1, n0, y0 with ringR, module, r1In, n0M, y0M) at raK
+    rw ← ae at raK
+    obtain ⟨_, n1, n1N, w, wT, e3⟩ := submoduleSum.membership.forward with raK
+    obtain ⟨_, c, cI, a1, a1A, we⟩ := idealSmulGenerators.membership.forward with wT
+    rw (singleton.membership.forward with a1A) at we
+    rw we at e3
+    have cIn := iBound with cI
+    have ncIn : -c ∈ R.carrier by typecheck
+    have n1M := SubmoduleOf.subset at R, M, N with ringR, module, sub, n1N
+    have caM := Module.smul_mem at R, M, c, a with *
+    have ncaM := Module.smul_mem at R, M, -c, a with *
+    have dIn : r1 + -c ∈ R.carrier by typecheck
+    have da : call2(M.smul, r1 + -c, a) = n1
+      rw (add_smul at R, M, r1, -c, a with ringR, module, r1In, ncIn, aMember)
+      rw e3
+      rw (Module.add_assoc at R, M, n1, call2(M.smul, c, a), call2(M.smul, -c, a) with ringR, module, n1M, caM, ncaM)
+      rw ← (add_smul at R, M, c, -c, a with ringR, module, cIn, ncIn, aMember)
+      have cc0 : c + -c = R[0] by ring
+      rw cc0
+      rw (zero_smul at R, M, a with ringR, module, aMember)
+      exact Module.add_zero at R, M, n1 with ringR, module, n1M
+    have daN : call2(M.smul, r1 + -c, a) ∈ N
+      rw da
+      exact n1N
+    have all : ∀ v ∈ M.carrier, call2(M.smul, (r1 + -c) * r1, v) ∈ N
+      intros v vM
+      have rv := r1N with v, vM
+      obtain ⟨_, n, nN, s, sS, se⟩ := submoduleSum.membership.forward with rv
+      rw (moduleSpan.singleton at R, M, a with ringR, module, aMember) at sS
+      obtain ⟨_, b, bIn, sa⟩ := scalarMultiples.membership.forward with sS
+      have nM := SubmoduleOf.subset at R, M, N with ringR, module, sub, nN
+      have baM := Module.smul_mem at R, M, b, a with *
+      rw (mul_smul at R, M, r1 + -c, r1, v with ringR, module, dIn, r1In, vM)
+      rw [se, sa]
+      rw (smul_add at R, M, r1 + -c, n, call2(M.smul, b, a) with ringR, module, dIn, nM, baM)
+      rw ← (mul_smul at R, M, r1 + -c, b, a with ringR, module, dIn, bIn, aMember)
+      have bc : (r1 + -c) * b = b * (r1 + -c) by ring
+      rw bc
+      rw (mul_smul at R, M, b, r1 + -c, a with ringR, module, bIn, dIn, aMember)
+      have p1 := SubmoduleOf.smul_mem at R, M, N, r1 + -c, n with ringR, module, sub, dIn, nN
+      have p2 := SubmoduleOf.smul_mem at R, M, N, b, call2(M.smul, r1 + -c, a) with ringR, module, sub, bIn, daN
+      exact SubmoduleOf.add_mem at R, M, N, call2(M.smul, r1 + -c, n), call2(M.smul, b, call2(M.smul, r1 + -c, a)) with ringR, module, sub, p1, p2
+    have rIn : (r1 + -c) * r1 ∈ R.carrier by typecheck
+    have u1In : r1 + R[1] ∈ R.carrier by typecheck
+    have q1 := (iProds with r1 + R[1], u1In, Ring.sub(R, r1, R.one), r1I).right
+    have ncI := iNeg with c, cI
+    have q2 := (iProds with r1, r1In, -c, ncI).right
+    have q := iSums with Ring.sub(R, r1, R.one) * (r1 + R[1]), q1, (-c) * r1, q2
+    have eq : Ring.sub(R, (r1 + -c) * r1, R.one) = Ring.sub(R, r1, R.one) * (r1 + R[1]) + (-c) * r1 by ring
+    rw ← eq at q
+    exact ⟨(r1 + -c) * r1, rIn, q, all⟩
+
+-- Helper: {0} + P = M when P = M.
+theorem cldESubmoduleSum.zero_left (P : Set)
+  requires full : P = M.carrier
+  shows submoduleSum(M, {M.zero}, P) = M.carrier
+proof
+  have ringR := CommRing.to_ring with comm
+  have zeroSelf := singleton.self at M.zero
+  apply Subset.antisymmetric
+  . intros v hv
+    exact (submoduleSum.membership.forward with hv).left
+  . intros v hv
+    have e := Module.zero_add at R, M, v with ringR, module, hv
+    symm at e
+    have vP := hv
+    rw ← full at vP
+    exact submoduleSum.membership.backward with ⟨hv, M.zero, zeroSelf, v, vP, e⟩
+
+-- Submodule.smul_le_of_le_smul_of_le_jacobson_bot and
+-- Submodule.le_of_le_smul_of_le_jacobson_bot: N + I M = M forces N = M.
+theorem Nakayama.submodule (I N : Set)
+  requires finite : FinitelyGeneratedModule(M, R)
+  requires ideal : Ideal(R, I)
+  requires jacobson : I ⊆ jacobsonRadical(R, {R.zero})
+  requires sub : SubmoduleOf(N, M, R)
+  requires covers : submoduleSum(M, N, idealSmul(M, R, I, M.carrier)) = M.carrier
+  shows N = M.carrier
+proof
+  obtain ⟨_, S, sSub, sFin, sSpan⟩ := finite
+  have ringR := CommRing.to_ring with comm
+  have sub2 := sub
+  obtain ⟨_, nBound, zeroN, _, nSmul⟩ := sub2
+  have c1 : submoduleSum(M, N, moduleSpan(M, R, S)) = M.carrier
+    apply Subset.antisymmetric
+    . intros v hv
+      exact (submoduleSum.membership.forward with hv).left
+    . intros v hv
+      have e := Module.zero_add at R, M, v with ringR, module, hv
+      symm at e
+      have vP := hv
+      rw ← sSpan at vP
+      exact submoduleSum.membership.backward with ⟨hv, M.zero, zeroN, v, vP, e⟩
+  have core := cldENakayama.core at R, M, I, S with comm, module, ideal, sSub, sFin
+  obtain ⟨r, rIn, rI, rN⟩ := core with N, sub, c1, covers
+  have jr := jacobson with rI
+  have oneIn : R[1] ∈ R.carrier by typecheck
+  have dIn : Ring.sub(R, r, R.one) ∈ R.carrier by typecheck
+  have u := ((jacobsonRadical.mem_zero_iff at R, Ring.sub(R, r, R.one) with comm, dIn).forward with jr) with R[1], oneIn
+  have e : R[1] + Ring.sub(R, r, R.one) * R[1] = r by ring
+  rw e at u
+  obtain ⟨_, s, sIn, _, sr⟩ := u
+  apply Subset.antisymmetric
+  . exact nBound
+  . intros v hv
+    have rv := rN with v, hv
+    have p := nSmul with s, sIn, call2(M.smul, r, v), rv
+    rw ← (mul_smul at R, M, s, r, v with ringR, module, sIn, rIn, hv) at p
+    rw sr at p
+    rw (one_smul at R, M, v with ringR, module, hv) at p
+    exact p
+
+-- Submodule.eq_bot_of_le_smul_of_le_jacobson_bot: for a finitely
+-- generated M and I in the Jacobson radical, M = I M forces M = 0.
+theorem Nakayama.eq_zero (I : Set)
+  requires finite : FinitelyGeneratedModule(M, R)
+  requires ideal : Ideal(R, I)
+  requires jacobson : I ⊆ jacobsonRadical(R, {R.zero})
+  requires equal : idealSmul(M, R, I, M.carrier) = M.carrier
+  shows M.carrier = {M.zero}
+proof
+  have ringR := CommRing.to_ring with comm
+  have zs := SubmoduleOf.zero_submodule at R, M with ringR, module
+  have c := cldESubmoduleSum.zero_left at R, M, idealSmul(M, R, I, M.carrier) with comm, module, equal
+  have e := Nakayama.submodule at R, M, I, {M.zero} with comm, module, finite, ideal, jacobson, zs, c
+  symm at e
+  exact e
+
+-- The determinant trick (Submodule.exists_sub_one_mem_and_smul_eq_zero_of_fg_of_le_smul):
+-- if M is finitely generated and I M = M, some r ≡ 1 mod I kills M.
+theorem Nakayama.determinant_trick (I : Set)
+  requires finite : FinitelyGeneratedModule(M, R)
+  requires ideal : Ideal(R, I)
+  requires equal : idealSmul(M, R, I, M.carrier) = M.carrier
+  shows ∃ r ∈ R.carrier, Ring.sub(R, r, R.one) ∈ I ∧
+    (∀ v ∈ M.carrier, call2(M.smul, r, v) = M.zero)
+proof
+  obtain ⟨_, S, sSub, sFin, sSpan⟩ := finite
+  have ringR := CommRing.to_ring with comm
+  have zs := SubmoduleOf.zero_submodule at R, M with ringR, module
+  have c1 := cldESubmoduleSum.zero_left at R, M, moduleSpan(M, R, S) with comm, module, sSpan
+  have c2 := cldESubmoduleSum.zero_left at R, M, idealSmul(M, R, I, M.carrier) with comm, module, equal
+  have core := cldENakayama.core at R, M, I, S with comm, module, ideal, sSub, sFin
+  obtain ⟨r, rIn, rI, rN⟩ := core with {M.zero}, zs, c1, c2
+  have all : ∀ v ∈ M.carrier, call2(M.smul, r, v) = M.zero
+    intros v hv
+    exact singleton.membership.forward with (rN with v, hv)
+  exact ⟨r, rIn, rI, all⟩
+
+-- Over a local ring: vectors whose classes span M ⧸ m M span M
+-- (IsLocalRing.span_eq_top_of_tmul_eq_basis, in the generator form).
+theorem Nakayama.local_generators (S : Set)
+  requires localRing : LocalRing(R)
+  requires finite : FinitelyGeneratedModule(M, R)
+  requires subset : S ⊆ M.carrier
+  requires spansModulo : submoduleSum(M, moduleSpan(M, R, S),
+    idealSmul(M, R, localMaximalIdeal(R), M.carrier)) = M.carrier
+  shows moduleSpan(M, R, S) = M.carrier
+proof
+  have ringR := CommRing.to_ring with comm
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  have j := LocalRing.jacobson at R with localRing
+  have jac : localMaximalIdeal(R) ⊆ jacobsonRadical(R, {R.zero})
+    rw j
+    intros x hx
+    exact hx
+  have sp := moduleSpan.submodule at R, M, S with ringR, module
+  exact Nakayama.submodule at R, M, localMaximalIdeal(R), moduleSpan(M, R, S) with comm, module, finite, mIdeal, jac, sp, spansModulo
+
+-- A linear map of finitely generated modules over a local ring that is
+-- surjective modulo m is surjective.
+theorem Nakayama.surjective_of_residue (N f : Set)
+  requires localRing : LocalRing(R)
+  requires finite : FinitelyGeneratedModule(N, R)
+  requires linear : LinearMap(f, M, R, N)
+  requires modulo : submoduleSum(N, linearRange(f, M, N),
+    idealSmul(N, R, localMaximalIdeal(R), Module.carrier(N))) = Module.carrier(N)
+  shows SurjectiveBetween(f, M.carrier, Module.carrier(N))
+proof
+  have ringR := CommRing.to_ring with comm
+  have linear2 := linear
+  obtain ⟨_, moduleN, fn, _⟩ := linear2
+  have mIdeal := localMaximalIdeal.ideal at R with localRing
+  have j := LocalRing.jacobson at R with localRing
+  have jac : localMaximalIdeal(R) ⊆ jacobsonRadical(R, {R.zero})
+    rw j
+    intros x hx
+    exact hx
+  have rs := LinearMap.range_submodule at R, M, N, f with ringR, module, moduleN, linear
+  have e := Nakayama.submodule at R, N, localMaximalIdeal(R), linearRange(f, M, N) with comm, moduleN, finite, mIdeal, jac, rs, modulo
+  refine ⟨fn, ?_⟩
+  intros y hy
+  rw ← e at hy
+  obtain ⟨_, v, vM, fv⟩ := linearRange.membership.forward with hy
+  have r := FunctionBetween.relates_apply with fn, vM
+  rw fv at r
+  exact ⟨v, vM, r⟩
+
+end Nakayama

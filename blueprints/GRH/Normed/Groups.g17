@@ -1,0 +1,2964 @@
+-- Normed abelian groups, normed rings, and normed fields: a norm on an
+-- abelian group and the metric and topology it induces; the norm laws the
+-- proof uses (triangle inequality, reverse triangle inequality, finite
+-- sums and products, powers); normed rings and fields with ℝ and ℂ as the
+-- examples; the sup norm on finite products; sums of families in a normed
+-- group, and complex sums with their bridge to layer 1's series.
+-- Part of the GRH blueprint.
+-- Planned home: Analysis/Normed/Group.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Normed.Groups
+import GRH.Topology.Sums
+import GRH.Exp
+import Grace.Cumulus.Metric.Spaces
+
+section NormedGroups
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- A norm on an abelian group G, written additively in its mul slot: a
+-- function from the carrier to ℝ, nonnegative, zero exactly at 0,
+-- invariant under negation, and subadditive (Mathlib's
+-- NormedAddCommGroup, with the norm given as a function graph).
+predicate IsNorm (G norm : Set) :=
+  (norm : Group.carrier(G) → ℝ) ∧
+  (∀ x ∈ Group.carrier(G), realZero ≤ norm(x)) ∧
+  (∀ x ∈ Group.carrier(G), norm(x) = realZero ↔ x = Group.one(G)) ∧
+  (∀ x ∈ Group.carrier(G), norm(Group.inv(G)(x)) = norm(x)) ∧
+  (∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G),
+    norm(Group.mul(G)(x, y)) ≤ R[norm(x) + norm(y)])
+
+predicate NormedGroup (G norm : Set) := AbelianGroup(G) ∧ IsNorm(G, norm)
+
+-- The distance d(x, y) = ‖x − y‖, the metric space it makes, and its
+-- topology.
+defgraph normDistance (G norm : Set)
+    (p ∈ Group.carrier(G) × Group.carrier(G)) : ℝ :=
+  norm(Group.mul(G)(fst(p), Group.inv(G)(snd(p))))
+requires normed : NormedGroup(G, norm)
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with member
+  rw pEq
+  rw [fst.pair, snd.pair]
+  have invY := Group.inv_mem at G, y with group, hy
+  have prod := Group.mul_mem at G, x, G.inv(y) with group, hx, invY
+  exact FunctionBetween.apply_closed with normF, prod
+
+def normMetric (G norm : Set) : Set :=
+  MetricSpace.mk(Group.carrier(G), normDistance(G, norm))
+def normTopology (G norm : Set) : Set := metricTopology(normMetric(G, norm))
+
+-- A normed ring: the additive group is normed and the norm is
+-- submultiplicative. A normed field: a field whose norm is multiplicative
+-- (Mathlib's NormedField; an absolute value in the sense of valuation
+-- theory, archimedean or not).
+predicate NormedRing (A norm : Set) :=
+  Ring(A) ∧ NormedGroup(Ring.additive(A), norm) ∧
+  (∀ x ∈ Ring.carrier(A), ∀ y ∈ Ring.carrier(A),
+    norm(Ring.mul(A)(x, y)) ≤ R[norm(x) * norm(y)])
+predicate NormedField (K norm : Set) :=
+  Field(K) ∧ CommRing(K) ∧ NormedRing(K, norm) ∧
+  (∀ x ∈ Ring.carrier(K), ∀ y ∈ Ring.carrier(K),
+    norm(Ring.mul(K)(x, y)) = R[norm(x) * norm(y)]) ∧
+  norm(Ring.one(K)) = realOne
+
+-- A normed field is nontrivially normed when some element has norm
+-- greater than 1 (Mathlib's NontriviallyNormedField).
+predicate NontriviallyNormedField (K norm : Set) :=
+  NormedField(K, norm) ∧ (∃ x ∈ Ring.carrier(K), realOne < norm(x))
+
+-- The additive group of ℂ.
+def complexAdditiveGroup : Set :=
+  Group.mk(complexCarrier, complexAdd, complexZero, complexNeg)
+
+-- The topology of ℂ from the modulus, as a space.
+def complexSpace : Set := normTopology(complexAdditiveGroup, complexAbs)
+
+-- Complex sums over arbitrary index sets.
+predicate ComplexHasSum (f I s : Set) :=
+  HasSum(complexAdditiveGroup, complexSpace, f, I, s)
+predicate ComplexSummableFamily (f I : Set) :=
+  SummableFamily(complexAdditiveGroup, complexSpace, f, I)
+def complexTsum (f I : Set) : Set := tsum(complexAdditiveGroup, complexSpace, f, I)
+
+-- The sup norm on the functions from a finite set I to a normed group:
+-- the least B ≥ 0 bounding every ‖v(i)‖ (0 on the empty set).
+defunique supNorm (I norm v : Set) (B ∈ ℝ) :=
+  realZero ≤ B ∧ (∀ i ∈ I, norm(v(i)) ≤ B) ∧
+  (∀ C ∈ ℝ, realZero ≤ C → (∀ i ∈ I, norm(v(i)) ≤ C) → B ≤ C)
+requires finite : Finite(I)
+requires values : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+proof
+  induction finite with H a
+  | empty =>
+    have zIn : (0:R) ∈ ℝ by typecheck
+    refine ⟨(0:R), zIn, ?_, ?_, ?_⟩
+    . linarith
+    . intros i hi
+      exfalso
+      exact set.empty with hi
+    . intros C hC pos bounds
+      exact pos
+  | insert using ih =>
+    obtain ⟨B, hB, pos, bounds, least⟩ := ih
+    have xIn := values with a, aMember
+    have xR : Real(norm(v(a))) by exact xIn
+    have BR : Real(B) by exact hB
+    by_cases order : (B:R) ≤ (norm(v(a)):R)
+    . refine ⟨norm(v(a)), xIn, ?_, ?_, ?_⟩
+      . linarith
+      . intros i hi
+        have hi2 := union2.membership.forward with hi
+        cases hi2 with inH | isA
+        . have le := bounds with i, inH
+          have iR : Real(norm(v(i))) by exact (values with i, (HSubset with i, inH))
+          linarith
+        . simp at isA
+          rw isA
+          linarith
+      . intros C hC cpos cb
+        have aIn : a ∈ H ∪ {a} by simp
+        exact cb with a, aIn
+    . refine ⟨B, hB, pos, ?_, ?_⟩
+      . intros i hi
+        have hi2 := union2.membership.forward with hi
+        cases hi2 with inH | isA
+        . exact bounds with i, inH
+        . simp at isA
+          rw isA
+          linarith
+      . intros C hC cpos cb
+        have cbH : ∀ i ∈ H, norm(v(i)) ≤ C
+          intros i hi
+          have iU : i ∈ H ∪ {a} by simp
+          exact cb with i, iU
+        exact least with C, hC, cpos, cbH
+uniqueness
+  intros B1 hB1 first B2 hB2 second
+  obtain ⟨pos1, bounds1, least1⟩ := first
+  obtain ⟨pos2, bounds2, least2⟩ := second
+  have le12 := least1 with B2, hB2, pos2, bounds2
+  have le21 := least2 with B1, hB1, pos1, bounds1
+  have r1 : Real(B1) by exact hB1
+  have r2 : Real(B2) by exact hB2
+  linarith
+
+-- The pointwise group of functions from I to the carrier of G, and its sup
+-- norm as a graph.
+def piGroup (I G : Set) : Set :=
+  Group.mk(functionSpace(I, Group.carrier(G)),
+    { p ∈ (functionSpace(I, Group.carrier(G)) × functionSpace(I, Group.carrier(G))) ×
+        functionSpace(I, Group.carrier(G)) |
+      ∀ i ∈ I, snd(p)(i) = Group.mul(G)(fst(fst(p))(i), snd(fst(p))(i)) },
+    I × {Group.one(G)},
+    { p ∈ functionSpace(I, Group.carrier(G)) × functionSpace(I, Group.carrier(G)) |
+      ∀ i ∈ I, snd(p)(i) = Group.inv(G)(fst(p)(i)) })
+def piNorm (I G norm : Set) : Set :=
+  { p ∈ functionSpace(I, Group.carrier(G)) × ℝ | snd(p) = supNorm(I, norm, fst(p)) }
+
+-- Section: Laws of norms
+-- In an abelian group (x y)(x′ y′)⁻¹ = (x x′⁻¹)(y y′⁻¹).
+theorem AbelianGroup.mul_div_mul (G a b c d : Set)
+  requires abelian : AbelianGroup(G)
+  requires aIn : a ∈ G.carrier
+  requires bIn : b ∈ G.carrier
+  requires cIn : c ∈ G.carrier
+  requires dIn : d ∈ G.carrier
+  shows G.mul(G.mul(a, b), G.inv(G.mul(c, d))) =
+    G.mul(G.mul(a, G.inv(c)), G.mul(b, G.inv(d)))
+proof
+  have group := AbelianGroup.to_group with abelian
+  have ab := abelian
+  obtain ⟨group2, commutative⟩ := ab
+  have rev := mul_inv_rev at G, c, d with group, cIn, dIn
+  have ic := Group.inv_mem at G, c with group, cIn
+  have id := Group.inv_mem at G, d with group, dIn
+  have sw := commutative with G.inv(d), id, G.inv(c), ic
+  rw [rev, sw]
+  exact AbelianGroup.mul_four_comm at G, a, b, G.inv(c), G.inv(d) with abelian, aIn, bIn, ic, id
+
+-- Finitely many reals below B > 0 are bounded by some 0 ≤ C < B.
+theorem supNorm.finite_below (I norm v : Set, B : Real)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+  requires positive : realZero < B
+  requires below : ∀ i ∈ I, norm(v(i)) < B
+  shows ∃ C ∈ ℝ, realZero ≤ C ∧ C < B ∧ (∀ i ∈ I, norm(v(i)) ≤ C)
+proof
+  induction finite with H a
+  | empty =>
+    have zIn : (0:R) ∈ ℝ by typecheck
+    refine ⟨(0:R), zIn, ?_, positive, ?_⟩
+    . linarith
+    . intros i hi
+      exfalso
+      exact set.empty with hi
+  | insert using ih =>
+    obtain ⟨C, hC, cNn, cB, bounds⟩ := ih
+    have xIn := values with a, aMember
+    have xR : Real(norm(v(a))) by exact xIn
+    have CR : Real(C) by exact hC
+    have aB := below with a, aMember
+    by_cases order : C ≤ norm(v(a))
+    . refine ⟨norm(v(a)), xIn, ?_, aB, ?_⟩
+      . linarith
+      . intros i hi
+        have hi2 := union2.membership.forward with hi
+        cases hi2 with inH | isA
+        . have le := bounds with i, inH
+          have iR : Real(norm(v(i))) by exact (values with i, (HSubset with i, inH))
+          linarith
+        . simp at isA
+          rw isA
+          linarith
+    . refine ⟨C, hC, cNn, cB, ?_⟩
+      intros i hi
+      have hi2 := union2.membership.forward with hi
+      cases hi2 with inH | isA
+      . exact bounds with i, inH
+      . simp at isA
+        rw isA
+        linarith
+
+section NormLaws
+variable (G norm : Set)
+hypothesis normed : NormedGroup(G, norm)
+
+theorem IsNorm.nonneg (x : Set)
+  requires member : x ∈ G.carrier
+  shows realZero ≤ norm(x)
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  exact nonneg with x, member
+
+theorem IsNorm.zero
+  shows norm(G.one) = realZero
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have oneIn := Group.one_mem at G with group
+  have iff := zeroIff with G.one, oneIn
+  exact iff.backward with rfl
+
+theorem IsNorm.eq_zero_iff (x : Set)
+  requires member : x ∈ G.carrier
+  shows norm(x) = realZero ↔ x = G.one
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  exact zeroIff with x, member
+
+theorem IsNorm.pos_iff (x : Set)
+  requires member : x ∈ G.carrier
+  shows realZero < norm(x) ↔ x ≠ G.one
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have nn := nonneg with x, member
+  have iff := zeroIff with x, member
+  have nx := FunctionBetween.apply_closed with normF, member
+  have nxR : Real(norm(x)) by exact nx
+  constructor
+  . intro pos
+    intro eq
+    have z := iff.backward with eq
+    rw z at pos
+    linarith
+  . intro ne
+    by_contra notPos
+    have z : norm(x) = realZero by linarith
+    exact ne with (iff.forward with z)
+
+theorem IsNorm.neg (x : Set)
+  requires member : x ∈ G.carrier
+  shows norm(G.inv(x)) = norm(x)
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  exact invar with x, member
+
+theorem IsNorm.add_le (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows norm(G.mul(x, y)) ≤ R[norm(x) + norm(y)]
+proof
+  obtain ⟨abelian, isNorm⟩ := normed
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  exact tri with x, memberX, y, memberY
+
+-- Mathlib's norm_sub_le.
+theorem IsNorm.sub_le (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows norm(G.mul(x, G.inv(y))) ≤ R[norm(x) + norm(y)]
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have invY := Group.inv_mem at G, y with group, memberY
+  have t := tri with x, memberX, G.inv(y), invY
+  have e := invar with y, memberY
+  rw e at t
+  exact t
+
+-- Mathlib's norm_sub_rev and abs_norm_sub_norm_le.
+theorem IsNorm.sub_rev (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows norm(G.mul(x, G.inv(y))) = norm(G.mul(y, G.inv(x)))
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have invX := Group.inv_mem at G, x with group, memberX
+  have yx := Group.mul_mem at G, y, G.inv(x) with group, memberY, invX
+  have e := invar with G.mul(y, G.inv(x)), yx
+  have rev := mul_inv_rev at G, y, G.inv(x) with group, memberY, invX
+  have ii := inv_inv at G, x with group, memberX
+  rw [rev, ii] at e
+  rw ← e
+
+theorem IsNorm.abs_sub_le (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows abs(R[norm(x) - norm(y)]) ≤ norm(G.mul(x, G.inv(y)))
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have invX := Group.inv_mem at G, x with group, memberX
+  have invY := Group.inv_mem at G, y with group, memberY
+  have xy := Group.mul_mem at G, x, G.inv(y) with group, memberX, invY
+  have yx := Group.mul_mem at G, y, G.inv(x) with group, memberY, invX
+  have t1 := tri with G.mul(x, G.inv(y)), xy, y, memberY
+  have c1 := inv_mul_cancel_right at G, x, y with group, memberX, memberY
+  rw c1 at t1
+  have t2 := tri with G.mul(y, G.inv(x)), yx, x, memberX
+  have c2 := inv_mul_cancel_right at G, y, x with group, memberY, memberX
+  rw c2 at t2
+  have rev := IsNorm.sub_rev at G, norm, x, y with normed, memberX, memberY
+  rw ← rev at t2
+  have nx := FunctionBetween.apply_closed with normF, memberX
+  have ny := FunctionBetween.apply_closed with normF, memberY
+  have nxy := FunctionBetween.apply_closed with normF, xy
+  have nxR : Real(norm(x)) by exact nx
+  have nyR : Real(norm(y)) by exact ny
+  have nxyR : Real(norm(G.mul(x, G.inv(y)))) by exact nxy
+  have dR : Real(R[norm(x) - norm(y)]) by typecheck
+  by_cases sign : (0:R) ≤ R[norm(x) - norm(y)]
+  . have e := abs.of_nonnegative at R[norm(x) - norm(y)] with sign
+    rw e
+    linarith
+  . have np : R[norm(x) - norm(y)] ≤ (0:R) by linarith
+    have e := abs.of_nonpositive at R[norm(x) - norm(y)] with np
+    rw e
+    linarith
+
+-- ‖x − z‖ ≤ ‖x − y‖ + ‖y − z‖ and ‖y‖ ≤ ‖x‖ + ‖x − y‖.
+theorem IsNorm.sub_triangle (x y z : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  requires memberZ : z ∈ G.carrier
+  shows norm(G.mul(x, G.inv(z))) ≤
+    R[norm(G.mul(x, G.inv(y))) + norm(G.mul(y, G.inv(z)))]
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have invY := Group.inv_mem at G, y with group, memberY
+  have invZ := Group.inv_mem at G, z with group, memberZ
+  have xy := Group.mul_mem at G, x, G.inv(y) with group, memberX, invY
+  have yz := Group.mul_mem at G, y, G.inv(z) with group, memberY, invZ
+  have t := tri with G.mul(x, G.inv(y)), xy, G.mul(y, G.inv(z)), yz
+  have assoc := mul_assoc at G, x, G.inv(y), G.mul(y, G.inv(z)) with group, memberX, invY, yz
+  have cancel := inv_mul_cancel_left at G, y, G.inv(z) with group, memberY, invZ
+  rw [assoc, cancel] at t
+  exact t
+
+theorem IsNorm.le_add_sub (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows norm(y) ≤ R[norm(x) + norm(G.mul(x, G.inv(y)))]
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have invY := Group.inv_mem at G, y with group, memberY
+  have xy := Group.mul_mem at G, x, G.inv(y) with group, memberX, invY
+  have a := IsNorm.abs_sub_le at G, norm, x, y with normed, memberX, memberY
+  have nx : Real(norm(x)) by exact (FunctionBetween.apply_closed with normF, memberX)
+  have ny : Real(norm(y)) by exact (FunctionBetween.apply_closed with normF, memberY)
+  have nxy : Real(norm(G.mul(x, G.inv(y)))) by exact (FunctionBetween.apply_closed with normF, xy)
+  have u := abs.upper_neg at norm(x) - norm(y)
+  linarith
+
+-- Mathlib's norm_sum_le and norm_sum_le_of_le: the norm of a finite sum is
+-- at most the sum of the norms.
+theorem IsNorm.sum_le (V w u : Set)
+  requires finite : Finite(V)
+  requires values : ∀ i ∈ V, w(i) ∈ G.carrier
+  requires norms : ∀ i ∈ V, u(i) = norm(w(i))
+  shows norm(groupFiniteSum(G, V, w)) ≤ realFiniteSum(u, V)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  induction finite with H a
+  | empty =>
+    have e1 := groupFiniteSum.empty at G, w with abelian
+    have z := IsNorm.zero at G, norm with normed
+    rw [e1, z, realFiniteSum.empty]
+    linarith
+  | insert using ih =>
+    have valuesH : ∀ i ∈ H, w(i) ∈ G.carrier
+      intros i hi
+      exact values with i, (HSubset with i, hi)
+    have uH : ∀ i ∈ H, u(i) ∈ ℝ
+      intros i hi
+      have iV := HSubset with i, hi
+      have e := norms with i, iV
+      rw e
+      exact FunctionBetween.apply_closed with normF, (values with i, iV)
+    have wa := values with a, aMember
+    have ua_eq := norms with a, aMember
+    have ua : u(a) ∈ ℝ
+      rw ua_eq
+      exact FunctionBetween.apply_closed with normF, wa
+    have stepG := groupFiniteSum.insert at G, H, a, w with abelian, HFinite, valuesH, wa, aFresh
+    have stepR := realFiniteSum.insert at u, H, a with HFinite, uH, ua, aFresh
+    have sH := groupFiniteSum.member with abelian, HFinite, valuesH
+    have t := tri with groupFiniteSum(G, H, w), sH, w(a), wa
+    have rH := realFiniteSum.real at u, H with HFinite, uH
+    have rHR : Real(realFiniteSum(u, H)) by exact rH
+    have uaR : Real(u(a)) by exact ua
+    have ns := FunctionBetween.apply_closed with normF, sH
+    have nsR : Real(norm(groupFiniteSum(G, H, w))) by exact ns
+    rw [stepG, stepR]
+    rw ← ua_eq at t
+    linarith
+
+theorem IsNorm.sum_le_of_le (V w b : Set)
+  requires finite : Finite(V)
+  requires values : ∀ i ∈ V, w(i) ∈ G.carrier
+  requires realB : ∀ i ∈ V, b(i) ∈ ℝ
+  requires bounds : ∀ i ∈ V, norm(w(i)) ≤ b(i)
+  shows norm(groupFiniteSum(G, V, w)) ≤ realFiniteSum(b, V)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  induction finite with H a
+  | empty =>
+    have e1 := groupFiniteSum.empty at G, w with abelian
+    have z := IsNorm.zero at G, norm with normed
+    rw [e1, z, realFiniteSum.empty]
+    linarith
+  | insert using ih =>
+    have valuesH : ∀ i ∈ H, w(i) ∈ G.carrier
+      intros i hi
+      exact values with i, (HSubset with i, hi)
+    have bH : ∀ i ∈ H, b(i) ∈ ℝ
+      intros i hi
+      exact realB with i, (HSubset with i, hi)
+    have wa := values with a, aMember
+    have ba := realB with a, aMember
+    have stepG := groupFiniteSum.insert at G, H, a, w with abelian, HFinite, valuesH, wa, aFresh
+    have stepR := realFiniteSum.insert at b, H, a with HFinite, bH, ba, aFresh
+    have sH := groupFiniteSum.member with abelian, HFinite, valuesH
+    have t := tri with groupFiniteSum(G, H, w), sH, w(a), wa
+    have rH := realFiniteSum.real at b, H with HFinite, bH
+    have rHR : Real(realFiniteSum(b, H)) by exact rH
+    have baR : Real(b(a)) by exact ba
+    have ns := FunctionBetween.apply_closed with normF, sH
+    have nsR : Real(norm(groupFiniteSum(G, H, w))) by exact ns
+    have na := FunctionBetween.apply_closed with normF, wa
+    have naR : Real(norm(w(a))) by exact na
+    have bnd := bounds with a, aMember
+    rw [stepG, stepR]
+    linarith
+
+theorem normDistance.apply (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows normDistance(G, norm)(x, y) = norm(G.mul(x, G.inv(y)))
+proof
+  have pair := product.pair with memberX, memberY
+  have value := normDistance.value at G, norm, (x, y) with normed, pair
+  rw [fst.pair, snd.pair] at value
+  have e : normDistance(G, norm)(x, y) = normDistance(G, norm)((x, y))
+    unfold Algebra.call2
+    rfl
+  rw e
+  exact value
+
+-- The induced metric and topology.
+theorem normMetric.metric
+  shows MetricSpace(normMetric(G, norm))
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have fn := normDistance.function at G, norm with normed
+  unfold normMetric
+  apply MetricSpace.of_parts
+  unfold IsMetric
+  refine ⟨fn, ?_, ?_, ?_, ?_⟩
+  . intros x hx y hy
+    have a := normDistance.apply at G, norm, x, y with normed, hx, hy
+    rw a
+    have invY := Group.inv_mem at G, y with group, hy
+    exact nonneg with G.mul(x, G.inv(y)), (Group.mul_mem at G, x, G.inv(y) with group, hx, invY)
+  . intros x hx y hy
+    have a := normDistance.apply at G, norm, x, y with normed, hx, hy
+    rw a
+    have invY := Group.inv_mem at G, y with group, hy
+    have xy := Group.mul_mem at G, x, G.inv(y) with group, hx, invY
+    have z := zeroIff with G.mul(x, G.inv(y)), xy
+    have m := mul_inv_eq_one at G, x, y with group, hx, hy
+    rw z
+    exact m
+  . intros x hx y hy
+    have a := normDistance.apply at G, norm, x, y with normed, hx, hy
+    have b := normDistance.apply at G, norm, y, x with normed, hy, hx
+    rw [a, b]
+    exact IsNorm.sub_rev at G, norm, x, y with normed, hx, hy
+  . intros x hx y hy z hz
+    have a := normDistance.apply at G, norm, x, z with normed, hx, hz
+    have b := normDistance.apply at G, norm, x, y with normed, hx, hy
+    have c := normDistance.apply at G, norm, y, z with normed, hy, hz
+    rw [a, b, c]
+    have invY := Group.inv_mem at G, y with group, hy
+    have invZ := Group.inv_mem at G, z with group, hz
+    have xy := Group.mul_mem at G, x, G.inv(y) with group, hx, invY
+    have yz := Group.mul_mem at G, y, G.inv(z) with group, hy, invZ
+    have t := tri with G.mul(x, G.inv(y)), xy, G.mul(y, G.inv(z)), yz
+    have assoc := mul_assoc at G, x, G.inv(y), G.mul(y, G.inv(z)) with group, hx, invY, yz
+    have cancel := inv_mul_cancel_left at G, y, G.inv(z) with group, hy, invZ
+    rw [assoc, cancel] at t
+    exact t
+
+theorem normMetric.carrier
+  shows MetricSpace.carrier(normMetric(G, norm)) = G.carrier
+proof
+  unfold normMetric
+  metric_projections
+
+-- Mathlib's dist_eq_norm.
+theorem normMetric.dist (x y : Set)
+  requires memberX : x ∈ G.carrier
+  requires memberY : y ∈ G.carrier
+  shows MetricSpace.dist(normMetric(G, norm))(x, y) =
+    norm(G.mul(x, G.inv(y)))
+proof
+  have d : MetricSpace.dist(normMetric(G, norm)) = normDistance(G, norm)
+    unfold normMetric
+    metric_projections
+  rw d
+  exact normDistance.apply at G, norm, x, y with normed, memberX, memberY
+
+theorem normTopology.space
+  shows TopologicalSpace(normTopology(G, norm))
+proof
+  have m := normMetric.metric at G, norm with normed
+  unfold normTopology
+  exact MetricSpace.topological_space with m
+
+theorem normTopology.carrier
+  shows TopologicalSpace.carrier(normTopology(G, norm)) = G.carrier
+proof
+  unfold normTopology
+  rw [metricTopology.carrier, normMetric.carrier]
+
+-- The pieces of the norm topology: its open sets are the metric open sets
+-- of the norm distance, which is a metric.
+theorem normTopology.opens_eq
+  shows TopologicalSpace.opens(normTopology(G, norm)) =
+    metricTopology(G.carrier, normDistance(G, norm))
+proof
+  have d : MetricSpace.dist(normMetric(G, norm)) = normDistance(G, norm)
+    unfold normMetric
+    metric_projections
+  unfold normTopology
+  rw [metricTopology.opens, normMetric.carrier, d]
+
+theorem normDistance.is_metric
+  shows IsMetric(G.carrier, normDistance(G, norm))
+proof
+  have m := normMetric.metric at G, norm with normed
+  have parts := MetricSpace.parts with m
+  have d : MetricSpace.dist(normMetric(G, norm)) = normDistance(G, norm)
+    unfold normMetric
+    metric_projections
+  rw [normMetric.carrier, d] at parts
+  exact parts
+
+-- Multiplication is continuous for the norm topology.
+theorem normTopology.mul_continuous
+  shows G.mul : productSpace(normTopology(G, norm), normTopology(G, norm)) ⇒
+    normTopology(G, norm)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have metric := normDistance.is_metric at G, norm with normed
+  have spX := normTopology.space at G, norm with normed
+  have spP := productSpace.space with spX, spX
+  have cEq := normTopology.carrier at G, norm with normed
+  have opEq := normTopology.opens_eq at G, norm with normed
+  apply Continuous.mk with spP, spX
+  . rw [productSpace.carrier, cEq]
+    have g2 := group
+    obtain ⟨gshape, mulF, oneIn, invF, assoc, oneMul, mulOne, invMul, mulInv⟩ := g2
+    exact mulF
+  . intros V hV
+    rw opEq at hV
+    rw [productSpace.carrier, productSpace.opens, cEq, opEq]
+    have preSub := functionPreimage.subset at G.mul, G.carrier × G.carrier, V
+    apply productTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with preSub), ?_⟩
+    intros p hp
+    have hp2 := functionPreimage.membership.forward with hp
+    obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with hp2.left
+    have value := hp2.right
+    rw pEq at value
+    have same : G.mul((x, y)) = G.mul(x, y)
+      unfold Algebra.call2
+      rfl
+    rw same at value
+    obtain ⟨E, EIn, pos, ballV⟩ := metricTopology.ball_inside with hV, value
+    have ER : Real(E) by exact EIn
+    have hpos := half.positive with pos
+    have hsum := half.add_self at E
+    have hR := half.real at E
+    have open1 := ball.member_topology at G.carrier, normDistance(G, norm), x, half(E) with metric, hx
+    have open2 := ball.member_topology at G.carrier, normDistance(G, norm), y, half(E) with metric, hy
+    have c1 := ball.center at G.carrier, normDistance(G, norm), x, half(E) with metric, hx, hpos
+    have c2 := ball.center at G.carrier, normDistance(G, norm), y, half(E) with metric, hy, hpos
+    refine ⟨ball(G.carrier, normDistance(G, norm), x, half(E)), open1, ball(G.carrier, normDistance(G, norm), y, half(E)), open2, ?_, ?_⟩
+    . rw pEq
+      exact product.pair with c1, c2
+    . intros q hq
+      obtain ⟨bound2, x2, hx2, y2, hy2, qEq⟩ := product.membership.forward with hq
+      have x2In := ball.point with hx2
+      have y2In := ball.point with hy2
+      have dx := ball.distance with hx2
+      have dy := ball.distance with hy2
+      rw normDistance.apply at G, norm, x, x2 with normed, hx, x2In at dx
+      rw normDistance.apply at G, norm, y, y2 with normed, hy, y2In at dy
+      have xyIn := Group.mul_mem at G, x, y with group, hx, hy
+      have x2y2In := Group.mul_mem at G, x2, y2 with group, x2In, y2In
+      have ix2 := Group.inv_mem at G, x2 with group, x2In
+      have iy2 := Group.inv_mem at G, y2 with group, y2In
+      have u := Group.mul_mem at G, x, G.inv(x2) with group, hx, ix2
+      have v := Group.mul_mem at G, y, G.inv(y2) with group, hy, iy2
+      have t := tri with G.mul(x, G.inv(x2)), u, G.mul(y, G.inv(y2)), v
+      have re := AbelianGroup.mul_div_mul at G, x, y, x2, y2 with abelian, hx, hy, x2In, y2In
+      rw ← re at t
+      have uR := FunctionBetween.apply_closed with normF, u
+      have vR := FunctionBetween.apply_closed with normF, v
+      have uRR : Real(norm(G.mul(x, G.inv(x2)))) by exact uR
+      have vRR : Real(norm(G.mul(y, G.inv(y2)))) by exact vR
+      have w := Group.mul_mem at G, G.mul(x, y), G.inv(G.mul(x2, y2)) with group, xyIn, (Group.inv_mem at G, G.mul(x2, y2) with group, x2y2In)
+      have wR := FunctionBetween.apply_closed with normF, w
+      have wRR : Real(norm(G.mul(G.mul(x, y), G.inv(G.mul(x2, y2))))) by exact wR
+      have near : normDistance(G, norm)(G.mul(x, y), G.mul(x2, y2)) < E
+        rw normDistance.apply at G, norm, G.mul(x, y), G.mul(x2, y2) with normed, xyIn, x2y2In
+        linarith
+      have inBall := ball.of_distance with x2y2In, near
+      have inV := ballV with G.mul(x2, y2), inBall
+      have qIn : q ∈ G.carrier × G.carrier
+        rw qEq
+        exact product.pair with x2In, y2In
+      apply functionPreimage.of_apply with qIn
+      rw qEq
+      have same2 : G.mul((x2, y2)) = G.mul(x2, y2)
+        unfold Algebra.call2
+        rfl
+      rw same2
+      exact inV
+
+-- Inversion is continuous (an isometry) for the norm topology.
+theorem normTopology.inv_continuous
+  shows G.inv : normTopology(G, norm) ⇒ normTopology(G, norm)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have ab := abelian
+  obtain ⟨group2, commutative⟩ := ab
+  have metric := normDistance.is_metric at G, norm with normed
+  have spX := normTopology.space at G, norm with normed
+  have cEq := normTopology.carrier at G, norm with normed
+  have opEq := normTopology.opens_eq at G, norm with normed
+  have g2 := group
+  obtain ⟨gshape, mulF, oneIn, invF, assoc, oneMul, mulOne, invMul, mulInv⟩ := g2
+  apply Continuous.mk with spX, spX
+  . rw cEq
+    exact invF
+  . intros V hV
+    rw opEq at hV
+    rw [cEq, opEq]
+    apply metricTopology.of_open
+    unfold MetricOpen
+    refine ⟨(functionPreimage.subset at G.inv, G.carrier, V), ?_⟩
+    intros x hx
+    have hx2 := functionPreimage.membership.forward with hx
+    obtain ⟨xIn, value⟩ := hx2
+    obtain ⟨E, EIn, pos, ballV⟩ := metricTopology.ball_inside with hV, value
+    refine ⟨E, EIn, pos, ?_⟩
+    intros x2 hx2b
+    have x2In := ball.point with hx2b
+    have dx := ball.distance with hx2b
+    rw normDistance.apply at G, norm, x, x2 with normed, xIn, x2In at dx
+    have ix := Group.inv_mem at G, x with group, xIn
+    have ix2 := Group.inv_mem at G, x2 with group, x2In
+    have u := Group.mul_mem at G, x, G.inv(x2) with group, xIn, ix2
+    have e1 := invar with G.mul(x, G.inv(x2)), u
+    have rev := mul_inv_rev at G, x, G.inv(x2) with group, xIn, ix2
+    have ii := inv_inv at G, x2 with group, x2In
+    rw [rev, ii] at e1
+    have ii2 := inv_inv at G, x2 with group, x2In
+    have near : normDistance(G, norm)(G.inv(x), G.inv(x2)) < E
+      rw normDistance.apply at G, norm, G.inv(x), G.inv(x2) with normed, ix, ix2
+      rw ii2
+      have sw := commutative with G.inv(x), ix, x2, x2In
+      rw sw
+      rw e1
+      exact dx
+    have inBall := ball.of_distance with ix2, near
+    have inV := ballV with G.inv(x2), inBall
+    apply functionPreimage.of_apply with x2In
+    exact inV
+
+theorem normTopology.topological_group
+  shows TopologicalGroup(G, normTopology(G, norm))
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  have group := AbelianGroup.to_group with abelian
+  have spX := normTopology.space at G, norm with normed
+  have cEq := normTopology.carrier at G, norm with normed
+  have mulC := normTopology.mul_continuous at G, norm with normed
+  have invC := normTopology.inv_continuous at G, norm with normed
+  unfold TopologicalGroup
+  exact ⟨group, spX, cEq, mulC, invC⟩
+
+theorem normTopology.hausdorff
+  shows Hausdorff(normTopology(G, norm))
+proof
+  have m := normMetric.metric at G, norm with normed
+  unfold normTopology
+  exact MetricSpace.hausdorff with m
+
+-- The norm is continuous (indeed 1-Lipschitz).
+theorem normTopology.norm_continuous
+  shows norm : normTopology(G, norm) ⇒ realLine
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have group := AbelianGroup.to_group with abelian
+  have spX := normTopology.space at G, norm with normed
+  have spR := realLine.space
+  have cEq := normTopology.carrier at G, norm with normed
+  have opEq := normTopology.opens_eq at G, norm with normed
+  apply Continuous.mk with spX, spR
+  . rw [cEq, realLine.carrier]
+    exact normF
+  . intros V hV
+    rw realLine.opens at hV
+    rw [cEq, opEq]
+    apply metricTopology.of_open
+    unfold MetricOpen
+    refine ⟨(functionPreimage.subset at norm, G.carrier, V), ?_⟩
+    intros x hx
+    have hx2 := functionPreimage.membership.forward with hx
+    obtain ⟨xIn, value⟩ := hx2
+    have hV2 := realTopology.membership.forward with hV
+    obtain ⟨E, EIn, pos, ballV⟩ := hV2.right with norm(x), value
+    refine ⟨E, EIn, pos, ?_⟩
+    intros x2 hx2b
+    have x2In := ball.point with hx2b
+    have dx := ball.distance with hx2b
+    rw normDistance.apply at G, norm, x, x2 with normed, xIn, x2In at dx
+    have nx := FunctionBetween.apply_closed with normF, xIn
+    have nx2 := FunctionBetween.apply_closed with normF, x2In
+    have nxR : Real(norm(x)) by exact nx
+    have nx2R : Real(norm(x2)) by exact nx2
+    have ER : Real(E) by exact EIn
+    have ix2 := Group.inv_mem at G, x2 with group, x2In
+    have u := Group.mul_mem at G, x, G.inv(x2) with group, xIn, ix2
+    have uR := FunctionBetween.apply_closed with normF, u
+    have uRR : Real(norm(G.mul(x, G.inv(x2)))) by exact uR
+    have asl := IsNorm.abs_sub_le at G, norm, x, x2 with normed, xIn, x2In
+    have up := abs.upper at R[norm(x) - norm(x2)]
+    have un := abs.upper_neg at R[norm(x) - norm(x2)]
+    have aR := abs.real at R[norm(x) - norm(x2)]
+    have inBall : norm(x2) ∈ openBall(norm(x), E)
+      apply (openBall.order_characterization at norm(x2), norm(x), E).backward
+      constructor
+      . linarith
+      . linarith
+    have inV := ballV with norm(x2), inBall
+    apply functionPreimage.of_apply with x2In
+    exact inV
+
+-- f(x) → a in norm exactly when ‖f(x) − a‖ → 0.
+theorem normTopology.tendsto_iff (f X F a h : Set)
+  requires filter : IsFilter(X, F)
+  requires values : f : X → G.carrier
+  requires member : a ∈ G.carrier
+  requires distances : ∀ x ∈ X, h(x) = norm(G.mul(f(x), G.inv(a)))
+  shows Tendsto(f, X, F, nhds(normTopology(G, norm), a)) ↔
+    Tendsto(h, X, F, nhds(realLine, realZero))
+proof
+  sorry
+
+-- Mathlib's norm_le_pi_norm and pi_norm_le_iff_of_nonneg on the sup norm.
+theorem supNorm.le (I v j : Set)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, v(i) ∈ G.carrier
+  requires member : j ∈ I
+  shows norm(v(j)) ≤ supNorm(I, norm, v)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have valuesR : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with normF, (values with i, hi)
+  have sel := supNorm.selected at I, norm, v with finite, valuesR
+  obtain ⟨BIn, nn, bound, least⟩ := sel
+  exact bound with j, member
+
+theorem supNorm.le_iff (I v : Set, B : Real)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, v(i) ∈ G.carrier
+  requires nonneg : realZero ≤ B
+  shows supNorm(I, norm, v) ≤ B ↔ (∀ i ∈ I, norm(v(i)) ≤ B)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg2, zeroIff, invar, tri⟩ := isNorm
+  have valuesR : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with normF, (values with i, hi)
+  have sel := supNorm.selected at I, norm, v with finite, valuesR
+  obtain ⟨BIn, nn, bound, least⟩ := sel
+  have BR : Real(supNorm(I, norm, v)) by exact BIn
+  have BIn2 : B ∈ ℝ by typecheck
+  constructor
+  . intros le i hi
+    have b := bound with i, hi
+    have r := valuesR with i, hi
+    have rR : Real(norm(v(i))) by exact r
+    linarith
+  . intro all
+    exact least with B, BIn2, nonneg, all
+
+-- Mathlib's pi_norm_lt_iff.
+theorem supNorm.lt_iff (I v : Set, B : Real)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, v(i) ∈ G.carrier
+  requires positive : realZero < B
+  shows supNorm(I, norm, v) < B ↔ (∀ i ∈ I, norm(v(i)) < B)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg2, zeroIff, invar, tri⟩ := isNorm
+  have valuesR : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with normF, (values with i, hi)
+  have sel := supNorm.selected at I, norm, v with finite, valuesR
+  obtain ⟨SIn, nn, bound, least⟩ := sel
+  have SR : Real(supNorm(I, norm, v)) by exact SIn
+  constructor
+  . intros lt i hi
+    have b := bound with i, hi
+    have r := valuesR with i, hi
+    have rR : Real(norm(v(i))) by exact r
+    linarith
+  . intro all
+    obtain ⟨C, hC, cNn, cB, bounds⟩ := supNorm.finite_below at I, norm, v, B with finite, valuesR, positive, all
+    have le := least with C, hC, cNn, bounds
+    have CR : Real(C) by exact hC
+    linarith
+
+theorem supNorm.nonneg (I v : Set)
+  requires finite : Finite(I)
+  requires values : ∀ i ∈ I, v(i) ∈ G.carrier
+  shows realZero ≤ supNorm(I, norm, v)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have valuesR : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with normF, (values with i, hi)
+  have sel := supNorm.selected at I, norm, v with finite, valuesR
+  obtain ⟨BIn, nn, bound, least⟩ := sel
+  exact nn
+
+-- The functions from a finite set into a normed group with the sup norm
+-- form a normed group, whose topology is the product topology.
+theorem piNorm.normed (I : Set)
+  requires finite : Finite(I)
+  shows NormedGroup(piGroup(I, G), piNorm(I, G, norm))
+proof
+  sorry
+
+theorem piNorm.value (I v : Set)
+  requires finite : Finite(I)
+  requires member : v ∈ functionSpace(I, G.carrier)
+  shows piNorm(I, G, norm)(v) = supNorm(I, norm, v)
+proof
+  have n2 := normed
+  obtain ⟨abelian, isNorm⟩ := n2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have fn := (functionSpace.mem_iff at v, I, G.carrier).forward with member
+  have valuesR : ∀ i ∈ I, norm(v(i)) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with normF, (FunctionBetween.apply_closed with fn, hi)
+  have sel := supNorm.selected at I, norm, v with finite, valuesR
+  have sIn := sel.left
+  have edge : (v, supNorm(I, norm, v)) ∈ piNorm(I, G, norm)
+    apply piNorm.membership.backward
+    refine ⟨(product.pair with member, sIn), ?_⟩
+    simp [fst.pair, snd.pair]
+  have pairs : ∀ p ∈ piNorm(I, G, norm), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    have hp2 := (piNorm.membership.forward with hp).left
+    obtain ⟨hpb, x, hx, y, hy, pEq⟩ := product.membership.forward with hp2
+    exact ⟨x, y, pEq⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ piNorm(I, G, norm) → (a, c) ∈ piNorm(I, G, norm) → b = c
+    intros a b c hb hc
+    have e1 := (piNorm.membership.forward with hb).right
+    have e2 := (piNorm.membership.forward with hc).right
+    simp [fst.pair, snd.pair] at e1
+    simp [fst.pair, snd.pair] at e2
+    rw [e1, e2]
+  exact pairGraph.apply with pairs, functional, edge
+
+-- Sums in a normed group: a family whose norms are summable, in a complete
+-- normed group, is summable, and ‖Σ f‖ ≤ Σ ‖f‖ (Mathlib's
+-- Summable.of_norm and norm_tsum_le_tsum_norm).
+theorem HasSum.of_norm (f u I : Set)
+  requires complete : Complete(normMetric(G, norm))
+  requires values : ∀ i ∈ I, f(i) ∈ G.carrier
+  requires norms : ∀ i ∈ I, u(i) = norm(f(i))
+  requires summable : RealSummable(u, I)
+  shows SummableFamily(G, normTopology(G, norm), f, I) ∧
+    norm(tsum(G, normTopology(G, norm), f, I)) ≤ realTsum(u, I)
+proof
+  sorry
+
+-- Mathlib's Summable.of_norm_bounded: domination by a summable real
+-- family.
+theorem HasSum.of_norm_bounded (f b I : Set)
+  requires complete : Complete(normMetric(G, norm))
+  requires values : ∀ i ∈ I, f(i) ∈ G.carrier
+  requires bounds : ∀ i ∈ I, norm(f(i)) ≤ b(i)
+  requires summable : RealSummable(b, I)
+  shows SummableFamily(G, normTopology(G, norm), f, I) ∧
+    norm(tsum(G, normTopology(G, norm), f, I)) ≤ realTsum(b, I)
+proof
+  sorry
+
+-- Cauchy's criterion for unconditional sums in a complete normed group:
+-- summable exactly when finite sums far out are small.
+theorem SummableFamily.cauchy_iff (f I : Set)
+  requires complete : Complete(normMetric(G, norm))
+  requires values : ∀ i ∈ I, f(i) ∈ G.carrier
+  shows SummableFamily(G, normTopology(G, norm), f, I) ↔
+    (∀ e ∈ ℝ, realZero < e → ∃ F0 ∈ finiteSubsets(I),
+      ∀ F ∈ finiteSubsets(I), Disjoint(F, F0) →
+        norm(groupFiniteSum(G, F, f)) < e)
+proof
+  sorry
+
+end NormLaws
+
+-- A homomorphism of normed groups that does not increase norms is
+-- continuous for the norm topologies.
+theorem normTopology.continuous_of_contraction (φ G normG H normH : Set)
+  requires normedG : NormedGroup(G, normG)
+  requires normedH : NormedGroup(H, normH)
+  requires hom : φ : G →* H
+  requires bound : ∀ x ∈ G.carrier, normH(φ(x)) ≤ normG(x)
+  shows φ : normTopology(G, normG) ⇒ normTopology(H, normH)
+proof
+  have nG := normedG
+  obtain ⟨abelianG, isNormG⟩ := nG
+  obtain ⟨normFG, nonnegG, zeroIffG, invarG, triG⟩ := isNormG
+  have nH := normedH
+  obtain ⟨abelianH, isNormH⟩ := nH
+  obtain ⟨normFH, nonnegH, zeroIffH, invarH, triH⟩ := isNormH
+  have groupG := AbelianGroup.to_group with abelianG
+  have groupH := AbelianGroup.to_group with abelianH
+  have metricH := normDistance.is_metric at H, normH with normedH
+  have spG := normTopology.space at G, normG with normedG
+  have spH := normTopology.space at H, normH with normedH
+  have cG := normTopology.carrier at G, normG with normedG
+  have cH := normTopology.carrier at H, normH with normedH
+  have oG := normTopology.opens_eq at G, normG with normedG
+  have oH := normTopology.opens_eq at H, normH with normedH
+  have fn := GroupHom.function at φ, G, H with hom
+  apply Continuous.mk with spG, spH
+  . rw [cG, cH]
+    exact fn
+  . intros V hV
+    rw oH at hV
+    rw [cG, oG]
+    apply metricTopology.of_open
+    unfold MetricOpen
+    refine ⟨(functionPreimage.subset at φ, G.carrier, V), ?_⟩
+    intros x hx
+    have hx2 := functionPreimage.membership.forward with hx
+    obtain ⟨xIn, value⟩ := hx2
+    obtain ⟨E, EIn, pos, ballV⟩ := metricTopology.ball_inside with hV, value
+    refine ⟨E, EIn, pos, ?_⟩
+    intros x2 hx2b
+    have x2In := ball.point with hx2b
+    have dx := ball.distance with hx2b
+    rw normDistance.apply at G, normG, x, x2 with normedG, xIn, x2In at dx
+    have fx := FunctionBetween.apply_closed with fn, xIn
+    have fx2 := FunctionBetween.apply_closed with fn, x2In
+    have ix2 := Group.inv_mem at G, x2 with groupG, x2In
+    have u := Group.mul_mem at G, x, G.inv(x2) with groupG, xIn, ix2
+    have mm := GroupHom.map_mul at φ, G, H, x, G.inv(x2) with hom, xIn, ix2
+    have mi := GroupHom.map_inv at φ, G, H, x2 with hom, x2In
+    rw mi at mm
+    have b := bound with G.mul(x, G.inv(x2)), u
+    rw mm at b
+    have uR := FunctionBetween.apply_closed with normFG, u
+    have uRR : Real(normG(G.mul(x, G.inv(x2)))) by exact uR
+    have ifx2 := Group.inv_mem at H, φ(x2) with groupH, fx2
+    have w := Group.mul_mem at H, φ(x), H.inv(φ(x2)) with groupH, fx, ifx2
+    have wR := FunctionBetween.apply_closed with normFH, w
+    have wRR : Real(normH(H.mul(φ(x), H.inv(φ(x2))))) by exact wR
+    have near : normDistance(H, normH)(φ(x), φ(x2)) < E
+      rw normDistance.apply at H, normH, φ(x), φ(x2) with normedH, fx, fx2
+      linarith
+    have inBall := ball.of_distance with fx2, near
+    have inV := ballV with φ(x2), inBall
+    apply functionPreimage.of_apply with x2In
+    exact inV
+
+
+-- Section: Normed rings and fields
+-- b (x − y) = b x − b y and (a − b) x = a x − b x in any ring.
+theorem Ring.mul_sub_distrib (K b x y : Set)
+  requires ring : Ring(K)
+  requires memberB : b ∈ Ring.carrier(K)
+  requires memberX : x ∈ Ring.carrier(K)
+  requires memberY : y ∈ Ring.carrier(K)
+  shows Ring.mul(K)(b, Ring.add(K)(x, Ring.neg(K)(y))) =
+    Ring.add(K)(Ring.mul(K)(b, x), Ring.neg(K)(Ring.mul(K)(b, y)))
+proof
+  have p := Ring.parts with ring
+  have dist := IsRing.distributive with p
+  have ny := IsRing.neg_closed with p, memberY
+  have l1 := (dist with b, memberB, x, memberX, Ring.neg(K)(y), ny).left
+  have l2 := (dist with b, memberB, Ring.neg(K)(y), ny, y, memberY).left
+  have inv := IsRing.add_inverse_left with p, memberY
+  have mz := IsRing.mul_zero with p, memberB
+  rw [inv, mz] at l2
+  have abelian := Ring.additive.abelian_group at K with ring
+  have group := AbelianGroup.to_group with abelian
+  have bny := IsRing.mul_closed with p, memberB, ny
+  have by := IsRing.mul_closed with p, memberB, memberY
+  have bnyA : Ring.mul(K)(b, Ring.neg(K)(y)) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact bny
+  have byA : Ring.mul(K)(b, y) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact by
+  have eq1 : Group.mul(Ring.additive(K))(Ring.mul(K)(b, Ring.neg(K)(y)), Ring.mul(K)(b, y)) = Group.one(Ring.additive(K))
+    rw [Ring.additive.mul, Ring.additive.one]
+    rw ← l2
+  have e := eq_inv_of_mul_eq_one_left at Ring.additive(K), Ring.mul(K)(b, Ring.neg(K)(y)), Ring.mul(K)(b, y) with group, bnyA, byA, eq1
+  rw Ring.additive.inv at e
+  rw [l1, e]
+
+theorem Ring.sub_mul_distrib (K a b x : Set)
+  requires ring : Ring(K)
+  requires memberA : a ∈ Ring.carrier(K)
+  requires memberB : b ∈ Ring.carrier(K)
+  requires memberX : x ∈ Ring.carrier(K)
+  shows Ring.mul(K)(Ring.add(K)(a, Ring.neg(K)(b)), x) =
+    Ring.add(K)(Ring.mul(K)(a, x), Ring.neg(K)(Ring.mul(K)(b, x)))
+proof
+  have p := Ring.parts with ring
+  have dist := IsRing.distributive with p
+  have nb := IsRing.neg_closed with p, memberB
+  have r1 := (dist with a, memberA, Ring.neg(K)(b), nb, x, memberX).right
+  have nm := IsRing.neg_mul with p, memberB, memberX
+  rw [r1, nm]
+
+-- The δ of a bilinear estimate: s P + u t < ε once s, t < δ and
+-- u ≤ Q + s, for the products a x and a • x.
+theorem bilinear.delta (e P Q : Real)
+  requires positive : realZero < e
+  requires nonnegP : realZero ≤ P
+  requires nonnegQ : realZero ≤ Q
+  shows ∃ d ∈ ℝ, realZero < d ∧ (∀ s ∈ ℝ, ∀ t ∈ ℝ, ∀ u ∈ ℝ,
+    realZero ≤ s → s < d → realZero ≤ t → t < d → realZero ≤ u →
+    u ≤ R[Q + s] → R[s * P + u * t] < e)
+proof
+  have one := realZero.lt_one
+  have MPos : (0:R) < P + Q + (1:R) by linarith
+  have MePos : (0:R) < P + Q + (1:R) + e by linarith
+  have MeNe : P + Q + (1:R) + e ≠ (0:R)
+    intro z
+    rw z at MePos
+    linarith
+  have dIn : e / (P + Q + (1:R) + e) ∈ ℝ by typecheck
+  have dR : Real(e / (P + Q + (1:R) + e)) by exact dIn
+  have dMul := realDiv.mul_right at e, P + Q + (1:R) + e with MeNe
+  have dPos : (0:R) < e / (P + Q + (1:R) + e)
+    by_contra np
+    have le : e / (P + Q + (1:R) + e) ≤ (0:R) by linarith
+    have MeNn : (0:R) ≤ P + Q + (1:R) + e by linarith
+    have m := realLe.mul_right_of_nonnegative at e / (P + Q + (1:R) + e), (0:R), P + Q + (1:R) + e with le, MeNn
+    rw dMul at m
+    have z : (0:R) * (P + Q + (1:R) + e) = (0:R) by ring
+    rw z at m
+    linarith
+  have dM := realLess.mul_left_of_positive at (0:R), P + Q + (1:R), e / (P + Q + (1:R) + e) with MPos, dPos
+  have de := realLess.mul_left_of_positive at (0:R), e, e / (P + Q + (1:R) + e) with positive, dPos
+  have z1 : e / (P + Q + (1:R) + e) * (0:R) = (0:R) by ring
+  rw z1 at dM
+  rw z1 at de
+  have split : e / (P + Q + (1:R) + e) * (P + Q + (1:R) + e) = e / (P + Q + (1:R) + e) * (P + Q + (1:R)) + e / (P + Q + (1:R) + e) * e by ring
+  rw dMul at split
+  have dLt : e / (P + Q + (1:R) + e) < (1:R)
+    by_contra big
+    have ge : (1:R) ≤ e / (P + Q + (1:R) + e) by linarith
+    have eNn : (0:R) ≤ e by linarith
+    have m := realLe.mul_right_of_nonnegative at (1:R), e / (P + Q + (1:R) + e), e with ge, eNn
+    have z2 : (1:R) * e = e by ring
+    rw z2 at m
+    linarith
+  refine ⟨e / (P + Q + (1:R) + e), dIn, dPos, ?_⟩
+  intros s sIn t tIn u uIn s0 sd t0 td u0 uq
+  have sR : Real(s) by exact sIn
+  have tR : Real(t) by exact tIn
+  have uR : Real(u) by exact uIn
+  have sdLe : s ≤ e / (P + Q + (1:R) + e) by linarith
+  have tdLe : t ≤ e / (P + Q + (1:R) + e) by linarith
+  have dNn : (0:R) ≤ e / (P + Q + (1:R) + e) by linarith
+  have m1 := realLe.mul_right_of_nonnegative at s, e / (P + Q + (1:R) + e), P with sdLe, nonnegP
+  have m2 := realLe.mul_left_of_nonnegative at t, e / (P + Q + (1:R) + e), u with tdLe, u0
+  have uq1 : u ≤ Q + (1:R) by linarith
+  have m3 := realLe.mul_right_of_nonnegative at u, Q + (1:R), e / (P + Q + (1:R) + e) with uq1, dNn
+  have ex : e / (P + Q + (1:R) + e) * (P + Q + (1:R)) = e / (P + Q + (1:R) + e) * P + (Q + (1:R)) * (e / (P + Q + (1:R) + e)) by ring
+  have sw : u * (e / (P + Q + (1:R) + e)) = u * (e / (P + Q + (1:R) + e)) by rfl
+  linarith
+
+-- A map of two variables between normed groups is jointly continuous for
+-- the norm topologies when it satisfies the ε-δ estimate at every point.
+theorem normTopology.joint_continuous (m A normA B normB C normC : Set)
+  requires normedA : NormedGroup(A, normA)
+  requires normedB : NormedGroup(B, normB)
+  requires normedC : NormedGroup(C, normC)
+  requires function : m : Group.carrier(A) × Group.carrier(B) → Group.carrier(C)
+  requires estimate : ∀ a ∈ Group.carrier(A), ∀ x ∈ Group.carrier(B),
+    ∀ e ∈ ℝ, realZero < e → ∃ d ∈ ℝ, realZero < d ∧
+      (∀ b ∈ Group.carrier(A), ∀ y ∈ Group.carrier(B),
+        normA(Group.mul(A)(a, Group.inv(A)(b))) < d →
+        normB(Group.mul(B)(x, Group.inv(B)(y))) < d →
+        normC(Group.mul(C)(m(a, x), Group.inv(C)(m(b, y)))) < e)
+  shows m : productSpace(normTopology(A, normA), normTopology(B, normB)) ⇒
+    normTopology(C, normC)
+proof
+  have metricA := normDistance.is_metric at A, normA with normedA
+  have metricB := normDistance.is_metric at B, normB with normedB
+  have metricC := normDistance.is_metric at C, normC with normedC
+  have spA := normTopology.space at A, normA with normedA
+  have spB := normTopology.space at B, normB with normedB
+  have spC := normTopology.space at C, normC with normedC
+  have spP := productSpace.space with spA, spB
+  have cA := normTopology.carrier at A, normA with normedA
+  have cB := normTopology.carrier at B, normB with normedB
+  have cC := normTopology.carrier at C, normC with normedC
+  have opA := normTopology.opens_eq at A, normA with normedA
+  have opB := normTopology.opens_eq at B, normB with normedB
+  have opC := normTopology.opens_eq at C, normC with normedC
+  apply Continuous.mk with spP, spC
+  . rw [productSpace.carrier, cA, cB, cC]
+    exact function
+  . intros V hV
+    rw opC at hV
+    rw [productSpace.carrier, productSpace.opens, cA, cB, opA, opB]
+    have preSub := functionPreimage.subset at m, Group.carrier(A) × Group.carrier(B), V
+    apply productTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with preSub), ?_⟩
+    intros p hp
+    have hp2 := functionPreimage.membership.forward with hp
+    obtain ⟨bound, a, ha, x, hx, pEq⟩ := product.membership.forward with hp2.left
+    have value := hp2.right
+    rw pEq at value
+    have same : m((a, x)) = m(a, x)
+      unfold Algebra.call2
+      rfl
+    rw same at value
+    obtain ⟨E, EIn, pos, ballV⟩ := metricTopology.ball_inside with hV, value
+    obtain ⟨d, dIn, dPos, est⟩ := estimate with a, ha, x, hx, E, EIn, pos
+    have open1 := ball.member_topology at Group.carrier(A), normDistance(A, normA), a, d with metricA, ha
+    have open2 := ball.member_topology at Group.carrier(B), normDistance(B, normB), x, d with metricB, hx
+    have c1 := ball.center at Group.carrier(A), normDistance(A, normA), a, d with metricA, ha, dPos
+    have c2 := ball.center at Group.carrier(B), normDistance(B, normB), x, d with metricB, hx, dPos
+    refine ⟨ball(Group.carrier(A), normDistance(A, normA), a, d), open1, ball(Group.carrier(B), normDistance(B, normB), x, d), open2, ?_, ?_⟩
+    . rw pEq
+      exact product.pair with c1, c2
+    . intros q hq
+      obtain ⟨bound2, b, hb, y, hy, qEq⟩ := product.membership.forward with hq
+      have bIn := ball.point with hb
+      have yIn := ball.point with hy
+      have db := ball.distance with hb
+      have dy := ball.distance with hy
+      rw normDistance.apply at A, normA, a, b with normedA, ha, bIn at db
+      rw normDistance.apply at B, normB, x, y with normedB, hx, yIn at dy
+      have r := est with b, bIn, y, yIn, db, dy
+      have axIn := FunctionBetween.apply_closed with function, (product.pair with ha, hx)
+      have byIn := FunctionBetween.apply_closed with function, (product.pair with bIn, yIn)
+      have s1 : m((a, x)) = m(a, x)
+        unfold Algebra.call2
+        rfl
+      have s2 : m((b, y)) = m(b, y)
+        unfold Algebra.call2
+        rfl
+      rw s1 at axIn
+      rw s2 at byIn
+      have near : normDistance(C, normC)(m(a, x), m(b, y)) < E
+        rw normDistance.apply at C, normC, m(a, x), m(b, y) with normedC, axIn, byIn
+        exact r
+      have inBall := ball.of_distance with byIn, near
+      have inV := ballV with m(b, y), inBall
+      have qIn : q ∈ Group.carrier(A) × Group.carrier(B)
+        rw qEq
+        exact product.pair with bIn, yIn
+      apply functionPreimage.of_apply with qIn
+      rw [qEq, s2]
+      exact inV
+
+section NormedRingLaws
+variable (K norm : Set)
+hypothesis normed : NormedRing(K, norm)
+
+theorem NormedRing.mul_le (x y : Set)
+  requires memberX : x ∈ Ring.carrier(K)
+  requires memberY : y ∈ Ring.carrier(K)
+  shows norm(Ring.mul(K)(x, y)) ≤ R[norm(x) * norm(y)]
+proof
+  obtain ⟨ring, ng, sub⟩ := normed
+  exact sub with x, memberX, y, memberY
+
+-- Mathlib's norm_mul_le_of_le.
+theorem NormedRing.mul_le_of_le (x y : Set, A B : Real)
+  requires memberX : x ∈ Ring.carrier(K)
+  requires memberY : y ∈ Ring.carrier(K)
+  requires boundX : norm(x) ≤ A
+  requires boundY : norm(y) ≤ B
+  shows norm(Ring.mul(K)(x, y)) ≤ R[A * B]
+proof
+  have n2 := normed
+  obtain ⟨ring, ng, sub⟩ := n2
+  obtain ⟨abelian, isNorm⟩ := ng
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have xA : x ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact memberX
+  have yA : y ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact memberY
+  have nx := FunctionBetween.apply_closed with normF, xA
+  have ny := FunctionBetween.apply_closed with normF, yA
+  have nxR : Real(norm(x)) by exact nx
+  have nyR : Real(norm(y)) by exact ny
+  have nxNn := nonneg with x, xA
+  have nyNn := nonneg with y, yA
+  have h1 := sub with x, memberX, y, memberY
+  have ANn : realZero ≤ A by linarith
+  have h2 := realLe.mul_right_of_nonnegative at norm(x), A, norm(y) with boundX, nyNn
+  have h3 := realLe.mul_left_of_nonnegative at norm(y), B, A with boundY, ANn
+  have xy := Ring.mul_mem at K, x, y with ring, memberX, memberY
+  have xyA : Ring.mul(K)(x, y) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact xy
+  have nxy := FunctionBetween.apply_closed with normF, xyA
+  have nxyR : Real(norm(Ring.mul(K)(x, y))) by exact nxy
+  linarith
+
+theorem NormedRing.topological
+  shows TopologicalRing(K, normTopology(Ring.additive(K), norm))
+proof
+  have n2 := normed
+  obtain ⟨ring, ng, sub⟩ := n2
+  have ng2 := ng
+  obtain ⟨abelian, isNorm⟩ := ng2
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have tg := normTopology.topological_group at Ring.additive(K), norm with ng
+  have r2 := ring
+  obtain ⟨shape, addF, zeroIn, negF, mulF, rest⟩ := r2
+  have mulF2 : Ring.mul(K) : Group.carrier(Ring.additive(K)) × Group.carrier(Ring.additive(K)) → Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact mulF
+  unfold TopologicalRing
+  refine ⟨ring, tg, ?_⟩
+  apply normTopology.joint_continuous with ng, ng, ng, mulF2
+  intros a ha x hx e eIn ePos
+  have aK : a ∈ Ring.carrier(K)
+    rw ← Ring.additive.carrier
+    exact ha
+  have xK : x ∈ Ring.carrier(K)
+    rw ← Ring.additive.carrier
+    exact hx
+  have naR : Real(norm(a)) by exact (FunctionBetween.apply_closed with normF, ha)
+  have nxR : Real(norm(x)) by exact (FunctionBetween.apply_closed with normF, hx)
+  have naNn := nonneg with a, ha
+  have nxNn := nonneg with x, hx
+  have eR : Real(e) by exact eIn
+  obtain ⟨d, dIn, dPos, est⟩ := bilinear.delta at e, norm(x), norm(a) with ePos, nxNn, naNn
+  refine ⟨d, dIn, dPos, ?_⟩
+  intros b hb y hy db dy
+  have bK : b ∈ Ring.carrier(K)
+    rw ← Ring.additive.carrier
+    exact hb
+  have yK : y ∈ Ring.carrier(K)
+    rw ← Ring.additive.carrier
+    exact hy
+  have ax := Ring.mul_mem at K, a, x with ring, aK, xK
+  have bx := Ring.mul_mem at K, b, x with ring, bK, xK
+  have by := Ring.mul_mem at K, b, y with ring, bK, yK
+  have axA : Ring.mul(K)(a, x) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact ax
+  have bxA : Ring.mul(K)(b, x) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact bx
+  have byA : Ring.mul(K)(b, y) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact by
+  have t := IsNorm.sub_triangle at Ring.additive(K), norm, Ring.mul(K)(a, x), Ring.mul(K)(b, x), Ring.mul(K)(b, y) with ng, axA, bxA, byA
+  have lb := IsNorm.le_add_sub at Ring.additive(K), norm, a, b with ng, ha, hb
+  rw [Ring.additive.mul, Ring.additive.inv] at t
+  rw [Ring.additive.mul, Ring.additive.inv] at lb
+  rw [Ring.additive.mul, Ring.additive.inv] at db
+  rw [Ring.additive.mul, Ring.additive.inv] at dy
+  rw [Ring.additive.mul, Ring.additive.inv]
+  have s1 := Ring.sub_mul_distrib at K, a, b, x with ring, aK, bK, xK
+  have s2 := Ring.mul_sub_distrib at K, b, x, y with ring, bK, xK, yK
+  rw [← s1, ← s2] at t
+  have nb := Ring.neg_mem at K, b with ring, bK
+  have ny := Ring.neg_mem at K, y with ring, yK
+  have ab := Ring.add_mem at K, a, Ring.neg(K)(b) with ring, aK, nb
+  have xy := Ring.add_mem at K, x, Ring.neg(K)(y) with ring, xK, ny
+  have m1 := sub with Ring.add(K)(a, Ring.neg(K)(b)), ab, x, xK
+  have m2 := sub with b, bK, Ring.add(K)(x, Ring.neg(K)(y)), xy
+  have abA : Ring.add(K)(a, Ring.neg(K)(b)) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact ab
+  have xyA : Ring.add(K)(x, Ring.neg(K)(y)) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact xy
+  have sIn := FunctionBetween.apply_closed with normF, abA
+  have tIn := FunctionBetween.apply_closed with normF, xyA
+  have uIn := FunctionBetween.apply_closed with normF, hb
+  have sR : Real(norm(Ring.add(K)(a, Ring.neg(K)(b)))) by exact sIn
+  have tR : Real(norm(Ring.add(K)(x, Ring.neg(K)(y)))) by exact tIn
+  have uR : Real(norm(b)) by exact uIn
+  have s0 := nonneg with Ring.add(K)(a, Ring.neg(K)(b)), abA
+  have t0 := nonneg with Ring.add(K)(x, Ring.neg(K)(y)), xyA
+  have u0 := nonneg with b, hb
+  have r := est with norm(Ring.add(K)(a, Ring.neg(K)(b))), sIn, norm(Ring.add(K)(x, Ring.neg(K)(y))), tIn, norm(b), uIn, s0, db, t0, dy, u0, lb
+  have p1 : Ring.mul(K)(Ring.add(K)(a, Ring.neg(K)(b)), x) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact Ring.mul_mem at K, Ring.add(K)(a, Ring.neg(K)(b)), x with ring, ab, xK
+  have p2 : Ring.mul(K)(b, Ring.add(K)(x, Ring.neg(K)(y))) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact Ring.mul_mem at K, b, Ring.add(K)(x, Ring.neg(K)(y)) with ring, bK, xy
+  have p1R : Real(norm(Ring.mul(K)(Ring.add(K)(a, Ring.neg(K)(b)), x))) by exact (FunctionBetween.apply_closed with normF, p1)
+  have p2R : Real(norm(Ring.mul(K)(b, Ring.add(K)(x, Ring.neg(K)(y))))) by exact (FunctionBetween.apply_closed with normF, p2)
+  have nby := Ring.neg_mem at K, Ring.mul(K)(b, y) with ring, by
+  have whole : Ring.add(K)(Ring.mul(K)(a, x), Ring.neg(K)(Ring.mul(K)(b, y))) ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact Ring.add_mem at K, Ring.mul(K)(a, x), Ring.neg(K)(Ring.mul(K)(b, y)) with ring, ax, nby
+  have wR : Real(norm(Ring.add(K)(Ring.mul(K)(a, x), Ring.neg(K)(Ring.mul(K)(b, y))))) by exact (FunctionBetween.apply_closed with normF, whole)
+  linarith
+
+end NormedRingLaws
+
+-- Positive powers of a nonnegative real stay on the same side of 1.
+theorem realPowers.lt_one (a : Real, n : Nat)
+  requires nonneg : realZero ≤ a
+  requires small : a < realOne
+  shows a ^ succ(n) < realOne
+proof
+  induction n
+  | zero =>
+    obtain ⟨p0In, p0Nn, step⟩ := realPowers.facts at a, (0:N) with nonneg
+    have z : a ^ (0:N) = (1:R)
+      rw monoidPow.zero
+    rw z at step
+    rw step
+    have c : a * (1:R) = a by ring
+    rw c
+    exact small
+  | succ(k) using ih =>
+    obtain ⟨pIn, pNn, step⟩ := realPowers.facts at a, succ(k) with nonneg
+    have pR : Real(a ^ succ(k)) by exact pIn
+    rw step
+    have aOne : a ≤ (1:R) by linarith
+    have m := realLe.mul_right_of_nonnegative at a, (1:R), a ^ succ(k) with aOne, pNn
+    have c : (1:R) * a ^ succ(k) = a ^ succ(k) by ring
+    rw c at m
+    linarith
+
+theorem realPowers.gt_one (a : Real, n : Nat)
+  requires large : realOne < a
+  shows realOne < a ^ succ(n)
+proof
+  have nonneg : realZero ≤ a by linarith
+  induction n
+  | zero =>
+    have nonneg2 : realZero ≤ a by linarith
+    obtain ⟨p0In, p0Nn, step⟩ := realPowers.facts at a, (0:N) with nonneg2
+    have z : a ^ (0:N) = (1:R)
+      rw monoidPow.zero
+    rw z at step
+    rw step
+    have c : a * (1:R) = a by ring
+    rw c
+    exact large
+  | succ(k) using ih =>
+    have nonneg2 : realZero ≤ a by linarith
+    obtain ⟨pIn, pNn, step⟩ := realPowers.facts at a, succ(k) with nonneg2
+    have pR : Real(a ^ succ(k)) by exact pIn
+    rw step
+    have aOne : (1:R) ≤ a by linarith
+    have m := realLe.mul_right_of_nonnegative at (1:R), a, a ^ succ(k) with aOne, pNn
+    have c : (1:R) * a ^ succ(k) = a ^ succ(k) by ring
+    rw c at m
+    linarith
+
+section NormedFieldLaws
+variable (K norm : Set)
+hypothesis normed : NormedField(K, norm)
+
+theorem NormedField.mul (x y : Set)
+  requires memberX : x ∈ Ring.carrier(K)
+  requires memberY : y ∈ Ring.carrier(K)
+  shows norm(Ring.mul(K)(x, y)) = R[norm(x) * norm(y)]
+proof
+  obtain ⟨field, comm, nr, mulEq, oneEq⟩ := normed
+  exact mulEq with x, memberX, y, memberY
+
+theorem NormedField.one
+  shows norm(Ring.one(K)) = realOne
+proof
+  obtain ⟨field, comm, nr, mulEq, oneEq⟩ := normed
+  exact oneEq
+
+-- Mathlib's norm_pow: ‖x^n‖ = ‖x‖^n, with x^n the ring power.
+theorem NormedField.pow (x : Set, n : Nat)
+  requires member : x ∈ Ring.carrier(K)
+  shows norm(monoidPow(Ring.mul(K), Ring.one(K), x, n)) = R[norm(x) ^ n]
+proof
+  obtain ⟨field, comm, nr, mulEq, oneEq⟩ := normed
+  have ring := nr.left
+  induction n
+  | zero =>
+    rw [monoidPow.zero, monoidPow.zero]
+    exact oneEq
+  | succ(k) using ih =>
+    have parts := Ring.parts at K with ring
+    have monoid := IsRing.multiplicative with parts
+    have power := monoidPow.closed at Ring.carrier(K), Ring.mul(K), Ring.one(K), x, k with monoid, member
+    have product := mulEq with x, member, monoidPow(Ring.mul(K), Ring.one(K), x, k), power
+    rw [monoidPow.succ, monoidPow.succ, product, ih]
+
+-- The norm of a prefix product, for any indexing f.
+theorem NormedField.prod_prefix (w u f : Set, N m : Nat)
+  requires values : ∀ i ∈ N, w(f(i)) ∈ Ring.carrier(K)
+  requires norms : ∀ i ∈ N, u(f(i)) = norm(w(f(i)))
+  shows m ≤ N → indexedRingSum(w, f, Ring.mul(K), Ring.one(K), m) ∈ Ring.carrier(K) ∧
+    norm(indexedRingSum(w, f, Ring.mul(K), Ring.one(K), m)) =
+      indexedRingSum(u, f, realMul, realOne, m)
+proof
+  have n2 := normed
+  obtain ⟨field, comm, nr, mulEq, oneEq⟩ := n2
+  have ring := nr.left
+  induction m
+  | zero =>
+    intro bound
+    rw [indexedRingSum, indexedRingSum]
+    exact ⟨(Ring.one_mem at K with ring), oneEq⟩
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ N by arith
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    obtain ⟨pIn, pNorm⟩ := ih with smaller
+    have wk := values with k, kMember
+    rw [indexedRingSum, indexedRingSum]
+    refine ⟨(Ring.mul_mem at K, indexedRingSum(w, f, Ring.mul(K), Ring.one(K), k), w(f(k)) with ring, pIn, wk), ?_⟩
+    rw [(mulEq with indexedRingSum(w, f, Ring.mul(K), Ring.one(K), k), pIn, w(f(k)), wk), pNorm, (norms with k, kMember)]
+    unfold Algebra.call2
+    rfl
+
+-- Mathlib's norm_prod: the norm of a finite product is the product of the
+-- norms, over {0, …, n − 1}.
+theorem NormedField.prod (w u : Set, n : Nat)
+  requires values : ∀ i ∈ n, w(i) ∈ Ring.carrier(K)
+  requires norms : ∀ i ∈ n, u(i) = norm(w(i))
+  shows norm(indexedRingSum(w, identity(n), Ring.mul(K), Ring.one(K), n)) =
+    indexedRingSum(u, identity(n), realMul, realOne, n)
+proof
+  have v2 : ∀ i ∈ n, w(identity(n)(i)) ∈ Ring.carrier(K)
+    intros i hi
+    rw (identity.apply at i, n with hi)
+    exact values with i, hi
+  have u2 : ∀ i ∈ n, u(identity(n)(i)) = norm(w(identity(n)(i)))
+    intros i hi
+    rw (identity.apply at i, n with hi)
+    exact norms with i, hi
+  have le : n ≤ n by arith
+  have r := NormedField.prod_prefix at K, norm, w, u, identity(n), n, n with normed, v2, u2
+  exact (r with le).right
+
+-- Mathlib's norm_inv: ‖x⁻¹‖ = ‖x‖⁻¹ for x ≠ 0, with the field inverse
+-- given as any y with x y = 1.
+theorem NormedField.inv (x y : Set)
+  requires memberX : x ∈ Ring.carrier(K)
+  requires memberY : y ∈ Ring.carrier(K)
+  requires inverse : Ring.mul(K)(x, y) = Ring.one(K)
+  shows R[norm(y) * norm(x)] = realOne
+proof
+  obtain ⟨field, comm, nr, mulEq, oneEq⟩ := normed
+  obtain ⟨ring, ng, sub⟩ := nr
+  obtain ⟨abelian, isNorm⟩ := ng
+  obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+  have xA : x ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact memberX
+  have yA : y ∈ Group.carrier(Ring.additive(K))
+    rw Ring.additive.carrier
+    exact memberY
+  have nx := FunctionBetween.apply_closed with normF, xA
+  have ny := FunctionBetween.apply_closed with normF, yA
+  have nxR : Real(norm(x)) by exact nx
+  have nyR : Real(norm(y)) by exact ny
+  have e := mulEq with x, memberX, y, memberY
+  rw [inverse, oneEq] at e
+  linear_combination -e
+
+-- Mathlib's norm_neg_one and the norm of a root of unity.
+theorem NormedField.root_of_unity (x : Set, n : Nat)
+  requires member : x ∈ Ring.carrier(K)
+  requires positive : 1 ≤ n
+  requires root : monoidPow(Ring.mul(K), Ring.one(K), x, n) = Ring.one(K)
+  shows norm(x) = realOne
+proof
+  induction n
+  | zero =>
+    intros positive root
+    exfalso
+    have e := LessEqual.eq_zero at (1:N) with positive
+    have ne := succ.ne_zero at (0:N)
+    exact ne with e
+  | succ(m) using ih =>
+    intros positive root
+    have pw := NormedField.pow at K, norm, x, succ(m) with normed, member
+    rw root at pw
+    have one := NormedField.one at K, norm with normed
+    rw one at pw
+    have n2 := normed
+    obtain ⟨field, comm, nr, mulEq, oneEq⟩ := n2
+    obtain ⟨ring, ng, sub⟩ := nr
+    obtain ⟨abelian, isNorm⟩ := ng
+    obtain ⟨normF, nonneg, zeroIff, invar, tri⟩ := isNorm
+    have xA : x ∈ Group.carrier(Ring.additive(K))
+      rw Ring.additive.carrier
+      exact member
+    have nx := FunctionBetween.apply_closed with normF, xA
+    have nxR : Real(norm(x)) by exact nx
+    have nxNn := nonneg with x, xA
+    by_contra ne
+    by_cases lt : norm(x) < realOne
+    . have p := realPowers.lt_one at norm(x), m with nxNn, lt
+      rw ← pw at p
+      linarith
+    . have gt : realOne < norm(x)
+        by_contra notGt
+        have eq : norm(x) = realOne by linarith
+        exact ne with eq
+      have p := realPowers.gt_one at norm(x), m with gt
+      rw ← pw at p
+      linarith
+
+end NormedFieldLaws
+
+-- Section: ℝ and ℂ
+theorem NormedField.real
+  shows NontriviallyNormedField(realRing, realAbs)
+proof
+  have c : Ring.carrier(realRing) = ℝ := realRing.carrierOf
+  have mEq : Ring.mul(realRing) = realMul
+    unfold realRing
+    simp [Ring.mk.mul]
+  have oEq : Ring.one(realRing) = realOne
+    unfold realRing
+    simp [Ring.mk.one]
+  have addG : realAdditiveGroup = Ring.additive(realRing)
+    unfold realAdditiveGroup
+    unfold Ring.additive
+    unfold realRing
+    simp [Ring.mk.carrier, Ring.mk.add, Ring.mk.zero, Ring.mk.neg]
+  obtain ⟨abelian, gc, gm, go⟩ := realAdditiveGroup.parts
+  have gi : Group.inv(realAdditiveGroup) = realNeg
+    unfold realAdditiveGroup
+    group_projections
+  have field := realRing.field
+  have comm := realRing.comm_ring
+  have ring := comm.left
+  have isNorm : IsNorm(realAdditiveGroup, realAbs)
+    unfold IsNorm
+    rw [gc, gm, gi, go]
+    refine ⟨realAbs.function, ?_, ?_, ?_, ?_⟩
+    . intros x hx
+      rw gc at hx
+      have xR : Real(x) by exact hx
+      have aa := abs.nonnegative at x
+      unfold abs at aa
+      exact aa
+    . intros x hx
+      rw gc at hx
+      have xR : Real(x) by exact hx
+      have aa := abs.eq_zero_iff at x
+      unfold abs at aa
+      exact aa
+    . intros x hx
+      rw gc at hx
+      have xR : Real(x) by exact hx
+      have aa := abs.neg at x
+      unfold abs at aa
+      exact aa
+    . intros x hx y hy
+      rw gc at hx
+      rw gc at hy
+      have xR : Real(x) by exact hx
+      have yR : Real(y) by exact hy
+      have aa := abs.triangle at x, y
+      unfold abs at aa
+      exact aa
+  have normedGroup : NormedGroup(Ring.additive(realRing), realAbs)
+    rw ← addG
+    exact ⟨abelian, isNorm⟩
+  have mulEq : ∀ x ∈ Ring.carrier(realRing), ∀ y ∈ Ring.carrier(realRing),
+      realAbs(Ring.mul(realRing)(x, y)) = R[realAbs(x) * realAbs(y)]
+    rw [c, mEq]
+    intros x hx y hy
+    have xR : Real(x) by exact hx
+    have yR : Real(y) by exact hy
+    have aa := abs.mul at x, y
+    unfold abs at aa
+    exact aa
+  have mulLe : ∀ x ∈ Ring.carrier(realRing), ∀ y ∈ Ring.carrier(realRing),
+      realAbs(Ring.mul(realRing)(x, y)) ≤ R[realAbs(x) * realAbs(y)]
+    intros x hx y hy
+    have e := mulEq with x, hx, y, hy
+    rw e
+    have xR : x ∈ ℝ
+      rw ← c
+      exact hx
+    have yR : y ∈ ℝ
+      rw ← c
+      exact hy
+    have xRR : Real(x) by exact xR
+    have yRR : Real(y) by exact yR
+    have pR := abs.real at x
+    have qR := abs.real at y
+    unfold abs at pR
+    unfold abs at qR
+    have prR : Real(R[realAbs(x) * realAbs(y)]) by typecheck
+    linarith
+  have oneAbs : realAbs(Ring.one(realRing)) = realOne
+    rw oEq
+    have one := abs.of_nonnegative at (1:R) with (realLess.implies_le with realZero.lt_one)
+    unfold abs at one
+    exact one
+  have normedField : NormedField(realRing, realAbs)
+    exact ⟨field, comm, ⟨ring, normedGroup, mulLe⟩, mulEq, oneAbs⟩
+  have twoIn : (2:R) ∈ ℝ by typecheck
+  have twoIn2 : (2:R) ∈ Ring.carrier(realRing)
+    rw c
+    exact twoIn
+  have twoPos : (0:R) ≤ (2:R) by linarith
+  have two := abs.of_nonnegative at (2:R) with twoPos
+  unfold abs at two
+  refine ⟨normedField, (2:R), twoIn2, ?_⟩
+  rw two
+  linarith
+
+theorem NormedField.complex
+  shows NontriviallyNormedField(complexRing, complexAbs)
+proof
+  have c := complexRing.carrierOf
+  have mEq := complexRing.mulOf
+  have oEq := complexRing.oneOf
+  have addG : complexAdditiveGroup = Ring.additive(complexRing)
+    unfold complexAdditiveGroup
+    unfold Ring.additive
+    unfold complexRing
+    simp [Ring.mk.carrier, Ring.mk.add, Ring.mk.zero, Ring.mk.neg]
+  have gc : Group.carrier(complexAdditiveGroup) = complexCarrier
+    unfold complexAdditiveGroup
+    group_projections
+  have gm : Group.mul(complexAdditiveGroup) = complexAdd
+    unfold complexAdditiveGroup
+    group_projections
+  have go : Group.one(complexAdditiveGroup) = complexZero
+    unfold complexAdditiveGroup
+    group_projections
+  have gi : Group.inv(complexAdditiveGroup) = complexNeg
+    unfold complexAdditiveGroup
+    group_projections
+  have field := complexRing.field
+  have comm := complexRing.comm_ring
+  have ring := comm.left
+  have abelian0 := Ring.additive.abelian_group at complexRing with ring
+  have abelian : AbelianGroup(complexAdditiveGroup)
+    rw addG
+    exact abelian0
+  have isNorm : IsNorm(complexAdditiveGroup, complexAbs)
+    unfold IsNorm
+    rw [gc, gm, gi, go]
+    refine ⟨complexAbs.function, ?_, ?_, ?_, ?_⟩
+    . intros x hx
+      rw gc at hx
+      exact complexAbs.nonnegative with hx
+    . intros x hx
+      rw gc at hx
+      exact complexAbs.zero_iff with hx
+    . intros x hx
+      rw gc at hx
+      exact complexAbs.neg with hx
+    . intros x hx y hy
+      rw gc at hx
+      rw gc at hy
+      exact complexAbs.triangle with hx, hy
+  have normedGroup : NormedGroup(Ring.additive(complexRing), complexAbs)
+    rw ← addG
+    exact ⟨abelian, isNorm⟩
+  have mulEq : ∀ x ∈ Ring.carrier(complexRing), ∀ y ∈ Ring.carrier(complexRing),
+      complexAbs(Ring.mul(complexRing)(x, y)) = R[complexAbs(x) * complexAbs(y)]
+    rw [c, mEq]
+    intros x hx y hy
+    exact complexAbs.mul with hx, hy
+  have mulLe : ∀ x ∈ Ring.carrier(complexRing), ∀ y ∈ Ring.carrier(complexRing),
+      complexAbs(Ring.mul(complexRing)(x, y)) ≤ R[complexAbs(x) * complexAbs(y)]
+    intros x hx y hy
+    have e := mulEq with x, hx, y, hy
+    rw e
+    have xR : x ∈ complexCarrier
+      rw ← c
+      exact hx
+    have yR : y ∈ complexCarrier
+      rw ← c
+      exact hy
+    have pR := FunctionBetween.apply_closed with complexAbs.function, xR
+    have qR := FunctionBetween.apply_closed with complexAbs.function, yR
+    have pRR : Real(complexAbs(x)) by exact pR
+    have qRR : Real(complexAbs(y)) by exact qR
+    have prR : Real(R[complexAbs(x) * complexAbs(y)]) by typecheck
+    linarith
+  have oneAbs : complexAbs(Ring.one(complexRing)) = realOne
+    rw oEq
+    exact complexAbs.one
+  have normedField : NormedField(complexRing, complexAbs)
+    exact ⟨field, comm, ⟨ring, normedGroup, mulLe⟩, mulEq, oneAbs⟩
+  have twoIn : (2:R) ∈ ℝ by typecheck
+  have twoR : Real((2:R)) by exact twoIn
+  have zIn : complexOfReal((2:R)) ∈ complexCarrier
+    exact FunctionBetween.apply_closed with complexOfReal.function, twoIn
+  have zIn2 : complexOfReal((2:R)) ∈ Ring.carrier(complexRing)
+    rw c
+    exact zIn
+  have abs2 := complexAbs.of_real at (2:R)
+  have twoPos : (0:R) ≤ (2:R) by linarith
+  have two := abs.of_nonnegative at (2:R) with twoPos
+  unfold abs at two
+  unfold abs at abs2
+  refine ⟨normedField, complexOfReal((2:R)), zIn2, ?_⟩
+  rw [abs2, two]
+  linarith
+
+-- The norm metric of ℝ is the real metric.
+theorem normMetric.real
+  shows normMetric(Ring.additive(realRing), realAbs) = realMetric
+proof
+  have ntf := NormedField.real
+  have nf := ntf.left
+  have nr := nf.right.right.left
+  have ng := nr.right.left
+  have cEq : Group.carrier(Ring.additive(realRing)) = ℝ
+    rw [Ring.additive.carrier, realRing.carrierOf]
+  have mEq : Group.mul(Ring.additive(realRing)) = realAdd
+    rw Ring.additive.mul
+    simp [realRing, Ring.mk.add]
+  have iEq : Group.inv(Ring.additive(realRing)) = realNeg
+    rw Ring.additive.inv
+    simp [realRing, Ring.mk.neg]
+  have ndF := normDistance.function at Ring.additive(realRing), realAbs with ng
+  rw cEq at ndF
+  have rdF := realDistance.function
+  have dEq : normDistance(Ring.additive(realRing), realAbs) = realDistance
+    apply FunctionBetween.ext with ndF, rdF
+    intros p hp
+    obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with hp
+    have xR : Real(x) by exact hx
+    have yR : Real(y) by exact hy
+    have xG : x ∈ Group.carrier(Ring.additive(realRing))
+      rw cEq
+      exact hx
+    have yG : y ∈ Group.carrier(Ring.additive(realRing))
+      rw cEq
+      exact hy
+    have a1 := normDistance.apply at Ring.additive(realRing), realAbs, x, y with ng, xG, yG
+    rw [mEq, iEq] at a1
+    have a2 := realDistance.apply at x, y
+    have e1 : normDistance(Ring.additive(realRing), realAbs)(p) = normDistance(Ring.additive(realRing), realAbs)(x, y)
+      rw pEq
+      unfold Algebra.call2
+      rfl
+    have e2 : realDistance(p) = realDistance(x, y)
+      rw pEq
+      unfold Algebra.call2
+      rfl
+    rw [e1, e2, a1, a2]
+    unfold dist
+    unfold abs
+    have s : realSubValue(x, y) = realAdd(x, realNeg(y))
+      unfold realSubValue
+      rfl
+    rw s
+  unfold normMetric
+  unfold realMetric
+  rw [cEq, dEq]
+
+theorem normTopology.real
+  shows normTopology(Ring.additive(realRing), realAbs) = realLine
+proof
+  unfold normTopology
+  rw normMetric.real
+  exact realMetric.topology
+
+theorem complexAdditiveGroup.ring_additive
+  shows complexAdditiveGroup = Ring.additive(complexRing)
+proof
+  unfold complexAdditiveGroup
+  unfold Ring.additive
+  unfold complexRing
+  simp [Ring.mk.carrier, Ring.mk.add, Ring.mk.zero, Ring.mk.neg]
+
+theorem realAdditiveGroup.ring_additive
+  shows realAdditiveGroup = Ring.additive(realRing)
+proof
+  unfold realAdditiveGroup
+  unfold Ring.additive
+  unfold realRing
+  simp [Ring.mk.carrier, Ring.mk.add, Ring.mk.zero, Ring.mk.neg]
+
+-- ℂ as a normed group and a topological group.
+theorem complexAdditiveGroup.normed
+  shows NormedGroup(complexAdditiveGroup, complexAbs)
+proof
+  have ntf := NormedField.complex
+  have ng := ntf.left.right.right.left.right.left
+  rw ← complexAdditiveGroup.ring_additive at ng
+  exact ng
+
+theorem complexAdditiveGroup.parts
+  shows Group.carrier(complexAdditiveGroup) = complexCarrier ∧
+    Group.mul(complexAdditiveGroup) = complexAdd
+proof
+  have c : Group.carrier(complexAdditiveGroup) = complexCarrier
+    unfold complexAdditiveGroup
+    group_projections
+  have m : Group.mul(complexAdditiveGroup) = complexAdd
+    unfold complexAdditiveGroup
+    group_projections
+  exact ⟨c, m⟩
+
+-- The real part as the first projection of ℝ × ℝ, a contraction of
+-- normed groups from ℂ to ℝ.
+theorem complexRe.projection (z : Set)
+  requires member : z ∈ complexCarrier
+  shows firstProjection(ℝ, ℝ)(z) = complexRe(z)
+proof
+  unfold complexCarrier at member
+  obtain ⟨bound, a, ha, b, hb, zEq⟩ := product.membership.forward with member
+  rw zEq
+  unfold complexRe
+  have p := firstProjection.pair at ℝ, ℝ, a, b with ha, hb
+  rw [p, fst.pair]
+
+theorem complexRe.hasSum_map (f g I s : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ complexCarrier
+  requires parts : ∀ i ∈ I, g(i) = complexRe(f(i))
+  requires sum : ComplexHasSum(f, I, s)
+  shows RealHasSum(g, I, complexRe(s))
+proof
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have groupC := AbelianGroup.to_group with abelianC
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have ntf := NormedField.real
+  have ngR := ntf.left.right.right.left.right.left
+  rw ← realAdditiveGroup.ring_additive at ngR
+  have abelianR := realAdditiveGroup.abelian
+  have groupR := AbelianGroup.to_group with abelianR
+  have topR := realAdditiveGroup.topological
+  obtain ⟨abR, cR, mR, oR⟩ := realAdditiveGroup.parts
+  have fn : firstProjection(ℝ, ℝ) : Group.carrier(complexAdditiveGroup) → Group.carrier(realAdditiveGroup)
+    rw [c, cR]
+    unfold complexCarrier
+    exact firstProjection.function at ℝ, ℝ
+  have hom : firstProjection(ℝ, ℝ) : complexAdditiveGroup →* realAdditiveGroup
+    apply GroupHom.mk with groupC, groupR, fn
+    intros x hx y hy
+    rw c at hx
+    rw c at hy
+    rw [m, mR]
+    have xy := FunctionBetween.apply_closed with complexAdd.function, (product.pair with hx, hy)
+    have e1 := complexRe.projection with xy
+    have e2 := complexRe.projection with hx
+    have e3 := complexRe.projection with hy
+    have ad := complexRe.add with hx, hy
+    rw [e2, e3]
+    have same : complexAdd(x, y) = complexAdd((x, y))
+      unfold Algebra.call2
+      rfl
+    rw ← same at e1
+    rw [e1, ad]
+  have bound : ∀ z ∈ Group.carrier(complexAdditiveGroup), realAbs(firstProjection(ℝ, ℝ)(z)) ≤ complexAbs(z)
+    intros z hz
+    rw c at hz
+    have e := complexRe.projection with hz
+    rw e
+    have le := complexAbs.re_le with hz
+    unfold abs at le
+    exact le
+  have cont := normTopology.continuous_of_contraction at firstProjection(ℝ, ℝ), complexAdditiveGroup, complexAbs, realAdditiveGroup, realAbs with ngC, ngR, hom, bound
+  rw [realAdditiveGroup.ring_additive, normTopology.real] at cont
+  have values2 : ∀ i ∈ I, f(i) ∈ Group.carrier(complexAdditiveGroup)
+    rw c
+    exact values
+  have composite : ∀ i ∈ I, g(i) = firstProjection(ℝ, ℝ)(f(i))
+    intros i hi
+    have e := complexRe.projection with (values with i, hi)
+    rw e
+    exact parts with i, hi
+  unfold ComplexHasSum at sum
+  unfold complexSpace at sum
+  have sIn := sum.left
+  rw c at sIn
+  have mapped := HasSum.map at firstProjection(ℝ, ℝ), complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), realAdditiveGroup, realLine, f, g, I, s with topC, topR, abelianC, abelianR, hom, cont, values2, composite, sum
+  have es := complexRe.projection with sIn
+  rw es at mapped
+  unfold RealHasSum
+  exact mapped
+
+theorem complexIm.projection (z : Set)
+  requires member : z ∈ complexCarrier
+  shows secondProjection(ℝ, ℝ)(z) = complexIm(z)
+proof
+  unfold complexCarrier at member
+  obtain ⟨bound, a, ha, b, hb, zEq⟩ := product.membership.forward with member
+  rw zEq
+  unfold complexIm
+  have p := secondProjection.pair at ℝ, ℝ, a, b with ha, hb
+  rw [p, snd.pair]
+
+theorem complexIm.hasSum_map (f g I s : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ complexCarrier
+  requires parts : ∀ i ∈ I, g(i) = complexIm(f(i))
+  requires sum : ComplexHasSum(f, I, s)
+  shows RealHasSum(g, I, complexIm(s))
+proof
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have groupC := AbelianGroup.to_group with abelianC
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have ntf := NormedField.real
+  have ngR := ntf.left.right.right.left.right.left
+  rw ← realAdditiveGroup.ring_additive at ngR
+  have abelianR := realAdditiveGroup.abelian
+  have groupR := AbelianGroup.to_group with abelianR
+  have topR := realAdditiveGroup.topological
+  obtain ⟨abR, cR, mR, oR⟩ := realAdditiveGroup.parts
+  have fn : secondProjection(ℝ, ℝ) : Group.carrier(complexAdditiveGroup) → Group.carrier(realAdditiveGroup)
+    rw [c, cR]
+    unfold complexCarrier
+    exact secondProjection.function at ℝ, ℝ
+  have hom : secondProjection(ℝ, ℝ) : complexAdditiveGroup →* realAdditiveGroup
+    apply GroupHom.mk with groupC, groupR, fn
+    intros x hx y hy
+    rw c at hx
+    rw c at hy
+    rw [m, mR]
+    have xy := FunctionBetween.apply_closed with complexAdd.function, (product.pair with hx, hy)
+    have e1 := complexIm.projection with xy
+    have e2 := complexIm.projection with hx
+    have e3 := complexIm.projection with hy
+    have ad := complexIm.add with hx, hy
+    rw [e2, e3]
+    have same : complexAdd(x, y) = complexAdd((x, y))
+      unfold Algebra.call2
+      rfl
+    rw ← same at e1
+    rw [e1, ad]
+  have bound : ∀ z ∈ Group.carrier(complexAdditiveGroup), realAbs(secondProjection(ℝ, ℝ)(z)) ≤ complexAbs(z)
+    intros z hz
+    rw c at hz
+    have e := complexIm.projection with hz
+    rw e
+    have le := complexAbs.im_le with hz
+    unfold abs at le
+    exact le
+  have cont := normTopology.continuous_of_contraction at secondProjection(ℝ, ℝ), complexAdditiveGroup, complexAbs, realAdditiveGroup, realAbs with ngC, ngR, hom, bound
+  rw [realAdditiveGroup.ring_additive, normTopology.real] at cont
+  have values2 : ∀ i ∈ I, f(i) ∈ Group.carrier(complexAdditiveGroup)
+    rw c
+    exact values
+  have composite : ∀ i ∈ I, g(i) = secondProjection(ℝ, ℝ)(f(i))
+    intros i hi
+    have e := complexIm.projection with (values with i, hi)
+    rw e
+    exact parts with i, hi
+  unfold ComplexHasSum at sum
+  unfold complexSpace at sum
+  have sIn := sum.left
+  rw c at sIn
+  have mapped := HasSum.map at secondProjection(ℝ, ℝ), complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), realAdditiveGroup, realLine, f, g, I, s with topC, topR, abelianC, abelianR, hom, cont, values2, composite, sum
+  have es := complexIm.projection with sIn
+  rw es at mapped
+  unfold RealHasSum
+  exact mapped
+
+theorem complexSpace.carrier
+  shows TopologicalSpace.carrier(complexSpace) = complexCarrier
+proof
+  have ntf := NormedField.complex
+  have ng := ntf.left.right.right.left.right.left
+  rw ← complexAdditiveGroup.ring_additive at ng
+  have c := normTopology.carrier at complexAdditiveGroup, complexAbs with ng
+  unfold complexSpace
+  rw c
+  unfold complexAdditiveGroup
+  group_projections
+
+theorem complexSpace.hausdorff
+  shows Hausdorff(complexSpace)
+proof
+  have ntf := NormedField.complex
+  have ng := ntf.left.right.right.left.right.left
+  rw ← complexAdditiveGroup.ring_additive at ng
+  unfold complexSpace
+  exact normTopology.hausdorff at complexAdditiveGroup, complexAbs with ng
+
+theorem complexSpace.complete
+  shows Complete(normMetric(complexAdditiveGroup, complexAbs))
+proof
+  sorry
+
+theorem complexSpace.locally_compact
+  shows LocallyCompact(complexSpace)
+proof
+  sorry
+
+-- Closed disks in ℂ are compact (Mathlib's isCompact_closedBall for ℂ).
+theorem complexSpace.closed_ball_compact (a : Set, r : Real)
+  requires member : a ∈ complexCarrier
+  shows Compact(complexSpace, closedBall(normMetric(complexAdditiveGroup, complexAbs), a, r))
+proof
+  sorry
+
+theorem realLine.complete
+  shows Complete(normMetric(realAdditiveGroup, realAbs))
+proof
+  rw [realAdditiveGroup.ring_additive, normMetric.real]
+  exact realMetric.complete
+
+theorem complexAbs.abs_re_le (z : Set)
+  requires member : z ∈ complexCarrier
+  shows abs(complexRe(z)) ≤ complexAbs(z)
+proof
+  exact complexAbs.re_le with member
+
+theorem complexAbs.abs_im_le (z : Set)
+  requires member : z ∈ complexCarrier
+  shows abs(complexIm(z)) ≤ complexAbs(z)
+proof
+  exact complexAbs.im_le with member
+
+-- Mathlib's Complex.mul_conj': z z̄ = |z|², and Complex.inv_eq_conj on the
+-- unit circle.
+theorem complexAbs.mul_conj (z : Set)
+  requires member : z ∈ complexCarrier
+  shows complexMul(z, complexConj(z)) =
+    complexOfReal(R[complexAbs(z) * complexAbs(z)])
+proof
+  have m := complexConj.mul_self with member
+  have sq := complexAbs.square with member
+  rw ← sq at m
+  exact m
+
+theorem complexAbs.inv_eq_conj (z : Set)
+  requires member : z ∈ complexCarrier
+  requires unit : complexAbs(z) = realOne
+  shows complexInv(z) = complexConj(z)
+proof
+  have conjugate := FunctionBetween.apply_closed with complexConj.function, member
+  have m := complexConj.mul_self with member
+  have sq := complexAbs.square with member
+  rw ← sq at m
+  rw unit at m
+  have one : realOne * realOne = realOne by ring
+  rw [one, complexOfReal.one] at m
+  exact complexInv.unique with member, conjugate, m
+
+-- Complex sums: an unconditional sum over ℕ is the sum of the series, and
+-- an absolutely convergent series is unconditionally summable.
+theorem ComplexHasSum.sums_to (u s : Set)
+  requires sequence : u : ℕ → complexCarrier
+  requires sum : ComplexHasSum(u, ℕ, s)
+  shows ComplexSumsTo(u, s)
+proof
+  have cs : ComplexSequence(u) by exact sequence
+  have xs := complexSequenceX.sequence with cs
+  have ys := complexSequenceY.sequence with cs
+  have values : ∀ i ∈ ℕ, u(i) ∈ complexCarrier
+    intros i hi
+    exact FunctionBetween.apply_closed with sequence, hi
+  have xParts : ∀ i ∈ ℕ, complexSequenceX(u)(i) = complexRe(u(i))
+    intros i hi
+    have v := complexSequenceX.value at u, i with cs, hi
+    rw v
+    exact complexRe.x with (values with i, hi)
+  have yParts : ∀ i ∈ ℕ, complexSequenceY(u)(i) = complexIm(u(i))
+    intros i hi
+    have v := complexSequenceY.value at u, i with cs, hi
+    rw v
+    exact complexIm.y with (values with i, hi)
+  have reSum := complexRe.hasSum_map with values, xParts, sum
+  have imSum := complexIm.hasSum_map with values, yParts, sum
+  have sIn : s ∈ complexCarrier
+    have s0 := sum
+    unfold ComplexHasSum at s0
+    have m := s0.left
+    obtain ⟨c, mm⟩ := complexAdditiveGroup.parts
+    rw c at m
+    exact m
+  obtain ⟨a, aReal, b, bReal, shape⟩ := complexCarrier.cases with sIn
+  have reR : Real(complexRe(s))
+    rw shape
+    unfold complexRe
+    rw fst.pair
+    exact aReal
+  have imR : Real(complexIm(s))
+    rw shape
+    unfold complexIm
+    rw snd.pair
+    exact bReal
+  have xSum := RealHasSum.sums_to at complexSequenceX(u), complexRe(s) with xs, reSum
+  have ySum := RealHasSum.sums_to at complexSequenceY(u), complexIm(s) with ys, imSum
+  have result := ComplexSumsTo.of_parts at u, complexRe(s), complexIm(s) with cs, xSum, ySum
+  have pairEq : (complexRe(s), complexIm(s)) = s
+    rw shape
+    unfold complexRe
+    unfold complexIm
+    rw [fst.pair, snd.pair]
+  rw pairEq at result
+  exact result
+
+-- A family pushed through a map φ, and the real and imaginary parts as
+-- maps ℂ → ℝ.
+def familyMap (φ f I : Set) : Set := { (i, φ(f(i))) | i ∈ I }
+
+theorem familyMap.apply (φ f I i : Set)
+  requires index : i ∈ I
+  shows familyMap(φ, f, I)(i) = φ(f(i))
+proof
+  have edge : (i, φ(f(i))) ∈ familyMap(φ, f, I)
+    apply familyMap.membership.backward
+    exact ⟨i, index, rfl⟩
+  have pairs : ∀ p ∈ familyMap(φ, f, I), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := familyMap.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, φ(f(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ familyMap(φ, f, I) → (a, c) ∈ familyMap(φ, f, I) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := familyMap.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := familyMap.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+def familyMap2 (φ f g I : Set) : Set := { (i, φ(f(i), g(i))) | i ∈ I }
+
+theorem familyMap2.apply (φ f g I i : Set)
+  requires index : i ∈ I
+  shows familyMap2(φ, f, g, I)(i) = φ(f(i), g(i))
+proof
+  have edge : (i, φ(f(i), g(i))) ∈ familyMap2(φ, f, g, I)
+    apply familyMap2.membership.backward
+    exact ⟨i, index, rfl⟩
+  have pairs : ∀ p ∈ familyMap2(φ, f, g, I), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := familyMap2.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, φ(f(k), g(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ familyMap2(φ, f, g, I) → (a, c) ∈ familyMap2(φ, f, g, I) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := familyMap2.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := familyMap2.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+defgraph complexReMap (z ∈ complexCarrier) : ℝ := complexRe(z)
+proof
+  exact complexRe.real with member
+
+defgraph complexImMap (z ∈ complexCarrier) : ℝ := complexIm(z)
+proof
+  exact complexIm.real with member
+
+-- |z| ≤ |Re z| + |Im z| (as in GRH.Integral).
+theorem complexAbs.le_abs_parts (z : Set)
+  requires hz : z ∈ complexCarrier
+  shows complexAbs(z) ≤ R[abs(complexRe(z)) + abs(complexIm(z))]
+proof
+  have nonnegative := complexAbs.nonnegative with hz
+  have nonnegativeRe := abs.nonnegative at complexRe(z)
+  have nonnegativeIm := abs.nonnegative at complexIm(z)
+  have square := complexAbs.square with hz
+  have parts := complexNormSquared.parts with hz
+  have squareRe := abs.mul at complexRe(z), complexRe(z)
+  have squareIm := abs.mul at complexIm(z), complexIm(z)
+  have selfRe := abs.of_nonnegative with
+    (realMulValue.square_nonnegative at complexRe(z))
+  have selfIm := abs.of_nonnegative with
+    (realMulValue.square_nonnegative at complexIm(z))
+  have cross := realLe.mul_left_of_nonnegative with nonnegativeIm,
+    nonnegativeRe
+  have zeroed : R[abs(complexRe(z)) * 0] = R[0] by ring
+  have sumNonnegative : R[0] ≤ R[abs(complexRe(z)) + abs(complexIm(z))]
+    by linarith
+  apply realMulValue.le_of_square_le with nonnegative, sumNonnegative
+  have expand : R[(abs(complexRe(z)) + abs(complexIm(z))) *
+      (abs(complexRe(z)) + abs(complexIm(z)))] =
+    R[abs(complexRe(z)) * abs(complexRe(z)) +
+      abs(complexIm(z)) * abs(complexIm(z)) +
+      (abs(complexRe(z)) * abs(complexIm(z)) +
+        abs(complexRe(z)) * abs(complexIm(z)))] by ring
+  linarith
+
+-- Real and imaginary parts of a complex sum.
+theorem ComplexHasSum.re (f g I s : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ complexCarrier
+  requires parts : ∀ i ∈ I, g(i) = complexRe(f(i))
+  requires sum : ComplexHasSum(f, I, s)
+  shows RealHasSum(g, I, complexRe(s))
+proof
+  exact complexRe.hasSum_map with values, parts, sum
+
+theorem ComplexHasSum.of_real (f g I : Set, S : Real)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires embedded : ∀ i ∈ I, g(i) = complexOfReal(f(i))
+  shows ComplexHasSum(g, I, complexOfReal(S)) ↔ RealHasSum(f, I, S)
+proof
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have groupC := AbelianGroup.to_group with abelianC
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have ntf := NormedField.real
+  have ngR := ntf.left.right.right.left.right.left
+  rw ← realAdditiveGroup.ring_additive at ngR
+  have abelianR := realAdditiveGroup.abelian
+  have groupR := AbelianGroup.to_group with abelianR
+  have topR := realAdditiveGroup.topological
+  obtain ⟨abR, cR, mR, oR⟩ := realAdditiveGroup.parts
+  have SIn : S ∈ ℝ by typecheck
+  have gv : ∀ i ∈ I, g(i) ∈ complexCarrier
+    intros i hi
+    have e := embedded with i, hi
+    rw e
+    exact FunctionBetween.apply_closed with complexOfReal.function, (values with i, hi)
+  constructor
+  . intro sum
+    have parts : ∀ i ∈ I, f(i) = complexRe(g(i))
+      intros i hi
+      have fiR : Real(f(i)) by exact (values with i, hi)
+      have e := embedded with i, hi
+      rw [e, complexOfReal.re at f(i)]
+    have r := complexRe.hasSum_map with gv, parts, sum
+    rw complexOfReal.re at S at r
+    exact r
+  . intro sum
+    have fn : complexOfReal : Group.carrier(realAdditiveGroup) → Group.carrier(complexAdditiveGroup)
+      rw [c, cR]
+      exact complexOfReal.function
+    have hom : complexOfReal : realAdditiveGroup →* complexAdditiveGroup
+      apply GroupHom.mk with groupR, groupC, fn
+      intros x hx y hy
+      rw cR at hx
+      rw cR at hy
+      have xR : Real(x) by exact hx
+      have yR : Real(y) by exact hy
+      rw [m, mR]
+      exact complexOfReal.add at x, y
+    have bound : ∀ x ∈ Group.carrier(realAdditiveGroup), complexAbs(complexOfReal(x)) ≤ realAbs(x)
+      intros x hx
+      rw cR at hx
+      have xR : Real(x) by exact hx
+      have e := complexAbs.of_real at x
+      rw e
+      unfold abs
+      have aR : Real(realAbs(x)) by typecheck
+      linarith
+    have cont := normTopology.continuous_of_contraction at complexOfReal, realAdditiveGroup, realAbs, complexAdditiveGroup, complexAbs with ngR, ngC, hom, bound
+    rw [realAdditiveGroup.ring_additive, normTopology.real] at cont
+    have values2 : ∀ i ∈ I, f(i) ∈ Group.carrier(realAdditiveGroup)
+      rw cR
+      exact values
+    unfold RealHasSum at sum
+    unfold ComplexHasSum
+    unfold complexSpace
+    exact HasSum.map at complexOfReal, realAdditiveGroup, realLine, complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), f, g, I, S with topR, topC, abelianR, abelianC, hom, cont, values2, embedded, sum
+
+theorem ComplexHasSum.conj (f g I s : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ complexCarrier
+  requires conjugates : ∀ i ∈ I, g(i) = complexConj(f(i))
+  requires sum : ComplexHasSum(f, I, s)
+  shows ComplexHasSum(g, I, complexConj(s))
+proof
+  have ng := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelian := ng.left
+  have group := AbelianGroup.to_group with abelian
+  have top := normTopology.topological_group at complexAdditiveGroup, complexAbs with ng
+  have fn : complexConj : Group.carrier(complexAdditiveGroup) → Group.carrier(complexAdditiveGroup)
+    rw c
+    exact complexConj.function
+  have hom : complexConj : complexAdditiveGroup →* complexAdditiveGroup
+    apply GroupHom.mk with group, group, fn
+    intros x hx y hy
+    rw c at hx
+    rw c at hy
+    rw m
+    exact complexConj.add with hx, hy
+  have bound : ∀ x ∈ Group.carrier(complexAdditiveGroup), complexAbs(complexConj(x)) ≤ complexAbs(x)
+    intros x hx
+    rw c at hx
+    have e := complexAbs.conj with hx
+    rw e
+    have aR : Real(complexAbs(x)) by typecheck
+    linarith
+  have cont := normTopology.continuous_of_contraction at complexConj, complexAdditiveGroup, complexAbs, complexAdditiveGroup, complexAbs with ng, ng, hom, bound
+  have values2 : ∀ i ∈ I, f(i) ∈ Group.carrier(complexAdditiveGroup)
+    rw c
+    exact values
+  unfold ComplexHasSum at sum
+  unfold complexSpace at sum
+  unfold ComplexHasSum
+  unfold complexSpace
+  exact HasSum.map at complexConj, complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), f, g, I, s with top, top, abelian, abelian, hom, cont, values2, conjugates, sum
+
+-- The terms |u(n)| of a real sequence, the embedding t ↦ (0, t) of ℝ
+-- into ℂ, and the terms (0, v(n)).
+defgraph realAbsTerms (u : Set) (n ∈ ℕ) : ℝ := realAbs(u(n))
+requires sequence : RealSequence(u)
+proof
+  have v := FunctionBetween.apply_closed with sequence, member
+  exact FunctionBetween.apply_closed with realAbs.function, v
+
+defgraph complexImagEmbed (t ∈ ℝ) : complexCarrier := (realZero, t)
+proof
+  have tR : Real(t) by exact member
+  exact complexCarrier.pair at realZero, t
+
+defgraph complexImagTerms (v : Set) (n ∈ ℕ) : complexCarrier := (realZero, v(n))
+requires sequence : RealSequence(v)
+proof
+  have vn := FunctionBetween.apply_closed with sequence, member
+  have vR : Real(v(n)) by exact vn
+  exact complexCarrier.pair at realZero, v(n)
+
+defgraph complexRealTerms (v : Set) (n ∈ ℕ) : complexCarrier := complexOfReal(v(n))
+requires sequence : RealSequence(v)
+proof
+  have vn := FunctionBetween.apply_closed with sequence, member
+  exact FunctionBetween.apply_closed with complexOfReal.function, vn
+
+-- A real sum embedded on the imaginary axis.
+theorem ComplexHasSum.of_imag (f g I : Set, S : Real)
+  requires values : ∀ i ∈ I, f(i) ∈ ℝ
+  requires embedded : ∀ i ∈ I, g(i) = complexImagEmbed(f(i))
+  requires sum : RealHasSum(f, I, S)
+  shows ComplexHasSum(g, I, complexImagEmbed(S))
+proof
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have groupC := AbelianGroup.to_group with abelianC
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have ntf := NormedField.real
+  have ngR := ntf.left.right.right.left.right.left
+  rw ← realAdditiveGroup.ring_additive at ngR
+  have abelianR := realAdditiveGroup.abelian
+  have groupR := AbelianGroup.to_group with abelianR
+  have topR := realAdditiveGroup.topological
+  obtain ⟨abR, cR, mR, oR⟩ := realAdditiveGroup.parts
+  have fn : complexImagEmbed : Group.carrier(realAdditiveGroup) → Group.carrier(complexAdditiveGroup)
+    rw [c, cR]
+    exact complexImagEmbed.function
+  have hom : complexImagEmbed : realAdditiveGroup →* complexAdditiveGroup
+    apply GroupHom.mk with groupR, groupC, fn
+    intros x hx y hy
+    rw cR at hx
+    rw cR at hy
+    have xR : Real(x) by exact hx
+    have yR : Real(y) by exact hy
+    have xy : x + y ∈ ℝ by typecheck
+    rw [m, mR]
+    rw [(complexImagEmbed.value with xy), (complexImagEmbed.value with hx), (complexImagEmbed.value with hy), complexAdd.pair]
+    have z : R[0 + 0] = R[0] by ring
+    rw z
+  have bound : ∀ x ∈ Group.carrier(realAdditiveGroup), complexAbs(complexImagEmbed(x)) ≤ realAbs(x)
+    intros x hx
+    rw cR at hx
+    have xR : Real(x) by exact hx
+    rw (complexImagEmbed.value with hx)
+    have pz := complexCarrier.pair at realZero, x
+    have nn := abs.nonnegative at x
+    have sq : R[abs(x) * abs(x)] = complexNormSquared((realZero, x))
+      rw complexNormSquared.pair
+      have sqn := realMulValue.square_nonnegative at x
+      rw [← abs.mul, abs.of_nonnegative with sqn]
+      ring
+    rw (complexAbs.unique at (realZero, x), abs(x) with pz, nn, sq)
+    unfold abs
+    have aR : Real(realAbs(x)) by typecheck
+    linarith
+  have cont := normTopology.continuous_of_contraction at complexImagEmbed, realAdditiveGroup, realAbs, complexAdditiveGroup, complexAbs with ngR, ngC, hom, bound
+  rw [realAdditiveGroup.ring_additive, normTopology.real] at cont
+  have values2 : ∀ i ∈ I, f(i) ∈ Group.carrier(realAdditiveGroup)
+    rw cR
+    exact values
+  unfold RealHasSum at sum
+  unfold ComplexHasSum
+  unfold complexSpace
+  exact HasSum.map at complexImagEmbed, realAdditiveGroup, realLine, complexAdditiveGroup, normTopology(complexAdditiveGroup, complexAbs), f, g, I, S with topR, topC, abelianR, abelianC, hom, cont, values2, embedded, sum
+
+theorem ComplexHasSum.of_absolutely_summable (u s : Set)
+  requires absolute : ComplexAbsolutelySummable(u)
+  requires sums : ComplexSumsTo(u, s)
+  shows ComplexHasSum(u, ℕ, s)
+proof
+  have abs2 := absolute
+  obtain ⟨sequence, summable⟩ := abs2
+  have xs := complexSequenceX.sequence with sequence
+  have ys := complexSequenceY.sequence with sequence
+  have function : u : ℕ → complexCarrier by exact sequence
+  have absSeq : RealSequence(complexAbsSequence(u)) by exact complexAbsSequence.function with sequence
+  have xAbsSeq : RealSequence(realAbsTerms(complexSequenceX(u))) by exact realAbsTerms.function with xs
+  have yAbsSeq : RealSequence(realAbsTerms(complexSequenceY(u))) by exact realAbsTerms.function with ys
+  have xAbsVal : ∀ n ∈ ℕ, realAbsTerms(complexSequenceX(u))(n) = abs(complexSequenceX(u)(n))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    rw (realAbsTerms.value with xs)
+    unfold abs
+    rfl
+  have yAbsVal : ∀ n ∈ ℕ, realAbsTerms(complexSequenceY(u))(n) = abs(complexSequenceY(u)(n))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    rw (realAbsTerms.value with ys)
+    unfold abs
+    rfl
+  have xBound : ∀ n ∈ ℕ, abs(complexSequenceX(u)(n)) ≤ complexAbsSequence(u)(n)
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have term := FunctionBetween.apply_closed with function, nIn
+    rw [(complexSequenceX.value with sequence), (complexAbsSequence.value with sequence), (complexRe.x with term)]
+    exact complexAbs.re_le with term
+  have yBound : ∀ n ∈ ℕ, abs(complexSequenceY(u)(n)) ≤ complexAbsSequence(u)(n)
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have term := FunctionBetween.apply_closed with function, nIn
+    rw [(complexSequenceY.value with sequence), (complexAbsSequence.value with sequence), (complexIm.y with term)]
+    exact complexAbs.im_le with term
+  have xNn : NonnegativeTerms(realAbsTerms(complexSequenceX(u)))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    apply realLe.characterization.forward
+    rw (xAbsVal with n, nIn)
+    exact abs.nonnegative at complexSequenceX(u)(n)
+  have yNn : NonnegativeTerms(realAbsTerms(complexSequenceY(u)))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    apply realLe.characterization.forward
+    rw (yAbsVal with n, nIn)
+    exact abs.nonnegative at complexSequenceY(u)(n)
+  have xLe : PointwiseLE(realAbsTerms(complexSequenceX(u)), complexAbsSequence(u))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    apply realLe.characterization.forward
+    rw (xAbsVal with n, nIn)
+    exact xBound with n, nIn
+  have yLe : PointwiseLE(realAbsTerms(complexSequenceY(u)), complexAbsSequence(u))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    apply realLe.characterization.forward
+    rw (yAbsVal with n, nIn)
+    exact yBound with n, nIn
+  have xAbsSum := Summable.of_nonnegative_le with xAbsSeq, summable, xNn, xLe
+  have yAbsSum := Summable.of_nonnegative_le with yAbsSeq, summable, yNn, yLe
+  have xSummable := Summable.of_abs_le with xs, summable, xBound
+  have ySummable := Summable.of_abs_le with ys, summable, yBound
+  obtain ⟨A, aIn, xSums⟩ := xSummable
+  obtain ⟨B, bIn, ySums⟩ := ySummable
+  have aR : Real(A) by exact aIn
+  have bR : Real(B) by exact bIn
+  have sumsAB := ComplexSumsTo.of_parts with sequence, xSums, ySums
+  have sEq := ComplexSumsTo.unique with sums, sumsAB
+  have xHas := RealHasSum.of_abs_summable at complexSequenceX(u), realAbsTerms(complexSequenceX(u)), A with xs, xAbsVal, xAbsSum, xSums
+  have yHas := RealHasSum.of_abs_summable at complexSequenceY(u), realAbsTerms(complexSequenceY(u)), B with ys, yAbsVal, yAbsSum, ySums
+  have xVals : ∀ i ∈ ℕ, complexSequenceX(u)(i) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with xs, hi
+  have yVals : ∀ i ∈ ℕ, complexSequenceY(u)(i) ∈ ℝ
+    intros i hi
+    exact FunctionBetween.apply_closed with ys, hi
+  have g1 : ∀ i ∈ ℕ, complexRealTerms(complexSequenceX(u))(i) = complexOfReal(complexSequenceX(u)(i))
+    intros i hi
+    have iNat := nat.omega.backward with hi
+    exact complexRealTerms.value with xs
+  have g2 : ∀ i ∈ ℕ, complexImagTerms(complexSequenceY(u))(i) = complexImagEmbed(complexSequenceY(u)(i))
+    intros i hi
+    have iNat := nat.omega.backward with hi
+    have yi := yVals with i, hi
+    rw [(complexImagTerms.value with ys), (complexImagEmbed.value with yi)]
+  have c1 := (ComplexHasSum.of_real at complexSequenceX(u), complexRealTerms(complexSequenceX(u)), ℕ, A with xVals, g1).backward with xHas
+  have c2 := ComplexHasSum.of_imag at complexSequenceY(u), complexImagTerms(complexSequenceY(u)), ℕ, B with yVals, g2, yHas
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have v1 : ∀ i ∈ ℕ, complexRealTerms(complexSequenceX(u))(i) ∈ Group.carrier(complexAdditiveGroup)
+    intros i hi
+    rw [c, (g1 with i, hi)]
+    exact FunctionBetween.apply_closed with complexOfReal.function, (xVals with i, hi)
+  have v2 : ∀ i ∈ ℕ, complexImagTerms(complexSequenceY(u))(i) ∈ Group.carrier(complexAdditiveGroup)
+    intros i hi
+    rw c
+    have iNat := nat.omega.backward with hi
+    rw (complexImagTerms.value with ys)
+    have yR : Real(complexSequenceY(u)(i)) by exact (yVals with i, hi)
+    exact complexCarrier.pair at realZero, complexSequenceY(u)(i)
+  have split : ∀ i ∈ ℕ, u(i) = Group.mul(complexAdditiveGroup)(complexRealTerms(complexSequenceX(u))(i), complexImagTerms(complexSequenceY(u))(i))
+    intros i hi
+    have iNat := nat.omega.backward with hi
+    have term := FunctionBetween.apply_closed with function, hi
+    obtain ⟨a, aReal, b, bReal, shape⟩ := complexCarrier.cases with term
+    rw [m, (g1 with i, hi), (complexImagTerms.value with ys), (complexSequenceX.value with sequence), (complexSequenceY.value with sequence), shape, Euclidean.x.pair, Euclidean.y.pair, (complexOfReal.value at a with aReal), complexAdd.pair]
+    have z1 : R[a + 0] = a by ring
+    have z2 : R[0 + b] = b by ring
+    rw [z1, z2]
+  unfold ComplexHasSum at c1
+  unfold ComplexHasSum at c2
+  have topC2 : TopologicalGroup(complexAdditiveGroup, complexSpace)
+    unfold complexSpace
+    exact topC
+  have total := HasSum.add at complexAdditiveGroup, complexSpace, complexRealTerms(complexSequenceX(u)), complexImagTerms(complexSequenceY(u)), u, ℕ, complexOfReal(A), complexImagEmbed(B) with topC2, abelianC, v1, v2, split, c1, c2
+  rw [m, (complexOfReal.value at A with aIn), (complexImagEmbed.value with bIn), complexAdd.pair] at total
+  have z1 : R[A + 0] = A by ring
+  have z2 : R[0 + B] = B by ring
+  rw [z1, z2, ← sEq] at total
+  unfold ComplexHasSum
+  exact total
+
+-- A complex family is summable exactly when its moduli are.
+theorem ComplexSummableFamily.iff_abs (f u I : Set)
+  requires values : ∀ i ∈ I, f(i) ∈ complexCarrier
+  requires moduli : ∀ i ∈ I, u(i) = complexAbs(f(i))
+  shows ComplexSummableFamily(f, I) ↔ RealSummable(u, I)
+proof
+  have ngC := complexAdditiveGroup.normed
+  obtain ⟨c, m⟩ := complexAdditiveGroup.parts
+  have abelianC := ngC.left
+  have topC := normTopology.topological_group at complexAdditiveGroup, complexAbs with ngC
+  have topC2 : TopologicalGroup(complexAdditiveGroup, complexSpace)
+    unfold complexSpace
+    exact topC
+  obtain ⟨abR, cR, mR, oR⟩ := realAdditiveGroup.parts
+  have topR := realAdditiveGroup.topological
+  have reV : ∀ i ∈ I, familyMap(complexReMap, f, I)(i) = complexRe(f(i))
+    intros i hi
+    rw [(familyMap.apply at complexReMap, f, I, i with hi), (complexReMap.value with (values with i, hi))]
+  have imV : ∀ i ∈ I, familyMap(complexImMap, f, I)(i) = complexIm(f(i))
+    intros i hi
+    rw [(familyMap.apply at complexImMap, f, I, i with hi), (complexImMap.value with (values with i, hi))]
+  have reR : ∀ i ∈ I, familyMap(complexReMap, f, I)(i) ∈ ℝ
+    intros i hi
+    rw (reV with i, hi)
+    exact complexRe.real with (values with i, hi)
+  have imR : ∀ i ∈ I, familyMap(complexImMap, f, I)(i) ∈ ℝ
+    intros i hi
+    rw (imV with i, hi)
+    exact complexIm.real with (values with i, hi)
+  constructor
+  . intro summ
+    unfold ComplexSummableFamily at summ
+    unfold SummableFamily at summ
+    obtain ⟨s, sIn, sum⟩ := summ
+    rw c at sIn
+    have sum2 : ComplexHasSum(f, I, s)
+      unfold ComplexHasSum
+      exact sum
+    have hRe := complexRe.hasSum_map with values, reV, sum2
+    have hIm := complexIm.hasSum_map with values, imV, sum2
+    have sRe : RealSummable(familyMap(complexReMap, f, I), I)
+      unfold RealSummable
+      unfold SummableFamily
+      refine ⟨complexRe(s), ?_, hRe⟩
+      rw cR
+      exact complexRe.real with sIn
+    have sIm : RealSummable(familyMap(complexImMap, f, I), I)
+      unfold RealSummable
+      unfold SummableFamily
+      refine ⟨complexIm(s), ?_, hIm⟩
+      rw cR
+      exact complexIm.real with sIn
+    have aReV : ∀ i ∈ I, familyMap(realAbs, familyMap(complexReMap, f, I), I)(i) = abs(familyMap(complexReMap, f, I)(i))
+      intros i hi
+      have r := reR with i, hi
+      have rR : Real(familyMap(complexReMap, f, I)(i)) by exact r
+      rw (familyMap.apply at realAbs, familyMap(complexReMap, f, I), I, i with hi)
+      unfold abs
+      rfl
+    have aImV : ∀ i ∈ I, familyMap(realAbs, familyMap(complexImMap, f, I), I)(i) = abs(familyMap(complexImMap, f, I)(i))
+      intros i hi
+      have r := imR with i, hi
+      have rR : Real(familyMap(complexImMap, f, I)(i)) by exact r
+      rw (familyMap.apply at realAbs, familyMap(complexImMap, f, I), I, i with hi)
+      unfold abs
+      rfl
+    have aRe := (RealSummable.iff_abs at familyMap(complexReMap, f, I), familyMap(realAbs, familyMap(complexReMap, f, I), I), I with reR, aReV).forward with sRe
+    have aIm := (RealSummable.iff_abs at familyMap(complexImMap, f, I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I with imR, aImV).forward with sIm
+    unfold RealSummable at aRe
+    unfold SummableFamily at aRe
+    unfold RealSummable at aIm
+    unfold SummableFamily at aIm
+    obtain ⟨A, AIn, hA⟩ := aRe
+    obtain ⟨B, BIn, hB⟩ := aIm
+    have vA : ∀ i ∈ I, familyMap(realAbs, familyMap(complexReMap, f, I), I)(i) ∈ Group.carrier(realAdditiveGroup)
+      intros i hi
+      rw [cR, (aReV with i, hi)]
+      have rR : Real(familyMap(complexReMap, f, I)(i)) by exact (reR with i, hi)
+      exact abs.real at familyMap(complexReMap, f, I)(i)
+    have vB : ∀ i ∈ I, familyMap(realAbs, familyMap(complexImMap, f, I), I)(i) ∈ Group.carrier(realAdditiveGroup)
+      intros i hi
+      rw [cR, (aImV with i, hi)]
+      have rR : Real(familyMap(complexImMap, f, I)(i)) by exact (imR with i, hi)
+      exact abs.real at familyMap(complexImMap, f, I)(i)
+    have hsum : ∀ i ∈ I, familyMap2(realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I)(i) = Group.mul(realAdditiveGroup)(familyMap(realAbs, familyMap(complexReMap, f, I), I)(i), familyMap(realAbs, familyMap(complexImMap, f, I), I)(i))
+      intros i hi
+      rw [mR, (familyMap2.apply at realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I, i with hi)]
+    have total := HasSum.add at realAdditiveGroup, realLine, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), familyMap2(realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I), I, A, B with topR, abR, vA, vB, hsum, hA, hB
+    have gS : RealSummable(familyMap2(realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I), I)
+      unfold RealSummable
+      unfold SummableFamily
+      refine ⟨Group.mul(realAdditiveGroup)(A, B), ?_, total⟩
+      have g := AbelianGroup.to_group with abR
+      exact Group.mul_mem at realAdditiveGroup, A, B with g, AIn, BIn
+    have uR : ∀ i ∈ I, u(i) ∈ ℝ
+      intros i hi
+      rw (moduli with i, hi)
+      exact FunctionBetween.apply_closed with complexAbs.function, (values with i, hi)
+    have bound : ∀ i ∈ I, abs(u(i)) ≤ familyMap2(realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I)(i)
+      intros i hi
+      have fi := values with i, hi
+      rw [(familyMap2.apply at realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I, i with hi), (aReV with i, hi), (aImV with i, hi), (reV with i, hi), (imV with i, hi), (moduli with i, hi)]
+      have nn := complexAbs.nonnegative with fi
+      have cR2 : Real(complexAbs(f(i))) by exact (FunctionBetween.apply_closed with complexAbs.function, fi)
+      rw (abs.of_nonnegative at complexAbs(f(i)) with nn)
+      exact complexAbs.le_abs_parts with fi
+    exact (RealSummable.of_abs_le at u, familyMap2(realAdd, familyMap(realAbs, familyMap(complexReMap, f, I), I), familyMap(realAbs, familyMap(complexImMap, f, I), I), I), I with uR, bound, gS).left
+  . intro summ
+    have bRe : ∀ i ∈ I, abs(familyMap(complexReMap, f, I)(i)) ≤ u(i)
+      intros i hi
+      rw [(reV with i, hi), (moduli with i, hi)]
+      exact complexAbs.re_le with (values with i, hi)
+    have bIm : ∀ i ∈ I, abs(familyMap(complexImMap, f, I)(i)) ≤ u(i)
+      intros i hi
+      rw [(imV with i, hi), (moduli with i, hi)]
+      exact complexAbs.im_le with (values with i, hi)
+    have sRe := (RealSummable.of_abs_le at familyMap(complexReMap, f, I), u, I with reR, bRe, summ).left
+    have sIm := (RealSummable.of_abs_le at familyMap(complexImMap, f, I), u, I with imR, bIm, summ).left
+    unfold RealSummable at sRe
+    unfold SummableFamily at sRe
+    unfold RealSummable at sIm
+    unfold SummableFamily at sIm
+    obtain ⟨A, AIn, hA⟩ := sRe
+    obtain ⟨B, BIn, hB⟩ := sIm
+    rw cR at AIn
+    rw cR at BIn
+    have aR : Real(A) by exact AIn
+    have bR : Real(B) by exact BIn
+    have hA2 : RealHasSum(familyMap(complexReMap, f, I), I, A)
+      unfold RealHasSum
+      exact hA
+    have hB2 : RealHasSum(familyMap(complexImMap, f, I), I, B)
+      unfold RealHasSum
+      exact hB
+    have g1 : ∀ i ∈ I, familyMap(complexOfReal, familyMap(complexReMap, f, I), I)(i) = complexOfReal(familyMap(complexReMap, f, I)(i))
+      intros i hi
+      exact familyMap.apply at complexOfReal, familyMap(complexReMap, f, I), I, i with hi
+    have g2 : ∀ i ∈ I, familyMap(complexImagEmbed, familyMap(complexImMap, f, I), I)(i) = complexImagEmbed(familyMap(complexImMap, f, I)(i))
+      intros i hi
+      exact familyMap.apply at complexImagEmbed, familyMap(complexImMap, f, I), I, i with hi
+    have c1 := (ComplexHasSum.of_real at familyMap(complexReMap, f, I), familyMap(complexOfReal, familyMap(complexReMap, f, I), I), I, A with reR, g1).backward with hA2
+    have c2 := ComplexHasSum.of_imag at familyMap(complexImMap, f, I), familyMap(complexImagEmbed, familyMap(complexImMap, f, I), I), I, B with imR, g2, hB2
+    have v1 : ∀ i ∈ I, familyMap(complexOfReal, familyMap(complexReMap, f, I), I)(i) ∈ Group.carrier(complexAdditiveGroup)
+      intros i hi
+      rw [c, (g1 with i, hi)]
+      exact FunctionBetween.apply_closed with complexOfReal.function, (reR with i, hi)
+    have v2 : ∀ i ∈ I, familyMap(complexImagEmbed, familyMap(complexImMap, f, I), I)(i) ∈ Group.carrier(complexAdditiveGroup)
+      intros i hi
+      rw [c, (g2 with i, hi)]
+      exact FunctionBetween.apply_closed with complexImagEmbed.function, (imR with i, hi)
+    have split : ∀ i ∈ I, f(i) = Group.mul(complexAdditiveGroup)(familyMap(complexOfReal, familyMap(complexReMap, f, I), I)(i), familyMap(complexImagEmbed, familyMap(complexImMap, f, I), I)(i))
+      intros i hi
+      have fi := values with i, hi
+      obtain ⟨a, aReal, b, bReal, shape⟩ := complexCarrier.cases with fi
+      have ri := imR with i, hi
+      rw [m, (g1 with i, hi), (g2 with i, hi), (complexImagEmbed.value with ri), (reV with i, hi), (imV with i, hi), shape]
+      have re1 : complexRe((a, b)) = a
+        unfold complexRe
+        rw fst.pair
+      have im1 : complexIm((a, b)) = b
+        unfold complexIm
+        rw snd.pair
+      rw [re1, im1, (complexOfReal.value at a with aReal), complexAdd.pair]
+      have z1 : R[a + 0] = a by ring
+      have z2 : R[0 + b] = b by ring
+      rw [z1, z2]
+    unfold ComplexHasSum at c1
+    unfold ComplexHasSum at c2
+    have total := HasSum.add at complexAdditiveGroup, complexSpace, familyMap(complexOfReal, familyMap(complexReMap, f, I), I), familyMap(complexImagEmbed, familyMap(complexImMap, f, I), I), f, I, complexOfReal(A), complexImagEmbed(B) with topC2, abelianC, v1, v2, split, c1, c2
+    unfold ComplexSummableFamily
+    unfold SummableFamily
+    refine ⟨Group.mul(complexAdditiveGroup)(complexOfReal(A), complexImagEmbed(B)), ?_, total⟩
+    have g := AbelianGroup.to_group with abelianC
+    have oa : complexOfReal(A) ∈ Group.carrier(complexAdditiveGroup)
+      rw c
+      exact FunctionBetween.apply_closed with complexOfReal.function, AIn
+    have ob : complexImagEmbed(B) ∈ Group.carrier(complexAdditiveGroup)
+      rw c
+      exact FunctionBetween.apply_closed with complexImagEmbed.function, BIn
+    exact Group.mul_mem at complexAdditiveGroup, complexOfReal(A), complexImagEmbed(B) with g, oa, ob
+
+end NormedGroups
+
+-- Section: Integer powers of reals
+-- The integer power x^k of a nonzero real, k = n − m ∈ ℤ (zpow on ℝ).
+defunique realZpow (x k : Set) (y ∈ ℝ) :=
+  ∃ n ∈ ℕ, ∃ m ∈ ℕ, k = integerClass(n, m) ∧
+    realMulValue(y, realPow(x, m)) = realPow(x, n)
+requires real : x ∈ ℝ
+requires nonzero : x ≠ realZero
+requires integer : k ∈ ℤ
+proof
+  sorry
+uniqueness
+  sorry
+
+-- Section: The completion of a normed field
+-- For a normed field (K, ‖·‖) (an absolute value, Mathlib's
+-- AbsoluteValue with CauSeq.Completion.Cauchy): the Cauchy sequences, the
+-- relation u ~ v when ‖u(n) − v(n)‖ → 0, and the set of classes.
+def normCauchySeqs (K norm : Set) : Set :=
+  { u ∈ functionSpace(ℕ, Ring.carrier(K)) | ∀ ε ∈ ℝ, realZero < ε →
+    (∃ N ∈ ℕ, ∀ m ∈ ℕ, ∀ n ∈ ℕ, N ≤ m → N ≤ n →
+      norm(Ring.sub(K, u(m), u(n))) < ε) }
+
+def normCauchyEquiv (K norm : Set) : Set :=
+  { q ∈ normCauchySeqs(K, norm) × normCauchySeqs(K, norm) |
+    ∀ ε ∈ ℝ, realZero < ε → (∃ N ∈ ℕ, ∀ n ∈ ℕ, N ≤ n →
+      norm(Ring.sub(K, fst(q)(n), snd(q)(n))) < ε) }
+
+def normCompletionCarrier (K norm : Set) : Set :=
+  normCauchySeqs(K, norm) ⧸ normCauchyEquiv(K, norm)
+
+-- The class of a Cauchy sequence.
+def normClass (K norm u : Set) : Set :=
+  ⟦u⟧[normCauchySeqs(K, norm), normCauchyEquiv(K, norm)]
+
+-- Termwise operations on sequences, and constant sequences.
+def seqAdd (K u v : Set) : Set := { (n, call2(Ring.add(K), u(n), v(n))) | n ∈ ℕ }
+def seqMul (K u v : Set) : Set := { (n, call2(Ring.mul(K), u(n), v(n))) | n ∈ ℕ }
+def seqNeg (K u : Set) : Set := { (n, apply(Ring.neg(K), u(n))) | n ∈ ℕ }
+def seqConst (a : Set) : Set := { (n, a) | n ∈ ℕ }
+def seqNorm (norm u : Set) : Set := { (n, norm(u(n))) | n ∈ ℕ }
+
+-- The operations on classes, each defined on representatives.
+def normCompletionAdd (K norm : Set) : Set :=
+  { q ∈ (normCompletionCarrier(K, norm) × normCompletionCarrier(K, norm)) ×
+      normCompletionCarrier(K, norm) |
+    ∃ u ∈ normCauchySeqs(K, norm), ∃ v ∈ normCauchySeqs(K, norm),
+      q = ((normClass(K, norm, u), normClass(K, norm, v)),
+        normClass(K, norm, seqAdd(K, u, v))) }
+
+def normCompletionMul (K norm : Set) : Set :=
+  { q ∈ (normCompletionCarrier(K, norm) × normCompletionCarrier(K, norm)) ×
+      normCompletionCarrier(K, norm) |
+    ∃ u ∈ normCauchySeqs(K, norm), ∃ v ∈ normCauchySeqs(K, norm),
+      q = ((normClass(K, norm, u), normClass(K, norm, v)),
+        normClass(K, norm, seqMul(K, u, v))) }
+
+def normCompletionNeg (K norm : Set) : Set :=
+  { q ∈ normCompletionCarrier(K, norm) × normCompletionCarrier(K, norm) |
+    ∃ u ∈ normCauchySeqs(K, norm),
+      q = (normClass(K, norm, u), normClass(K, norm, seqNeg(K, u))) }
+
+-- The completion as a ring (a field when K is one).
+def normCompletion (K norm : Set) : Set :=
+  Ring.mk(normCompletionCarrier(K, norm), normCompletionAdd(K, norm),
+    normClass(K, norm, seqConst(Ring.zero(K))), normCompletionNeg(K, norm),
+    normCompletionMul(K, norm), normClass(K, norm, seqConst(Ring.one(K))))
+
+-- The extended norm ‖[u]‖ = lim ‖u(n)‖, as a graph, and the embedding
+-- a ↦ [(a, a, …)] of K (UniformSpace.Completion.coe).
+def normCompletionNorm (K norm : Set) : Set :=
+  { q ∈ normCompletionCarrier(K, norm) × ℝ | ∃ u ∈ normCauchySeqs(K, norm),
+    fst(q) = normClass(K, norm, u) ∧ ConvergesIn(ℝ, realDistance, seqNorm(norm, u), snd(q)) }
+
+def normCompletionOf (K norm : Set) : Set :=
+  { (a, normClass(K, norm, seqConst(a))) | a ∈ Ring.carrier(K) }
+
+-- (K, ‖·‖) is complete: every Cauchy sequence converges (CompleteSpace).
+predicate NormComplete (K norm : Set) :=
+  Complete(normMetric(Ring.additive(K), norm))
+
+-- The norm is nonarchimedean: ‖x + y‖ ≤ max(‖x‖, ‖y‖) (IsUltrametricDist,
+-- IsNonarchimedean of the norm).
+predicate NonarchimedeanNorm (K norm : Set) :=
+  NormedRing(K, norm) ∧ (∀ x ∈ Ring.carrier(K), ∀ y ∈ Ring.carrier(K),
+    norm(call2(Ring.add(K), x, y)) ≤ norm(x) ∨ norm(call2(Ring.add(K), x, y)) ≤ norm(y))
+
+-- Section: Laws of the completion
+section Completions
+variable (K norm : Set)
+hypothesis normed : NormedField(K, norm)
+
+-- Equivalence of Cauchy sequences (CauSeq.equiv) is an equivalence
+-- relation on the Cauchy sequences.
+theorem normCauchyEquiv.equivalence
+  shows Equivalence(normCauchySeqs(K, norm), normCauchyEquiv(K, norm))
+proof
+  sorry
+
+-- The completion is a field and the extended norm a field norm
+-- (CauSeq.Completion.Cauchy.field, UniformSpace.Completion normed field).
+theorem normCompletion.normed_field
+  shows NormedField(normCompletion(K, norm), normCompletionNorm(K, norm))
+proof
+  sorry
+
+-- The norm of a class is the limit of the norms of a representative.
+theorem normCompletionNorm.class (u : Set)
+  requires cauchy : u ∈ normCauchySeqs(K, norm)
+  shows ConvergesIn(ℝ, realDistance, seqNorm(norm, u),
+    normCompletionNorm(K, norm)(normClass(K, norm, u)))
+proof
+  sorry
+
+-- The completion is complete (UniformSpace.Completion.completeSpace).
+theorem normCompletion.complete
+  shows NormComplete(normCompletion(K, norm), normCompletionNorm(K, norm))
+proof
+  sorry
+
+-- The embedding is an isometric ring homomorphism with dense image
+-- (UniformSpace.Completion.coeRingHom, norm_coe, denseRange_coe).
+theorem normCompletionOf.ring_hom
+  shows (normCompletionOf(K, norm) : K →+* normCompletion(K, norm))
+proof
+  sorry
+
+theorem normCompletionOf.isometry (a : Set)
+  requires member : a ∈ Ring.carrier(K)
+  shows normCompletionNorm(K, norm)(normCompletionOf(K, norm)(a)) = norm(a)
+proof
+  sorry
+
+theorem normCompletionOf.dense
+  shows Dense(normTopology(Ring.additive(normCompletion(K, norm)), normCompletionNorm(K, norm)),
+    functionImage(normCompletionOf(K, norm), Ring.carrier(K),
+      Ring.carrier(normCompletion(K, norm))))
+proof
+  sorry
+
+-- A nonarchimedean norm stays nonarchimedean on the completion
+-- (IsUltrametricDist of UniformSpace.Completion).
+theorem normCompletion.nonarchimedean
+  requires ultrametric : NonarchimedeanNorm(K, norm)
+  shows NonarchimedeanNorm(normCompletion(K, norm), normCompletionNorm(K, norm))
+proof
+  sorry
+
+-- The universal property (UniformSpace.Completion.extension): an
+-- isometric ring homomorphism f : K → L into a complete normed field
+-- extends uniquely to an isometric ring homomorphism of the completion.
+theorem normCompletion.extension (L normL f : Set)
+  requires target : NormedField(L, normL)
+  requires complete : NormComplete(L, normL)
+  requires hom : (f : K →+* L)
+  requires isometric : ∀ a ∈ Ring.carrier(K), normL(f(a)) = norm(a)
+  shows ∃ g, (g : normCompletion(K, norm) →+* L) ∧
+    (∀ a ∈ Ring.carrier(K), g(normCompletionOf(K, norm)(a)) = f(a)) ∧
+    (∀ x ∈ Ring.carrier(normCompletion(K, norm)),
+      normL(g(x)) = normCompletionNorm(K, norm)(x)) ∧
+    (∀ h, (h : normCompletion(K, norm) →+* L) →
+      (∀ a ∈ Ring.carrier(K), h(normCompletionOf(K, norm)(a)) = f(a)) →
+      (∀ x ∈ Ring.carrier(normCompletion(K, norm)), h(x) = g(x)))
+proof
+  sorry
+
+end Completions

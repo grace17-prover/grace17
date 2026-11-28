@@ -1,0 +1,371 @@
+-- Period lattices of ℂ and the CM data of an imaginary quadratic field
+-- K = ℚ(√−d): the lattice ℤω₁ + ℤω₂ and its area, the Weierstrass
+-- function ℘ and the invariants g₂, g₃, the hermitian form H(l, z) =
+-- (π/A) l̄ z, its Riemann form, multipliers and theta functions; isogenies;
+-- the integers of K inside ℂ and the automorphisms of ℂ over K; CM data
+-- (Λ, t, a₁), their sections of degree m and their Galois conjugates.
+-- Source: grh-compact/src/Lib/CM/Sigma/SigmaFunction.lean (PeriodPair.area,
+-- PeriodPair.hermitianForm, PeriodPair.IsIsogeny, sigmaSign,
+-- riemannForm_hermitianForm, area_pos, exists_isIsogeny_of_mul_mem_lattice,
+-- eq_zero_of_entire_mul_eq_zero, IsAppellHumbert.exists_apply_ne_zero,
+-- IsAppellHumbert.finrank_thetaSpace_nsmul,
+-- IsAppellHumbert.thetaSpace_two_eq_span), Lib/CM/Sigma/CurveTheta.lean
+-- (quadGen, quadInt, CMLattice, CMLattice.Λ, CMLattice.multiplier,
+-- CMLattice.sections, exists_lattice_of_g₂_g₃,
+-- PeriodPair.exists_weierstrassP_eq_of_cubic, disc_eq),
+-- Lib/CM/MainTheorem/ConjugateCurve.lean (galConjugate), with
+-- Lib/Shimura/Uniformisation/LieExponential.lean (thetaSpace,
+-- riemannForm, IsAppellHumbert).
+-- Encoding. A period pair is the record of its two generators ω₁, ω₂
+-- (PeriodPairOf); every function of the lattice is a function of the
+-- pair. The source's real-complex forms are specialised to mH, m ∈ ℕ: the
+-- theta space of (mH, χ) is the set of entire f with
+-- f(z + l) = χ(l) exp(m(π/A)(z l̄ + |l|²/2)) f(z), l ∈ Λ, a subset of the
+-- functions ℂ → ℂ (with their ℂ-module, coordinateModule). An
+-- Appell–Humbert multiplier for mH is a function χ : Λ → ℂ with |χ| = 1
+-- and χ(l + l′) = χ(l)χ(l′) exp(πi m E(l′, l)). A CM datum is the record
+-- C = (ω₁, ω₂, t, a₁) with IsCMLattice; the source's conjugate curve
+-- galConjugate (a chosen datum with a₁(C′) = σ(a₁(C))) is the relation
+-- IsGalConjugate. The definitions of the integers of K, the period
+-- lattices, ℘, g₂, CM data and Aut(ℂ/K) are those layer 5 uses (moved
+-- here from GRH.Proof.Curve.PeriodDefs and GRH.Proof.Forward.Jets under the
+-- same names).
+-- Part of the GRH blueprint (layer 4, Lib/CM, stage S2).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.CM.Lattice
+import GRH.Adelic.CuspForms
+import GRH.Calculus.Analytic
+import GRH.Proof.Forward
+
+section Lattice
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: The automorphisms of ℂ and the integers of K
+-- The field automorphisms σ : ℂ ≃+* ℂ.
+def complexAutomorphisms : Set :=
+  { σ ∈ 𝒫(complexCarrier × complexCarrier) |
+    RingIso(σ, complexRing, complexRing) }
+
+-- i√d, the generator (up to the factor 2 and a shift by 1) of
+-- K = ℚ(√−d) inside ℂ.
+def sqrtNegD (d : Nat) : Set :=
+  complexMul(complexImaginaryUnit, complexOfReal(realSqrt(realNat(d))))
+
+-- Gal(ℂ/K): the automorphisms of ℂ fixing K = ℚ(√−d), that is, fixing
+-- i√d (they fix ℚ already).
+def galoisOverK (d : Nat) : Set :=
+  { σ ∈ complexAutomorphisms | σ(sqrtNegD(d)) = sqrtNegD(d) }
+
+-- CurveTheta.lean, quadGen: ω = (1 + i√d)/2.
+def quadGen (d : Nat) : Set := complexDiv(ℂ[1 + sqrtNegD(d)], ℂ[2])
+
+-- The integer a as a complex number.
+def intComplex (a : Set) : Set := complexOfReal(realInt(a))
+
+-- CurveTheta.lean, quadInt d: the image of 𝓞_K in ℂ, 𝓞_K = ℤ[ω] since
+-- d ≡ 3 mod 4.
+def quadIntegers (d : Nat) : Set :=
+  { z ∈ complexCarrier | ∃ a ∈ ℤ, ∃ b ∈ ℤ,
+    z = ℂ[intComplex(a) + intComplex(b) * quadGen(d)] }
+
+-- QuadField.scaledIdeal d (Ω, 1): the 𝓞_K-module Ω𝓞_K ⊂ ℂ.
+def scaledIntegers (d : Nat, Ω : Set) : Set :=
+  { z ∈ complexCarrier | ∃ a ∈ quadIntegers(d), z = ℂ[Ω * a] }
+
+-- Section: Period lattices
+-- PeriodPair: the lattice ℤω₁ + ℤω₂ of two ℝ-independent complex numbers
+-- (Im(ω̄₁ω₂) ≠ 0).
+predicate PeriodPairOf (ω1 ω2 : Set) :=
+  ω1 ∈ complexCarrier ∧ ω2 ∈ complexCarrier ∧
+  complexIm(ℂ[complexConj(ω1) * ω2]) ≠ realZero
+
+def periodLattice (ω1 ω2 : Set) : Set :=
+  { z ∈ complexCarrier | ∃ a ∈ ℤ, ∃ b ∈ ℤ,
+    z = ℂ[intComplex(a) * ω1 + intComplex(b) * ω2] }
+
+-- SigmaFunction.lean, PeriodPair.area: |Im(ω̄₁ω₂)|.
+def periodArea (ω1 ω2 : Set) : Set := abs(complexIm(ℂ[complexConj(ω1) * ω2]))
+
+-- The Weierstrass function ℘_Λ(z) = 1/z² + Σ'_{l ∈ Λ∖0} (1/(z − l)² − 1/l²)
+-- (Mathlib's PeriodPair.weierstrassP, an unconditional sum), and the
+-- invariant g₂ = 60 Σ'_{l ≠ 0} l⁻⁴ (PeriodPair.g₂).
+def weierstrassTerms (Λ z : Set) : Set :=
+  { (l, ℂ[complexInv(ℂ[(z - l) * (z - l)]) - complexInv(ℂ[l * l])]) |
+    l ∈ Λ ∖ {complexZero} }
+
+def weierstrassValue (Λ z : Set) : Set :=
+  ℂ[complexInv(ℂ[z * z]) + complexTsum(weierstrassTerms(Λ, z), Λ ∖ {complexZero})]
+
+def eisensteinFourTerms (Λ : Set) : Set :=
+  { (l, complexInv(ℂ[l * l * l * l])) | l ∈ Λ ∖ {complexZero} }
+
+def weierstrassG2 (Λ : Set) : Set :=
+  ℂ[60 * complexTsum(eisensteinFourTerms(Λ), Λ ∖ {complexZero})]
+
+-- PeriodPair.g₃ = 140 Σ'_{l ≠ 0} l⁻⁶.
+def eisensteinSixTerms (Λ : Set) : Set :=
+  { (l, complexInv(ℂ[l * l * l * l * l * l])) | l ∈ Λ ∖ {complexZero} }
+
+def weierstrassG3 (Λ : Set) : Set :=
+  ℂ[140 * complexTsum(eisensteinSixTerms(Λ), Λ ∖ {complexZero})]
+
+-- ℘′_Λ(z) = −2 Σ_{l ∈ Λ} (z − l)^{−3}.
+def weierstrassDerivTerms (Λ z : Set) : Set :=
+  { (l, complexInv(ℂ[(z - l) * (z - l) * (z - l)])) | l ∈ Λ }
+
+def weierstrassDeriv (Λ z : Set) : Set :=
+  ℂ[-2 * complexTsum(weierstrassDerivTerms(Λ, z), Λ)]
+
+-- Section: The hermitian form, multipliers and theta functions
+-- PeriodPair.hermitianForm: H(l, z) = (π/A) z l̄, and the exponent
+-- m(H(l, z) + H(l, l)/2) of the factor of automorphy of mH.
+def latticeAutExponent (ω1 ω2 m l z : Set) : Set :=
+  ℂ[complexOfReal(R[realNat(m) * realPi / periodArea(ω1, ω2)]) *
+    (z * complexConj(l) + complexOfReal(R[complexAbs(l) ^ 2 / 2]))]
+
+-- riemannForm_hermitianForm: E(u, v) = Im(ū v)/A.
+def latticeRiemannForm (ω1 ω2 u v : Set) : Set :=
+  R[complexIm(ℂ[complexConj(u) * v]) / periodArea(ω1, ω2)]
+
+-- exp(2πi x) for real x (riemannPhase).
+def phaseOf (x : Set) : Set :=
+  complexExp(ℂ[complexImaginaryUnit * complexOfReal(R[2 * realPi * x])])
+
+-- IsAppellHumbert (mH) χ: |χ| = 1 on Λ and χ(l + l′) =
+-- χ(l)χ(l′) exp(πi m E(l′, l)).
+predicate LatticeMultiplier (ω1 ω2 m χ : Set) :=
+  PeriodPairOf(ω1, ω2) ∧ m ∈ ℕ ∧ (χ : periodLattice(ω1, ω2) → complexCarrier) ∧
+  (∀ l ∈ periodLattice(ω1, ω2), complexAbs(χ(l)) = realOne) ∧
+  (∀ l ∈ periodLattice(ω1, ω2), ∀ l2 ∈ periodLattice(ω1, ω2),
+    χ(ℂ[l + l2]) = ℂ[χ(l) * χ(l2) *
+      complexExp(ℂ[complexImaginaryUnit *
+        complexOfReal(R[realPi * realNat(m) * latticeRiemannForm(ω1, ω2, l2, l)])])])
+
+-- RealComplexForm.thetaSpace (mH) χ: the entire f with
+-- f(z + l) = χ(l) exp(m(H(l, z) + H(l, l)/2)) f(z) for l ∈ Λ.
+def latticeThetaSpace (ω1 ω2 m χ : Set) : Set :=
+  { f ∈ functionSpace(complexCarrier, complexCarrier) |
+    HolomorphicOn(f, complexCarrier) ∧
+    ∀ l ∈ periodLattice(ω1, ω2), ∀ z ∈ complexCarrier,
+      f(ℂ[z + l]) = ℂ[χ(l) * complexExp(latticeAutExponent(ω1, ω2, m, l, z)) * f(z)] }
+
+-- The functions ℂ → ℂ as a ℂ-module, and the theta space as a submodule.
+def entireFunctionModule : Set := coordinateModule(complexRing, complexCarrier)
+
+def latticeThetaModule (ω1 ω2 m χ : Set) : Set :=
+  submoduleModule(entireFunctionModule, complexRing, latticeThetaSpace(ω1, ω2, m, χ))
+
+-- sigmaSign: 1 if w/2 ∈ Λ and −1 otherwise, and the multiplier l ↦ sigmaSign l.
+def sigmaSign (Λ w : Set) : Set :=
+  ⋃({ a ∈ complexCarrier | (complexDiv(w, ℂ[2]) ∈ Λ ∧ a = complexOne) ∨
+    (complexDiv(w, ℂ[2]) ∉ Λ ∧ a = ℂ[-1]) })
+
+def sigmaSignMap (ω1 ω2 : Set) : Set :=
+  { (l, sigmaSign(periodLattice(ω1, ω2), l)) | l ∈ periodLattice(ω1, ω2) }
+
+-- χ^m as a function on Λ.
+def multiplierPow (ω1 ω2 χ : Set, m : Nat) : Set :=
+  { (l, ℂ[χ(l) ^ m]) | l ∈ periodLattice(ω1, ω2) }
+
+-- PeriodPair.IsIsogeny L M a N: aΛ_L ⊂ Λ_M and a ā area(L) = N area(M).
+predicate IsLatticeIsogeny (ω1 ω2 η1 η2 a N : Set) :=
+  a ∈ complexCarrier ∧ N ∈ ℕ ∧
+  (∀ x ∈ periodLattice(ω1, ω2), ℂ[a * x] ∈ periodLattice(η1, η2)) ∧
+  R[complexAbs(a) ^ 2 * periodArea(ω1, ω2)] = R[realNat(N) * periodArea(η1, η2)]
+
+-- Section: CM data
+-- CurveTheta.lean, CMLattice d: a period pair (ω₁, ω₂), a point t and a₁.
+structure CMCurve
+  | omega1 omega2 t a1 : Set
+
+-- The lattice Λ of the datum (CMLattice.Λ, and CMLattice.latticeModule as a
+-- set).
+def cmLattice (C : Set) : Set := periodLattice(C.omega1, C.omega2)
+
+-- CurveTheta.lean, CMLattice d: g₂ = 12℘(t)² − 4, 𝓞_K Λ ⊂ Λ, t + t ∈ Λ,
+-- t ∉ Λ, ωt ∉ Λ and ω̄t ∉ Λ, and a₁² = 12℘(t).
+predicate IsCMLattice (d : Nat, C : Set) :=
+  CMCurve.Data(C) ∧ PeriodPairOf(C.omega1, C.omega2) ∧
+  C.t ∈ complexCarrier ∧ C.a1 ∈ complexCarrier ∧
+  weierstrassG2(cmLattice(C)) =
+    ℂ[12 * (weierstrassValue(cmLattice(C), C.t) *
+      weierstrassValue(cmLattice(C), C.t)) - 4] ∧
+  (∀ a ∈ quadIntegers(d), ∀ x ∈ cmLattice(C), ℂ[a * x] ∈ cmLattice(C)) ∧
+  ℂ[C.t + C.t] ∈ cmLattice(C) ∧ C.t ∉ cmLattice(C) ∧
+  ℂ[quadGen(d) * C.t] ∉ cmLattice(C) ∧
+  ℂ[complexConj(quadGen(d)) * C.t] ∉ cmLattice(C) ∧
+  ℂ[C.a1 * C.a1] = ℂ[12 * weierstrassValue(cmLattice(C), C.t)]
+
+-- The area of the lattice of a CM datum.
+def cmArea (C : Set) : Set := periodArea(C.omega1, C.omega2)
+
+-- ConjugateCurve.lean, exists_galConjugate and galConjugate: a conjugate
+-- of C under σ ∈ Aut(ℂ/K) is a CM datum C′ for d with a₁(C′) = σ(a₁(C)).
+predicate IsGalConjugate (d : Nat, σ C Cσ : Set) :=
+  IsCMLattice(d, Cσ) ∧ Cσ.a1 = σ(C.a1)
+
+-- CurveTheta.lean, CMLattice.multiplier: l ↦ sigmaSign(l) exp(2πi E(l, t)).
+def cmMultiplier (C : Set) : Set :=
+  { (l, ℂ[sigmaSign(cmLattice(C), l) *
+      phaseOf(latticeRiemannForm(C.omega1, C.omega2, l, C.t))]) | l ∈ cmLattice(C) }
+
+-- CurveTheta.lean, CMLattice.sections m: the theta functions of (mH, χ^m).
+def cmSections (C : Set, m : Nat) : Set :=
+  latticeThetaSpace(C.omega1, C.omega2, m, multiplierPow(C.omega1, C.omega2, cmMultiplier(C), m))
+
+-- PeriodPair.IsIsogeny between the lattices of two CM data.
+predicate IsCMIsogeny (C D a N : Set) :=
+  IsLatticeIsogeny(C.omega1, C.omega2, D.omega1, D.omega2, a, N)
+
+-- Section: Facts
+-- SigmaFunction.lean, area_pos.
+theorem periodArea.pos (ω1 ω2 : Set)
+  requires pair : PeriodPairOf(ω1, ω2)
+  shows realZero < periodArea(ω1, ω2)
+proof
+  sorry
+
+-- SigmaFunction.lean, exists_isIsogeny_of_mul_mem_lattice: if aΛ ⊂ Λ′ then
+-- a ā area(Λ) = N area(Λ′) for a natural N.
+theorem IsLatticeIsogeny.exists (ω1 ω2 η1 η2 a : Set)
+  requires pair : PeriodPairOf(ω1, ω2)
+  requires pair2 : PeriodPairOf(η1, η2)
+  requires ha : a ∈ complexCarrier
+  requires sub : ∀ x ∈ periodLattice(ω1, ω2), ℂ[a * x] ∈ periodLattice(η1, η2)
+  shows ∃ N ∈ ℕ, IsLatticeIsogeny(ω1, ω2, η1, η2, a, N)
+proof
+  sorry
+
+-- SigmaFunction.lean, eq_zero_of_entire_mul_eq_zero (on ℂ): if fg = 0 for
+-- entire f, g and f ≠ 0, then g = 0.
+theorem entire.eq_zero_of_mul (f g : Set)
+  requires hf : HolomorphicOn(f, complexCarrier)
+  requires hg : HolomorphicOn(g, complexCarrier)
+  requires product : ∀ z ∈ complexCarrier, ℂ[f(z) * g(z)] = complexZero
+  requires nonzero : ∃ z ∈ complexCarrier, f(z) ≠ complexZero
+  shows ∀ z ∈ complexCarrier, g(z) = complexZero
+proof
+  sorry
+
+-- SigmaFunction.lean, IsAppellHumbert.finrank_thetaSpace_nsmul (for the
+-- form H of the lattice): the theta space of (mH, χ^m) has dimension m.
+theorem latticeThetaSpace.finrank (ω1 ω2 χ : Set) (m : Nat)
+  requires multiplier : LatticeMultiplier(ω1, ω2, (1:N), χ)
+  requires positive : (0:N) < m
+  shows FiniteDimensional(latticeThetaModule(ω1, ω2, m, multiplierPow(ω1, ω2, χ, m)),
+      complexRing) ∧
+    finrank(latticeThetaModule(ω1, ω2, m, multiplierPow(ω1, ω2, χ, m)), complexRing) = m
+proof
+  sorry
+
+-- SigmaFunction.lean, IsAppellHumbert.exists_apply_ne_zero: for m ≥ 2 the
+-- theta functions of (mH, χ^m) have no common zero.
+theorem latticeThetaSpace.exists_ne_zero (ω1 ω2 χ z : Set) (m : Nat)
+  requires multiplier : LatticeMultiplier(ω1, ω2, (1:N), χ)
+  requires two : (1:N) < m
+  requires hz : z ∈ complexCarrier
+  shows ∃ f ∈ latticeThetaSpace(ω1, ω2, m, multiplierPow(ω1, ω2, χ, m)), f(z) ≠ complexZero
+proof
+  sorry
+
+-- The function Q = ℘f² off Λ, f′² on Λ.
+def wpSquareValue (ω1 ω2 f z : Set) : Set :=
+  ⋃({ a ∈ complexCarrier |
+    (z ∈ periodLattice(ω1, ω2) ∧ a = ℂ[complexDeriv(f, complexCarrier)(z) *
+      complexDeriv(f, complexCarrier)(z)]) ∨
+    (z ∉ periodLattice(ω1, ω2) ∧
+      a = ℂ[weierstrassValue(periodLattice(ω1, ω2), z) * f(z) * f(z)]) })
+
+def wpSquareSection (ω1 ω2 f : Set) : Set :=
+  { (z, wpSquareValue(ω1, ω2, f, z)) | z ∈ complexCarrier }
+
+def squareFunction (f : Set) : Set := { (z, ℂ[f(z) * f(z)]) | z ∈ complexCarrier }
+
+-- SigmaFunction.lean, IsAppellHumbert.thetaSpace_two_eq_span: a nonzero
+-- theta function f of (H, χ) with f(0) = 0 has simple zeros exactly on Λ,
+-- and the theta functions of (2H, χ²) are the combinations of ℘f² and f².
+theorem latticeThetaSpace.two_eq_span (ω1 ω2 χ f : Set)
+  requires multiplier : LatticeMultiplier(ω1, ω2, (1:N), χ)
+  requires hf : f ∈ latticeThetaSpace(ω1, ω2, (1:N), χ)
+  requires nonzero : ∃ z ∈ complexCarrier, f(z) ≠ complexZero
+  requires zero : f(complexZero) = complexZero
+  shows (∀ z ∈ complexCarrier, f(z) = complexZero ↔ z ∈ periodLattice(ω1, ω2)) ∧
+    (∀ z ∈ periodLattice(ω1, ω2), complexDeriv(f, complexCarrier)(z) ≠ complexZero) ∧
+    (∀ g, g ∈ latticeThetaSpace(ω1, ω2, (2:N), multiplierPow(ω1, ω2, χ, (2:N))) ↔
+      (∃ a ∈ complexCarrier, ∃ b ∈ complexCarrier, g ∈ functionSpace(complexCarrier, complexCarrier) ∧
+        ∀ z ∈ complexCarrier,
+          g(z) = ℂ[a * wpSquareSection(ω1, ω2, f)(z) + b * squareFunction(f)(z)]))
+proof
+  sorry
+
+-- The sign multiplier is an Appell–Humbert multiplier for H
+-- (isAppellHumbert_hermitianForm), and so is the multiplier of a CM datum
+-- (isAppellHumbert_multiplier).
+theorem sigmaSignMap.multiplier (ω1 ω2 : Set)
+  requires pair : PeriodPairOf(ω1, ω2)
+  shows LatticeMultiplier(ω1, ω2, (1:N), sigmaSignMap(ω1, ω2))
+proof
+  sorry
+
+theorem cmMultiplier.multiplier (C : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  shows LatticeMultiplier(C.omega1, C.omega2, (1:N), cmMultiplier(C))
+proof
+  sorry
+
+-- CurveTheta.lean, exists_lattice_of_g₂_g₃: for a³ − 27b² ≠ 0 some period
+-- lattice has g₂ = a and g₃ = b.
+theorem periodLattice.exists_of_invariants (a b : Set)
+  requires ha : a ∈ complexCarrier
+  requires hb : b ∈ complexCarrier
+  requires disc : ℂ[a * a * a - 27 * (b * b)] ≠ complexZero
+  shows ∃ ω1 ∈ complexCarrier, ∃ ω2 ∈ complexCarrier, PeriodPairOf(ω1, ω2) ∧ weierstrassG2(periodLattice(ω1, ω2)) = a ∧
+    weierstrassG3(periodLattice(ω1, ω2)) = b
+proof
+  sorry
+
+-- CurveTheta.lean, PeriodPair.exists_weierstrassP_eq_of_cubic: every point
+-- of y² = 4x³ − g₂x − g₃ is (℘(z), ℘′(z)) for some z ∉ Λ.
+theorem weierstrassValue.surjective_cubic (ω1 ω2 x y : Set)
+  requires pair : PeriodPairOf(ω1, ω2)
+  requires hx : x ∈ complexCarrier
+  requires hy : y ∈ complexCarrier
+  requires cubic : ℂ[y * y] = ℂ[4 * (x * x * x) - weierstrassG2(periodLattice(ω1, ω2)) * x -
+    weierstrassG3(periodLattice(ω1, ω2))]
+  shows ∃ z ∈ complexCarrier, z ∉ periodLattice(ω1, ω2) ∧
+    weierstrassValue(periodLattice(ω1, ω2), z) = x ∧
+    weierstrassDeriv(periodLattice(ω1, ω2), z) = y
+proof
+  sorry
+
+-- CurveTheta.lean, disc_eq and g₃_eq: g₃ = 4℘(t)³ − g₂℘(t) and the
+-- discriminant g₂³ − 27g₃² of a CM datum is a₁⁴ − 64.
+theorem IsCMLattice.disc (C : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  shows weierstrassG3(cmLattice(C)) =
+      ℂ[4 * (weierstrassValue(cmLattice(C), C.t) * weierstrassValue(cmLattice(C), C.t) *
+        weierstrassValue(cmLattice(C), C.t)) -
+        weierstrassG2(cmLattice(C)) * weierstrassValue(cmLattice(C), C.t)] ∧
+    ℂ[weierstrassG2(cmLattice(C)) * weierstrassG2(cmLattice(C)) * weierstrassG2(cmLattice(C)) -
+      27 * (weierstrassG3(cmLattice(C)) * weierstrassG3(cmLattice(C)))] =
+      ℂ[C.a1 * C.a1 * C.a1 * C.a1 - 64]
+proof
+  sorry
+
+-- CurveTheta.lean, multiplier_eq_canonicalMultiplier: on Λ the multiplier of
+-- a CM datum is exp(πi E(ω̄z, z)).
+theorem cmMultiplier.canonical (C z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires prime : PrimeSevenModEight(d)
+  requires hz : z ∈ cmLattice(C)
+  shows cmMultiplier(C)(z) = complexExp(ℂ[complexImaginaryUnit * complexOfReal(R[realPi *
+    latticeRiemannForm(C.omega1, C.omega2, ℂ[complexConj(quadGen(d)) * z], z)])])
+proof
+  sorry
+
+end Lattice

@@ -1,0 +1,1955 @@
+-- Polynomials in a set I of variables over a commutative ring R, on top
+-- of Cumulus's polynomialRing(R, I) (finitely supported maps from the
+-- exponent maps monomials(I) to R): coefficients, monomials, the
+-- constant coefficient, support and variables, evaluation in an algebra
+-- (MvPolynomial.aeval) and along a ring homomorphism (eval₂Hom),
+-- renaming of variables (rename), substitution of polynomials for
+-- variables (bind₁), coefficient maps (MvPolynomial.map), partial
+-- derivatives (pderiv), the total degree, homogeneous polynomials and
+-- components, polynomials with restricted support, induction on
+-- polynomials, and MvPolynomial.funext.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Polynomial/Multivariate.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Polynomial.Multivariate
+import GRH.Polynomial.Univariate
+import GRH.Linear.Tensor
+import Grace.Cumulus.Cardinal.NaturalSum
+import Grace.Cumulus.Algebra.Polynomial.Variables
+
+-- Section: Coefficients and monomials
+-- The coefficient of the monomial m (MvPolynomial.coeff), the monomial
+-- a X^m (MvPolynomial.monomial), and the constant a (MvPolynomial.C).
+def mvCoeff (p m : Set) : Set := p(m)
+
+def mvMonomial (R I m a : Set) : Set :=
+  coefficientSingle(monomials(I), Ring.carrier(R), Ring.zero(R), a, m)
+
+def mvC (R I a : Set) : Set := polynomialConstant(R, I)(a)
+
+-- The support {m | coeff m p ≠ 0} (MvPolynomial.support), the variables
+-- occurring in p (MvPolynomial.vars, Cumulus's polynomialVariablesUsed),
+-- and the constant coefficient p(0) (MvPolynomial.constantCoeff).
+def mvSupport (R I p : Set) : Set := functionSupport(p, monomials(I), Ring.zero(R))
+
+def mvVars (R I p : Set) : Set :=
+  polynomialVariablesUsed(I, Ring.carrier(R), Ring.zero(R), p)
+
+def mvConstantCoeff (R I p : Set) : Set := p(monomialOne(I))
+
+-- The degree Σᵢ m(i) of a monomial, the total degree of p, the largest
+-- degree in its support (0 for p = 0) (MvPolynomial.totalDegree).
+def monomialDegree (I m : Set) : Set := natSum(functionSupport(m, I, 0), m)
+
+-- Helper: the degree of a monomial is a natural number, and m ↦ deg m as
+-- a function on the monomials.
+theorem mv.monomial_degree_nat (I m : Set)
+  requires member : m ∈ monomials(I)
+  shows Nat(monomialDegree(I, m))
+proof
+  have map := monomials.map with member
+  obtain ⟨_, finite⟩ := map
+  have weights : ∀ v ∈ functionSupport(m, I, 0), m(v) ∈ ℕ
+    intros v hv
+    obtain ⟨vIn, _⟩ := functionSupport.membership.forward with hv
+    have e := monomials.exponent at I, m, v with member, vIn
+    exact nat.omega.forward with e
+  unfold monomialDegree
+  exact natSum.natural with finite, weights
+
+defgraph monomialDegreeMap (I : Set) (m ∈ monomials(I)) : ℕ := monomialDegree(I, m)
+proof
+  have n := mv.monomial_degree_nat at I, m with member
+  exact nat.omega.forward with n
+
+defunique mvTotalDegree (R I p : Set) (d ∈ ℕ) :=
+  (mvSupport(R, I, p) = ∅ ∧ d = 0) ∨
+  ((∃ m ∈ mvSupport(R, I, p), monomialDegree(I, m) = d) ∧
+    (∀ m ∈ mvSupport(R, I, p), monomialDegree(I, m) ≤ d))
+requires ring : CommRing(R)
+requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+proof
+  have polys := polynomialRing.comm_ring at R, I with ring
+  have pp := polynomialRing.member_parts at R, I, p with ring, polys, member
+  have finite := polynomials.finite_support with pp
+  have domain := functionSupport.subset at p, monomials(I), R.zero
+  have dmap := monomialDegreeMap.function at I
+  have imageFinite := Finite.function_image with dmap, finite, domain
+  have naturals := functionImage.subset at monomialDegreeMap(I), functionSupport(p, monomials(I), R.zero), ℕ
+  by_cases empty : mvSupport(R, I, p) = ∅
+  . witness 0
+    have zN : (0:Nat) ∈ ℕ by typecheck
+    refine ⟨zN, ?_⟩
+    left
+    exact ⟨empty, rfl⟩
+  . have ne := Nonempty.of_ne_empty with empty
+    obtain ⟨m0, hm0⟩ := ne
+    unfold mvSupport at hm0
+    obtain ⟨m0In, _⟩ := functionSupport.membership.forward with hm0
+    have v0 := monomialDegreeMap.value at I, m0 with m0In
+    have d0 := FunctionBetween.apply_closed with dmap, m0In
+    have img0 : monomialDegreeMap(I)(m0) ∈ functionImage(monomialDegreeMap(I), functionSupport(p, monomials(I), R.zero), ℕ)
+      apply functionImage.membership.backward
+      refine ⟨d0, m0, hm0, rfl⟩
+    have inhabited : Nonempty(functionImage(monomialDegreeMap(I), functionSupport(p, monomials(I), R.zero), ℕ)) := ⟨monomialDegreeMap(I)(m0), img0⟩
+    obtain ⟨n, nN, nIn, below⟩ := Finite.greatest_natural with inhabited, naturals, imageFinite
+    have nNat := nat.omega.backward with nN
+    witness n
+    refine ⟨nN, ?_⟩
+    right
+    obtain ⟨_, m, hm, eq⟩ := functionImage.membership.forward with nIn
+    have hm2 := hm
+    obtain ⟨mIn, _⟩ := functionSupport.membership.forward with hm2
+    rw (monomialDegreeMap.value at I, m with mIn) at eq
+    have hmS : m ∈ mvSupport(R, I, p)
+      unfold mvSupport
+      exact hm
+    refine ⟨⟨m, hmS, ?_⟩, ?_⟩
+    . rw eq
+    . intros k hk
+      have hk2 := hk
+      unfold mvSupport at hk2
+      obtain ⟨kIn, _⟩ := functionSupport.membership.forward with hk2
+      have dk := FunctionBetween.apply_closed with dmap, kIn
+      have imgk : monomialDegreeMap(I)(k) ∈ functionImage(monomialDegreeMap(I), functionSupport(p, monomials(I), R.zero), ℕ)
+        apply functionImage.membership.backward
+        refine ⟨dk, k, hk2, rfl⟩
+      have kb := below with monomialDegreeMap(I)(k), imgk
+      rw (monomialDegreeMap.value at I, k with kIn) at kb
+      have kNat := mv.monomial_degree_nat at I, k with kIn
+      have lt := Less.of_membership at monomialDegree(I, k), succ(n)
+      have l := lt with kb
+      exact Less.successor_upper with l
+uniqueness
+  intros u hu first v hv second
+  have uNat := nat.omega.backward with hu
+  have vNat := nat.omega.backward with hv
+  cases first with fe | fm
+  . cases second with se | sm
+    . have a := fe.right
+      have b := se.right
+      cc
+    . obtain ⟨⟨m, hm, _⟩, _⟩ := sm
+      have e := fe.left
+      rw e at hm
+      have no := empty.membership at m
+      exfalso
+      exact no with hm
+  . cases second with se | sm
+    . obtain ⟨⟨m, hm, _⟩, _⟩ := fm
+      have e := se.left
+      rw e at hm
+      have no := empty.membership at m
+      exfalso
+      exact no with hm
+    . obtain ⟨⟨m1, hm1, e1⟩, b1⟩ := fm
+      obtain ⟨⟨m2, hm2, e2⟩, b2⟩ := sm
+      have a := b1 with m2, hm2
+      have b := b2 with m1, hm1
+      rw e2 at a
+      rw e1 at b
+      exact LessEqual.antisymmetric with a, b
+
+-- p is homogeneous of degree n (MvPolynomial.IsHomogeneous); the
+-- homogeneous polynomials of degree n (homogeneousSubmodule); the degree-n
+-- component of p (homogeneousComponent).
+predicate MvHomogeneous (R I p n : Set) :=
+  p ∈ Ring.carrier(polynomialRing(R, I)) ∧
+  (∀ m ∈ mvSupport(R, I, p), monomialDegree(I, m) = n)
+
+def homogeneousPolynomials (R I n : Set) : Set :=
+  { p ∈ Ring.carrier(polynomialRing(R, I)) | MvHomogeneous(R, I, p, n) }
+
+def homogeneousComponent (R I n p : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(R) | ∃ m ∈ monomials(I),
+    (monomialDegree(I, m) = n ∧ u = (m, p(m))) ∨
+    (monomialDegree(I, m) ≠ n ∧ u = (m, Ring.zero(R))) }
+
+-- The polynomials supported in a set s of monomials
+-- (MvPolynomial.restrictSupport).
+def restrictSupport (R I s : Set) : Set :=
+  { p ∈ Ring.carrier(polynomialRing(R, I)) | mvSupport(R, I, p) ⊆ s }
+
+-- The polynomial ring as an R-module (through track A's algebraModule).
+def mvModule (R I : Set) : Set := algebraModule(polynomialAlgebra(R, I))
+
+-- Section: Evaluation, renaming, substitution, coefficient maps
+-- Evaluation along f : R →+* S at v : I → S (MvPolynomial.eval₂Hom) is
+-- Cumulus's evaluationHom(R, S, I, f, v); at v : I → R (MvPolynomial.eval)
+-- it is evaluationAt(R, I, v). In an R-algebra A at v : I → A
+-- (MvPolynomial.aeval):
+def mvAeval (A I v : Set) : Set :=
+  evaluationHom(Algebra.base(A), Algebra.ring(A), I, Algebra.map(A), v)
+
+-- Renaming along σ : I → J is Cumulus's polynomialRename(R, I, J, σ)
+-- (MvPolynomial.rename). Substitution of g(i) ∈ R[J] for Xᵢ
+-- (MvPolynomial.bind₁):
+def mvBind (R I J g : Set) : Set :=
+  evaluationHom(R, polynomialRing(R, J), I, polynomialConstant(R, J), g)
+
+-- The coefficientwise image under f : R → S (MvPolynomial.map).
+def mvMap (R S I f : Set) : Set :=
+  polynomialMap(I, Ring.carrier(R), Ring.zero(R), Ring.carrier(S), Ring.zero(S), f)
+
+-- The partial derivative ∂/∂Xᵢ is Cumulus's partialDerivative(R, I, i)
+-- (MvPolynomial.pderiv).
+
+-- The family i ↦ Xᵢ, and the composite assignment i ↦ φ(v(i)).
+def mvVariables (R I : Set) : Set :=
+  { u ∈ I × Ring.carrier(polynomialRing(R, I)) | ∃ i ∈ I, u = (i, X(R, I, i)) }
+
+def assignmentImage (I B φ v : Set) : Set :=
+  { u ∈ I × B | ∃ i ∈ I, u = (i, φ(v(i))) }
+
+-- The family i ↦ aeval v (g(i)) of values of substituted polynomials.
+def bindValues (A I J g v : Set) : Set :=
+  { u ∈ I × algebraCarrier(A) | ∃ i ∈ I, u = (i, mvAeval(A, J, v)(g(i))) }
+
+-- The family i ↦ bind g' (g(i)).
+def bindCompose (R I J K g h : Set) : Set :=
+  { u ∈ I × Ring.carrier(polynomialRing(R, K)) | ∃ i ∈ I,
+    u = (i, mvBind(R, J, K, h)(g(i))) }
+
+-- The coefficients m ↦ coeff m (p(k)) of a family, as a family over k.
+def coefficientFamily (R V p m : Set) : Set :=
+  { u ∈ V × Ring.carrier(R) | ∃ k ∈ V, u = (k, p(k)(m)) }
+
+-- Families used below: the monomial basis m ↦ X^m, the monomials of p over
+-- its support, the terms of a value, the homogeneous components indexed
+-- by degree, and the scaled point t v.
+def monomialBasisFamily (R I : Set) : Set :=
+  { u ∈ monomials(I) × Ring.carrier(polynomialRing(R, I)) | ∃ m ∈ monomials(I),
+    u = (m, mvMonomial(R, I, m, Ring.one(R))) }
+
+def monomialTerms (R I p : Set) : Set :=
+  { u ∈ mvSupport(R, I, p) × Ring.carrier(polynomialRing(R, I)) |
+    ∃ m ∈ mvSupport(R, I, p), u = (m, mvMonomial(R, I, m, p(m))) }
+
+def monomialValueTerms (R I v p : Set) : Set :=
+  { u ∈ mvSupport(R, I, p) × Ring.carrier(R) | ∃ m ∈ mvSupport(R, I, p),
+    u = (m, call2(Ring.mul(R), p(m),
+      evaluationAt(R, I, v)(mvMonomial(R, I, m, Ring.one(R))))) }
+
+def componentFamily (R I p : Set) : Set :=
+  { u ∈ ℕ × Ring.carrier(polynomialRing(R, I)) | ∃ n ∈ ℕ,
+    u = (n, homogeneousComponent(R, I, n, p)) }
+
+def pointwiseScale (R I t v : Set) : Set :=
+  { u ∈ I × Ring.carrier(R) | ∃ i ∈ I, u = (i, call2(Ring.mul(R), t, v(i))) }
+
+-- Helpers: the families of the module, written as graphs, are functions.
+theorem mv.variables_function (R I : Set)
+  requires values : ∀ i ∈ I, X(R, I, i) ∈ Ring.carrier(polynomialRing(R, I))
+  shows (mvVariables(R, I) : I → Ring.carrier(polynomialRing(R, I))) ∧ (∀ i ∈ I, mvVariables(R, I)(i) = X(R, I, i))
+proof
+  have rel : ∀ i ∈ I, relates(mvVariables(R, I), i, X(R, I, i))
+    intros i hi
+    have vIn := values with i, hi
+    unfold relates
+    apply mvVariables.membership.backward
+    refine ⟨(product.pair at i, X(R, I, i), I, Ring.carrier(polynomialRing(R, I)) with hi, vIn), i, hi, rfl⟩
+  have fn : mvVariables(R, I) : I → Ring.carrier(polynomialRing(R, I))
+    constructor
+      intros q0 mem
+      obtain ⟨bounded, _⟩ := mvVariables.membership.forward with mem
+      exact bounded
+    . constructor
+        intros z0 first xFirst second xSecond
+        unfold relates at xFirst
+        obtain ⟨_, a1, a1In, firstShape⟩ := mvVariables.membership.forward with xFirst
+        unfold relates at xSecond
+        obtain ⟨_, a2, a2In, secondShape⟩ := mvVariables.membership.forward with xSecond
+        obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+        obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+        rw [firstEqual, secondEqual]
+        cc
+      . intros i xIn
+        have vIn := values with i, xIn
+        refine ⟨X(R, I, i), vIn, (rel with i, xIn)⟩
+  refine ⟨fn, ?_⟩
+  intros i hi
+  exact FunctionBetween.apply_value with fn, hi, (rel with i, hi)
+
+theorem mv.assignment_image_function (I B φ v : Set)
+  requires values : ∀ i ∈ I, φ(v(i)) ∈ B
+  shows (assignmentImage(I, B, φ, v) : I → B) ∧ (∀ i ∈ I, assignmentImage(I, B, φ, v)(i) = φ(v(i)))
+proof
+  have rel : ∀ i ∈ I, relates(assignmentImage(I, B, φ, v), i, φ(v(i)))
+    intros i hi
+    have vIn := values with i, hi
+    unfold relates
+    apply assignmentImage.membership.backward
+    refine ⟨(product.pair at i, φ(v(i)), I, B with hi, vIn), i, hi, rfl⟩
+  have fn : assignmentImage(I, B, φ, v) : I → B
+    constructor
+      intros q0 mem
+      obtain ⟨bounded, _⟩ := assignmentImage.membership.forward with mem
+      exact bounded
+    . constructor
+        intros z0 first xFirst second xSecond
+        unfold relates at xFirst
+        obtain ⟨_, a1, a1In, firstShape⟩ := assignmentImage.membership.forward with xFirst
+        unfold relates at xSecond
+        obtain ⟨_, a2, a2In, secondShape⟩ := assignmentImage.membership.forward with xSecond
+        obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+        obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+        rw [firstEqual, secondEqual]
+        cc
+      . intros i xIn
+        have vIn := values with i, xIn
+        refine ⟨φ(v(i)), vIn, (rel with i, xIn)⟩
+  refine ⟨fn, ?_⟩
+  intros i hi
+  exact FunctionBetween.apply_value with fn, hi, (rel with i, hi)
+
+theorem mv.bind_values_function (A I J g v : Set)
+  requires values : ∀ i ∈ I, mvAeval(A, J, v)(g(i)) ∈ algebraCarrier(A)
+  shows (bindValues(A, I, J, g, v) : I → algebraCarrier(A)) ∧ (∀ i ∈ I, bindValues(A, I, J, g, v)(i) = mvAeval(A, J, v)(g(i)))
+proof
+  have rel : ∀ i ∈ I, relates(bindValues(A, I, J, g, v), i, mvAeval(A, J, v)(g(i)))
+    intros i hi
+    have vIn := values with i, hi
+    unfold relates
+    apply bindValues.membership.backward
+    refine ⟨(product.pair at i, mvAeval(A, J, v)(g(i)), I, algebraCarrier(A) with hi, vIn), i, hi, rfl⟩
+  have fn : bindValues(A, I, J, g, v) : I → algebraCarrier(A)
+    constructor
+      intros q0 mem
+      obtain ⟨bounded, _⟩ := bindValues.membership.forward with mem
+      exact bounded
+    . constructor
+        intros z0 first xFirst second xSecond
+        unfold relates at xFirst
+        obtain ⟨_, a1, a1In, firstShape⟩ := bindValues.membership.forward with xFirst
+        unfold relates at xSecond
+        obtain ⟨_, a2, a2In, secondShape⟩ := bindValues.membership.forward with xSecond
+        obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+        obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+        rw [firstEqual, secondEqual]
+        cc
+      . intros i xIn
+        have vIn := values with i, xIn
+        refine ⟨mvAeval(A, J, v)(g(i)), vIn, (rel with i, xIn)⟩
+  refine ⟨fn, ?_⟩
+  intros i hi
+  exact FunctionBetween.apply_value with fn, hi, (rel with i, hi)
+
+theorem mv.bind_compose_function (R I J K g h : Set)
+  requires values : ∀ i ∈ I, mvBind(R, J, K, h)(g(i)) ∈ Ring.carrier(polynomialRing(R, K))
+  shows (bindCompose(R, I, J, K, g, h) : I → Ring.carrier(polynomialRing(R, K))) ∧ (∀ i ∈ I, bindCompose(R, I, J, K, g, h)(i) = mvBind(R, J, K, h)(g(i)))
+proof
+  have rel : ∀ i ∈ I, relates(bindCompose(R, I, J, K, g, h), i, mvBind(R, J, K, h)(g(i)))
+    intros i hi
+    have vIn := values with i, hi
+    unfold relates
+    apply bindCompose.membership.backward
+    refine ⟨(product.pair at i, mvBind(R, J, K, h)(g(i)), I, Ring.carrier(polynomialRing(R, K)) with hi, vIn), i, hi, rfl⟩
+  have fn : bindCompose(R, I, J, K, g, h) : I → Ring.carrier(polynomialRing(R, K))
+    constructor
+      intros q0 mem
+      obtain ⟨bounded, _⟩ := bindCompose.membership.forward with mem
+      exact bounded
+    . constructor
+        intros z0 first xFirst second xSecond
+        unfold relates at xFirst
+        obtain ⟨_, a1, a1In, firstShape⟩ := bindCompose.membership.forward with xFirst
+        unfold relates at xSecond
+        obtain ⟨_, a2, a2In, secondShape⟩ := bindCompose.membership.forward with xSecond
+        obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+        obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+        rw [firstEqual, secondEqual]
+        cc
+      . intros i xIn
+        have vIn := values with i, xIn
+        refine ⟨mvBind(R, J, K, h)(g(i)), vIn, (rel with i, xIn)⟩
+  refine ⟨fn, ?_⟩
+  intros i hi
+  exact FunctionBetween.apply_value with fn, hi, (rel with i, hi)
+
+
+-- Section: Laws
+section Laws
+variable (R I : Set)
+hypothesis comm : CommRing(R)
+hypothesis polys : CommRing(polynomialRing(R, I))
+
+-- Helper: the coefficient of a constant at the unit monomial.
+theorem mv.C_coeff_one (a : R)
+  shows polynomialConstant(R, I)(a)(monomialOne(I)) = a
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have aIn : a ∈ R.carrier by typecheck
+  have m1 := monomialOne.member at I
+  rw (polynomialConstant.apply at R, I, a with comm, aIn)
+  unfold polynomialConstant
+  exact polynomialTerm.same at I, R.carrier, R.zero, a, monomialOne(I) with zeroIn, aIn, m1
+
+-- MvPolynomial.ext: polynomials with equal coefficients are equal.
+theorem mvPolynomial.ext (p q : polynomialRing(R, I))
+  requires agree : ∀ m ∈ monomials(I), mvCoeff(p, m) = mvCoeff(q, m)
+  shows p = q
+proof
+  apply polynomialRing.ext at R, I, p, q with comm, polys
+  intros m hm
+  have e := agree with m, hm
+  unfold mvCoeff at e
+  exact e
+
+-- Monomials: polynomials, with one coefficient (MvPolynomial.coeff_monomial),
+-- multiplying by adding exponents (monomial_mul), and
+-- monomial m a = C a · Π Xᵢ^{m(i)} (MvPolynomial.monomial_eq), with
+-- monomial 0 a = C a (monomial_zero').
+theorem mvMonomial.mem (m a : Set)
+  requires monomial : m ∈ monomials(I)
+  requires scalar : a ∈ R.carrier
+  shows mvMonomial(R, I, m, a) ∈ Ring.carrier(polynomialRing(R, I))
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have t := polynomialTerm.member at I, R.carrier, R.zero, a, m with zeroIn, scalar
+  unfold polynomialTerm at t
+  unfold mvMonomial
+  exact polynomialRing.member_of_parts at R, I, coefficientSingle(monomials(I), R.carrier, R.zero, a, m) with comm, polys, t
+
+theorem mvMonomial.coeff (m a n : Set)
+  requires monomial : m ∈ monomials(I)
+  requires scalar : a ∈ R.carrier
+  requires other : n ∈ monomials(I)
+  shows (n = m → mvCoeff(mvMonomial(R, I, m, a), n) = a) ∧
+    (n ≠ m → mvCoeff(mvMonomial(R, I, m, a), n) = R.zero)
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  unfold mvCoeff
+  unfold mvMonomial
+  constructor
+  . intro e
+    rw e
+    have s := polynomialTerm.same at I, R.carrier, R.zero, a, m with zeroIn, scalar, monomial
+    unfold polynomialTerm at s
+    exact s
+  . intro ne
+    have s := polynomialTerm.other at I, R.carrier, R.zero, a, m, n with zeroIn, scalar, other, ne
+    unfold polynomialTerm at s
+    exact s
+
+theorem mvMonomial.mul (m n a b : Set)
+  requires first : m ∈ monomials(I)
+  requires second : n ∈ monomials(I)
+  requires scalarA : a ∈ R.carrier
+  requires scalarB : b ∈ R.carrier
+  shows call2(Ring.mul(polynomialRing(R, I)), mvMonomial(R, I, m, a),
+      mvMonomial(R, I, n, b)) =
+    mvMonomial(R, I, monomialMul(I)((m, n)), call2(R.mul, a, b))
+proof
+  have parts := CommRing.parts with comm
+  have ma := mvMonomial.mem at R, I, m, a with comm, polys, first, scalarA
+  have mb := mvMonomial.mem at R, I, n, b with comm, polys, second, scalarB
+  rw (polynomialRing.mul_apply at R, I, mvMonomial(R, I, m, a), mvMonomial(R, I, n, b) with comm, polys, ma, mb)
+  have t := polynomialProduct.terms at I, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, a, b, m, n with parts, scalarA, scalarB, first, second
+  unfold polynomialTerm at t
+  unfold mvMonomial
+  rw t
+  have v := monomialMul.apply at I, m, n with first, second
+  unfold call2 at v
+  rw v
+
+theorem mvMonomial.zero (a : R)
+  shows mvMonomial(R, I, monomialOne(I), a) = mvC(R, I, a)
+proof
+  have aIn : a ∈ R.carrier by typecheck
+  unfold mvC
+  rw (polynomialConstant.apply at R, I, a with comm, aIn)
+  unfold mvMonomial
+  unfold polynomialConstant
+  unfold polynomialTerm
+  rfl
+
+-- MvPolynomial.X_pow_eq_monomial and monomial_sum_one: Xᵢ is the
+-- monomial of the unit exponent at i.
+theorem X.eq_monomial (i : Set)
+  requires index : i ∈ I
+  shows X(R, I, i) = mvMonomial(R, I, monomialVariable(I, i), R.one)
+proof
+  rw X.value
+  unfold polynomialVariable
+  unfold polynomialTerm
+  unfold mvMonomial
+  rfl
+
+-- MvPolynomial.C_mul', smul_eq_C_mul, C_eq_smul_one: multiplying by a
+-- constant is the module action, coefficientwise.
+theorem mvC.mul_coeff (a m : Set) (p : polynomialRing(R, I))
+  requires scalar : a ∈ R.carrier
+  requires monomial : m ∈ monomials(I)
+  shows mvCoeff(call2(Ring.mul(polynomialRing(R, I)), mvC(R, I, a), p), m) =
+    call2(R.mul, a, mvCoeff(p, m))
+proof
+  unfold mvCoeff
+  unfold mvC
+  exact polynomialRing.constant_mul at R, I, a, p, m with comm, polys, scalar, monomial
+
+theorem mvC.mul_eq_smul (a : Set) (p : polynomialRing(R, I))
+  requires scalar : a ∈ R.carrier
+  shows call2(Ring.mul(polynomialRing(R, I)), mvC(R, I, a), p) =
+    call2(Module.smul(mvModule(R, I)), a, p)
+proof
+  have pa := polynomialAlgebra.algebra at R, I with comm
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have hr : a ∈ Ring.carrier(Algebra.base(polynomialAlgebra(R, I)))
+    rw polynomialAlgebra.base
+    exact scalar
+  have ha : p ∈ algebraCarrier(polynomialAlgebra(R, I))
+    rw polynomialAlgebra.carrierOf
+    exact pIn
+  have sv := algebraModule.smul_value at polynomialAlgebra(R, I), a, p with pa, hr, ha
+  rw [polynomialAlgebra.ring, polynomialAlgebra.map] at sv
+  unfold mvModule
+  rw sv
+  unfold mvC
+  rfl
+
+-- Coefficients are additive (coeff_add), and of a finite sum
+-- (MvPolynomial.coeff_sum): the coefficient of the sum is the sum of the
+-- coefficients; the coefficient at m is an R-linear form (lcoeff).
+theorem mvCoeff.add (p q : polynomialRing(R, I)) (m : Set)
+  requires monomial : m ∈ monomials(I)
+  shows mvCoeff(p + q, m) = call2(R.add, mvCoeff(p, m), mvCoeff(q, m))
+proof
+  unfold mvCoeff
+  exact polynomialRing.coefficient_add at R, I, p, q, m with comm, polys, monomial
+
+theorem mvCoeff.sum (V p m : Set)
+  requires finite : Finite(V)
+  requires family : p : V → Ring.carrier(polynomialRing(R, I))
+  requires monomial : m ∈ monomials(I)
+  shows mvCoeff(finiteRingSum(V, Ring.carrier(polynomialRing(R, I)),
+      Ring.add(polynomialRing(R, I)), Ring.zero(polynomialRing(R, I)),
+      Ring.neg(polynomialRing(R, I)), Ring.mul(polynomialRing(R, I)),
+      Ring.one(polynomialRing(R, I)), p), m) =
+    finiteRingSum(V, R.carrier, R.add, R.zero, R.neg, R.mul, R.one,
+      coefficientFamily(R, V, p, m))
+proof
+  sorry
+
+theorem mvModule.module
+  shows Module(mvModule(R, I), R)
+proof
+  have pa := polynomialAlgebra.algebra at R, I with comm
+  have m := algebraModule.module_of at polynomialAlgebra(R, I) with pa
+  rw (polynomialAlgebra.base at R, I) at m
+  unfold mvModule
+  exact m
+
+-- The monomials form a basis of the R-module of polynomials
+-- (MvPolynomial.basisMonomials).
+theorem mvModule.monomial_basis
+  shows ModuleBasis(mvModule(R, I), R, monomials(I), monomialBasisFamily(R, I))
+proof
+  sorry
+
+-- Every polynomial is the finite sum of its monomials over its support
+-- (MvPolynomial.as_sum, support finite).
+theorem mvSupport.finite (p : polynomialRing(R, I))
+  shows Finite(mvSupport(R, I, p))
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have pp := polynomialRing.member_parts at R, I, p with comm, polys, pIn
+  unfold mvSupport
+  exact polynomials.finite_support with pp
+
+theorem mvPolynomial.as_sum (p : polynomialRing(R, I))
+  shows p = finiteRingSum(mvSupport(R, I, p), Ring.carrier(polynomialRing(R, I)),
+    Ring.add(polynomialRing(R, I)), Ring.zero(polynomialRing(R, I)),
+    Ring.neg(polynomialRing(R, I)), Ring.mul(polynomialRing(R, I)),
+    Ring.one(polynomialRing(R, I)), monomialTerms(R, I, p))
+proof
+  sorry
+
+-- MvPolynomial.induction_on: a set of polynomials containing the
+-- constants and closed under sums and under multiplication by variables
+-- contains every polynomial.
+theorem mvPolynomial.induction (P : Set)
+  requires constants : ∀ a ∈ R.carrier, mvC(R, I, a) ∈ P
+  requires sums : ∀ p q ∈ P ∩ Ring.carrier(polynomialRing(R, I)),
+    call2(Ring.add(polynomialRing(R, I)), p, q) ∈ P
+  requires variables : ∀ p ∈ P ∩ Ring.carrier(polynomialRing(R, I)), ∀ i ∈ I,
+    call2(Ring.mul(polynomialRing(R, I)), p, X(R, I, i)) ∈ P
+  shows Ring.carrier(polynomialRing(R, I)) ⊆ P
+proof
+  sorry
+
+-- The constant coefficient is a ring homomorphism, the value at 0
+-- (MvPolynomial.constantCoeff, constantCoeff_C, constantCoeff_X).
+theorem mvConstantCoeff.hom
+  shows RingHom(polynomialAtOrigin(I, R.carrier, R.zero), polynomialRing(R, I), R)
+proof
+  have parts := CommRing.parts with comm
+  have pr := CommRing.to_ring with polys
+  have ringR := CommRing.to_ring with comm
+  have engine := polynomialAtOrigin.hom at I, R.carrier, R.add, R.zero, R.neg, R.mul, R.one with parts
+  have shifted : IsRingHom(polynomialAtOrigin(I, R.carrier, R.zero),
+      Ring.carrier(polynomialRing(R, I)), Ring.add(polynomialRing(R, I)),
+      Ring.zero(polynomialRing(R, I)), Ring.neg(polynomialRing(R, I)),
+      Ring.mul(polynomialRing(R, I)), Ring.one(polynomialRing(R, I)),
+      R.carrier, R.add, R.zero, R.neg, R.mul, R.one)
+    rw [polynomialRing.carrierOf, polynomialRing.addOf, polynomialRing.zeroOf,
+      polynomialRing.negOf, polynomialRing.mulOf, polynomialRing.oneOf]
+    exact engine
+  exact RingHom.of_projections with pr, ringR, shifted
+
+theorem mvConstantCoeff.eq_eval (p : polynomialRing(R, I))
+  shows mvConstantCoeff(R, I, p) =
+    evaluationAt(R, I, constantFunction(I, R.carrier, R.zero))(p)
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have v0 := constantFunction.function at I, R.carrier, R.zero with *
+  have eh := evaluationAt.hom at R, I, constantFunction(I, R.carrier, R.zero) with comm, v0
+  have oh := mvConstantCoeff.hom at R, I with comm, polys
+  have eq : polynomialAtOrigin(I, R.carrier, R.zero) = evaluationAt(R, I, constantFunction(I, R.carrier, R.zero))
+    apply polynomialRing.hom_ext at R, I, R, polynomialAtOrigin(I, R.carrier, R.zero), evaluationAt(R, I, constantFunction(I, R.carrier, R.zero)) with comm, oh, eh
+    . intros a ha
+      rw (evaluationAt.map_constant at R, I, constantFunction(I, R.carrier, R.zero), a with comm, v0, ha)
+      rw (polynomialConstant.apply at R, I, a with comm, ha)
+      exact polynomialAtOrigin.constant at I, R.carrier, R.zero, a with zeroIn, ha
+    . intros j hj
+      rw (evaluationAt.map_X at R, I, constantFunction(I, R.carrier, R.zero), j with comm, v0, hj)
+      rw (constantFunction.apply at I, R.carrier, j, R.zero with hj, zeroIn)
+      rw X.value
+      exact polynomialAtOrigin.variable at I, R.carrier, R.zero, R.one, j with zeroIn, oneIn, hj
+  rw ← eq
+  have pp := polynomialRing.member_parts at R, I, p with comm, polys, pIn
+  rw (polynomialAtOrigin.value at I, R.carrier, R.zero, p with pp)
+  unfold mvConstantCoeff
+  rfl
+
+-- Variables: a polynomial lies in the image of the renaming from the
+-- finite set of its variables (MvPolynomial.exists_finset_rename).
+theorem mvVars.finite (p : polynomialRing(R, I))
+  shows Finite(mvVars(R, I, p)) ∧ mvVars(R, I, p) ⊆ I
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have pp := polynomialRing.member_parts at R, I, p with comm, polys, pIn
+  unfold mvVars
+  have f := polynomialVariablesUsed.finite at I, R.carrier, R.zero, p with pp
+  have s := polynomialVariablesUsed.subset at I, R.carrier, R.zero, p
+  exact ⟨f, s⟩
+
+theorem mvVars.exists_rename (p : polynomialRing(R, I))
+  shows ∃ q ∈ Ring.carrier(polynomialRing(R, mvVars(R, I, p))),
+    polynomialRename(R, mvVars(R, I, p), I, identity(mvVars(R, I, p)))(q) = p
+proof
+  sorry
+
+-- Evaluation along a homomorphism: the universal property
+-- (MvPolynomial.eval₂Hom_X', eval₂Hom_C, and uniqueness).
+theorem evaluationHom.map_X_mv (S f v i : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires values : v : I → S.carrier
+  requires index : i ∈ I
+  shows evaluationHom(R, S, I, f, v)(X(R, I, i)) = v(i)
+proof
+  exact evaluationHom.map_X at R, S, I, f, v, i with comm, target, hom, values, index
+
+-- MvPolynomial.eval_eq': the value of p at v is the sum over the support
+-- of coefficients times monomial values.
+theorem evaluationAt.as_sum (v : Set) (p : polynomialRing(R, I))
+  requires values : v : I → R.carrier
+  shows evaluationAt(R, I, v)(p) = finiteRingSum(mvSupport(R, I, p), R.carrier,
+    R.add, R.zero, R.neg, R.mul, R.one, monomialValueTerms(R, I, v, p))
+proof
+  sorry
+
+-- Coefficient maps: a homomorphism R[I] → S[I] (MvPolynomial.map,
+-- coeff_map, map_X, map_C), functorial, injective for injective f
+-- (map_injective), commuting with evaluation (MvPolynomial.eval_map,
+-- map_aeval, eval₂_comp_left) and with partial derivatives
+-- (MvPolynomial.pderiv_map).
+theorem mvMap.hom (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  shows mvMap(R, S, I, f) : polynomialRing(R, I) →+* polynomialRing(S, I)
+proof
+  have partsR := CommRing.parts with comm
+  have partsS := CommRing.parts with target
+  have homParts := RingHom.parts with hom
+  have prR := CommRing.to_ring with polys
+  have prS := CommRing.to_ring with (polynomialRing.comm_ring at S, I with target)
+  have engine := polynomialMap.hom at I, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, S.carrier, S.add, S.zero, S.neg, S.mul, S.one, f with partsR, partsS, homParts
+  have shifted : IsRingHom(polynomialMap(I, R.carrier, R.zero, S.carrier, S.zero, f),
+      Ring.carrier(polynomialRing(R, I)), Ring.add(polynomialRing(R, I)),
+      Ring.zero(polynomialRing(R, I)), Ring.neg(polynomialRing(R, I)),
+      Ring.mul(polynomialRing(R, I)), Ring.one(polynomialRing(R, I)),
+      Ring.carrier(polynomialRing(S, I)), Ring.add(polynomialRing(S, I)),
+      Ring.zero(polynomialRing(S, I)), Ring.neg(polynomialRing(S, I)),
+      Ring.mul(polynomialRing(S, I)), Ring.one(polynomialRing(S, I)))
+    rw [polynomialRing.carrierOf, polynomialRing.addOf, polynomialRing.zeroOf,
+      polynomialRing.negOf, polynomialRing.mulOf, polynomialRing.oneOf]
+    rw [polynomialRing.carrierOf, polynomialRing.addOf, polynomialRing.zeroOf,
+      polynomialRing.negOf, polynomialRing.mulOf, polynomialRing.oneOf]
+    exact engine
+  unfold mvMap
+  exact RingHom.of_projections with prR, prS, shifted
+
+theorem mvMap.coeff (S f m : Set) (p : polynomialRing(R, I))
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires monomial : m ∈ monomials(I)
+  shows mvCoeff(mvMap(R, S, I, f)(p), m) = f(mvCoeff(p, m))
+proof
+  have homParts := RingHom.parts with hom
+  have function := IsRingHom.function with homParts
+  have zero := IsRingHom.zero with homParts
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have pp := polynomialRing.member_parts at R, I, p with comm, polys, pIn
+  unfold mvMap
+  unfold mvCoeff
+  exact polynomialMap.coefficient at I, R.carrier, R.zero, S.carrier, S.zero, f, p, m with function, zero, pp, monomial
+
+theorem mvMap.X (S f i : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires index : i ∈ I
+  shows mvMap(R, S, I, f)(X(R, I, i)) = X(S, I, i)
+proof
+  have pcS := polynomialRing.comm_ring at S, I with target
+  have mh := mvMap.hom at R, I, S, f with comm, polys, target, hom
+  have xR := X.mem at R, I, i with comm
+  have xS := X.mem at S, I, i with target
+  have lm := RingHom.map_mem at mvMap(R, S, I, f), polynomialRing(R, I), polynomialRing(S, I), X(R, I, i) with mh, xR
+  apply polynomialRing.ext at S, I, mvMap(R, S, I, f)(X(R, I, i)), X(S, I, i) with target, pcS, lm, xS
+  intros m hm
+  have c := mvMap.coeff at R, I, S, f, m, X(R, I, i) with comm, polys, xR, target, hom, hm
+  unfold mvCoeff at c
+  rw c
+  by_cases e : m = monomialVariable(I, i)
+  . rw e
+    rw (X.coefficient_same at R, I, i with comm, polys, index)
+    rw (X.coefficient_same at S, I, i with target, pcS, index)
+    exact RingHom.map_one at f, R, S with hom
+  . rw (X.coefficient_other at R, I, i, m with comm, polys, hm, e)
+    rw (X.coefficient_other at S, I, i, m with target, pcS, hm, e)
+    exact RingHom.map_zero at f, R, S with hom
+
+theorem mvMap.C (S f a : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires scalar : a ∈ R.carrier
+  shows mvMap(R, S, I, f)(mvC(R, I, a)) = mvC(S, I, f(a))
+proof
+  have pcS := polynomialRing.comm_ring at S, I with target
+  have mh := mvMap.hom at R, I, S, f with comm, polys, target, hom
+  have fa := RingHom.map_mem at f, R, S, a with hom, scalar
+  have cR := polynomialConstant.mem at R, I, a with comm, scalar
+  have cS := polynomialConstant.mem at S, I, f(a) with target, fa
+  have lm := RingHom.map_mem at mvMap(R, S, I, f), polynomialRing(R, I), polynomialRing(S, I), polynomialConstant(R, I)(a) with mh, cR
+  unfold mvC
+  apply polynomialRing.ext at S, I, mvMap(R, S, I, f)(polynomialConstant(R, I)(a)), polynomialConstant(S, I)(f(a)) with target, pcS, lm, cS
+  intros m hm
+  have c := mvMap.coeff at R, I, S, f, m, polynomialConstant(R, I)(a) with comm, polys, cR, target, hom, hm
+  unfold mvCoeff at c
+  rw c
+  by_cases e : m = monomialOne(I)
+  . rw e
+    rw (mv.C_coeff_one at R, I, a with comm, polys, scalar)
+    rw (mv.C_coeff_one at S, I, f(a) with target, pcS, fa)
+  . rw (polynomialConstant.coefficient_other at R, I, a, m with comm, polys, scalar, hm, e)
+    rw (polynomialConstant.coefficient_other at S, I, f(a), m with target, pcS, fa, hm, e)
+    exact RingHom.map_zero at f, R, S with hom
+
+theorem mvMap.injective (S f : Set)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires injective : InjectiveBetween(f, R.carrier, S.carrier)
+  shows InjectiveBetween(mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)),
+    Ring.carrier(polynomialRing(S, I)))
+proof
+  have pcS := polynomialRing.comm_ring at S, I with target
+  have mh := mvMap.hom at R, I, S, f with comm, polys, target, hom
+  have m0 := mh
+  obtain ⟨_, _, mfn, _⟩ := m0
+  apply Injective.of_pointwise with mfn
+  intros p hp q hq same
+  apply polynomialRing.ext at R, I, p, q with comm, polys, hp, hq
+  intros m hm
+  have cp := mvMap.coeff at R, I, S, f, m, p with comm, polys, hp, target, hom, hm
+  have cq := mvMap.coeff at R, I, S, f, m, q with comm, polys, hq, target, hom, hm
+  rw same at cp
+  rw cp at cq
+  unfold mvCoeff at cq
+  have pk := polynomialRing.coefficient_mem at R, I, p, m with comm, polys, hp, hm
+  have qk := polynomialRing.coefficient_mem at R, I, q, m with comm, polys, hq, hm
+  have fn := Injective.function with injective
+  have fp := FunctionBetween.apply_closed with fn, pk
+  have r1 := FunctionBetween.relates_apply with fn, pk
+  have r2 := FunctionBetween.relates_apply with fn, qk
+  rw ← cq at r2
+  exact Injective.cancel at f, R.carrier, S.carrier, p(m), q(m), f(p(m)) with injective, pk, qk, fp, r1, r2
+
+theorem mvMap.eval (S f v : Set) (p : polynomialRing(R, I))
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires values : v : I → S.carrier
+  shows evaluationAt(S, I, v)(mvMap(R, S, I, f)(p)) = evaluationHom(R, S, I, f, v)(p)
+proof
+  have pcS := polynomialRing.comm_ring at S, I with target
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have eh := evaluationAt.hom at S, I, v with target, values
+  have mh := mvMap.hom at R, I, S, f with comm, polys, target, hom
+  have c := RingHom.comp at mvMap(R, S, I, f), evaluationAt(S, I, v), polynomialRing(R, I), polynomialRing(S, I), S with polys, mh, eh
+  have m0 := mh
+  obtain ⟨_, _, mfn, _⟩ := m0
+  have e0 := eh
+  obtain ⟨_, _, efn, _⟩ := e0
+  have u := evaluationHom.unique at R, S, I, f, v, compose(evaluationAt(S, I, v), mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(S, I)), S.carrier) with comm, target, hom, values, c
+  have eq : compose(evaluationAt(S, I, v), mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(S, I)), S.carrier) = evaluationHom(R, S, I, f, v)
+    apply u
+    . intros a ha
+      have cIn := polynomialConstant.mem at R, I, a with comm, ha
+      rw (compose.apply at evaluationAt(S, I, v), mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(S, I)), S.carrier, polynomialConstant(R, I)(a) with mfn, efn, cIn)
+      have mc := mvMap.C at R, I, S, f, a with comm, polys, target, hom, ha
+      unfold mvC at mc
+      rw mc
+      have fa := RingHom.map_mem at f, R, S, a with hom, ha
+      exact evaluationAt.map_constant at S, I, v, f(a) with target, values, fa
+    . intros j hj
+      have xIn := X.mem at R, I, j with comm
+      rw (compose.apply at evaluationAt(S, I, v), mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(S, I)), S.carrier, X(R, I, j) with mfn, efn, xIn)
+      rw (mvMap.X at R, I, S, f, j with comm, polys, target, hom, hj)
+      exact evaluationAt.map_X at S, I, v, j with target, values, hj
+  rw ← eq
+  rw (compose.apply at evaluationAt(S, I, v), mvMap(R, S, I, f), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(S, I)), S.carrier, p with mfn, efn, pIn)
+
+theorem mvMap.compose (S T f g : Set) (p : polynomialRing(R, I))
+  requires targetS : CommRing(S)
+  requires targetT : CommRing(T)
+  requires first : f : R →+* S
+  requires second : g : S →+* T
+  shows mvMap(S, T, I, g)(mvMap(R, S, I, f)(p)) =
+    mvMap(R, T, I, compose(g, f, R.carrier, S.carrier, T.carrier))(p)
+proof
+  have pcS := polynomialRing.comm_ring at S, I with targetS
+  have pcT := polynomialRing.comm_ring at T, I with targetT
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have gf := RingHom.comp at f, g, R, S, T with comm, first, second
+  have mf := mvMap.hom at R, I, S, f with comm, polys, targetS, first
+  have mg := mvMap.hom at S, I, T, g with targetS, pcS, targetT, second
+  have mgf := mvMap.hom at R, I, T, compose(g, f, R.carrier, S.carrier, T.carrier) with comm, polys, targetT, gf
+  have l1 := RingHom.map_mem at mvMap(R, S, I, f), polynomialRing(R, I), polynomialRing(S, I), p with mf, pIn
+  have l2 := RingHom.map_mem at mvMap(S, T, I, g), polynomialRing(S, I), polynomialRing(T, I), mvMap(R, S, I, f)(p) with mg, l1
+  have l3 := RingHom.map_mem at mvMap(R, T, I, compose(g, f, R.carrier, S.carrier, T.carrier)), polynomialRing(R, I), polynomialRing(T, I), p with mgf, pIn
+  apply polynomialRing.ext at T, I, mvMap(S, T, I, g)(mvMap(R, S, I, f)(p)), mvMap(R, T, I, compose(g, f, R.carrier, S.carrier, T.carrier))(p) with targetT, pcT, l2, l3
+  intros m hm
+  have c1 := mvMap.coeff at S, I, T, g, m, mvMap(R, S, I, f)(p) with targetS, pcS, l1, targetT, second, hm
+  have c2 := mvMap.coeff at R, I, S, f, m, p with comm, polys, pIn, targetS, first, hm
+  have c3 := mvMap.coeff at R, I, T, compose(g, f, R.carrier, S.carrier, T.carrier), m, p with comm, polys, pIn, targetT, gf, hm
+  unfold mvCoeff at c1
+  unfold mvCoeff at c2
+  unfold mvCoeff at c3
+  rw [c1, c2, c3]
+  have f0 := first
+  obtain ⟨_, _, ffn, _⟩ := f0
+  have g0 := second
+  obtain ⟨_, _, gfn, _⟩ := g0
+  have ck := polynomialRing.coefficient_mem at R, I, p, m with comm, polys, pIn, hm
+  rw (compose.apply at g, f, R.carrier, S.carrier, T.carrier, p(m) with ffn, gfn, ck)
+
+theorem mvMap.partial_derivative (S f i : Set) (p : polynomialRing(R, I))
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires index : i ∈ I
+  shows mvMap(R, S, I, f)(partialDerivative(R, I, i)(p)) =
+    partialDerivative(S, I, i)(mvMap(R, S, I, f)(p))
+proof
+  have pcS := polynomialRing.comm_ring at S, I with target
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have mh := mvMap.hom at R, I, S, f with comm, polys, target, hom
+  have dIn := partialDerivative.map_mem at R, I, i, p with comm, polys, index, pIn
+  have l1 := RingHom.map_mem at mvMap(R, S, I, f), polynomialRing(R, I), polynomialRing(S, I), partialDerivative(R, I, i)(p) with mh, dIn
+  have l2 := RingHom.map_mem at mvMap(R, S, I, f), polynomialRing(R, I), polynomialRing(S, I), p with mh, pIn
+  have l3 := partialDerivative.map_mem at S, I, i, mvMap(R, S, I, f)(p) with target, pcS, index, l2
+  apply polynomialRing.ext at S, I, mvMap(R, S, I, f)(partialDerivative(R, I, i)(p)), partialDerivative(S, I, i)(mvMap(R, S, I, f)(p)) with target, pcS, l1, l3
+  intros m hm
+  have c1 := mvMap.coeff at R, I, S, f, m, partialDerivative(R, I, i)(p) with comm, polys, dIn, target, hom, hm
+  unfold mvCoeff at c1
+  rw c1
+  rw (partialDerivative.coefficient at R, I, i, p, m with comm, polys, index, pIn, hm)
+  rw (partialDerivative.coefficient at S, I, i, mvMap(R, S, I, f)(p), m with target, pcS, index, l2, hm)
+  have sm := shiftMonomial.member at I, i, m with index, hm
+  have c2 := mvMap.coeff at R, I, S, f, shiftMonomial(I, m, i), p with comm, polys, pIn, target, hom, sm
+  unfold mvCoeff at c2
+  rw c2
+  have pk := polynomialRing.coefficient_mem at R, I, p, shiftMonomial(I, m, i) with comm, polys, pIn, sm
+  have mi := monomials.exponent at I, m, i with hm, index
+  have nk : ringNat(R.add, R.zero, R.one, succ(m(i))) ∈ R.carrier by typecheck
+  rw (RingHom.map_mul at f, R, S, ringNat(R.add, R.zero, R.one, succ(m(i))), p(shiftMonomial(I, m, i)) with hom, nk, pk)
+  rw (RingHom.map_numeral at R, S, f, succ(m(i)) with comm, target, hom)
+
+-- Partial derivatives (MvPolynomial.pderiv_X, pderiv_C, pderiv_mul, and
+-- the coefficient formula coeff_pderiv: the coefficient at m of ∂ᵢp is
+-- (m(i) + 1) times the coefficient of p at m + eᵢ).
+theorem partialDerivative.X_mv (i j : Set)
+  requires first : i ∈ I
+  requires second : j ∈ I
+  shows (i = j → partialDerivative(R, I, i)(X(R, I, j)) = Ring.one(polynomialRing(R, I))) ∧
+    (i ≠ j → partialDerivative(R, I, i)(X(R, I, j)) = Ring.zero(polynomialRing(R, I)))
+proof
+  constructor
+  . intro e
+    rw ← e
+    exact partialDerivative.X_self at R, I, i with comm, polys, first
+  . intro ne
+    have ne2 : j ≠ i
+      intro e
+      apply ne
+      rw e
+    exact partialDerivative.X_other at R, I, i, j with comm, polys, first, second, ne2
+
+theorem partialDerivative.coeff_mv (i m : Set) (p : polynomialRing(R, I))
+  requires index : i ∈ I
+  requires monomial : m ∈ monomials(I)
+  shows mvCoeff(partialDerivative(R, I, i)(p), m) =
+    call2(R.mul, mvCoeff(p, monomialMul(I)((m, monomialVariable(I, i)))),
+      ringNat(R.add, R.zero, R.one, succ(m(i))))
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have c := partialDerivative.coefficient at R, I, i, p, m with comm, polys, index, pIn, monomial
+  have sh := shiftMonomial.product at I, i, m with index, monomial
+  have mv := monomialVariable.member at I, i
+  have cm := monomialProduct.commutative at I, monomialVariable(I, i), m with mv, monomial
+  have ap := monomialMul.apply at I, m, monomialVariable(I, i) with monomial, mv
+  unfold call2 at ap
+  rw [sh, cm, ← ap] at c
+  unfold mvCoeff
+  rw c
+  have sm := monomialProduct.member at I, m, monomialVariable(I, i) with monomial, mv
+  rw ← ap at sm
+  have pk := polynomialRing.coefficient_mem at R, I, p, monomialMul(I)((m, monomialVariable(I, i))) with comm, polys, pIn, sm
+  have mi := monomials.exponent at I, m, i with monomial, index
+  have nk : ringNat(R.add, R.zero, R.one, succ(m(i))) ∈ R.carrier by typecheck
+  ring
+
+-- Total degree (MvPolynomial.le_totalDegree, totalDegree_add,
+-- totalDegree_mul, totalDegree_X, totalDegree_C).
+theorem mvTotalDegree.le (m : Set) (p : polynomialRing(R, I))
+  requires support : m ∈ mvSupport(R, I, p)
+  shows monomialDegree(I, m) ≤ mvTotalDegree(R, I, p)
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have sel := mvTotalDegree.selected at R, I, p with comm, pIn
+  obtain ⟨_, spec⟩ := sel
+  cases spec with e | b
+  . have s := support
+    rw e.left at s
+    have no := empty.membership at m
+    exfalso
+    exact no with s
+  . exact b.right with m, support
+
+-- Helper: the unit monomial has degree 0.
+theorem rmEMv.one_degree
+  shows monomialDegree(I, monomialOne(I)) = 0
+proof
+  have empty : functionSupport(monomialOne(I), I, 0) = ∅
+    apply Subset.antisymmetric
+    . intros i hi
+      obtain ⟨iI, nz⟩ := functionSupport.membership.forward at monomialOne(I), I, 0, i with hi
+      exfalso
+      exact nz with (monomialOne.value at I, i with iI)
+    . exact empty.subset at functionSupport(monomialOne(I), I, 0)
+  unfold monomialDegree
+  rw empty
+  exact natSum.empty at monomialOne(I)
+
+-- Helper: the unit exponent at i has degree 1.
+theorem rmEMv.variable_degree (i : Set)
+  requires index : i ∈ I
+  shows monomialDegree(I, monomialVariable(I, i)) = 1
+proof
+  have single : functionSupport(monomialVariable(I, i), I, 0) = {i}
+    apply Subset.antisymmetric
+    . intros j hj
+      obtain ⟨jI, nz⟩ := functionSupport.membership.forward at monomialVariable(I, i), I, 0, j with hj
+      apply singleton.membership.backward
+      by_contra ne
+      exact nz with (monomialVariable.other at I, i, j with jI, ne)
+    . intros j hj
+      have ji := singleton.membership.forward with hj
+      rw ji
+      have one := monomialVariable.same at I, i with index
+      have nz : monomialVariable(I, i)(i) ≠ 0
+        rw one
+        arith
+      exact functionSupport.membership.backward at monomialVariable(I, i), I, 0, i with ⟨index, nz⟩
+  have one := monomialVariable.same at I, i with index
+  have w : monomialVariable(I, i)(i) ∈ ℕ
+    rw one
+    typecheck
+  unfold monomialDegree
+  rw single
+  rw (natSum.singleton at monomialVariable(I, i), i with w)
+  exact one
+
+theorem mvTotalDegree.add_le (p q : polynomialRing(R, I)) (n : Nat)
+  requires first : mvTotalDegree(R, I, p) ≤ n
+  requires second : mvTotalDegree(R, I, q) ≤ n
+  shows mvTotalDegree(R, I, p + q) ≤ n
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have qIn : q ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have sIn : p + q ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+  have sel := mvTotalDegree.selected at R, I, p + q with comm, sIn
+  obtain ⟨dN, spec⟩ := sel
+  cases spec with emp | b
+  . rw emp.right
+    arith
+  . obtain ⟨⟨m, mS, md⟩, _⟩ := b
+    rw ← md
+    have mS0 := mS
+    unfold mvSupport at mS0
+    obtain ⟨mIn, nz⟩ := functionSupport.membership.forward at p + q, monomials(I), R.zero, m with mS0
+    have ca := polynomialRing.coefficient_add at R, I, p, q, m with comm, polys, pIn, qIn, mIn
+    have mNat := mv.monomial_degree_nat at I, m with mIn
+    by_cases pz : p(m) = R.zero
+    . have qnz : q(m) ≠ R.zero
+        intro qz
+        have qmIn := polynomialRing.coefficient_mem at R, I, q, m with comm, polys, qIn, mIn
+        rw [pz, qz] at ca
+        have z : call2(R.add, R.zero, R.zero) = R.zero by ring
+        rw z at ca
+        exact nz with ca
+      have qS : m ∈ mvSupport(R, I, q)
+        unfold mvSupport
+        exact functionSupport.membership.backward at q, monomials(I), R.zero, m with ⟨mIn, qnz⟩
+      have le := mvTotalDegree.le at R, I, m, q with comm, polys, qIn, qS
+      have qdN := (mvTotalDegree.selected at R, I, q with comm, qIn).left
+      have qdNat := nat.omega.backward with qdN
+      arith
+    . have pS : m ∈ mvSupport(R, I, p)
+        unfold mvSupport
+        exact functionSupport.membership.backward at p, monomials(I), R.zero, m with ⟨mIn, pz⟩
+      have le := mvTotalDegree.le at R, I, m, p with comm, polys, pIn, pS
+      have pdN := (mvTotalDegree.selected at R, I, p with comm, pIn).left
+      have pdNat := nat.omega.backward with pdN
+      arith
+
+theorem mvTotalDegree.mul_le (p q : polynomialRing(R, I))
+  shows mvTotalDegree(R, I, p * q) ≤ mvTotalDegree(R, I, p) + mvTotalDegree(R, I, q)
+proof
+  sorry
+
+theorem mvTotalDegree.X (i : Set)
+  requires index : i ∈ I
+  requires nontrivial : R.zero ≠ R.one
+  shows mvTotalDegree(R, I, X(R, I, i)) = 1
+proof
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have vm := monomialVariable.member at I, i
+  have xIn := mvMonomial.mem at R, I, monomialVariable(I, i), R.one with comm, polys, vm, oneIn
+  rw (X.eq_monomial at R, I, i with comm, polys, index)
+  have vS : monomialVariable(I, i) ∈ mvSupport(R, I, mvMonomial(R, I, monomialVariable(I, i), R.one))
+    have c := (mvMonomial.coeff at R, I, monomialVariable(I, i), R.one, monomialVariable(I, i) with comm, polys, vm, oneIn, vm).left with rfl
+    unfold mvCoeff at c
+    have nz : mvMonomial(R, I, monomialVariable(I, i), R.one)(monomialVariable(I, i)) ≠ R.zero
+      rw c
+      intro e
+      have e2 : R.zero = R.one
+        rw e
+      exact nontrivial with e2
+    unfold mvSupport
+    exact functionSupport.membership.backward at mvMonomial(R, I, monomialVariable(I, i), R.one), monomials(I), R.zero, monomialVariable(I, i) with ⟨vm, nz⟩
+  have sel := mvTotalDegree.selected at R, I, mvMonomial(R, I, monomialVariable(I, i), R.one) with comm, xIn
+  obtain ⟨_, spec⟩ := sel
+  cases spec with emp | b
+  . exfalso
+    have s := vS
+    rw emp.left at s
+    exact (empty.membership at monomialVariable(I, i)) with s
+  . obtain ⟨⟨n, nS, nd⟩, _⟩ := b
+    have nS0 := nS
+    unfold mvSupport at nS0
+    obtain ⟨nIn, nz⟩ := functionSupport.membership.forward at mvMonomial(R, I, monomialVariable(I, i), R.one), monomials(I), R.zero, n with nS0
+    by_cases nv : n = monomialVariable(I, i)
+    . rw nv at nd
+      rw (rmEMv.variable_degree at R, I, i with comm, polys, index) at nd
+      rw nd
+    . exfalso
+      have c := (mvMonomial.coeff at R, I, monomialVariable(I, i), R.one, n with comm, polys, vm, oneIn, nIn).right with nv
+      unfold mvCoeff at c
+      exact nz with c
+
+theorem mvTotalDegree.C (a : R)
+  shows mvTotalDegree(R, I, mvC(R, I, a)) = 0
+proof
+  have aIn : a ∈ R.carrier by typecheck
+  have m1 := monomialOne.member at I
+  have e := mvMonomial.zero at R, I, a with comm, polys, aIn
+  have cIn := mvMonomial.mem at R, I, monomialOne(I), a with comm, polys, m1, aIn
+  rw ← e
+  have sel := mvTotalDegree.selected at R, I, mvMonomial(R, I, monomialOne(I), a) with comm, cIn
+  obtain ⟨_, spec⟩ := sel
+  cases spec with emp | b
+  . exact emp.right
+  . obtain ⟨⟨n, nS, nd⟩, _⟩ := b
+    unfold mvSupport at nS
+    obtain ⟨nIn, nz⟩ := functionSupport.membership.forward at mvMonomial(R, I, monomialOne(I), a), monomials(I), R.zero, n with nS
+    by_cases nOne : n = monomialOne(I)
+    . rw nOne at nd
+      rw (rmEMv.one_degree at R, I with comm, polys) at nd
+      rw nd
+    . exfalso
+      have c := (mvMonomial.coeff at R, I, monomialOne(I), a, n with comm, polys, m1, aIn, nIn).right with nOne
+      unfold mvCoeff at c
+      exact nz with c
+
+-- Homogeneous polynomials: X is homogeneous of degree 1, monomials of
+-- their degree (MvPolynomial.isHomogeneous_X, isHomogeneous_monomial),
+-- products add degrees (IsHomogeneous.mul), the homogeneous polynomials of
+-- degree n form a submodule (homogeneousSubmodule), components are
+-- homogeneous (homogeneousComponent_mem), and p is the finite sum of its
+-- components up to its total degree (sum_homogeneousComponent).
+theorem MvHomogeneous.monomial (m a : Set)
+  requires monomial : m ∈ monomials(I)
+  requires scalar : a ∈ R.carrier
+  shows MvHomogeneous(R, I, mvMonomial(R, I, m, a), monomialDegree(I, m))
+proof
+  have mm := mvMonomial.mem at R, I, m, a with comm, polys, monomial, scalar
+  refine ⟨mm, ?_⟩
+  intros n hn
+  unfold mvSupport at hn
+  obtain ⟨nIn, nz⟩ := functionSupport.membership.forward at mvMonomial(R, I, m, a), monomials(I), R.zero, n with hn
+  by_contra ne
+  have nm : n ≠ m
+    intro e
+    rw e at ne
+    exact ne with rfl
+  have c := (mvMonomial.coeff at R, I, m, a, n with comm, polys, monomial, scalar, nIn).right with nm
+  unfold mvCoeff at c
+  exact nz with c
+
+theorem MvHomogeneous.X (i : Set)
+  requires index : i ∈ I
+  shows MvHomogeneous(R, I, X(R, I, i), 1)
+proof
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have vm := monomialVariable.member at I, i
+  have h := MvHomogeneous.monomial at R, I, monomialVariable(I, i), R.one with comm, polys, vm, oneIn
+  rw (rmEMv.variable_degree at R, I, i with comm, polys, index) at h
+  rw (X.eq_monomial at R, I, i with comm, polys, index)
+  exact h
+
+theorem MvHomogeneous.mul (p q : polynomialRing(R, I)) (m n : Nat)
+  requires first : MvHomogeneous(R, I, p, m)
+  requires second : MvHomogeneous(R, I, q, n)
+  shows MvHomogeneous(R, I, p * q, m + n)
+proof
+  sorry
+
+theorem homogeneousComponent.homogeneous (p : polynomialRing(R, I)) (n : Nat)
+  shows homogeneousComponent(R, I, n, p) ∈ homogeneousPolynomials(R, I, n)
+proof
+  have pIn : p ∈ Ring.carrier(polynomialRing(R, I)) by assumption
+  have pp := polynomialRing.member_parts at R, I, p with comm, polys, pIn
+  unfold polynomials at pp
+  obtain ⟨_, pmap⟩ := coefficientMaps.membership.forward with pp
+  obtain ⟨pF, pFin⟩ := pmap
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have rel : ∀ m ∈ monomials(I), (monomialDegree(I, m) = n → relates(homogeneousComponent(R, I, n, p), m, p(m))) ∧ (monomialDegree(I, m) ≠ n → relates(homogeneousComponent(R, I, n, p), m, R.zero))
+    intros m mIn
+    have pm := FunctionBetween.apply_closed with pF, mIn
+    constructor
+    . intro d
+      have pq := product.pair with mIn, pm
+      unfold relates
+      have o : (monomialDegree(I, m) = n ∧ (m, p(m)) = (m, p(m))) ∨ (monomialDegree(I, m) ≠ n ∧ (m, p(m)) = (m, R.zero))
+        left
+        exact ⟨d, rfl⟩
+      exact homogeneousComponent.membership.backward with ⟨pq, m, mIn, o⟩
+    . intro d
+      have pq := product.pair with mIn, zeroIn
+      unfold relates
+      have o : (monomialDegree(I, m) = n ∧ (m, R.zero) = (m, p(m))) ∨ (monomialDegree(I, m) ≠ n ∧ (m, R.zero) = (m, R.zero))
+        right
+        exact ⟨d, rfl⟩
+      exact homogeneousComponent.membership.backward with ⟨pq, m, mIn, o⟩
+  have fn : homogeneousComponent(R, I, n, p) : monomials(I) → R.carrier
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros q hq
+      exact (homogeneousComponent.membership.forward with hq).left
+    . unfold Functional
+      intros x y hxy z hxz
+      unfold relates at hxy
+      unfold relates at hxz
+      obtain ⟨_, a, aIn, c1⟩ := homogeneousComponent.membership.forward with hxy
+      obtain ⟨_, b, bIn, c2⟩ := homogeneousComponent.membership.forward with hxz
+      rcases c1 with ⟨d1, e1⟩ | ⟨d1, e1⟩
+      . obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+        rcases c2 with ⟨d2, e2⟩ | ⟨d2, e2⟩
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          have ab : a = b
+            rw [← x1, ← x2]
+          rw [y1, z2, ab]
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          have ab : a = b
+            rw [← x1, ← x2]
+          rw ab at d1
+          exfalso
+          exact d2 with d1
+      . obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+        rcases c2 with ⟨d2, e2⟩ | ⟨d2, e2⟩
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          have ab : a = b
+            rw [← x1, ← x2]
+          rw ab at d1
+          exfalso
+          exact d1 with d2
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          rw [y1, z2]
+    . intros m mIn
+      have pm := FunctionBetween.apply_closed with pF, mIn
+      obtain ⟨r1, r2⟩ := rel with m, mIn
+      by_cases d : monomialDegree(I, m) = n
+      . exact ⟨p(m), pm, (r1 with d)⟩
+      . exact ⟨R.zero, zeroIn, (r2 with d)⟩
+  have degs : ∀ m ∈ mvSupport(R, I, homogeneousComponent(R, I, n, p)), monomialDegree(I, m) = n ∧ m ∈ mvSupport(R, I, p)
+    intros m hm
+    unfold mvSupport at hm
+    obtain ⟨mIn, ne⟩ := functionSupport.membership.forward with hm
+    obtain ⟨r1, r2⟩ := rel with m, mIn
+    by_cases d : monomialDegree(I, m) = n
+    . have v := FunctionBetween.apply_value with fn, mIn, (r1 with d)
+      rw v at ne
+      have ms : m ∈ mvSupport(R, I, p)
+        unfold mvSupport
+        exact functionSupport.membership.backward with ⟨mIn, ne⟩
+      exact ⟨d, ms⟩
+    . have v := FunctionBetween.apply_value with fn, mIn, (r2 with d)
+      exfalso
+      exact ne with v
+  have sub : functionSupport(homogeneousComponent(R, I, n, p), monomials(I), R.zero) ⊆ functionSupport(p, monomials(I), R.zero)
+    intros m hm
+    have hm2 : m ∈ mvSupport(R, I, homogeneousComponent(R, I, n, p))
+      unfold mvSupport
+      exact hm
+    have r := (degs with m, hm2).right
+    unfold mvSupport at r
+    exact r
+  have fin := Finite.subset with pFin, sub
+  have cm : CoefficientMap(homogeneousComponent(R, I, n, p), monomials(I), R.carrier, R.zero)
+    unfold CoefficientMap
+    exact ⟨fn, fin⟩
+  have hIn : homogeneousComponent(R, I, n, p) ∈ Ring.carrier(polynomialRing(R, I))
+    rw polynomialRing.carrierOf
+    unfold polynomials
+    exact coefficientMaps.contains with cm
+  have degs2 : ∀ m ∈ mvSupport(R, I, homogeneousComponent(R, I, n, p)), monomialDegree(I, m) = n
+    intros m hm
+    exact (degs with m, hm).left
+  have hom : MvHomogeneous(R, I, homogeneousComponent(R, I, n, p), n)
+    unfold MvHomogeneous
+    exact ⟨hIn, degs2⟩
+  exact homogeneousPolynomials.membership.backward with ⟨hIn, hom⟩
+
+theorem homogeneousComponent.sum (p : polynomialRing(R, I))
+  shows p = finiteRingSum(succ(mvTotalDegree(R, I, p)),
+    Ring.carrier(polynomialRing(R, I)), Ring.add(polynomialRing(R, I)),
+    Ring.zero(polynomialRing(R, I)), Ring.neg(polynomialRing(R, I)),
+    Ring.mul(polynomialRing(R, I)), Ring.one(polynomialRing(R, I)),
+    restrict(componentFamily(R, I, p), succ(mvTotalDegree(R, I, p))))
+proof
+  sorry
+
+-- A homogeneous polynomial of degree n has the value tⁿ p(v) at t v
+-- (IsHomogeneous.eval_smul... in the form used for scaling).
+theorem MvHomogeneous.eval_scale (v t : Set) (p : polynomialRing(R, I)) (n : Nat)
+  requires homogeneous : MvHomogeneous(R, I, p, n)
+  requires values : v : I → R.carrier
+  requires scalar : t ∈ R.carrier
+  shows evaluationAt(R, I, pointwiseScale(R, I, t, v))(p) =
+    call2(R.mul, Ring.pow(R, t, n), evaluationAt(R, I, v)(p))
+proof
+  sorry
+
+-- Helpers: the module of polynomials has the ring's carrier, addition,
+-- and zero; a polynomial vanishes off its support.
+theorem cldEMvModule.projections
+  shows Module.carrier(mvModule(R, I)) = Ring.carrier(polynomialRing(R, I)) ∧
+    Module.add(mvModule(R, I)) = Ring.add(polynomialRing(R, I)) ∧
+    Module.zero(mvModule(R, I)) = Ring.zero(polynomialRing(R, I))
+proof
+  unfold mvModule
+  unfold algebraModule
+  rw [Module.mk.carrier, Module.mk.add, Module.mk.zero]
+  rw [polynomialAlgebra.carrierOf, polynomialAlgebra.ring]
+  exact ⟨rfl, rfl, rfl⟩
+
+theorem cldEMvSupport.zero_off (s m : Set) (p : polynomialRing(R, I))
+  requires support : mvSupport(R, I, p) ⊆ s
+  requires monomial : m ∈ monomials(I)
+  requires outside : m ∉ s
+  shows p(m) = R.zero
+proof
+  by_contra ne
+  have ms : m ∈ mvSupport(R, I, p)
+    unfold mvSupport
+    exact functionSupport.membership.backward with ⟨monomial, ne⟩
+  exact outside with (support with ms)
+
+-- Restricted support: a submodule (restrictSupport), monotone in the
+-- support set (restrictSupport_mono), spanned by its monomials
+-- (restrictSupport_eq_span).
+theorem restrictSupport.submodule (s : Set)
+  shows SubmoduleOf(restrictSupport(R, I, s), mvModule(R, I), R)
+proof
+  have mm := mvModule.module at R, I with comm, polys
+  obtain ⟨pc, pa, pz⟩ := cldEMvModule.projections at R, I with comm, polys
+  unfold SubmoduleOf
+  refine ⟨mm, ?_, ?_, ?_, ?_⟩
+  . intros p hp
+    rw pc
+    exact (restrictSupport.membership.forward with hp).left
+  . rw pz
+    have zIn : Ring.zero(polynomialRing(R, I)) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have sub : mvSupport(R, I, Ring.zero(polynomialRing(R, I))) ⊆ s
+      intros m hm
+      unfold mvSupport at hm
+      obtain ⟨mMon, ne⟩ := functionSupport.membership.forward with hm
+      exfalso
+      exact ne with (polynomialRing.coefficient_zero at R, I, m with comm, polys, mMon)
+    exact restrictSupport.membership.backward with ⟨zIn, sub⟩
+  . intros p hp q hq
+    rw pa
+    obtain ⟨pIn, ps⟩ := restrictSupport.membership.forward with hp
+    obtain ⟨qIn, qs⟩ := restrictSupport.membership.forward with hq
+    have sIn : p + q ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have sub : mvSupport(R, I, p + q) ⊆ s
+      intros m hm
+      unfold mvSupport at hm
+      obtain ⟨mMon, ne⟩ := functionSupport.membership.forward with hm
+      by_contra ms
+      have p0 := cldEMvSupport.zero_off at R, I, s, m, p with comm, polys, pIn, ps, mMon, ms
+      have q0 := cldEMvSupport.zero_off at R, I, s, m, q with comm, polys, qIn, qs, mMon, ms
+      rw (polynomialRing.coefficient_add at R, I, p, q, m with comm, polys, pIn, qIn, mMon) at ne
+      rw [p0, q0] at ne
+      have e : R.zero + R.zero = R.zero by ring
+      exact ne with e
+    exact restrictSupport.membership.backward with ⟨sIn, sub⟩
+  . intros a ha p hp
+    obtain ⟨pIn, ps⟩ := restrictSupport.membership.forward with hp
+    rw ← (mvC.mul_eq_smul at R, I, a, p with comm, polys, ha, pIn)
+    have cIn : call2(Ring.mul(polynomialRing(R, I)), mvC(R, I, a), p) ∈ Ring.carrier(polynomialRing(R, I))
+      unfold mvC
+      typecheck
+    have sub : mvSupport(R, I, call2(Ring.mul(polynomialRing(R, I)), mvC(R, I, a), p)) ⊆ s
+      intros m hm
+      unfold mvSupport at hm
+      obtain ⟨mMon, ne⟩ := functionSupport.membership.forward with hm
+      by_contra ms
+      have p0 := cldEMvSupport.zero_off at R, I, s, m, p with comm, polys, pIn, ps, mMon, ms
+      have c := mvC.mul_coeff at R, I, a, m, p with comm, polys, ha, mMon, pIn
+      unfold mvCoeff at c
+      rw [c, p0] at ne
+      have e : a * R.zero = R.zero by ring
+      exact ne with e
+    exact restrictSupport.membership.backward with ⟨cIn, sub⟩
+
+-- Helper: the monomials of degree n.
+def cldEDegreeMonomials (n : Set) : Set :=
+  { m ∈ monomials(I) | monomialDegree(I, m) = n }
+
+theorem homogeneousPolynomials.submodule (n : Set)
+  shows SubmoduleOf(homogeneousPolynomials(R, I, n), mvModule(R, I), R)
+proof
+  have e : homogeneousPolynomials(R, I, n) = restrictSupport(R, I, cldEDegreeMonomials(R, I, n))
+    apply Subset.antisymmetric
+    . intros p hp
+      obtain ⟨pIn, hom⟩ := homogeneousPolynomials.membership.forward with hp
+      obtain ⟨_, degs⟩ := hom
+      have sub : mvSupport(R, I, p) ⊆ cldEDegreeMonomials(R, I, n)
+        intros m hm
+        have hm2 := hm
+        unfold mvSupport at hm2
+        obtain ⟨mMon, _⟩ := functionSupport.membership.forward with hm2
+        exact cldEDegreeMonomials.membership.backward with ⟨mMon, (degs with m, hm)⟩
+      exact restrictSupport.membership.backward with ⟨pIn, sub⟩
+    . intros p hp
+      obtain ⟨pIn, sub⟩ := restrictSupport.membership.forward with hp
+      have degs : ∀ m ∈ mvSupport(R, I, p), monomialDegree(I, m) = n
+        intros m hm
+        exact (cldEDegreeMonomials.membership.forward with (sub with hm)).right
+      have hom : MvHomogeneous(R, I, p, n)
+        unfold MvHomogeneous
+        exact ⟨pIn, degs⟩
+      exact homogeneousPolynomials.membership.backward with ⟨pIn, hom⟩
+  rw e
+  exact restrictSupport.submodule at R, I, cldEDegreeMonomials(R, I, n) with comm, polys
+
+theorem restrictSupport.mono (s t : Set)
+  requires subset : s ⊆ t
+  shows restrictSupport(R, I, s) ⊆ restrictSupport(R, I, t)
+proof
+  intros p hp
+  unfold restrictSupport at hp
+  obtain ⟨pIn, sub⟩ := hp
+  unfold restrictSupport
+  refine ⟨pIn, ?_⟩
+  exact Subset.transitive with sub, subset
+
+theorem restrictSupport.span (s : Set)
+  requires monomialsIn : s ⊆ monomials(I)
+  shows restrictSupport(R, I, s) = moduleSpan(mvModule(R, I), R,
+    functionImage(monomialBasisFamily(R, I), s, Ring.carrier(polynomialRing(R, I))))
+proof
+  sorry
+
+end Laws
+
+-- Section: Evaluation in algebras, renaming and substitution
+section AlgebraEvaluation
+variable (A I : Set)
+hypothesis algebra : Algebra(A)
+
+-- MvPolynomial.aeval: an algebra homomorphism R[I] → A with Xᵢ ↦ v(i)
+-- (aeval_X, aeval_C), unique (MvPolynomial.algHom_ext, aeval_unique).
+theorem mvAeval.algebra_hom (v : Set)
+  requires values : v : I → algebraCarrier(A)
+  shows AlgebraHom(mvAeval(A, I, v), polynomialAlgebra(Algebra.base(A), I), A)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have over : Algebra.base(A) = Algebra.base(A) by rfl
+  unfold mvAeval
+  exact evaluationHom.algebra_hom at Algebra.base(A), I, A, v with base, algebra, over, values
+
+theorem mvAeval.X (v i : Set)
+  requires values : v : I → algebraCarrier(A)
+  requires index : i ∈ I
+  shows mvAeval(A, I, v)(X(Algebra.base(A), I, i)) = v(i)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have over : Algebra.base(A) = Algebra.base(A) by rfl
+  unfold mvAeval
+  exact evaluationHom.algebra_X at Algebra.base(A), I, A, v, i with base, algebra, over, values, index
+
+theorem mvAeval.C (v a : Set)
+  requires values : v : I → algebraCarrier(A)
+  requires scalar : a ∈ Ring.carrier(Algebra.base(A))
+  shows mvAeval(A, I, v)(mvC(Algebra.base(A), I, a)) = Algebra.map(A)(a)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have ringA := Algebra.comm_ring at A with algebra
+  have sh := Algebra.structure_hom at A with algebra
+  have vs := values
+  unfold algebraCarrier at vs
+  unfold mvAeval
+  unfold mvC
+  exact evaluationHom.map_constant at Algebra.base(A), Algebra.ring(A), I, Algebra.map(A), v, a with base, ringA, sh, vs, scalar
+
+theorem mvAeval.unique (v f : Set)
+  requires values : v : I → algebraCarrier(A)
+  requires hom : AlgebraHom(f, polynomialAlgebra(Algebra.base(A), I), A)
+  requires variables : ∀ i ∈ I, f(X(Algebra.base(A), I, i)) = v(i)
+  shows f = mvAeval(A, I, v)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have g := mvAeval.algebra_hom at A, I, v with algebra, values
+  apply AlgebraHom.polynomial_ext at Algebra.base(A), I, A, f, mvAeval(A, I, v) with base, hom, g
+  intros j hj
+  rw (mvAeval.X at A, I, v, j with algebra, values, hj)
+  exact variables with j, hj
+
+-- MvPolynomial.algHom_ext.
+theorem mvAeval.hom_ext (f g : Set)
+  requires first : AlgebraHom(f, polynomialAlgebra(Algebra.base(A), I), A)
+  requires second : AlgebraHom(g, polynomialAlgebra(Algebra.base(A), I), A)
+  requires variables : ∀ i ∈ I, f(X(Algebra.base(A), I, i)) = g(X(Algebra.base(A), I, i))
+  shows f = g
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  exact AlgebraHom.polynomial_ext at Algebra.base(A), I, A, f, g with base, first, second, variables
+
+-- MvPolynomial.comp_aeval and aeval_algHom_apply: algebra homomorphisms
+-- commute with aeval.
+theorem mvAeval.compose (B φ v p : Set)
+  requires hom : φ : A →ₐ B
+  requires values : v : I → algebraCarrier(A)
+  requires member : p ∈ Ring.carrier(polynomialRing(Algebra.base(A), I))
+  shows φ(mvAeval(A, I, v)(p)) =
+    mvAeval(B, I, assignmentImage(I, algebraCarrier(B), φ, v))(p)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have algB := AlgebraHom.target at φ, A, B with hom
+  have bEq := AlgebraHom.base_eq at φ, A, B with hom
+  have φfn := AlgebraHom.function at φ, A, B with hom
+  have wv : ∀ i ∈ I, φ(v(i)) ∈ algebraCarrier(B)
+    intros i hi
+    have vi := FunctionBetween.apply_closed with values, hi
+    exact FunctionBetween.apply_closed with φfn, vi
+  obtain ⟨wfn, wval⟩ := mv.assignment_image_function at I, algebraCarrier(B), φ, v with wv
+  have f := mvAeval.algebra_hom at A, I, v with algebra, values
+  have h := mvAeval.algebra_hom at B, I, assignmentImage(I, algebraCarrier(B), φ, v) with algB, wfn
+  rw ← bEq at h
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), I) at pmem
+  have ag : ∀ i ∈ I, φ(mvAeval(A, I, v)(X(Algebra.base(A), I, i))) = mvAeval(B, I, assignmentImage(I, algebraCarrier(B), φ, v))(X(Algebra.base(A), I, i))
+    intros i hi
+    rw (mvAeval.X at A, I, v, i with algebra, values, hi)
+    have hx := mvAeval.X at B, I, assignmentImage(I, algebraCarrier(B), φ, v), i with algB, wfn, hi
+    rw ← bEq at hx
+    rw hx
+    rw (wval with i, hi)
+  exact polynomial_composite_agree at Algebra.base(A), I, A, B, mvAeval(A, I, v), φ, mvAeval(B, I, assignmentImage(I, algebraCarrier(B), φ, v)), p with base, f, hom, h, ag, pmem
+
+-- MvPolynomial.aeval_rename: evaluating a renamed polynomial is
+-- evaluating at the composite assignment; rename is functorial
+-- (rename_rename), sends Xᵢ to X_σ(i) (rename_X), and is injective for
+-- injective σ (MvPolynomial.rename_injective).
+theorem mvAeval.rename (J σ v p : Set)
+  requires map : σ : I → J
+  requires values : v : J → algebraCarrier(A)
+  requires member : p ∈ Ring.carrier(polynomialRing(Algebra.base(A), I))
+  shows mvAeval(A, J, v)(polynomialRename(Algebra.base(A), I, J, σ)(p)) =
+    mvAeval(A, I, compose(v, σ, I, J, algebraCarrier(A)))(p)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have rn := polynomialRename.hom at Algebra.base(A), I, J, σ with base, map
+  have g := mvAeval.algebra_hom at A, J, v with algebra, values
+  have cf := compose.function at v, σ, I, J, algebraCarrier(A) with map, values
+  have h := mvAeval.algebra_hom at A, I, compose(v, σ, I, J, algebraCarrier(A)) with algebra, cf
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), I) at pmem
+  have ag : ∀ i ∈ I, mvAeval(A, J, v)(polynomialRename(Algebra.base(A), I, J, σ)(X(Algebra.base(A), I, i))) = mvAeval(A, I, compose(v, σ, I, J, algebraCarrier(A)))(X(Algebra.base(A), I, i))
+    intros i hi
+    rw (polynomialRename.map_X at Algebra.base(A), I, J, σ, i with base, map, hi)
+    have si := FunctionBetween.apply_closed with map, hi
+    rw (mvAeval.X at A, J, v, σ(i) with algebra, values, si)
+    rw (mvAeval.X at A, I, compose(v, σ, I, J, algebraCarrier(A)), i with algebra, cf, hi)
+    rw (compose.apply at v, σ, I, J, algebraCarrier(A), i with map, values, hi)
+  exact polynomial_composite_agree at Algebra.base(A), I, polynomialAlgebra(Algebra.base(A), J), A, polynomialRename(Algebra.base(A), I, J, σ), mvAeval(A, J, v), mvAeval(A, I, compose(v, σ, I, J, algebraCarrier(A))), p with base, rn, g, h, ag, pmem
+
+-- MvPolynomial.aeval_bind₁: evaluating a substitution evaluates the
+-- substituted polynomials first.
+theorem mvAeval.bind (J g v p : Set)
+  requires substitution : g : I → Ring.carrier(polynomialRing(Algebra.base(A), J))
+  requires values : v : J → algebraCarrier(A)
+  requires member : p ∈ Ring.carrier(polynomialRing(Algebra.base(A), I))
+  shows mvAeval(A, J, v)(mvBind(Algebra.base(A), I, J, g)(p)) =
+    mvAeval(A, I, bindValues(A, I, J, g, v))(p)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have paJ := polynomialAlgebra.algebra at Algebra.base(A), J with base
+  have over := polynomialAlgebra.base at Algebra.base(A), J
+  have gv := substitution
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), J) at gv
+  have bh := evaluationHom.algebra_hom at Algebra.base(A), I, polynomialAlgebra(Algebra.base(A), J), g with base, paJ, over, gv
+  rw [polynomialAlgebra.ring, polynomialAlgebra.map] at bh
+  have g2 := mvAeval.algebra_hom at A, J, v with algebra, values
+  have bv : ∀ i ∈ I, mvAeval(A, J, v)(g(i)) ∈ algebraCarrier(A)
+    intros i hi
+    have gi := FunctionBetween.apply_closed with substitution, hi
+    have af := AlgebraHom.function at mvAeval(A, J, v), polynomialAlgebra(Algebra.base(A), J), A with g2
+    rw (polynomialAlgebra.carrierOf at Algebra.base(A), J) at af
+    exact FunctionBetween.apply_closed with af, gi
+  obtain ⟨bfn, bval⟩ := mv.bind_values_function at A, I, J, g, v with bv
+  have h := mvAeval.algebra_hom at A, I, bindValues(A, I, J, g, v) with algebra, bfn
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), I) at pmem
+  have ag : ∀ i ∈ I, mvAeval(A, J, v)(evaluationHom(Algebra.base(A), polynomialRing(Algebra.base(A), J), I, polynomialConstant(Algebra.base(A), J), g)(X(Algebra.base(A), I, i))) = mvAeval(A, I, bindValues(A, I, J, g, v))(X(Algebra.base(A), I, i))
+    intros i hi
+    have pcJ := polynomialRing.comm_ring at Algebra.base(A), J with base
+    have ch := polynomialConstant.hom at Algebra.base(A), J with base
+    rw (evaluationHom.map_X at Algebra.base(A), polynomialRing(Algebra.base(A), J), I, polynomialConstant(Algebra.base(A), J), g, i with base, pcJ, ch, substitution, hi)
+    rw (mvAeval.X at A, I, bindValues(A, I, J, g, v), i with algebra, bfn, hi)
+    rw (bval with i, hi)
+  unfold mvBind
+  exact polynomial_composite_agree at Algebra.base(A), I, polynomialAlgebra(Algebra.base(A), J), A, evaluationHom(Algebra.base(A), polynomialRing(Algebra.base(A), J), I, polynomialConstant(Algebra.base(A), J), g), mvAeval(A, J, v), mvAeval(A, I, bindValues(A, I, J, g, v)), p with base, bh, g2, h, ag, pmem
+
+-- In the polynomial algebra itself, aeval at the variables is the
+-- identity (MvPolynomial.aeval_X_left).
+theorem mvAeval.variables_self (p : Set)
+  requires member : p ∈ Ring.carrier(polynomialRing(Algebra.base(A), I))
+  shows mvAeval(polynomialAlgebra(Algebra.base(A), I), I,
+    mvVariables(Algebra.base(A), I))(p) = p
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have pa := polynomialAlgebra.algebra at Algebra.base(A), I with base
+  have xs : ∀ i ∈ I, X(Algebra.base(A), I, i) ∈ Ring.carrier(polynomialRing(Algebra.base(A), I))
+    intros i hi
+    exact X.mem at Algebra.base(A), I, i with base
+  obtain ⟨vfn, vval⟩ := mv.variables_function at Algebra.base(A), I with xs
+  have vfn2 := vfn
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), I) at vfn2
+  have idh := AlgebraHom.identity at polynomialAlgebra(Algebra.base(A), I) with pa
+  have u := mvAeval.unique at polynomialAlgebra(Algebra.base(A), I), I, mvVariables(Algebra.base(A), I), identity(algebraCarrier(polynomialAlgebra(Algebra.base(A), I))) with pa, vfn2
+  rw (polynomialAlgebra.base at Algebra.base(A), I) at u
+  rw (polynomialAlgebra.base at Algebra.base(A), I) at u
+  have ag : ∀ i ∈ I, identity(algebraCarrier(polynomialAlgebra(Algebra.base(A), I)))(X(Algebra.base(A), I, i)) = mvVariables(Algebra.base(A), I)(i)
+    intros i hi
+    rw (vval with i, hi)
+    have xIn := X.algebra_mem at Algebra.base(A), I, i with base, hi
+    exact identity.apply at X(Algebra.base(A), I, i), algebraCarrier(polynomialAlgebra(Algebra.base(A), I)) with xIn
+  have eq := u with idh, ag
+  rw ← eq
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at Algebra.base(A), I) at pmem
+  exact identity.apply at p, algebraCarrier(polynomialAlgebra(Algebra.base(A), I)) with pmem
+
+end AlgebraEvaluation
+
+section RenameBind
+variable (R : Set)
+hypothesis comm : CommRing(R)
+
+theorem polynomialRename.compose (I J K σ τ p : Set)
+  requires first : σ : I → J
+  requires second : τ : J → K
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows polynomialRename(R, J, K, τ)(polynomialRename(R, I, J, σ)(p)) =
+    polynomialRename(R, I, K, compose(τ, σ, I, J, K))(p)
+proof
+  have pa := polynomialRename.hom at R, I, J, σ with comm, first
+  have pb := polynomialRename.hom at R, J, K, τ with comm, second
+  have cf := compose.function at τ, σ, I, J, K with first, second
+  have pc := polynomialRename.hom at R, I, K, compose(τ, σ, I, J, K) with comm, cf
+  have pmem := member
+  rw ← (polynomialAlgebra.carrierOf at R, I) at pmem
+  have ag : ∀ i ∈ I, polynomialRename(R, J, K, τ)(polynomialRename(R, I, J, σ)(X(R, I, i))) = polynomialRename(R, I, K, compose(τ, σ, I, J, K))(X(R, I, i))
+    intros i hi
+    rw (polynomialRename.map_X at R, I, J, σ, i with comm, first, hi)
+    have si := FunctionBetween.apply_closed with first, hi
+    rw (polynomialRename.map_X at R, J, K, τ, σ(i) with comm, second, si)
+    rw (polynomialRename.map_X at R, I, K, compose(τ, σ, I, J, K), i with comm, cf, hi)
+    rw (compose.apply at τ, σ, I, J, K, i with first, second, hi)
+  exact polynomial_composite_agree at R, I, polynomialAlgebra(R, J), polynomialAlgebra(R, K), polynomialRename(R, I, J, σ), polynomialRename(R, J, K, τ), polynomialRename(R, I, K, compose(τ, σ, I, J, K)), p with comm, pa, pb, pc, ag, pmem
+
+-- Helper: for injective σ : I → J, the assignment J → R[I] sending σ(i)
+-- to X_i and the rest of J to 0; evaluation along it undoes renaming.
+def cldERenameBack (I J σ : Set) : Set :=
+  { p ∈ J × Ring.carrier(polynomialRing(R, I)) |
+    (∃ i ∈ I, p = (σ(i), X(R, I, i))) ∨
+    (∃ j ∈ J, j ∉ functionImage(σ, I, J) ∧
+      p = (j, Ring.zero(polynomialRing(R, I)))) }
+
+theorem cldERenameBack.function (I J σ : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  shows (cldERenameBack(R, I, J, σ) : J → Ring.carrier(polynomialRing(R, I))) ∧
+    (∀ i ∈ I, cldERenameBack(R, I, J, σ)(σ(i)) = X(R, I, i))
+proof
+  have pr := polynomialRing.comm_ring at R, I with comm
+  have zeroIn : Ring.zero(polynomialRing(R, I)) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+  have relX : ∀ i ∈ I, relates(cldERenameBack(R, I, J, σ), σ(i), X(R, I, i))
+    intros i hi
+    have si := FunctionBetween.apply_closed with map, hi
+    have xi : X(R, I, i) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+    have pq := product.pair with si, xi
+    have o : (∃ k ∈ I, (σ(i), X(R, I, i)) = (σ(k), X(R, I, k))) ∨ (∃ j ∈ J, j ∉ functionImage(σ, I, J) ∧ (σ(i), X(R, I, i)) = (j, Ring.zero(polynomialRing(R, I))))
+      left
+      exact ⟨i, hi, rfl⟩
+    unfold relates
+    exact cldERenameBack.membership.backward with ⟨pq, o⟩
+  have fn : cldERenameBack(R, I, J, σ) : J → Ring.carrier(polynomialRing(R, I))
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros q hq
+      exact (cldERenameBack.membership.forward with hq).left
+    . unfold Functional
+      intros x y hxy z hxz
+      unfold relates at hxy
+      unfold relates at hxz
+      obtain ⟨_, c1⟩ := cldERenameBack.membership.forward with hxy
+      obtain ⟨_, c2⟩ := cldERenameBack.membership.forward with hxz
+      rcases c1 with ⟨i1, hi1, e1⟩ | ⟨j1, hj1, out1, e1⟩
+      . obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+        rcases c2 with ⟨i2, hi2, e2⟩ | ⟨j2, hj2, out2, e2⟩
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          have s : σ(i1) = σ(i2)
+            rw [← x1, ← x2]
+          have ii := Injective.apply_cancel with injective, hi1, hi2, s
+          rw [y1, z2, ii]
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          exfalso
+          have s : j2 = σ(i1)
+            rw [← x1, ← x2]
+          have im := functionImage.membership.backward at σ, I, J, j2 with ⟨hj2, i1, hi1, s⟩
+          exact out2 with im
+      . obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+        rcases c2 with ⟨i2, hi2, e2⟩ | ⟨j2, hj2, out2, e2⟩
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          exfalso
+          have s : j1 = σ(i2)
+            rw [← x1, ← x2]
+          have im := functionImage.membership.backward at σ, I, J, j1 with ⟨hj1, i2, hi2, s⟩
+          exact out1 with im
+        . obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+          rw [y1, z2]
+    . intros j hj
+      by_cases im : j ∈ functionImage(σ, I, J)
+      . obtain ⟨_, i, hi, ji⟩ := functionImage.membership.forward with im
+        have r := relX with i, hi
+        rw ← ji at r
+        have xi : X(R, I, i) ∈ Ring.carrier(polynomialRing(R, I)) by typecheck
+        exact ⟨X(R, I, i), xi, r⟩
+      . have pq := product.pair with hj, zeroIn
+        have o : (∃ k ∈ I, (j, Ring.zero(polynomialRing(R, I))) = (σ(k), X(R, I, k))) ∨ (∃ j2 ∈ J, j2 ∉ functionImage(σ, I, J) ∧ (j, Ring.zero(polynomialRing(R, I))) = (j2, Ring.zero(polynomialRing(R, I))))
+          right
+          exact ⟨j, hj, im, rfl⟩
+        have m := cldERenameBack.membership.backward with ⟨pq, o⟩
+        have r : relates(cldERenameBack(R, I, J, σ), j, Ring.zero(polynomialRing(R, I)))
+          unfold relates
+          exact m
+        exact ⟨Ring.zero(polynomialRing(R, I)), zeroIn, r⟩
+  refine ⟨fn, ?_⟩
+  intros i hi
+  have si := FunctionBetween.apply_closed with map, hi
+  exact FunctionBetween.apply_value with fn, si, (relX with i, hi)
+
+theorem polynomialRename.injective (I J σ : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  shows InjectiveBetween(polynomialRename(R, I, J, σ),
+    Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)))
+proof
+  obtain ⟨wF, wV⟩ := cldERenameBack.function at R, I, J, σ with comm, map, injective
+  have algI := polynomialAlgebra.algebra at R, I with comm
+  have over := polynomialAlgebra.base at R, I
+  have values : cldERenameBack(R, I, J, σ) : J → algebraCarrier(polynomialAlgebra(R, I))
+    rw polynomialAlgebra.carrierOf
+    exact wF
+  have back := evaluationHom.algebra_hom at R, J, polynomialAlgebra(R, I), cldERenameBack(R, I, J, σ) with comm, algI, over, values
+  rw [polynomialAlgebra.ring, polynomialAlgebra.map] at back
+  have forward := polynomialRename.hom at R, I, J, σ with comm, map
+  have pI := polynomialRing.comm_ring at R, I with comm
+  have pJ := polynomialRing.comm_ring at R, J with comm
+  have cst := polynomialConstant.hom at R, I with comm
+  have vars : ∀ i ∈ I, evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ))(polynomialRename(R, I, J, σ)(X(R, I, i))) = X(R, I, i)
+    intros i hi
+    rw (polynomialRename.map_X at R, I, J, σ, i with comm, map, hi)
+    have si := FunctionBetween.apply_closed with map, hi
+    rw (evaluationHom.map_X at R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ), σ(i) with comm, pI, cst, wF, si)
+    exact wV with i, hi
+  have trip := AlgebraHom.polynomial_round_trip at R, I, polynomialAlgebra(R, J), polynomialRename(R, I, J, σ), evaluationHom(R, polynomialRing(R, I), J, polynomialConstant(R, I), cldERenameBack(R, I, J, σ)) with comm, forward, back, vars
+  have rf := AlgebraHom.function with forward
+  rw [polynomialAlgebra.carrierOf, polynomialAlgebra.carrierOf] at rf
+  refine ⟨rf, ?_⟩
+  intros x hx y hy z hz rx ry
+  have vx := FunctionBetween.apply_value with rf, hx, rx
+  have vy := FunctionBetween.apply_value with rf, hy, ry
+  have hx2 := hx
+  rw ← (polynomialAlgebra.carrierOf at R, I) at hx2
+  have hy2 := hy
+  rw ← (polynomialAlgebra.carrierOf at R, I) at hy2
+  have tx := trip with x, hx2
+  have ty := trip with y, hy2
+  rw vx at tx
+  rw vy at ty
+  rw tx at ty
+  exact ty
+
+-- MvPolynomial.eval_rename.
+theorem polynomialRename.eval (I J σ v p : Set)
+  requires map : σ : I → J
+  requires values : v : J → R.carrier
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows evaluationAt(R, J, v)(polynomialRename(R, I, J, σ)(p)) =
+    evaluationAt(R, I, compose(v, σ, I, J, R.carrier))(p)
+proof
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have rn := polynomialRename.hom at R, I, J, σ with comm, map
+  have rh := AlgebraHom.ring_hom at polynomialRename(R, I, J, σ), polynomialAlgebra(R, I), polynomialAlgebra(R, J) with rn
+  rw [polynomialAlgebra.ring, polynomialAlgebra.ring] at rh
+  have eh := evaluationAt.hom at R, J, v with comm, values
+  have c := RingHom.comp at polynomialRename(R, I, J, σ), evaluationAt(R, J, v), polynomialRing(R, I), polynomialRing(R, J), R with pcI, rh, eh
+  have cf := compose.function at v, σ, I, J, R.carrier with map, values
+  have eh2 := evaluationAt.hom at R, I, compose(v, σ, I, J, R.carrier) with comm, cf
+  have r0 := rh
+  obtain ⟨_, _, rfn, _⟩ := r0
+  have e0 := eh
+  obtain ⟨_, _, efn, _⟩ := e0
+  have eq : compose(evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier) = evaluationAt(R, I, compose(v, σ, I, J, R.carrier))
+    apply polynomialRing.hom_ext at R, I, R, compose(evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier), evaluationAt(R, I, compose(v, σ, I, J, R.carrier)) with comm, c, eh2
+    . intros a ha
+      have cIn := polynomialConstant.mem at R, I, a with comm, ha
+      rw (compose.apply at evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier, polynomialConstant(R, I)(a) with rfn, efn, cIn)
+      have ha2 : a ∈ Ring.carrier(Algebra.base(polynomialAlgebra(R, I)))
+        rw polynomialAlgebra.base
+        exact ha
+      have mb := AlgebraHom.map_base at polynomialRename(R, I, J, σ), polynomialAlgebra(R, I), polynomialAlgebra(R, J), a with rn, ha2
+      rw [polynomialAlgebra.map, polynomialAlgebra.map] at mb
+      rw mb
+      rw (evaluationAt.map_constant at R, J, v, a with comm, values, ha)
+      rw (evaluationAt.map_constant at R, I, compose(v, σ, I, J, R.carrier), a with comm, cf, ha)
+    . intros j hj
+      have xIn := X.mem at R, I, j with comm
+      rw (compose.apply at evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier, X(R, I, j) with rfn, efn, xIn)
+      rw (polynomialRename.map_X at R, I, J, σ, j with comm, map, hj)
+      have sj := FunctionBetween.apply_closed with map, hj
+      rw (evaluationAt.map_X at R, J, v, σ(j) with comm, values, sj)
+      rw (evaluationAt.map_X at R, I, compose(v, σ, I, J, R.carrier), j with comm, cf, hj)
+      rw (compose.apply at v, σ, I, J, R.carrier, j with map, values, hj)
+  rw ← eq
+  rw (compose.apply at evaluationAt(R, J, v), polynomialRename(R, I, J, σ), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), R.carrier, p with rfn, efn, member)
+
+-- Renaming keeps the total degree.
+theorem polynomialRename.total_degree (I J σ p : Set)
+  requires map : σ : I → J
+  requires injective : InjectiveBetween(σ, I, J)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvTotalDegree(R, J, polynomialRename(R, I, J, σ)(p)) = mvTotalDegree(R, I, p)
+proof
+  sorry
+
+-- bind₁: a homomorphism R[I] → R[J] with Xᵢ ↦ g(i) (bind₁_X_right), bind
+-- of the variables is the identity (bind₁_X_left), substitution composes
+-- (MvPolynomial.bind₁_bind₁), and rename is bind along variables
+-- (rename_eq_bind₁... written with mvVariables), and aeval is
+-- MvPolynomial.aeval_eq_bind₁ at a polynomial algebra.
+theorem mvBind.hom (I J g : Set)
+  requires substitution : g : I → Ring.carrier(polynomialRing(R, J))
+  shows mvBind(R, I, J, g) : polynomialRing(R, I) →+* polynomialRing(R, J)
+proof
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have ch := polynomialConstant.hom at R, J with comm
+  unfold mvBind
+  exact evaluationHom.hom at R, polynomialRing(R, J), I, polynomialConstant(R, J), g with comm, pcJ, ch, substitution
+
+theorem mvBind.X (I J g i : Set)
+  requires substitution : g : I → Ring.carrier(polynomialRing(R, J))
+  requires index : i ∈ I
+  shows mvBind(R, I, J, g)(X(R, I, i)) = g(i)
+proof
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have ch := polynomialConstant.hom at R, J with comm
+  unfold mvBind
+  exact evaluationHom.map_X at R, polynomialRing(R, J), I, polynomialConstant(R, J), g, i with comm, pcJ, ch, substitution, index
+
+theorem mvBind.variables (I p : Set)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvBind(R, I, I, mvVariables(R, I))(p) = p
+proof
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have ch := polynomialConstant.hom at R, I with comm
+  have vf := mv.variables_function at R, I
+  have xs : ∀ i ∈ I, X(R, I, i) ∈ Ring.carrier(polynomialRing(R, I))
+    intros i hi
+    exact X.mem at R, I, i with comm
+  obtain ⟨fn, vals⟩ := vf with xs
+  have idh := RingHom.id at polynomialRing(R, I) with pcI
+  have u := evaluationHom.unique at R, polynomialRing(R, I), I, polynomialConstant(R, I), mvVariables(R, I), identity(Ring.carrier(polynomialRing(R, I))) with comm, pcI, ch, fn, idh
+  have eq : identity(Ring.carrier(polynomialRing(R, I))) = evaluationHom(R, polynomialRing(R, I), I, polynomialConstant(R, I), mvVariables(R, I))
+    apply u
+    . intros a ha
+      have cIn := polynomialConstant.mem at R, I, a with comm, ha
+      exact identity.apply at polynomialConstant(R, I)(a), Ring.carrier(polynomialRing(R, I)) with cIn
+    . intros j hj
+      have xIn := X.mem at R, I, j with comm
+      rw (vals with j, hj)
+      exact identity.apply at X(R, I, j), Ring.carrier(polynomialRing(R, I)) with xIn
+  unfold mvBind
+  rw ← eq
+  exact identity.apply at p, Ring.carrier(polynomialRing(R, I)) with member
+
+theorem mvBind.bind (I J K g h p : Set)
+  requires first : g : I → Ring.carrier(polynomialRing(R, J))
+  requires second : h : J → Ring.carrier(polynomialRing(R, K))
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows mvBind(R, J, K, h)(mvBind(R, I, J, g)(p)) =
+    mvBind(R, I, K, bindCompose(R, I, J, K, g, h))(p)
+proof
+  have pcI := polynomialRing.comm_ring at R, I with comm
+  have pcJ := polynomialRing.comm_ring at R, J with comm
+  have pcK := polynomialRing.comm_ring at R, K with comm
+  have bg := mvBind.hom at R, I, J, g with comm, first
+  have bh := mvBind.hom at R, J, K, h with comm, second
+  have c := RingHom.comp at mvBind(R, I, J, g), mvBind(R, J, K, h), polynomialRing(R, I), polynomialRing(R, J), polynomialRing(R, K) with pcI, bg, bh
+  have bv : ∀ i ∈ I, mvBind(R, J, K, h)(g(i)) ∈ Ring.carrier(polynomialRing(R, K))
+    intros i hi
+    have gi := FunctionBetween.apply_closed with first, hi
+    exact RingHom.map_mem at mvBind(R, J, K, h), polynomialRing(R, J), polynomialRing(R, K), g(i) with bh, gi
+  obtain ⟨bcf, bcv⟩ := mv.bind_compose_function at R, I, J, K, g, h with bv
+  have bc := mvBind.hom at R, I, K, bindCompose(R, I, J, K, g, h) with comm, bcf
+  have b0 := bg
+  obtain ⟨_, _, gfn, _⟩ := b0
+  have b1 := bh
+  obtain ⟨_, _, hfn, _⟩ := b1
+  have chJ := polynomialConstant.hom at R, J with comm
+  have chK := polynomialConstant.hom at R, K with comm
+  have eq : compose(mvBind(R, J, K, h), mvBind(R, I, J, g), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), Ring.carrier(polynomialRing(R, K))) = mvBind(R, I, K, bindCompose(R, I, J, K, g, h))
+    apply polynomialRing.hom_ext at R, I, polynomialRing(R, K), compose(mvBind(R, J, K, h), mvBind(R, I, J, g), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), Ring.carrier(polynomialRing(R, K))), mvBind(R, I, K, bindCompose(R, I, J, K, g, h)) with comm, c, bc
+    . intros a ha
+      have cIn := polynomialConstant.mem at R, I, a with comm, ha
+      rw (compose.apply at mvBind(R, J, K, h), mvBind(R, I, J, g), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), Ring.carrier(polynomialRing(R, K)), polynomialConstant(R, I)(a) with gfn, hfn, cIn)
+      unfold mvBind
+      rw (evaluationHom.map_constant at R, polynomialRing(R, J), I, polynomialConstant(R, J), g, a with comm, pcJ, chJ, first, ha)
+      rw (evaluationHom.map_constant at R, polynomialRing(R, K), J, polynomialConstant(R, K), h, a with comm, pcK, chK, second, ha)
+      rw (evaluationHom.map_constant at R, polynomialRing(R, K), I, polynomialConstant(R, K), bindCompose(R, I, J, K, g, h), a with comm, pcK, chK, bcf, ha)
+    . intros i hi
+      have xIn := X.mem at R, I, i with comm
+      rw (compose.apply at mvBind(R, J, K, h), mvBind(R, I, J, g), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), Ring.carrier(polynomialRing(R, K)), X(R, I, i) with gfn, hfn, xIn)
+      rw (mvBind.X at R, I, J, g, i with comm, first, hi)
+      rw (mvBind.X at R, I, K, bindCompose(R, I, J, K, g, h), i with comm, bcf, hi)
+      rw (bcv with i, hi)
+  rw ← eq
+  rw (compose.apply at mvBind(R, J, K, h), mvBind(R, I, J, g), Ring.carrier(polynomialRing(R, I)), Ring.carrier(polynomialRing(R, J)), Ring.carrier(polynomialRing(R, K)), p with gfn, hfn, member)
+
+theorem mvBind.rename (I J σ p : Set)
+  requires map : σ : I → J
+  requires member : p ∈ Ring.carrier(polynomialRing(R, I))
+  shows polynomialRename(R, I, J, σ)(p) =
+    mvBind(R, I, J, compose(mvVariables(R, J), σ, I, J,
+      Ring.carrier(polynomialRing(R, J))))(p)
+proof
+  have xs : ∀ j ∈ J, X(R, J, j) ∈ Ring.carrier(polynomialRing(R, J))
+    intros j hj
+    exact X.mem at R, J, j with comm
+  obtain ⟨vfn, vval⟩ := mv.variables_function at R, J with xs
+  have va := variableAssignment.function at R, I, J, σ with comm, map
+  have cf := compose.function at mvVariables(R, J), σ, I, J, Ring.carrier(polynomialRing(R, J)) with map, vfn
+  have eq : variableAssignment(R, I, J, σ) = compose(mvVariables(R, J), σ, I, J, Ring.carrier(polynomialRing(R, J)))
+    apply FunctionBetween.ext with va, cf
+    intros i hi
+    rw (variableAssignment.apply at R, I, J, σ, i with comm, map, hi)
+    rw (compose.apply at mvVariables(R, J), σ, I, J, Ring.carrier(polynomialRing(R, J)), i with map, vfn, hi)
+    have si := FunctionBetween.apply_closed with map, hi
+    rw (vval with σ(i), si)
+  unfold polynomialRename
+  unfold mvBind
+  rw eq
+
+-- MvPolynomial.funext: over an infinite domain, polynomials with the same
+-- values at every point are equal.
+theorem mvPolynomial.funext (I p q : Set)
+  requires domain : IntegralDomain(R)
+  requires infinite : ¬Finite(R.carrier)
+  requires first : p ∈ Ring.carrier(polynomialRing(R, I))
+  requires second : q ∈ Ring.carrier(polynomialRing(R, I))
+  requires agree : ∀ v, (v : I → R.carrier) →
+    evaluationAt(R, I, v)(p) = evaluationAt(R, I, v)(q)
+  shows p = q
+proof
+  sorry
+
+-- One variable: R[{0}] with X_0 is the univariate ring of
+-- GRH.Polynomial.Univariate, and aeval in one variable is polyAeval.
+theorem mvAeval.univariate (A x p : Set)
+  requires algebra : Algebra(A)
+  requires point : x ∈ algebraCarrier(A)
+  requires member : p ∈ Ring.carrier(polynomialRing(Algebra.base(A), {0}))
+  shows mvAeval(A, {0}, constantFunction({0}, algebraCarrier(A), x))(p) =
+    polyAeval(A, x, p)
+proof
+  unfold mvAeval
+  unfold polyAeval
+  unfold polyEval2
+  unfold algebraCarrier
+  rfl
+
+end RenameBind

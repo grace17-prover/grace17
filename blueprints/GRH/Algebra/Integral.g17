@@ -1,0 +1,1896 @@
+-- Integral elements and integral closure: x in an R-algebra A is integral
+-- when it is a root of a monic polynomial over R (Mathlib's IsIntegral),
+-- integral algebras (Algebra.IsIntegral), the integral closure as a
+-- subalgebra, integral closures and integrally closed domains
+-- (IsIntegralClosure, IsIntegrallyClosedIn, IsIntegrallyClosed), algebraic
+-- elements over a field, the finiteness characterization, transitivity,
+-- determinants of integral matrices, lying over and going up, and the
+-- integral closedness of unique factorization domains.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Ring/Integral (beside Cumulus's IntegralOver).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Algebra.Integral
+import GRH.Algebra.Finiteness
+import Grace.Cumulus.Algebra.IntegralFinite
+import Grace.Cumulus.Algebra.Field.IntegralDescent
+import Grace.Cumulus.Algebra.FiniteModuleTower
+
+-- Section: Integral and algebraic elements
+-- x ∈ A is integral over R = Algebra.base(A): p(x) = 0 for a monic p ∈ R[X]
+-- (IsIntegral). Cumulus's IntegralOver is the same notion with the monic
+-- polynomial as a coefficient list.
+predicate IntegralElement (A x : Set) :=
+  Algebra(A) ∧ x ∈ algebraCarrier(A) ∧
+  (∃ p, PolyMonic(Algebra.base(A), p) ∧
+    polyAeval(A, x, p) = Ring.zero(Algebra.ring(A)))
+
+-- x is algebraic: a root of a nonzero polynomial (IsAlgebraic).
+predicate AlgebraicElement (A x : Set) :=
+  Algebra(A) ∧ x ∈ algebraCarrier(A) ∧
+  (∃ p ∈ Ring.carrier(polynomialRing(Algebra.base(A), {0})),
+    p ≠ Ring.zero(polynomialRing(Algebra.base(A), {0})) ∧
+    polyAeval(A, x, p) = Ring.zero(Algebra.ring(A)))
+
+-- An integral algebra (Algebra.IsIntegral) and an algebraic one
+-- (Algebra.IsAlgebraic).
+predicate IntegralAlgebra (A : Set) :=
+  Algebra(A) ∧ (∀ x ∈ algebraCarrier(A), IntegralElement(A, x))
+
+predicate AlgebraicAlgebra (A : Set) :=
+  Algebra(A) ∧ (∀ x ∈ algebraCarrier(A), AlgebraicElement(A, x))
+
+-- The integral closure of R in A (integralClosure R A).
+def integralClosure (A : Set) : Set :=
+  { x ∈ algebraCarrier(A) | IntegralElement(A, x) }
+
+-- R is integrally closed in A: the structure map is injective and its
+-- image is the set of integral elements (IsIntegrallyClosedIn, i.e.
+-- IsIntegralClosure R R A).
+predicate IntegrallyClosedIn (A : Set) :=
+  Algebra(A) ∧
+  InjectiveBetween(Algebra.map(A), Ring.carrier(Algebra.base(A)), algebraCarrier(A)) ∧
+  integralClosure(A) = functionImage(Algebra.map(A),
+    Ring.carrier(Algebra.base(A)), algebraCarrier(A))
+
+-- C with j : C → B is the integral closure of R in B, where B and C are
+-- R-algebras and j an injective algebra homomorphism onto the integral
+-- elements of B (IsIntegralClosure C R B).
+predicate IsIntegralClosure (C B j : Set) :=
+  AlgebraHom(j, C, B) ∧ InjectiveBetween(j, algebraCarrier(C), algebraCarrier(B)) ∧
+  functionImage(j, algebraCarrier(C), algebraCarrier(B)) = integralClosure(B)
+
+-- An integrally closed domain: integrally closed in its fraction field
+-- (IsIntegrallyClosed R, by IsIntegralClosure R R (FractionRing R)).
+predicate IntegrallyClosedDomain (R : Set) :=
+  IntegralDomain(R) ∧ IntegrallyClosedIn(localizationAlgebra(R, nonZeroDivisors(R)))
+
+-- An element y of a ring S is integral along f : R →+* S
+-- (RingHom.IsIntegralElem), and f is integral (RingHom.IsIntegral).
+predicate IntegralAlong (f R S y : Set) :=
+  IntegralElement(Algebra.mk(R, S, f), y)
+
+predicate IntegralHom (f R S : Set) :=
+  RingHom(f, R, S) ∧ (∀ y ∈ Ring.carrier(S), IntegralAlong(f, R, S, y))
+
+-- Section: Helpers for the bridge to Cumulus's monic relations
+theorem intHelp.pred (k : Nat)
+  requires positive : 0 < k
+  shows ∃ j ∈ ℕ, k = j + 1
+proof
+  induction k
+  | zero =>
+    intro h
+    exfalso
+    arith
+  | succ(m) using ih =>
+    intro h
+    have mN : m ∈ ℕ by typecheck
+    refine ⟨m, mN, ?_⟩
+    arith
+
+-- The coefficients of a + X p are a, then those of p (shifted by one).
+theorem intHelp.shift_coeff (R p a : Set) (j : Nat)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyCoeff(call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), j + 1) = polyCoeff(p, j)
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have pring := CommRing.to_ring with polys
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have add := polyCoeff.add at R, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), j + 1 with comm, polys, cIn, xpIn
+  have c := polyC.coeff at R, a, j + 1 with comm, polys, scalar
+  have ne : j + 1 ≠ 0 by arith
+  have c0 := c.right with ne
+  have pow1 := Ring.pow_one at polynomialRing(R, {0}), polyX(R) with xIn, pring
+  have sh := polyCoeff.X_pow_mul at R, p, 1, j with comm, polys, member
+  rw pow1 at sh
+  have pj := uni.coeff_mem at R, p, j with comm, member
+  rw [add, c0, sh]
+  exact finHelp.zero_add at R, polyCoeff(p, j) with pj, comm
+
+theorem intHelp.shift_coeff_zero (R p a : Set)
+  requires comm : CommRing(R)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyCoeff(call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), 0) =
+    call2(Ring.add(R), a, polyCoeff(call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), 0))
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have add := polyCoeff.add at R, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p), 0 with comm, polys, cIn, xpIn
+  have c := polyC.coeff at R, a, 0 with comm, polys, scalar
+  have e : (0:Nat) = 0 by rfl
+  rw [add, (c.left with e)]
+
+-- The value of a + X p is f(a) + x · p(x).
+theorem intHelp.shift_eval (R S f x p a : Set)
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires scalar : a ∈ Ring.carrier(R)
+  shows polyEval2(R, S, f, x, call2(Ring.add(polynomialRing(R, {0})), polyC(R, a),
+    call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p))) =
+    call2(Ring.add(S), f(a), call2(Ring.mul(S), x, polyEval2(R, S, f, x, p)))
+proof
+  have polys := polynomialRing.comm_ring at R, {0} with comm
+  have xIn := polyX.mem at R with comm, polys
+  have cIn := polyC.mem at R, a with comm, polys, scalar
+  have H := polyEval2.hom at R, S, f, x with comm, polys, target, hom, point
+  have xpIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+  have eC := polyEval2.C at R, S, f, x, a with comm, polys, target, hom, point, scalar
+  have eX := polyEval2.X at R, S, f, x with comm, polys, target, hom, point
+  unfold polyEval2 at eC
+  unfold polyEval2 at eX
+  unfold polyEval2
+  rw (RingHom.map_add at evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x)), polynomialRing(R, {0}), S, polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p) with cIn, xpIn, H)
+  rw (RingHom.map_mul at evaluationHom(R, S, {0}, f, constantFunction({0}, S.carrier, x)), polynomialRing(R, {0}), S, polyX(R), p with xIn, member, H)
+  rw [eC, eX]
+
+-- Conversely, a polynomial with leading coefficient 1 in degree n has the
+-- value of a Cumulus monic list (over a nontrivial ring; dividing by X).
+theorem intHelp.poly_list (R S f x c : Set) (n : Nat)
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  requires nontrivial : Ring.zero(R) ≠ Ring.one(R)
+  shows ∀ p ∈ Ring.carrier(polynomialRing(R, {0})), polyCoeff(p, n) = c →
+    (∀ k ∈ ℕ, n < k → polyCoeff(p, k) = Ring.zero(R)) →
+    ∃ cs, List(Ring.carrier(R), cs) ∧ polyEval2(R, S, f, x, p) =
+      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), f(c), x, cs)
+proof
+  induction n
+  | zero =>
+    intros p pIn top vanish
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have lt1 : p ∈ polyDegreeLT(R, 1)
+      unfold polyDegreeLT
+      refine ⟨pIn, ?_⟩
+      intros k hk
+      unfold polyDegrees at hk
+      obtain ⟨kN, nz⟩ := hk
+      have kNat := nat.omega.backward with kN
+      by_contra ge
+      have pos : 0 < k by arith
+      have z := vanish with k, kN, pos
+      unfold polyCoeff at z
+      exact nz with z
+    have pc := uni.const_of_lt_one at R, p with comm, polys, lt1
+    have cR := uni.coeff_mem at R, p, 0 with comm, pIn
+    rw top at pc
+    rw top at cR
+    have nilL : List(Ring.carrier(R), List.nil) by typecheck
+    refine ⟨List.nil, nilL, ?_⟩
+    rw pc
+    rw monicValue
+    exact polyEval2.C at R, S, f, x, c with comm, polys, target, hom, point, cR
+  | succ(m) using ih =>
+    intros p pIn top vanish
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have pp := CommRing.parts with polys
+    have xIn := polyX.mem at R with comm, polys
+    have xm := PolyMonic.X at R with comm, polys
+    have e1 : (1:Nat) = 1 by rfl
+    have xtop := (uni.X_coeff at R, 1 with comm, polys).left with e1
+    have xvanish : ∀ k ∈ ℕ, 1 < k → polyCoeff(polyX(R), k) = Ring.zero(R)
+      intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have n1 : k ≠ 1 by arith
+      exact (uni.X_coeff at R, k with comm, polys).right with n1
+    have xd := (uni.monic_of at R, polyX(R), 1 with comm, polys, xIn, xtop, xvanish).right with nontrivial
+    have vanishN : ∀ k ∈ ℕ, succ(m) + 1 ≤ k → polyCoeff(p, k) = Ring.zero(R)
+      intros k hk le
+      have kNat := nat.omega.backward with hk
+      have lt : succ(m) < k by arith
+      exact vanish with k, hk, lt
+    obtain ⟨q, qIn, r, rIn, split, small⟩ := uni.div_exists at R, polyX(R), succ(m) + 1 with xIn, comm, polys, xm, p, pIn, vanishN
+    rw xd at small
+    have rc := uni.const_of_lt_one at R, r with comm, polys, small
+    have r0 := uni.coeff_mem at R, r, 0 with comm, rIn
+    have qx := IsCommRing.mul_comm with pp, qIn, xIn
+    have xqIn : call2(Ring.mul(polynomialRing(R, {0})), polyX(R), q) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+    have cIn := polyC.mem at R, polyCoeff(r, 0) with comm, polys, r0
+    rw [qx, rc] at split
+    have ac := IsCommRing.add_comm with pp, xqIn, cIn
+    rw ac at split
+    have shifted : ∀ j ∈ ℕ, polyCoeff(q, j) = polyCoeff(p, j + 1)
+      intros j hj
+      have jNat := nat.omega.backward with hj
+      rw split
+      rw (intHelp.shift_coeff at R, q, polyCoeff(r, 0), j with comm, qIn, r0)
+    have mN : m ∈ ℕ by typecheck
+    have qtop : polyCoeff(q, m) = c
+      rw (shifted with m, mN)
+      have same : m + 1 = succ(m) by arith
+      rw same
+      exact top
+    have qvanish : ∀ k ∈ ℕ, m < k → polyCoeff(q, k) = Ring.zero(R)
+      intros k hk lt
+      have kNat := nat.omega.backward with hk
+      rw (shifted with k, hk)
+      have k1 : k + 1 ∈ ℕ by typecheck
+      have lt2 : succ(m) < k + 1 by arith
+      exact vanish with k + 1, k1, lt2
+    obtain ⟨cs, list, value⟩ := ih with q, qIn, qtop, qvanish
+    have cons : List(Ring.carrier(R), List.cons(polyCoeff(r, 0), cs)) by typecheck
+    refine ⟨List.cons(polyCoeff(r, 0), cs), cons, ?_⟩
+    rw split
+    rw (intHelp.shift_eval at R, S, f, x, q, polyCoeff(r, 0) with comm, target, hom, point, qIn, r0)
+    rw value
+    rw monicValue
+
+-- A Cumulus monic list gives a polynomial with leading coefficient 1 in
+-- degree n and the same value.
+theorem intHelp.list_poly (R S f x : Set) (cs : List(Ring.carrier(R)))
+  requires comm : CommRing(R)
+  requires target : CommRing(S)
+  requires hom : f : R →+* S
+  requires point : x ∈ Ring.carrier(S)
+  shows ∃ p ∈ Ring.carrier(polynomialRing(R, {0})), ∃ n ∈ ℕ,
+    polyCoeff(p, n) = Ring.one(R) ∧
+    (∀ k ∈ ℕ, n < k → polyCoeff(p, k) = Ring.zero(R)) ∧
+    polyEval2(R, S, f, x, p) =
+      monicValue{Ring.carrier(R)}(f, Ring.add(S), Ring.mul(S), Ring.one(S), x, cs)
+proof
+  induction cs
+  | List.nil =>
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have oneR : Ring.one(R) ∈ Ring.carrier(R) by typecheck
+    have cIn := polyC.mem at R, Ring.one(R) with comm, polys, oneR
+    have zN : (0:Nat) ∈ ℕ by typecheck
+    have c := polyC.coeff at R, Ring.one(R), 0 with comm, polys, oneR
+    have e : (0:Nat) = 0 by rfl
+    refine ⟨polyC(R, Ring.one(R)), cIn, 0, zN, (c.left with e), ?_, ?_⟩
+    . intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have ne : k ≠ 0 by arith
+      exact (polyC.coeff at R, Ring.one(R), k with comm, polys, oneR).right with ne
+    . rw monicValue
+      rw (polyEval2.C at R, S, f, x, Ring.one(R) with comm, polys, target, hom, point, oneR)
+      exact RingHom.map_one with hom
+  | List.cons(a, tail) using ih =>
+    have polys := polynomialRing.comm_ring at R, {0} with comm
+    have aR : a ∈ Ring.carrier(R) by assumption
+    obtain ⟨p, pIn, n, nN, top, vanish, value⟩ := ih
+    have nNat := nat.omega.backward with nN
+    have xIn := polyX.mem at R with comm, polys
+    have cIn := polyC.mem at R, a with comm, polys, aR
+    have qIn : call2(Ring.add(polynomialRing(R, {0})), polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)) ∈ Ring.carrier(polynomialRing(R, {0})) by typecheck
+    have sN : n + 1 ∈ ℕ by typecheck
+    refine ⟨call2(Ring.add(polynomialRing(R, {0})), polyC(R, a), call2(Ring.mul(polynomialRing(R, {0})), polyX(R), p)), qIn, n + 1, sN, ?_, ?_, ?_⟩
+    . rw (intHelp.shift_coeff at R, p, a, n with comm, pIn, aR)
+      exact top
+    . intros k hk lt
+      have kNat := nat.omega.backward with hk
+      have kpos : 0 < k by arith
+      obtain ⟨j, jN, jk⟩ := intHelp.pred at k with kpos
+      have jNat := nat.omega.backward with jN
+      rw jk
+      rw (intHelp.shift_coeff at R, p, a, j with comm, pIn, aR)
+      have lt2 : n < j by arith
+      exact vanish with j, jN, lt2
+    . rw (intHelp.shift_eval at R, S, f, x, p, a with comm, target, hom, point, pIn, aR)
+      rw value
+      rw monicValue
+
+-- Section: Helpers for subalgebras as rings
+-- A subalgebra T of S over R, as the ring S ↾ T with f corestricted: a
+-- finite span T is a finite module over R, and integrality in S ↾ T is
+-- integrality in S.
+section IntRestriction
+variable (A add zero neg mul one B plus z minus times unit f T : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+notation ring L := S ↾ T
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis subalgebra : Subalgebra(f, R, S, T)
+
+theorem intHelp.restricted_hom
+  shows IsRingHom(f, R, L)
+proof
+  have subring := Subalgebra.subring with *
+  have smaller : IsCommRing(L)
+    exact IsSubring.comm_ring with *
+  have function := IsRingHom.function with hom
+  have data := subalgebra
+  obtain ⟨_, image⟩ := data
+  have values : ∀ a ∈ A, f(a) ∈ T
+    intros a ha
+    have fa := functionImage.value at f, A, B, a with function, ha
+    exact image with f(a), fa
+  have corestricted := FunctionBetween.codomain_of_values with function, values
+  have ordinary := IsCommRing.ring with target
+  have bounded := IsSubring.subset_carrier with subring
+  have addition : IsMagma(B, plus) by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, IsMonoid, IsSemigroup]
+  have multiplication : IsMagma(B, times) by simp [IsCommRing, IsRing, IsMonoid, IsSemigroup]
+  apply IsRingHom.of_add_mul_one with source, smaller, corestricted
+  . intros x hx y hy
+    have fx := values with x, hx
+    have fy := values with y, hy
+    rw (restrictBinary.value_on_subset at B, T, plus, f(x), f(y) with *)
+    exact IsRingHom.add with hom, hx, hy
+  . intros x hx y hy
+    have fx := values with x, hx
+    have fy := values with y, hy
+    rw (restrictBinary.value_on_subset at B, T, times, f(x), f(y) with *)
+    exact IsRingHom.mul with hom, hx, hy
+  . exact IsRingHom.one with hom
+
+theorem intHelp.restricted_submodule (U : Set)
+  requires submodule : Submodule(f, R, L, U)
+  shows Submodule(f, R, S, U)
+proof
+  have subring := Subalgebra.subring with *
+  have bounded := IsSubring.subset_carrier with subring
+  have negT := IsSubring.neg_closed with subring
+  have addition : IsMagma(B, plus) by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, IsMonoid, IsSemigroup]
+  have multiplication : IsMagma(B, times) by simp [IsCommRing, IsRing, IsMonoid, IsSemigroup]
+  have negF : minus : B → B by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, Inverse]
+  have restrictedHom := intHelp.restricted_hom with *
+  have function := IsRingHom.function with restrictedHom
+  obtain ⟨UT, zU, negC, addC, smulC⟩ := submodule
+  have UB := Subset.transitive with UT, bounded
+  unfold Submodule
+  refine ⟨UB, zU, ?_, ?_, ?_⟩
+  . unfold ClosedUnary
+    intros v hv
+    have vT := UT with v, hv
+    have c := ClosedUnary.mem with negC, hv
+    rw (restrictUnary.value at B, T, minus, v with negF, bounded, negT, vT) at c
+    exact c
+  . unfold ClosedBinary
+    intros v hv w hw
+    have vT := UT with v, hv
+    have wT := UT with w, hw
+    have c := ClosedBinary.mem with addC, hv, hw
+    rw (restrictBinary.value_on_subset at B, T, plus, v, w with addition, bounded, vT, wT) at c
+    exact c
+  . intros a ha v hv
+    have vT := UT with v, hv
+    have faT := FunctionBetween.apply_closed with function, ha
+    have c := smulC with a, ha, v, hv
+    rw (restrictBinary.value_on_subset at B, T, times, f(a), v with multiplication, bounded, faT, vT) at c
+    exact c
+
+theorem intHelp.restricted_submodule_back (U : Set)
+  requires inside : U ⊆ T
+  requires submodule : Submodule(f, R, S, U)
+  shows Submodule(f, R, L, U)
+proof
+  have subring := Subalgebra.subring with *
+  have bounded := IsSubring.subset_carrier with subring
+  have negT := IsSubring.neg_closed with subring
+  have addition : IsMagma(B, plus) by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, IsMonoid, IsSemigroup]
+  have multiplication : IsMagma(B, times) by simp [IsCommRing, IsRing, IsMonoid, IsSemigroup]
+  have negF : minus : B → B by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, Inverse]
+  have restrictedHom := intHelp.restricted_hom with *
+  have function := IsRingHom.function with restrictedHom
+  obtain ⟨UB, zU, negC, addC, smulC⟩ := submodule
+  unfold Submodule
+  refine ⟨inside, zU, ?_, ?_, ?_⟩
+  . unfold ClosedUnary
+    intros v hv
+    have vT := inside with v, hv
+    rw (restrictUnary.value at B, T, minus, v with negF, bounded, negT, vT)
+    exact ClosedUnary.mem with negC, hv
+  . unfold ClosedBinary
+    intros v hv w hw
+    have vT := inside with v, hv
+    have wT := inside with w, hw
+    rw (restrictBinary.value_on_subset at B, T, plus, v, w with addition, bounded, vT, wT)
+    exact ClosedBinary.mem with addC, hv, hw
+  . intros a ha v hv
+    have vT := inside with v, hv
+    have faT := FunctionBetween.apply_closed with function, ha
+    rw (restrictBinary.value_on_subset at B, T, times, f(a), v with multiplication, bounded, faT, vT)
+    exact smulC with a, ha, v, hv
+
+theorem intHelp.restricted_span (G : Set)
+  requires inside : G ⊆ T
+  shows linearSpan(f, R, L, G) = linearSpan(f, R, S, G)
+proof
+  have subring := Subalgebra.subring with *
+  have bounded := IsSubring.subset_carrier with subring
+  have smaller : IsCommRing(L)
+    exact IsSubring.comm_ring with *
+  have restrictedHom := intHelp.restricted_hom with *
+  have GB := Subset.transitive with inside, bounded
+  have tMod := Subalgebra.submodule with *
+  have sSpan := linearSpan.least at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, G, T with source, target, hom, tMod, inside
+  have sMod := linearSpan.submodule at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, G with source, target, hom
+  have sModL := intHelp.restricted_submodule_back at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T, linearSpan(f, R, S, G) with source, target, hom, subalgebra, sSpan, sMod
+  have gS := linearSpan.contains at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, G with source, target, hom, GB
+  have le := linearSpan.least at A, add, zero, neg, mul, one, T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, f, G, linearSpan(f, R, S, G) with source, smaller, restrictedHom, sModL, gS
+  have lMod := linearSpan.submodule at A, add, zero, neg, mul, one, T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, f, G with source, smaller, restrictedHom
+  have lModS := intHelp.restricted_submodule at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T, linearSpan(f, R, L, G) with source, target, hom, subalgebra, lMod
+  have gL := linearSpan.contains at A, add, zero, neg, mul, one, T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, f, G with source, smaller, restrictedHom, inside
+  have ge := linearSpan.least at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, G, linearSpan(f, R, L, G) with source, target, hom, lModS, gL
+  exact Subset.antisymmetric with le, ge
+
+theorem intHelp.restricted_finite
+  requires finite : FiniteSpan(f, R, S, T)
+  shows FiniteAlgebraModule(f, R, L)
+proof
+  obtain ⟨G, finG, GT, span⟩ := finite
+  have same := intHelp.restricted_span at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T, G with source, target, hom, subalgebra, GT
+  rw span at same
+  unfold FiniteAlgebraModule
+  exact ⟨G, finG, GT, same⟩
+
+theorem intHelp.restricted_value (x : Set) (cs : List(A))
+  requires member : x ∈ T
+  shows monicValue{A}(f, restrict(plus, T × T), restrict(times, T × T), unit, x, cs) =
+    monicValue{A}(f, plus, times, unit, x, cs)
+proof
+  induction cs
+  | List.nil =>
+    rw [monicValue, monicValue]
+  | List.cons(a, tail) using ih =>
+    have subring := Subalgebra.subring with *
+    have bounded := IsSubring.subset_carrier with subring
+    have addition : IsMagma(B, plus) by simp [IsCommRing, IsRing, IsAbelianGroup, IsGroup, IsMonoid, IsSemigroup]
+    have multiplication : IsMagma(B, times) by simp [IsCommRing, IsRing, IsMonoid, IsSemigroup]
+    have restrictedHom := intHelp.restricted_hom with *
+    have function := IsRingHom.function with restrictedHom
+    have aA : a ∈ A by assumption
+    have faT := FunctionBetween.apply_closed with function, aA
+    have xB := bounded with x, member
+    have tailT := monicValue.in_subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, T, tail with source, target, hom, xB, subalgebra, member
+    have mulT := IsSubring.mul_closed with subring
+    have prodT := ClosedBinary.mem with mulT, member, tailT
+    rw [monicValue, monicValue, ih]
+    rw (restrictBinary.value_on_subset at B, T, times, x, monicValue{A}(f, plus, times, unit, x, tail) with multiplication, bounded, member, tailT)
+    rw (restrictBinary.value_on_subset at B, T, plus, f(a), call2(times, x, monicValue{A}(f, plus, times, unit, x, tail)) with addition, bounded, faT, prodT)
+
+theorem intHelp.integral_of_finite_span (x : Set)
+  requires finite : FiniteSpan(f, R, S, T)
+  requires member : x ∈ T
+  shows IntegralOver(f, R, S, x)
+proof
+  have subring := Subalgebra.subring with *
+  have bounded := IsSubring.subset_carrier with subring
+  have smaller : IsCommRing(L)
+    exact IsSubring.comm_ring with *
+  have restrictedHom := intHelp.restricted_hom with *
+  have fin := intHelp.restricted_finite with *
+  have io := FiniteAlgebraModule.integral at A, add, zero, neg, mul, one, T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, f, x with source, smaller, restrictedHom, member, fin
+  obtain ⟨_, cs, list, value⟩ := io
+  have same := intHelp.restricted_value at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T, x, cs with list, source, target, hom, subalgebra, member
+  rw same at value
+  have xB := bounded with x, member
+  unfold IntegralOver
+  exact ⟨xB, cs, list, value⟩
+
+end IntRestriction
+
+-- Section: Helpers for integral multiples
+-- If p has leading coefficient a and p(x) = 0, then a x is integral:
+-- f(e) · p_s(x) = f(a) · q_t(a x) along the Horner tails.
+section IntMultiple
+variable (A add zero neg mul one B plus z minus times unit f x a : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+hypothesis scalar : a ∈ A
+
+theorem intHelp.scaled_tail (s : List(A))
+  shows ∃ e ∈ A, ∃ t, List(A, t) ∧
+    S[f(e) * monicValue{A}(f, plus, times, f(a), x, s)] =
+    S[f(a) * monicValue{A}(f, plus, times, unit, S[f(a) * x], t)]
+proof
+  induction s
+  | List.nil =>
+    have oneIn : R[1] ∈ R by typecheck
+    have empty : List(A, []) by typecheck
+    have one := IsRingHom.one with hom
+    have fa := IsRingHom.closed with hom, scalar
+    refine ⟨R[1], oneIn, [], empty, ?_⟩
+    rw [monicValue, monicValue, one]
+    ring
+  | List.cons(c, s0) using ih =>
+    obtain ⟨e0, e0In, t0, list0, equation⟩ := ih
+    have cIn : c ∈ A by assumption
+    have ordinary := IsCommRing.ring with source
+    have ae := IsRing.mul_closed with ordinary, scalar, e0In
+    have ec := IsRing.mul_closed with ordinary, e0In, cIn
+    have cons : List(A, (R[e0 * c]) :: t0) by typecheck
+    have fa := IsRingHom.closed with hom, scalar
+    have fe := IsRingHom.closed with hom, e0In
+    have fc := IsRingHom.closed with hom, cIn
+    have v0 := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(a), s0 with *
+    have sRing := IsCommRing.ring with target
+    have ax := IsRing.mul_closed with sRing, fa, element
+    have m0 := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, S[f(a) * x], t0 with *
+    have mul1 := IsRingHom.mul with hom, scalar, e0In
+    have mul2 := IsRingHom.mul with hom, e0In, cIn
+    refine ⟨R[a * e0], ae, (R[e0 * c]) :: t0, cons, ?_⟩
+    rw [monicValue, monicValue, mul1, mul2]
+    linear_combination S[f(a) * x] * equation
+
+theorem intHelp.integral_multiple (cs : List(A))
+  requires relation : monicValue{A}(f, plus, times, f(a), x, cs) = z
+  shows IntegralOver(f, R, S, S[f(a) * x])
+proof
+  induction cs
+  | List.nil =>
+    intro relation
+    have zeroIn : R[0] ∈ R by typecheck
+    have zero := IsRingHom.zero with hom
+    rw monicValue at relation
+    have io := IntegralOver.coefficient at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, R[0] with *
+    rw zero at io
+    have same : S[f(a) * x] = S[0]
+      rw relation
+      ring
+    rw same
+    exact io
+  | List.cons(c, s0) using ih =>
+    intro relation
+    obtain ⟨e0, e0In, t0, list0, equation⟩ := intHelp.scaled_tail at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, a, s0 with *
+    have cIn : c ∈ A by assumption
+    have ordinary := IsCommRing.ring with source
+    have ec := IsRing.mul_closed with ordinary, e0In, cIn
+    have cons : List(A, (R[e0 * c]) :: t0) by typecheck
+    have fa := IsRingHom.closed with hom, scalar
+    have fe := IsRingHom.closed with hom, e0In
+    have fc := IsRingHom.closed with hom, cIn
+    have v0 := hornerValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, f(a), s0 with *
+    have sRing := IsCommRing.ring with target
+    have ax := IsRing.mul_closed with sRing, fa, element
+    have m0 := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, S[f(a) * x], t0 with *
+    have mul2 := IsRingHom.mul with hom, e0In, cIn
+    rw monicValue at relation
+    unfold IntegralOver
+    refine ⟨ax, (R[e0 * c]) :: t0, cons, ?_⟩
+    rw [monicValue, mul2]
+    linear_combination f(e0) * relation - x * equation
+
+end IntMultiple
+
+-- Section: Helpers for inverses of integral elements
+-- If x cancels and every coefficient maps to 0 or to a unit, a monic
+-- relation of x gives an inverse of x in R[x].
+section IntInverse
+variable (A add zero neg mul one B plus z minus times unit f x : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+hypothesis element : x ∈ S
+hypothesis cancel : ∀ u ∈ B, S[x * u] = S[0] → u = S[0]
+hypothesis coefficients : ∀ c ∈ A, f(c) = S[0] ∨ (∃ d ∈ A, S[f(c) * f(d)] = S[1])
+
+theorem intHelp.inverse_in_adjoin (cs : List(A))
+  requires relation : monicValue{A}(f, plus, times, unit, x, cs) = z
+  shows ∃ y ∈ algebraAdjoin(f, R, S, {x}), S[x * y] = S[1]
+proof
+  induction cs
+  | List.nil =>
+    intro relation
+    rw monicValue at relation
+    have single : {x} ⊆ B
+      intros w hw
+      rw singleton.membership at hw
+      rw hw
+      exact element
+    have sub := algebraAdjoin.subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, {x} with *
+    have subring := Subalgebra.subring with *
+    have zT := IsSubring.zero_closed with subring
+    refine ⟨S[0], zT, ?_⟩
+    rw relation
+    ring
+  | List.cons(c, t) using ih =>
+    intro relation
+    rw monicValue at relation
+    have cIn : c ∈ A by assumption
+    have fc := IsRingHom.closed with hom, cIn
+    have mv := monicValue.closed at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, t with *
+    cases (coefficients with c, cIn) with zc | inv
+    . rw zc at relation
+      have xm : S[x * monicValue{A}(f, plus, times, unit, x, t)] = S[0]
+        linear_combination relation
+      have m0 := cancel with monicValue{A}(f, plus, times, unit, x, t), mv, xm
+      exact ih with m0
+    . obtain ⟨d, dIn, cd⟩ := inv
+      have fd := IsRingHom.closed with hom, dIn
+      have single : {x} ⊆ B
+        intros w hw
+        rw singleton.membership at hw
+        rw hw
+        exact element
+      have sub := algebraAdjoin.subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, {x} with *
+      have subring := Subalgebra.subring with *
+      have contains := algebraAdjoin.contains at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, {x} with *
+      have xIn : x ∈ {x} by simp [singleton.membership]
+      have xT := contains with x, xIn
+      have mT := monicValue.in_subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, x, algebraAdjoin(f, R, S, {x}), t with *
+      have sT := Subalgebra.scalar_mul_mem at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, algebraAdjoin(f, R, S, {x}), d, monicValue{A}(f, plus, times, unit, x, t) with *
+      have negT := IsSubring.neg_closed with subring
+      have yT := ClosedUnary.mem with negT, sT
+      refine ⟨S[-(f(d) * monicValue{A}(f, plus, times, unit, x, t))], yT, ?_⟩
+      linear_combination cd - f(d) * relation
+
+end IntInverse
+
+-- Helper: a monic relation whose coefficients h(a) lie in T, rewritten
+-- with coefficients in T.
+theorem intHelp.list_transport (C h T plus times unit x : Set) (cs : List(C))
+  requires values : ∀ a ∈ listSupport{C}(cs), h(a) ∈ T
+  shows ∃ ds, List(T, ds) ∧ monicValue{T}(identity(T), plus, times, unit, x, ds) =
+    monicValue{C}(h, plus, times, unit, x, cs)
+proof
+  induction cs
+  | List.nil =>
+    intro values
+    have empty : List(T, []) by typecheck
+    refine ⟨[], empty, ?_⟩
+    rw [monicValue, monicValue]
+  | List.cons(a, t) using ih =>
+    intro values
+    have aC : a ∈ C by assumption
+    have tl : List(C, t) by assumption
+    have supp := listSupport.cons at C, a, t with tl, aC
+    rw supp at values
+    have tailValues : ∀ b ∈ listSupport{C}(t), h(b) ∈ T
+      intros b hb
+      exact values with b, (insert.contains at b, a, listSupport{C}(t) with hb)
+    obtain ⟨ds, listD, eq⟩ := ih with tailValues
+    have ha := values with a, (insert.self at a, listSupport{C}(t))
+    have cons : List(T, h(a) :: ds) by typecheck
+    refine ⟨h(a) :: ds, cons, ?_⟩
+    rw [monicValue, monicValue, eq]
+    rw (identity.apply at h(a), T with ha)
+
+-- Section: Helpers for towers of integral elements
+-- An element integral over a finite subalgebra T is integral (the tower
+-- R → T → T[x] of finite modules), and so is one with a monic relation
+-- whose coefficients are integral.
+section IntTower
+variable (A add zero neg mul one B plus z minus times unit f : Set)
+notation ring R := (A, add, zero, neg, mul, one)
+notation ring S := (B, plus, z, minus, times, unit)
+hypothesis source : IsCommRing(R)
+hypothesis target : IsCommRing(S)
+hypothesis hom : IsRingHom(f, R, S)
+
+theorem intHelp.tower_integral (T x : Set) (ds : List(T))
+  requires subalgebra : Subalgebra(f, R, S, T)
+  requires finite : FiniteSpan(f, R, S, T)
+  requires element : x ∈ B
+  requires relation : monicValue{T}(identity(T), plus, times, unit, x, ds) = z
+  shows IntegralOver(f, R, S, x)
+proof
+  have subring := Subalgebra.subring with source, target, hom, subalgebra
+  have bounded := IsSubring.subset_carrier with subring
+  have smaller := IsSubring.comm_ring with target, subring
+  have incl := IsSubring.inclusion_hom at B, plus, z, minus, times, unit, T with target, subring
+  have fL := intHelp.restricted_hom at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T with source, target, hom, subalgebra
+  have finL := intHelp.restricted_finite at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T with source, target, hom, subalgebra, finite
+  have listT : List(T, ds) by assumption
+  have io1 : IntegralOver(identity(T), T, B, plus, z, times, unit, x)
+    unfold IntegralOver
+    exact ⟨element, ds, listT, relation⟩
+  have fs2 := IntegralOver.finite_span_adjoin at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), x with smaller, target, incl, io1
+  have single : {x} ⊆ B
+    intros w hw
+    rw singleton.membership at hw
+    rw hw
+    exact element
+  have sub2 := algebraAdjoin.subalgebra at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), {x} with smaller, target, incl, single
+  have finU := intHelp.restricted_finite at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) with smaller, target, incl, sub2, fs2
+  have idU := intHelp.restricted_hom at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) with smaller, target, incl, sub2
+  have subring2 := Subalgebra.subring with smaller, target, incl, sub2
+  have bounded2 := IsSubring.subset_carrier with subring2
+  have smallU := IsSubring.comm_ring with target, subring2
+  have tower := FiniteAlgebraModule.tower at A, add, zero, neg, mul, one, T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}), restrict(plus, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) × algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), z, restrict(minus, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), restrict(times, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) × algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), unit, f, identity(T) with source, smaller, smallU, fL, idU, finL, finU
+  have TT2 : T ⊆ algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})
+    intros t ht
+    have c := algebraAdjoin.coefficient at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), {x}, t with smaller, target, incl, single, ht
+    rw (identity.apply at t, T with ht) at c
+    exact c
+  have fF := IsRingHom.function with fL
+  have fT2 := IsRingHom.function with (intHelp.restricted_hom at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, T with source, target, hom, subalgebra)
+  have values2 : ∀ a ∈ A, f(a) ∈ algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})
+    intros a ha
+    exact TT2 with f(a), (FunctionBetween.apply_closed with fF, ha)
+  have f2 := FunctionBetween.codomain_of_values with fF, values2
+  have idF := IsRingHom.function with idU
+  have cF := compose.function with fF, idF
+  have phiEq : compose(identity(T), f, A, T, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})) = f
+    apply FunctionBetween.ext with cF, f2
+    intros a ha
+    rw (compose.apply with fF, idF, ha)
+    exact identity.apply at f(a), T with (FunctionBetween.apply_closed with fF, ha)
+  rw phiEq at tower
+  have image2 : functionImage(f, A, B) ⊆ algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})
+    intros w hw
+    obtain ⟨_, a, ha, wa⟩ := functionImage.membership.forward with hw
+    rw wa
+    exact values2 with a, ha
+  have subF2 : Subalgebra(f, R, S, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}))
+    unfold Subalgebra
+    exact ⟨subring2, image2⟩
+  have fU := intHelp.restricted_hom at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) with source, target, hom, subF2
+  have contains := algebraAdjoin.contains at T, restrict(plus, T × T), z, restrict(minus, T), restrict(times, T × T), unit, B, plus, z, minus, times, unit, identity(T), {x} with smaller, target, incl, single
+  have xIn : x ∈ {x} by simp [singleton.membership]
+  have xT2 := contains with x, xIn
+  have ioU := FiniteAlgebraModule.integral at A, add, zero, neg, mul, one, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}), restrict(plus, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) × algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), z, restrict(minus, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), restrict(times, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}) × algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x})), unit, f, x with source, smallU, fU, xT2, tower
+  obtain ⟨_, cs, list, value⟩ := ioU
+  have same := intHelp.restricted_value at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, algebraAdjoin(identity(T), T, B, plus, z, minus, times, unit, {x}), x, cs with list, source, target, hom, subF2, xT2
+  rw same at value
+  unfold IntegralOver
+  exact ⟨element, cs, list, value⟩
+
+theorem intHelp.integral_trans (C h x : Set) (cs : List(C))
+  requires hF : h : C → B
+  requires coefficients : ∀ a ∈ listSupport{C}(cs), IntegralOver(f, R, S, h(a))
+  requires element : x ∈ B
+  requires relation : monicValue{C}(h, plus, times, unit, x, cs) = z
+  shows IntegralOver(f, R, S, x)
+proof
+  have listC : List(C, cs) by assumption
+  have suppSub := listSupport.subset at C, cs with listC
+  have finSupp := listSupport.finite at C, cs with listC
+  have finK := Finite.function_image at C, B, h, listSupport{C}(cs) with hF, finSupp, suppSub
+  have KB : functionImage(h, listSupport{C}(cs), B) ⊆ B
+    intros y hy
+    exact (functionImage.membership.forward with hy).left
+  have intK : ∀ y ∈ functionImage(h, listSupport{C}(cs), B), IntegralOver(f, R, S, y)
+    intros y hy
+    obtain ⟨_, a, ha, ya⟩ := functionImage.membership.forward with hy
+    rw ya
+    exact coefficients with a, ha
+  have fsT := integralGenerators.finite_adjoin at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, functionImage(h, listSupport{C}(cs), B) with source, target, hom, finK, KB, intK
+  have subT := algebraAdjoin.subalgebra at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, functionImage(h, listSupport{C}(cs), B) with source, target, hom, KB
+  have contK := algebraAdjoin.contains at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, functionImage(h, listSupport{C}(cs), B) with source, target, hom, KB
+  have values : ∀ a ∈ listSupport{C}(cs), h(a) ∈ algebraAdjoin(f, R, S, functionImage(h, listSupport{C}(cs), B))
+    intros a ha
+    have aC := suppSub with a, ha
+    have hB := FunctionBetween.apply_closed with hF, aC
+    have inK : h(a) ∈ functionImage(h, listSupport{C}(cs), B)
+      apply functionImage.membership.backward
+      exact ⟨hB, a, ha, rfl⟩
+    exact contK with h(a), inK
+  obtain ⟨ds, listD, eq⟩ := intHelp.list_transport at C, h, algebraAdjoin(f, R, S, functionImage(h, listSupport{C}(cs), B)), plus, times, unit, x, cs with listC, values
+  rw relation at eq
+  exact intHelp.tower_integral at A, add, zero, neg, mul, one, B, plus, z, minus, times, unit, f, algebraAdjoin(f, R, S, functionImage(h, listSupport{C}(cs), B)), x, ds with listD, source, target, hom, subT, fsT, element, eq
+
+end IntTower
+
+-- Helper: membership in the integral closure.
+theorem intHelp.closure_mem (A x : Set)
+  shows x ∈ integralClosure(A) ↔ IntegralElement(A, x)
+proof
+  unfold integralClosure
+  constructor
+  . intro h
+    exact h.right
+  . intro h
+    exact ⟨h.right.left, h⟩
+
+-- Helper: a nonzero polynomial relation as Cumulus's AlgebraicOver, with
+-- the leading coefficient of p.
+theorem intHelp.algebraic_over (A x : Set)
+  requires algebra : Algebra(A)
+  requires nontrivial : Ring.zero(Algebra.base(A)) ≠ Ring.one(Algebra.base(A))
+  requires algebraic : AlgebraicElement(A, x)
+  shows AlgebraicOver(Algebra.map(A), Ring.carrier(Algebra.base(A)),
+    Ring.zero(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)),
+    Ring.zero(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), x)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have ringA := Algebra.comm_ring at A with algebra
+  have sh := Algebra.structure_hom at A with algebra
+  have polys := polynomialRing.comm_ring at Algebra.base(A), {0} with base
+  obtain ⟨_, xA, p, pIn, ne, root⟩ := algebraic
+  have pt := xA
+  unfold algebraCarrier at pt
+  have dN : polyNatDegree(Algebra.base(A), p) ∈ ℕ by typecheck
+  have dNat := nat.omega.backward with dN
+  have spec := uni.deg_spec at Algebra.base(A), p with base, polys, pIn
+  have leadNe := spec.right with ne
+  have leadIn := uni.coeff_mem at Algebra.base(A), p, polyNatDegree(Algebra.base(A), p) with base, pIn
+  have vanish : ∀ k ∈ ℕ, polyNatDegree(Algebra.base(A), p) < k → polyCoeff(p, k) = Ring.zero(Algebra.base(A))
+    intros k hk lt
+    have kNat := nat.omega.backward with hk
+    exact polyNatDegree.coeff_zero_of_lt at Algebra.base(A), p, k with pIn, base, polys, lt
+  have all := intHelp.poly_list at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, polyCoeff(p, polyNatDegree(Algebra.base(A), p)), polyNatDegree(Algebra.base(A), p) with base, ringA, sh, pt, nontrivial
+  have same : polyCoeff(p, polyNatDegree(Algebra.base(A), p)) = polyCoeff(p, polyNatDegree(Algebra.base(A), p)) by rfl
+  obtain ⟨cs, list, value⟩ := all with p, pIn, same, vanish
+  unfold AlgebraicOver
+  refine ⟨xA, polyCoeff(p, polyNatDegree(Algebra.base(A), p)), leadIn, leadNe, cs, list, ?_⟩
+  unfold polynomialHorner
+  rw ← value
+  unfold polyAeval at root
+  exact root
+
+-- Section: Laws of integral elements
+section IntegralElements
+variable (A : Set)
+hypothesis algebra : Algebra(A)
+
+-- The polynomial and the list forms agree.
+theorem IntegralElement.iff_cumulus (x : Set)
+  requires member : x ∈ algebraCarrier(A)
+  shows IntegralElement(A, x) ↔
+    IntegralOver(Algebra.map(A), Ring.carrier(Algebra.base(A)), algebraCarrier(A),
+      Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)),
+      Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), x)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have ringA := Algebra.comm_ring at A with algebra
+  have sh := Algebra.structure_hom at A with algebra
+  have polys := polynomialRing.comm_ring at Algebra.base(A), {0} with base
+  have pt := member
+  unfold algebraCarrier at pt
+  constructor
+  . intro integral
+    obtain ⟨_, _, p, monic, root⟩ := integral
+    unfold IntegralOver
+    refine ⟨member, ?_⟩
+    have nilL : List(Ring.carrier(Algebra.base(A)), List.nil) by typecheck
+    by_cases triv : Ring.zero(Algebra.base(A)) = Ring.one(Algebra.base(A))
+    . refine ⟨List.nil, nilL, ?_⟩
+      rw monicValue
+      have o := RingHom.map_one with sh
+      have z := RingHom.map_zero with sh
+      rw triv at z
+      rw o at z
+      exact z
+    . have m0 := monic
+      obtain ⟨pIn, lead⟩ := m0
+      have dN : polyNatDegree(Algebra.base(A), p) ∈ ℕ by typecheck
+      have dNat := nat.omega.backward with dN
+      have le := uni.lead_eq at Algebra.base(A), p with base, polys
+      rw le at lead
+      have vanish : ∀ k ∈ ℕ, polyNatDegree(Algebra.base(A), p) < k → polyCoeff(p, k) = Ring.zero(Algebra.base(A))
+        intros k hk lt
+        have kNat := nat.omega.backward with hk
+        exact polyNatDegree.coeff_zero_of_lt at Algebra.base(A), p, k with pIn, base, polys, lt
+      have all := intHelp.poly_list at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, Ring.one(Algebra.base(A)), polyNatDegree(Algebra.base(A), p) with base, ringA, sh, pt, triv
+      obtain ⟨cs, list, value⟩ := all with p, pIn, lead, vanish
+      rw (RingHom.map_one with sh) at value
+      refine ⟨cs, list, ?_⟩
+      rw ← value
+      unfold polyAeval at root
+      exact root
+  . intro io
+    obtain ⟨_, cs, list, value⟩ := io
+    obtain ⟨p, pIn, n, nN, top, vanish, ev⟩ := intHelp.list_poly at Algebra.base(A), Algebra.ring(A), Algebra.map(A), x, cs with list, base, ringA, sh, pt
+    have nNat := nat.omega.backward with nN
+    have monic := (uni.monic_of at Algebra.base(A), p, n with pIn, base, polys, top, vanish).left
+    unfold IntegralElement
+    refine ⟨algebra, member, p, monic, ?_⟩
+    unfold polyAeval
+    rw ev
+    exact value
+
+-- Moved up from the finiteness criterion below: an element of a finite
+-- subalgebra is integral, and integral generators span a finite subalgebra.
+theorem IntegralElement.of_mem_fg (T x : Set)
+  requires subalgebra : SubalgebraOf(A, T)
+  requires finite : SubmoduleFG(algebraModule(A), Algebra.base(A), T)
+  requires member : x ∈ T
+  shows IntegralElement(A, x)
+proof
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  obtain ⟨_, sub⟩ := subalgebra
+  have fs := (intHelp.fg_iff at A, T with algebra).forward with finite
+  have io := intHelp.integral_of_finite_span at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), T, x with bp, ap, hp, sub, fs, member
+  have subring := Subalgebra.subring with bp, ap, hp, sub
+  have TA := IsSubring.subset_carrier with subring
+  have xA := TA with x, member
+  exact (IntegralElement.iff_cumulus at A, x with algebra, xA).backward with io
+
+theorem adjoinOf.finite_of_integral (G : Set)
+  requires finite : Finite(G)
+  requires integral : ∀ x ∈ G, IntegralElement(A, x)
+  shows SubmoduleFG(algebraModule(A), Algebra.base(A), adjoinOf(A, G))
+proof
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have GA : G ⊆ algebraCarrier(A)
+    intros x hx
+    have d := integral with x, hx
+    obtain ⟨_, xA, _⟩ := d
+    exact xA
+  have ios : ∀ x ∈ G, IntegralOver(Algebra.map(A), Ring.carrier(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), x)
+    intros x hx
+    have xA := GA with x, hx
+    exact (IntegralElement.iff_cumulus at A, x with algebra, xA).forward with (integral with x, hx)
+  have fs := integralGenerators.finite_adjoin at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), G with bp, ap, hp, finite, GA, ios
+  unfold adjoinOf
+  exact (intHelp.fg_iff at A, algebraAdjoin(Algebra.map(A), Ring.carrier(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), G) with algebra).backward with fs
+
+-- Helper: an element of the subalgebra generated by two integral
+-- elements is integral.
+theorem intHelp.of_two (x y z : Set)
+  requires first : IntegralElement(A, x)
+  requires second : IntegralElement(A, y)
+  requires member : z ∈ adjoinOf(A, insert(x, {y}))
+  shows IntegralElement(A, z)
+proof
+  have xA := first.right.left
+  have yA := second.right.left
+  have fin1 := Finite.singleton at y
+  have fin := Finite.insert at {y}, x with fin1
+  have all : ∀ w ∈ insert(x, {y}), IntegralElement(A, w)
+    intros w hw
+    rw insert.membership at hw
+    cases hw with wx | wy
+    . rw wx
+      exact first
+    . rw singleton.membership at wy
+      rw wy
+      exact second
+  have fg := adjoinOf.finite_of_integral at A, insert(x, {y}) with algebra, fin, all
+  have GA : insert(x, {y}) ⊆ algebraCarrier(A)
+    intros w hw
+    exact (all with w, hw).right.left
+  have both := adjoinOf.subalgebra at A, insert(x, {y}) with algebra, GA
+  exact IntegralElement.of_mem_fg at A, adjoinOf(A, insert(x, {y})), z with algebra, both.left, fg, member
+
+-- Helper: the subalgebra generated by x and y as a Cumulus subring
+-- containing both.
+theorem intHelp.two_subring (x y : Set)
+  requires first : x ∈ algebraCarrier(A)
+  requires second : y ∈ algebraCarrier(A)
+  shows IsSubring(algebraCarrier(A), Ring.add(Algebra.ring(A)),
+      Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)),
+      Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)),
+      adjoinOf(A, insert(x, {y}))) ∧
+    x ∈ adjoinOf(A, insert(x, {y})) ∧ y ∈ adjoinOf(A, insert(x, {y}))
+proof
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have GA : insert(x, {y}) ⊆ algebraCarrier(A)
+    intros w hw
+    rw insert.membership at hw
+    cases hw with wx | wy
+    . rw wx
+      exact first
+    . rw singleton.membership at wy
+      rw wy
+      exact second
+  have both := adjoinOf.subalgebra at A, insert(x, {y}) with algebra, GA
+  obtain ⟨sa, contains⟩ := both
+  obtain ⟨_, sub⟩ := sa
+  have subring := Subalgebra.subring with bp, ap, hp, sub
+  have xIn := contains with x, (insert.self at x, {y})
+  have yS : y ∈ {y} by simp [singleton.membership]
+  have yIn := contains with y, (insert.contains at y, x, {y} with yS)
+  exact ⟨subring, xIn, yIn⟩
+
+-- isIntegral_algebraMap, isIntegral_zero, isIntegral_one.
+theorem IntegralElement.algebra_map (a : Set)
+  requires scalar : a ∈ Ring.carrier(Algebra.base(A))
+  shows IntegralElement(A, Algebra.map(A)(a))
+proof
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have io := IntegralOver.coefficient at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), a with bp, ap, hp, scalar
+  have fa := IsRingHom.closed with hp, scalar
+  exact (IntegralElement.iff_cumulus at A, Algebra.map(A)(a) with algebra, fa).backward with io
+
+-- IsIntegral.add, mul, neg, sub, pow, smul: the integral elements form a
+-- subalgebra (integralClosure).
+theorem IntegralElement.add (x y : Set)
+  requires first : IntegralElement(A, x)
+  requires second : IntegralElement(A, y)
+  shows IntegralElement(A, call2(Ring.add(Algebra.ring(A)), x, y))
+proof
+  have xA := first.right.left
+  have yA := second.right.left
+  obtain ⟨subring, xT, yT⟩ := intHelp.two_subring at A, x, y with algebra, xA, yA
+  have closed := IsSubring.add_closed with subring
+  have zT := ClosedBinary.mem with closed, xT, yT
+  exact intHelp.of_two at A, x, y, call2(Ring.add(Algebra.ring(A)), x, y) with algebra, first, second, zT
+
+theorem IntegralElement.mul (x y : Set)
+  requires first : IntegralElement(A, x)
+  requires second : IntegralElement(A, y)
+  shows IntegralElement(A, call2(Ring.mul(Algebra.ring(A)), x, y))
+proof
+  have xA := first.right.left
+  have yA := second.right.left
+  obtain ⟨subring, xT, yT⟩ := intHelp.two_subring at A, x, y with algebra, xA, yA
+  have closed := IsSubring.mul_closed with subring
+  have zT := ClosedBinary.mem with closed, xT, yT
+  exact intHelp.of_two at A, x, y, call2(Ring.mul(Algebra.ring(A)), x, y) with algebra, first, second, zT
+
+theorem IntegralElement.neg (x : Set)
+  requires integral : IntegralElement(A, x)
+  shows IntegralElement(A, apply(Ring.neg(Algebra.ring(A)), x))
+proof
+  have xA := integral.right.left
+  obtain ⟨subring, xT, _⟩ := intHelp.two_subring at A, x, x with algebra, xA, xA
+  have closed := IsSubring.neg_closed with subring
+  have zT := ClosedUnary.mem with closed, xT
+  exact intHelp.of_two at A, x, x, apply(Ring.neg(Algebra.ring(A)), x) with algebra, integral, integral, zT
+
+theorem IntegralElement.sub (x y : Set)
+  requires first : IntegralElement(A, x)
+  requires second : IntegralElement(A, y)
+  shows IntegralElement(A, Ring.sub(Algebra.ring(A), x, y))
+proof
+  have ny := IntegralElement.neg at A, y with algebra, second
+  unfold Ring.sub
+  exact IntegralElement.add at A, x, apply(Ring.neg(Algebra.ring(A)), y) with algebra, first, ny
+
+theorem IntegralElement.pow (x : Set) (n : Nat)
+  requires integral : IntegralElement(A, x)
+  shows IntegralElement(A, Ring.pow(Algebra.ring(A), x, n))
+proof
+  induction n
+  | zero =>
+    have ringA := Algebra.comm_ring at A with algebra
+    have r := CommRing.to_ring with ringA
+    have xA := integral.right.left
+    unfold algebraCarrier at xA
+    rw (Ring.pow_zero at Algebra.ring(A), x with xA, r)
+    have sh := Algebra.structure_hom at A with algebra
+    have o := RingHom.map_one with sh
+    rw ← o
+    have oneB : Ring.one(Algebra.base(A)) ∈ Ring.carrier(Algebra.base(A)) by typecheck
+    exact IntegralElement.algebra_map at A, Ring.one(Algebra.base(A)) with algebra, oneB
+  | succ(m) using ih =>
+    have ringA := Algebra.comm_ring at A with algebra
+    have r := CommRing.to_ring with ringA
+    have xA := integral.right.left
+    unfold algebraCarrier at xA
+    have same : succ(m) = m + 1 by arith
+    rw same
+    rw (Ring.pow_succ at Algebra.ring(A), x, m with xA, r)
+    exact IntegralElement.mul at A, Ring.pow(Algebra.ring(A), x, m), x with algebra, ih, integral
+
+theorem IntegralElement.smul (a x : Set)
+  requires scalar : a ∈ Ring.carrier(Algebra.base(A))
+  requires integral : IntegralElement(A, x)
+  shows IntegralElement(A, call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(a), x))
+proof
+  have ia := IntegralElement.algebra_map at A, a with algebra, scalar
+  exact IntegralElement.mul at A, Algebra.map(A)(a), x with algebra, ia, integral
+
+theorem integralClosure.subalgebra
+  shows SubalgebraOf(A, integralClosure(A))
+proof
+  have sh := Algebra.structure_hom at A with algebra
+  have zeroB : Ring.zero(Algebra.base(A)) ∈ Ring.carrier(Algebra.base(A)) by typecheck
+  have oneB : Ring.one(Algebra.base(A)) ∈ Ring.carrier(Algebra.base(A)) by typecheck
+  have z := RingHom.map_zero with sh
+  have o := RingHom.map_one with sh
+  have iz := IntegralElement.algebra_map at A, Ring.zero(Algebra.base(A)) with algebra, zeroB
+  have io := IntegralElement.algebra_map at A, Ring.one(Algebra.base(A)) with algebra, oneB
+  rw z at iz
+  rw o at io
+  unfold SubalgebraOf
+  refine ⟨algebra, ?_⟩
+  unfold Subalgebra
+  refine ⟨?_, ?_⟩
+  . unfold IsSubring
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+    . intros w hw
+      exact ((intHelp.closure_mem at A, w).forward with hw).right.left
+    . exact (intHelp.closure_mem at A, Ring.zero(Algebra.ring(A))).backward with iz
+    . exact (intHelp.closure_mem at A, Ring.one(Algebra.ring(A))).backward with io
+    . unfold ClosedUnary
+      intros v hv
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      exact (intHelp.closure_mem at A, apply(Ring.neg(Algebra.ring(A)), v)).backward with (IntegralElement.neg at A, v with algebra, iv)
+    . unfold ClosedBinary
+      intros v hv w hw
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      have iw := (intHelp.closure_mem at A, w).forward with hw
+      exact (intHelp.closure_mem at A, call2(Ring.add(Algebra.ring(A)), v, w)).backward with (IntegralElement.add at A, v, w with algebra, iv, iw)
+    . unfold ClosedBinary
+      intros v hv w hw
+      have iv := (intHelp.closure_mem at A, v).forward with hv
+      have iw := (intHelp.closure_mem at A, w).forward with hw
+      exact (intHelp.closure_mem at A, call2(Ring.mul(Algebra.ring(A)), v, w)).backward with (IntegralElement.mul at A, v, w with algebra, iv, iw)
+  . intros w hw
+    obtain ⟨_, a, ha, wa⟩ := functionImage.membership.forward with hw
+    rw wa
+    exact (intHelp.closure_mem at A, Algebra.map(A)(a)).backward with (IntegralElement.algebra_map at A, a with algebra, ha)
+
+-- Helper: the integral closure as a bundled subring.
+theorem intHelp.closure_subring
+  shows Subring(Algebra.ring(A), integralClosure(A))
+proof
+  have sa := integralClosure.subalgebra at A with algebra
+  obtain ⟨_, sub⟩ := sa
+  obtain ⟨isSub, _⟩ := sub
+  unfold algebraCarrier at isSub
+  have ringA := Algebra.comm_ring at A with algebra
+  have r := CommRing.to_ring with ringA
+  have eta := Ring.eta_of_ring at Algebra.ring(A) with r
+  rw eta
+  exact Subring.of_parts with isSub
+
+-- The finiteness criterion: x is integral iff R[x] is a finite R-module
+-- (IsIntegral.fg_adjoin_singleton, isIntegral_iff_fg_adjoin), and an
+-- element of a subalgebra that is a finite module is integral
+-- (IsIntegral.of_mem_of_fg, IsIntegral.of_finite).
+theorem IntegralElement.iff_adjoin_finite (x : Set)
+  requires member : x ∈ algebraCarrier(A)
+  shows IntegralElement(A, x) ↔
+    SubmoduleFG(algebraModule(A), Algebra.base(A), adjoinOf(A, {x}))
+proof
+  have xs : {x} ⊆ algebraCarrier(A)
+    intros w hw
+    rw singleton.membership at hw
+    rw hw
+    exact member
+  constructor
+  . intro ix
+    have all : ∀ w ∈ {x}, IntegralElement(A, w)
+      intros w hw
+      rw singleton.membership at hw
+      rw hw
+      exact ix
+    exact adjoinOf.finite_of_integral at A, {x} with algebra, (Finite.singleton at x), all
+  . intro fg
+    have both := adjoinOf.subalgebra at A, {x} with algebra, xs
+    have xIn : x ∈ {x} by simp [singleton.membership]
+    have xT := both.right with x, xIn
+    exact IntegralElement.of_mem_fg at A, adjoinOf(A, {x}), x with algebra, both.left, fg, xT
+
+theorem IntegralAlgebra.of_finite
+  requires finite : FiniteAlgebra(A)
+  shows IntegralAlgebra(A)
+proof
+  obtain ⟨_, fgm⟩ := finite
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have base := Algebra.base_comm_ring at A with algebra
+  have modA := algebraModule.module_of at A with algebra
+  have fg := (FinitelyGeneratedModule.iff_fg at Algebra.base(A), algebraModule(A) with base, modA).forward with fgm
+  rw (algebraModule.carrier_eq at A) at fg
+  have fs := (intHelp.fg_iff at A, algebraCarrier(A) with algebra).forward with fg
+  have fam := (FiniteSpan.target_iff at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A) with bp, ap, hp).forward with fs
+  unfold IntegralAlgebra
+  refine ⟨algebra, ?_⟩
+  intros x hx
+  have io := FiniteAlgebraModule.integral at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), x with bp, ap, hp, hx, fam
+  exact (IntegralElement.iff_cumulus at A, x with algebra, hx).backward with io
+
+-- An algebra of finite type that is integral is finite
+-- (Algebra.IsIntegral.finite, Cumulus's
+-- FinitelyGeneratedAlgebra.finite_module_of_integral); finitely many
+-- integral elements generate a finite subalgebra (fg_adjoin_of_finite).
+theorem FiniteAlgebra.of_integral_finite_type
+  requires integral : IntegralAlgebra(A)
+  requires finiteType : FiniteTypeAlgebra(A)
+  shows FiniteAlgebra(A)
+proof
+  obtain ⟨_, G, GA, finG, eq⟩ := finiteType
+  have all : ∀ w ∈ G, IntegralElement(A, w)
+    intros w hw
+    exact integral.right with w, (GA with w, hw)
+  have fg := adjoinOf.finite_of_integral at A, G with algebra, finG, all
+  rw eq at fg
+  have base := Algebra.base_comm_ring at A with algebra
+  have modA := algebraModule.module_of at A with algebra
+  rw ← (algebraModule.carrier_eq at A) at fg
+  have fgm := (FinitelyGeneratedModule.iff_fg at Algebra.base(A), algebraModule(A) with base, modA).backward with fg
+  unfold FiniteAlgebra
+  exact ⟨algebra, fgm⟩
+
+-- IsIntegral.map: algebra homomorphisms preserve integrality; the image
+-- under a surjection of an integral algebra is integral.
+theorem IntegralElement.map (B f x : Set)
+  requires hom : f : A →ₐ B
+  requires integral : IntegralElement(A, x)
+  shows IntegralElement(B, f(x))
+proof
+  obtain ⟨_, xA, p, monic, root⟩ := integral
+  have algB := AlgebraHom.target with hom
+  have baseEq := AlgebraHom.base_eq with hom
+  have fF := AlgebraHom.function with hom
+  have rh := AlgebraHom.ring_hom with hom
+  have pIn := monic.left
+  have ap := polyAeval.algebra_hom_apply at A, B, f, x, p with algebra, hom, xA, pIn
+  rw root at ap
+  rw (RingHom.map_zero with rh) at ap
+  have fx := FunctionBetween.apply_closed with fF, xA
+  unfold IntegralElement
+  refine ⟨algB, fx, p, ?_, ?_⟩
+  . rw ← baseEq
+    exact monic
+  . symm
+    exact ap
+
+-- The integral closure is integrally closed (integralClosure_idem): an
+-- element of A integral over the integral closure is in it.
+theorem integralClosure.idempotent (x : Set)
+  requires member : x ∈ algebraCarrier(A)
+  requires integral : IntegralElement(Algebra.mk(subringRing(Algebra.ring(A),
+    integralClosure(A)), Algebra.ring(A), identity(integralClosure(A))), x)
+  shows x ∈ integralClosure(A)
+proof
+  have algE := integral.left
+  have xE := integral.right.left
+  have io := (IntegralElement.iff_cumulus at Algebra.mk(subringRing(Algebra.ring(A), integralClosure(A)), Algebra.ring(A), identity(integralClosure(A))), x with algE, xE).forward with integral
+  unfold algebraCarrier at io
+  rw [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map] at io
+  rw (subringRing.carrierOf at Algebra.ring(A), integralClosure(A)) at io
+  obtain ⟨xA, cs, list, rel⟩ := io
+  have base := Algebra.base_comm_ring at A with algebra
+  have ringA := Algebra.comm_ring at A with algebra
+  have sh := Algebra.structure_hom at A with algebra
+  have bp := CommRing.parts with base
+  have ap := CommRing.parts with ringA
+  have hp := RingHom.parts with sh
+  have ICA : ∀ c ∈ integralClosure(A), identity(integralClosure(A))(c) ∈ Ring.carrier(Algebra.ring(A))
+    intros c hc
+    rw (identity.apply at c, integralClosure(A) with hc)
+    have ic := (intHelp.closure_mem at A, c).forward with hc
+    have cA := ic.right.left
+    unfold algebraCarrier at cA
+    exact cA
+  have idF := FunctionBetween.codomain_of_values with (identity.function at integralClosure(A)), ICA
+  have coefficients : ∀ a ∈ listSupport{integralClosure(A)}(cs), IntegralOver(Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), identity(integralClosure(A))(a))
+    intros a ha
+    have aIC := (listSupport.subset at integralClosure(A), cs with list) with a, ha
+    rw (identity.apply at a, integralClosure(A) with aIC)
+    have ia := (intHelp.closure_mem at A, a).forward with aIC
+    have aA := ia.right.left
+    have r := (IntegralElement.iff_cumulus at A, a with algebra, aA).forward with ia
+    unfold algebraCarrier at r
+    exact r
+  have res := intHelp.integral_trans at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), integralClosure(A), identity(integralClosure(A)), x, cs with list, bp, ap, hp, idF, coefficients, xA, rel
+  have e : algebraCarrier(A) = Ring.carrier(Algebra.ring(A))
+    unfold algebraCarrier
+    rfl
+  rw ← e at res
+  have ix := (IntegralElement.iff_cumulus at A, x with algebra, member).backward with res
+  exact (intHelp.closure_mem at A, x).backward with ix
+
+-- Over a field, integral and algebraic agree (isAlgebraic_iff_isIntegral,
+-- IsIntegral.isAlgebraic); over a domain an algebraic element times a
+-- nonzero scalar is integral (IsAlgebraic.exists_smul_eq_mul... in the
+-- form exists_integral_multiple).
+theorem AlgebraicElement.iff_integral (x : Set)
+  requires field : Field(Algebra.base(A))
+  shows AlgebraicElement(A, x) ↔ IntegralElement(A, x)
+proof
+  have fp := Field.parts with field
+  have nt := fp.right.left
+  obtain ⟨_, _, nontrivial⟩ := nt
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  constructor
+  . intro alg
+    have xA := alg.right.left
+    have ao := intHelp.algebraic_over at A, x with algebra, nontrivial, alg
+    have io := AlgebraicOver.integral at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), x with fp, ap, hp, ao
+    exact (IntegralElement.iff_cumulus at A, x with algebra, xA).backward with io
+  . intro ix
+    have base := Algebra.base_comm_ring at A with algebra
+    have polys := polynomialRing.comm_ring at Algebra.base(A), {0} with base
+    obtain ⟨_, xA, p, monic, root⟩ := ix
+    have pIn := monic.left
+    have ne := PolyMonic.ne_zero at Algebra.base(A), p with base, polys, pIn, nontrivial, monic
+    unfold AlgebraicElement
+    exact ⟨algebra, xA, p, pIn, ne, root⟩
+
+theorem IntegralElement.algebraic (x : Set)
+  requires nontrivial : Ring.zero(Algebra.base(A)) ≠ Ring.one(Algebra.base(A))
+  requires integral : IntegralElement(A, x)
+  shows AlgebraicElement(A, x)
+proof
+  have base := Algebra.base_comm_ring at A with algebra
+  have polys := polynomialRing.comm_ring at Algebra.base(A), {0} with base
+  obtain ⟨_, xA, p, monic, root⟩ := integral
+  have pIn := monic.left
+  have ne := PolyMonic.ne_zero at Algebra.base(A), p with base, polys, pIn, nontrivial, monic
+  unfold AlgebraicElement
+  exact ⟨algebra, xA, p, pIn, ne, root⟩
+
+theorem AlgebraicElement.integral_multiple (x : Set)
+  requires domain : IntegralDomain(Algebra.base(A))
+  requires algebraic : AlgebraicElement(A, x)
+  shows ∃ a ∈ Ring.carrier(Algebra.base(A)), a ≠ Ring.zero(Algebra.base(A)) ∧
+    IntegralElement(A, call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(a), x))
+proof
+  have nontrivial := domain.right.left
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have xA := algebraic.right.left
+  have ao := intHelp.algebraic_over at A, x with algebra, nontrivial, algebraic
+  obtain ⟨_, a, aIn, aNe, cs, list, relation⟩ := ao
+  unfold polynomialHorner at relation
+  have io := intHelp.integral_multiple at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), x, a, cs with list, bp, ap, hp, xA, aIn, relation
+  have fa := IsRingHom.closed with hp, aIn
+  have ap2 := IsCommRing.ring with ap
+  have prod := IsRing.mul_closed with ap2, fa, xA
+  refine ⟨a, aIn, aNe, ?_⟩
+  exact (IntegralElement.iff_cumulus at A, call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(a), x) with algebra, prod).backward with io
+
+-- Over a field, the inverse of an integral element lies in R[x]
+-- (the subalgebra form of IsIntegral.inv_mem_adjoin... used for field
+-- towers).
+theorem IntegralElement.inverse_mem_adjoin (x y : Set)
+  requires field : Field(Algebra.base(A))
+  requires integral : IntegralElement(A, x)
+  requires inverse : call2(Ring.mul(Algebra.ring(A)), x, y) = Ring.one(Algebra.ring(A))
+  requires member : y ∈ algebraCarrier(A)
+  shows y ∈ adjoinOf(A, {x})
+proof
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have ringA := Algebra.comm_ring at A with algebra
+  have xA := integral.right.left
+  have io := (IntegralElement.iff_cumulus at A, x with algebra, xA).forward with integral
+  obtain ⟨_, cs, list, rel⟩ := io
+  have fp := Field.parts with field
+  have cancel : ∀ u ∈ algebraCarrier(A), call2(Ring.mul(Algebra.ring(A)), x, u) = Ring.zero(Algebra.ring(A)) → u = Ring.zero(Algebra.ring(A))
+    intros u hu h
+    unfold algebraCarrier at hu
+    have yA := member
+    unfold algebraCarrier at yA
+    have xA2 := xA
+    unfold algebraCarrier at xA2
+    linear_combination y * h - u * inverse
+  have coefficients : ∀ c ∈ Ring.carrier(Algebra.base(A)), Algebra.map(A)(c) = Ring.zero(Algebra.ring(A)) ∨ (∃ d ∈ Ring.carrier(Algebra.base(A)), call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(c), Algebra.map(A)(d)) = Ring.one(Algebra.ring(A)))
+    intros c hc
+    by_cases cz : c = Ring.zero(Algebra.base(A))
+    . left
+      rw cz
+      exact IsRingHom.zero with hp
+    . right
+      obtain ⟨d, inv⟩ := fp.right.right with c, hc, cz
+      obtain ⟨_, dIn, _, cd⟩ := inv
+      refine ⟨d, dIn, ?_⟩
+      rw ← (IsRingHom.mul with hp, hc, dIn)
+      rw cd
+      exact IsRingHom.one with hp
+  obtain ⟨y2, y2In, e2⟩ := intHelp.inverse_in_adjoin at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), x, cs with list, bp, ap, hp, xA, cancel, coefficients, rel
+  have single : {x} ⊆ algebraCarrier(A)
+    intros w hw
+    rw singleton.membership at hw
+    rw hw
+    exact xA
+  have bound := algebraAdjoin.subset at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), {x} with bp, ap, hp
+  have y2A := bound with y2, y2In
+  have same : y = y2
+    linear_combination y2 * inverse - y * e2
+  rw same
+  unfold adjoinOf
+  exact y2In
+
+-- IsIntegral.det: the determinant of a matrix with integral entries is
+-- integral.
+theorem IntegralElement.det (n M : Set)
+  requires finite : Finite(n)
+  requires matrix : M ∈ matrixSpace(Algebra.ring(A), n, n)
+  requires entries : ∀ i ∈ n, ∀ j ∈ n, IntegralElement(A, M((i, j)))
+  shows IntegralElement(A, matDet(Algebra.ring(A), n, M))
+proof
+  have ringA := Algebra.comm_ring at A with algebra
+  have sub := intHelp.closure_subring at A with algebra
+  have commC := subringRing.comm_ring at Algebra.ring(A), integralClosure(A) with ringA, sub
+  have incl := Subring.inclusion at Algebra.ring(A), integralClosure(A) with ringA, sub
+  have MF := matrixSpace.function at Algebra.ring(A), n, n, M with matrix
+  have values : ∀ p ∈ n × n, M(p) ∈ Ring.carrier(subringRing(Algebra.ring(A), integralClosure(A)))
+    intros p hp
+    obtain ⟨_, i, hi, j, hj, pij⟩ := product.membership.forward with hp
+    rw (subringRing.carrierOf at Algebra.ring(A), integralClosure(A))
+    rw pij
+    exact (intHelp.closure_mem at A, M((i, j))).backward with (entries with i, hi, j, hj)
+  have MCF := FunctionBetween.codomain_of_values with MF, values
+  have MC := matrixSpace.of_function at subringRing(Algebra.ring(A), integralClosure(A)), n, n, M with MCF
+  have mapEq := matDet.map at subringRing(Algebra.ring(A), integralClosure(A)), Algebra.ring(A), n, identity(integralClosure(A)), M with commC, ringA, finite, incl, MC
+  have same : matMap(Algebra.ring(A), n, n, identity(integralClosure(A)), M) = M
+    have inSpace : matMap(Algebra.ring(A), n, n, identity(integralClosure(A)), M) ∈ matrixSpace(Algebra.ring(A), n, n)
+      have vals : ∀ i ∈ n, ∀ j ∈ n, identity(integralClosure(A))(M((i, j))) ∈ Ring.carrier(Algebra.ring(A))
+        intros i hi j hj
+        have pIn : (i, j) ∈ n × n by typecheck
+        have v := values with (i, j), pIn
+        rw (subringRing.carrierOf at Algebra.ring(A), integralClosure(A)) at v
+        rw (identity.apply at M((i, j)), integralClosure(A) with v)
+        exact FunctionBetween.apply_closed with MF, pIn
+      have gf := matMap.graph_function at Algebra.ring(A), n, n, identity(integralClosure(A)), M with vals
+      exact matrixSpace.of_function at Algebra.ring(A), n, n, matMap(Algebra.ring(A), n, n, identity(integralClosure(A)), M) with gf
+    apply (matrixSpace.ext at Algebra.ring(A), n, n, matMap(Algebra.ring(A), n, n, identity(integralClosure(A)), M), M with ringA, inSpace, matrix).backward
+    intros i hi j hj
+    rw (matMap.entry at subringRing(Algebra.ring(A), integralClosure(A)), Algebra.ring(A), n, n, identity(integralClosure(A)), M, i, j with commC, incl, MC, hi, hj)
+    have pIn : (i, j) ∈ n × n by typecheck
+    have v := values with (i, j), pIn
+    rw (subringRing.carrierOf at Algebra.ring(A), integralClosure(A)) at v
+    exact identity.apply at M((i, j)), integralClosure(A) with v
+  rw same at mapEq
+  have dIn := matDet.mem at subringRing(Algebra.ring(A), integralClosure(A)), n, M with commC, finite, MC
+  rw (subringRing.carrierOf at Algebra.ring(A), integralClosure(A)) at dIn
+  rw (identity.apply at matDet(subringRing(Algebra.ring(A), integralClosure(A)), n, M), integralClosure(A) with dIn) at mapEq
+  rw mapEq at dIn
+  exact (intHelp.closure_mem at A, matDet(Algebra.ring(A), n, M)).forward with dIn
+
+end IntegralElements
+
+-- Section: Towers and integral extensions
+-- Transitivity (isIntegral_trans, Algebra.IsIntegral.trans): for
+-- R → A → B with A integral over R, an element of B integral over A is
+-- integral over R.
+theorem IntegralElement.trans (A B x : Set)
+  requires integralA : IntegralAlgebra(A)
+  requires algebraB : Algebra(B)
+  requires tower : Algebra.base(B) = Algebra.ring(A)
+  requires integral : IntegralElement(B, x)
+  shows IntegralElement(Algebra.mk(Algebra.base(A), Algebra.ring(B),
+    compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)),
+      algebraCarrier(A), algebraCarrier(B))), x)
+proof
+  have algA := integralA.left
+  have baseA := Algebra.base_comm_ring at A with algA
+  have ringA := Algebra.comm_ring at A with algA
+  have ringB := Algebra.comm_ring at B with algebraB
+  have shA := Algebra.structure_hom at A with algA
+  have shB := Algebra.structure_hom at B with algebraB
+  rw tower at shB
+  have g := RingHom.comp at Algebra.map(A), Algebra.map(B), Algebra.base(A), Algebra.ring(A), Algebra.ring(B) with baseA, shA, shB
+  have algD := Algebra.intro at Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))) with baseA, ringB, g
+  have eA : algebraCarrier(A) = Ring.carrier(Algebra.ring(A))
+    unfold algebraCarrier
+    rfl
+  have eB : algebraCarrier(B) = Ring.carrier(Algebra.ring(B))
+    unfold algebraCarrier
+    rfl
+  rw [eA, eB]
+  have bp := CommRing.parts with baseA
+  have dp := CommRing.parts with ringB
+  have gp := RingHom.parts with g
+  have mAF := IsRingHom.function with (RingHom.parts with shA)
+  have mBF := IsRingHom.function with (RingHom.parts with shB)
+  have homAD : AlgebraHom(Algebra.map(B), A, Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))
+    unfold AlgebraHom
+    rw [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map]
+    refine ⟨algA, algD, rfl, shB, ?_⟩
+    intros r hr
+    symm
+    exact compose.apply with mAF, mBF, hr
+  have coefficients : ∀ a ∈ Ring.carrier(Algebra.ring(A)), IntegralOver(compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(B)), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)), Algebra.map(B)(a))
+    intros a ha
+    have aA : a ∈ algebraCarrier(A)
+      rw eA
+      exact ha
+    have ia := integralA.right with a, aA
+    have im := IntegralElement.map at A, Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))), Algebra.map(B), a with algA, homAD, ia
+    have mD := im.right.left
+    have r := (IntegralElement.iff_cumulus at Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))), Algebra.map(B)(a) with algD, mD).forward with im
+    unfold algebraCarrier at r
+    rw [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map] at r
+    exact r
+  have xB := integral.right.left
+  have io := (IntegralElement.iff_cumulus at B, x with algebraB, xB).forward with integral
+  unfold algebraCarrier at io
+  obtain ⟨xB2, cs, list, rel⟩ := io
+  rw tower at list
+  rw tower at rel
+  have coeffs : ∀ a ∈ listSupport{Ring.carrier(Algebra.ring(A))}(cs), IntegralOver(compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(B)), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)), Algebra.map(B)(a))
+    intros a ha
+    have aA := (listSupport.subset at Ring.carrier(Algebra.ring(A)), cs with list) with a, ha
+    exact coefficients with a, aA
+  have res := intHelp.integral_trans at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), Ring.carrier(Algebra.ring(B)), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.neg(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))), Ring.carrier(Algebra.ring(A)), Algebra.map(B), x, cs with list, bp, dp, gp, mBF, coeffs, xB2, rel
+  have xD : x ∈ algebraCarrier(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))
+    unfold algebraCarrier
+    rw Algebra.mk.ring
+    exact xB2
+  have io2 : IntegralOver(Algebra.map(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))))), Ring.carrier(Algebra.base(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))), algebraCarrier(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B))))), Ring.add(Algebra.ring(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))), Ring.zero(Algebra.ring(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))), Ring.mul(Algebra.ring(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))), Ring.one(Algebra.ring(Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))))), x)
+    unfold algebraCarrier
+    rw [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map]
+    exact res
+  exact (IntegralElement.iff_cumulus at Algebra.mk(Algebra.base(A), Algebra.ring(B), compose(Algebra.map(B), Algebra.map(A), Ring.carrier(Algebra.base(A)), Ring.carrier(Algebra.ring(A)), Ring.carrier(Algebra.ring(B)))), x with algD, xD).backward with io2
+
+-- An integral extension of domains: the base is a field iff the extension
+-- is (isField_of_isIntegral_of_isField', Cumulus's
+-- IsField.of_integral_extension).
+theorem IntegralAlgebra.field_iff (A : Set)
+  requires integral : IntegralAlgebra(A)
+  requires domain : IntegralDomain(Algebra.ring(A))
+  requires injective : InjectiveBetween(Algebra.map(A), Ring.carrier(Algebra.base(A)),
+    algebraCarrier(A))
+  shows Field(Algebra.base(A)) ↔ Field(Algebra.ring(A))
+proof
+  have algebra := integral.left
+  have parts := intHelp.parts at A with algebra
+  obtain ⟨bp, ap, hp⟩ := parts
+  have ringA := Algebra.comm_ring at A with algebra
+  have base := Algebra.base_comm_ring at A with algebra
+  have ios : ∀ y ∈ algebraCarrier(A), IntegralOver(Algebra.map(A), Ring.carrier(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), y)
+    intros y hy
+    exact (IntegralElement.iff_cumulus at A, y with algebra, hy).forward with (integral.right with y, hy)
+  constructor
+  . intro field
+    have fp := Field.parts with field
+    have coefficients : ∀ c ∈ Ring.carrier(Algebra.base(A)), Algebra.map(A)(c) = Ring.zero(Algebra.ring(A)) ∨ (∃ d ∈ Ring.carrier(Algebra.base(A)), call2(Ring.mul(Algebra.ring(A)), Algebra.map(A)(c), Algebra.map(A)(d)) = Ring.one(Algebra.ring(A)))
+      intros c hc
+      by_cases cz : c = Ring.zero(Algebra.base(A))
+      . left
+        rw cz
+        exact IsRingHom.zero with hp
+      . right
+        obtain ⟨d, inv⟩ := fp.right.right with c, hc, cz
+        obtain ⟨_, dIn, _, cd⟩ := inv
+        refine ⟨d, dIn, ?_⟩
+        rw ← (IsRingHom.mul with hp, hc, dIn)
+        rw cd
+        exact IsRingHom.one with hp
+    have nt := domain.right.left
+    have zeroIn : Ring.zero(Algebra.ring(A)) ∈ Ring.carrier(Algebra.ring(A)) by typecheck
+    have oneIn : Ring.one(Algebra.ring(A)) ∈ Ring.carrier(Algebra.ring(A)) by typecheck
+    have inverses : ∀ x ∈ Ring.carrier(Algebra.ring(A)), x ≠ Ring.zero(Algebra.ring(A)) → ∃ y, IsInverse(Ring.carrier(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), x, y)
+      intros x xIn xnz
+      have xA : x ∈ algebraCarrier(A)
+        unfold algebraCarrier
+        exact xIn
+      have cancel : ∀ u ∈ algebraCarrier(A), call2(Ring.mul(Algebra.ring(A)), x, u) = Ring.zero(Algebra.ring(A)) → u = Ring.zero(Algebra.ring(A))
+        intros u hu h
+        unfold algebraCarrier at hu
+        have zd := domain.right.right with x, xIn, u, hu, h
+        cases zd with a | b
+        . exfalso
+          exact xnz with a
+        . exact b
+      obtain ⟨_, cs, list, rel⟩ := ios with x, xA
+      obtain ⟨y, yIn, e⟩ := intHelp.inverse_in_adjoin at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), x, cs with list, bp, ap, hp, xA, cancel, coefficients, rel
+      have bound := algebraAdjoin.subset at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A), {x} with bp, ap, hp
+      have yAc := bound with y, yIn
+      have yA := yAc
+      unfold algebraCarrier at yA
+      have yx : call2(Ring.mul(Algebra.ring(A)), y, x) = Ring.one(Algebra.ring(A))
+        rw ← e
+        ring
+      unfold IsInverse
+      exact ⟨y, xIn, yA, yx, e⟩
+    have cp := CommRing.parts with ringA
+    have isField : IsField(Ring.carrier(Algebra.ring(A)), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)))
+      unfold IsField
+      unfold Nontrivial
+      exact ⟨cp, ⟨zeroIn, oneIn, nt⟩, inverses⟩
+    have ringR := CommRing.to_ring with ringA
+    have eta := Ring.eta_of_ring at Algebra.ring(A) with ringR
+    rw eta
+    exact Field.of_parts with isField
+  . intro field
+    have fA : IsField(algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)))
+      unfold algebraCarrier
+      exact Field.parts with field
+    have isField := IsField.of_integral_extension at Ring.carrier(Algebra.base(A)), Ring.add(Algebra.base(A)), Ring.zero(Algebra.base(A)), Ring.neg(Algebra.base(A)), Ring.mul(Algebra.base(A)), Ring.one(Algebra.base(A)), algebraCarrier(A), Ring.add(Algebra.ring(A)), Ring.zero(Algebra.ring(A)), Ring.neg(Algebra.ring(A)), Ring.mul(Algebra.ring(A)), Ring.one(Algebra.ring(A)), Algebra.map(A) with bp, fA, hp, injective, ios
+    have ringR := CommRing.to_ring with base
+    have eta := Ring.eta_of_ring at Algebra.base(A) with ringR
+    rw eta
+    exact Field.of_parts with isField
+
+-- In an integral extension the contraction of a maximal ideal is maximal
+-- (Ideal.isMaximal_comap_of_isIntegral_of_isMaximal), and a prime
+-- contracting to a maximal ideal is maximal
+-- (Ideal.IsMaximal.of_isIntegral_of_isMaximal_comap).
+theorem IntegralAlgebra.comap_maximal (A M : Set)
+  requires integral : IntegralAlgebra(A)
+  requires maximal : MaximalIdeal(Algebra.ring(A), M)
+  shows MaximalIdeal(Algebra.base(A),
+    idealComap(Algebra.map(A), Ring.carrier(Algebra.base(A)), M))
+proof
+  sorry
+
+theorem IntegralAlgebra.maximal_of_comap (A P : Set)
+  requires integral : IntegralAlgebra(A)
+  requires prime : PrimeIdeal(Algebra.ring(A), P)
+  requires maximal : MaximalIdeal(Algebra.base(A),
+    idealComap(Algebra.map(A), Ring.carrier(Algebra.base(A)), P))
+  shows MaximalIdeal(Algebra.ring(A), P)
+proof
+  sorry
+
+-- Lying over (Ideal.exists_ideal_over_prime_of_isIntegral): for an
+-- integral extension with injective structure map, every prime of R is
+-- the contraction of a prime of A; going up extends a lying-over prime
+-- above a larger prime. Both build a prime by Zorn's lemma: Choice.
+theorem IntegralAlgebra.lying_over (A P : Set)
+  requires integral : IntegralAlgebra(A)
+  requires kernel : ringKernel(Algebra.map(A), Ring.carrier(Algebra.base(A)),
+    Ring.zero(Algebra.ring(A))) ⊆ P
+  requires prime : PrimeIdeal(Algebra.base(A), P)
+  shows ∃ Q, PrimeIdeal(Algebra.ring(A), Q) ∧ LiesOver(Algebra.map(A), Algebra.base(A), Q, P)
+proof
+  sorry
+
+theorem IntegralAlgebra.going_up (A P P2 Q : Set)
+  requires integral : IntegralAlgebra(A)
+  requires primeQ : PrimeIdeal(Algebra.ring(A), Q)
+  requires over : LiesOver(Algebra.map(A), Algebra.base(A), Q, P)
+  requires larger : PrimeIdeal(Algebra.base(A), P2)
+  requires subset : P ⊆ P2
+  shows ∃ Q2, PrimeIdeal(Algebra.ring(A), Q2) ∧ Q ⊆ Q2 ∧
+    LiesOver(Algebra.map(A), Algebra.base(A), Q2, P2)
+proof
+  sorry
+
+-- Incomparability (Ideal.comap_lt_comap_of_integral_mem_sdiff): primes
+-- lying over the same prime are incomparable.
+theorem IntegralAlgebra.incomparable (A P Q1 Q2 : Set)
+  requires integral : IntegralAlgebra(A)
+  requires first : PrimeIdeal(Algebra.ring(A), Q1)
+  requires second : PrimeIdeal(Algebra.ring(A), Q2)
+  requires overFirst : LiesOver(Algebra.map(A), Algebra.base(A), Q1, P)
+  requires overSecond : LiesOver(Algebra.map(A), Algebra.base(A), Q2, P)
+  requires subset : Q1 ⊆ Q2
+  shows Q1 = Q2
+proof
+  sorry
+
+-- Section: Integrally closed domains
+-- A UFD is integrally closed (UniqueFactorizationMonoid.instIsIntegrallyClosed),
+-- so is a PID, and a field.
+theorem IntegrallyClosedDomain.of_ufd (R : Set)
+  requires ufd : UniqueFactorizationDomain(R)
+  shows IntegrallyClosedDomain(R)
+proof
+  sorry
+
+theorem IntegrallyClosedDomain.of_field (K : Set)
+  requires field : Field(K)
+  shows IntegrallyClosedDomain(K)
+proof
+  have domain := Field.domain at K with field
+  have comm := IntegralDomain.comm_ring at K with domain
+  have fp := Field.parts with field
+  have ms := nonZeroDivisors.multiplicative at K with comm
+  have loc := localizationAlgebra.is_localization at K, nonZeroDivisors(K) with comm, ms
+  have alg := localizationAlgebra.algebra at K, nonZeroDivisors(K) with comm, ms
+  have proj := localizationAlgebra.projections at K, nonZeroDivisors(K) with comm, ms
+  have pb := proj.left
+  have units : nonZeroDivisors(K) ⊆ ringUnits(Algebra.base(localizationAlgebra(K, nonZeroDivisors(K))))
+    rw pb
+    intros x hx
+    unfold nonZeroDivisors at hx
+    obtain ⟨xK, nz⟩ := hx
+    have nt := domain.right.left
+    have xne : x ≠ Ring.zero(K)
+      intro xz
+      have oneK : Ring.one(K) ∈ Ring.carrier(K) by typecheck
+      have e : call2(Ring.mul(K), Ring.one(K), x) = Ring.zero(K)
+        rw xz
+        ring
+      have o := nz with Ring.one(K), oneK, e
+      apply nt
+      rw o
+    obtain ⟨y, inv⟩ := fp.right.right with x, xK, xne
+    obtain ⟨_, yK, yx, xy⟩ := inv
+    unfold ringUnits
+    refine ⟨xK, ?_⟩
+    unfold RingUnit
+    exact ⟨xK, y, yK, xy, yx⟩
+  have bij := IsLocalization.at_units at nonZeroDivisors(K), localizationAlgebra(K, nonZeroDivisors(K)) with loc, units
+  have inj := bij.left
+  have img := Surjective.image_full with bij.right
+  have closure : integralClosure(localizationAlgebra(K, nonZeroDivisors(K))) = algebraCarrier(localizationAlgebra(K, nonZeroDivisors(K)))
+    ext z
+    constructor
+    . intro hz
+      exact ((intHelp.closure_mem at localizationAlgebra(K, nonZeroDivisors(K)), z).forward with hz).right.left
+    . intro hz
+      rw ← img at hz
+      obtain ⟨_, a, ha, za⟩ := functionImage.membership.forward with hz
+      rw za
+      exact (intHelp.closure_mem at localizationAlgebra(K, nonZeroDivisors(K)), Algebra.map(localizationAlgebra(K, nonZeroDivisors(K)))(a)).backward with (IntegralElement.algebra_map at localizationAlgebra(K, nonZeroDivisors(K)), a with alg, ha)
+  rw ← img at closure
+  unfold IntegrallyClosedDomain
+  unfold IntegrallyClosedIn
+  exact ⟨domain, alg, inj, closure⟩
+
+-- An integrally closed domain: an element of any fraction field that is
+-- integral over R lies in R (IsIntegrallyClosed.isIntegral_iff), stated
+-- for every IsFractionRing algebra.
+theorem IntegrallyClosedDomain.integral_iff (K x : Set)
+  requires closed : IntegrallyClosedDomain(Algebra.base(K))
+  requires fractions : IsFractionRing(K)
+  requires member : x ∈ algebraCarrier(K)
+  shows IntegralElement(K, x) ↔
+    (∃ a ∈ Ring.carrier(Algebra.base(K)), x = Algebra.map(K)(a))
+proof
+  sorry
+
+-- The rational root theorem behind IsLocalization.scaleRoots_commonDenom_mem_lifts:
+-- a root a / b in the fraction field of a monic polynomial over a UFD has
+-- b a unit.
+theorem IntegrallyClosedDomain.monic_root (K p x : Set)
+  requires closed : IntegrallyClosedDomain(Algebra.base(K))
+  requires fractions : IsFractionRing(K)
+  requires monic : PolyMonic(Algebra.base(K), p)
+  requires member : x ∈ algebraCarrier(K)
+  requires root : polyAeval(K, x, p) = Ring.zero(Algebra.ring(K))
+  shows ∃ a ∈ Ring.carrier(Algebra.base(K)), x = Algebra.map(K)(a) ∧
+    PolyIsRoot(Algebra.base(K), p, a)
+proof
+  sorry
+
+-- A localization of an integrally closed domain is integrally closed
+-- (IsLocalization.isIntegrallyClosed... for localizations at
+-- submonoids without zero).
+theorem IntegrallyClosedDomain.localization (S A : Set)
+  requires closed : IntegrallyClosedDomain(Algebra.base(A))
+  requires localization : IsLocalization(S, A)
+  requires noZero : Ring.zero(Algebra.base(A)) ∉ S
+  shows IntegrallyClosedDomain(Algebra.ring(A))
+proof
+  sorry
+
+-- The integral closure of R in an algebra B is the integral closure in
+-- the sense of IsIntegralClosure (integralClosure.isIntegralClosure), and
+-- integral closures are unique up to isomorphism (IsIntegralClosure.equiv).
+theorem integralClosure.is_integral_closure (B : Set)
+  requires algebra : Algebra(B)
+  shows IsIntegralClosure(Algebra.mk(Algebra.base(B),
+      subringRing(Algebra.ring(B), integralClosure(B)),
+      Algebra.map(B)), B, identity(integralClosure(B)))
+proof
+  have baseB := Algebra.base_comm_ring at B with algebra
+  have ringB := Algebra.comm_ring at B with algebra
+  have sub := intHelp.closure_subring at B with algebra
+  have commC := subringRing.comm_ring at Algebra.ring(B), integralClosure(B) with ringB, sub
+  have incl := Subring.inclusion at Algebra.ring(B), integralClosure(B) with ringB, sub
+  have sa := integralClosure.subalgebra at B with algebra
+  obtain ⟨_, subA⟩ := sa
+  have bp := CommRing.parts with baseB
+  have ap0 := CommRing.parts with ringB
+  have ap : IsCommRing(algebraCarrier(B), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.neg(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)))
+    unfold algebraCarrier
+    exact ap0
+  have sh := Algebra.structure_hom at B with algebra
+  have hp0 := RingHom.parts with sh
+  have hp : IsRingHom(Algebra.map(B), Ring.carrier(Algebra.base(B)), Ring.add(Algebra.base(B)), Ring.zero(Algebra.base(B)), Ring.neg(Algebra.base(B)), Ring.mul(Algebra.base(B)), Ring.one(Algebra.base(B)), algebraCarrier(B), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.neg(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)))
+    unfold algebraCarrier
+    exact hp0
+  have rh := intHelp.restricted_hom at Ring.carrier(Algebra.base(B)), Ring.add(Algebra.base(B)), Ring.zero(Algebra.base(B)), Ring.neg(Algebra.base(B)), Ring.mul(Algebra.base(B)), Ring.one(Algebra.base(B)), algebraCarrier(B), Ring.add(Algebra.ring(B)), Ring.zero(Algebra.ring(B)), Ring.neg(Algebra.ring(B)), Ring.mul(Algebra.ring(B)), Ring.one(Algebra.ring(B)), Algebra.map(B), integralClosure(B) with bp, ap, hp, subA
+  have rh2 : IsRingHom(Algebra.map(B), Ring.carrier(Algebra.base(B)), Ring.add(Algebra.base(B)), Ring.zero(Algebra.base(B)), Ring.neg(Algebra.base(B)), Ring.mul(Algebra.base(B)), Ring.one(Algebra.base(B)), Ring.carrier(subringRing(Algebra.ring(B), integralClosure(B))), Ring.add(subringRing(Algebra.ring(B), integralClosure(B))), Ring.zero(subringRing(Algebra.ring(B), integralClosure(B))), Ring.neg(subringRing(Algebra.ring(B), integralClosure(B))), Ring.mul(subringRing(Algebra.ring(B), integralClosure(B))), Ring.one(subringRing(Algebra.ring(B), integralClosure(B))))
+    unfold subringRing
+    ring_projections
+  have mapC := RingHom.of_projections with (CommRing.to_ring with baseB), (CommRing.to_ring with commC), rh2
+  have algC := Algebra.intro at Algebra.base(B), subringRing(Algebra.ring(B), integralClosure(B)), Algebra.map(B) with baseB, commC, mapC
+  have cc := subringRing.carrierOf at Algebra.ring(B), integralClosure(B)
+  have ICB : ∀ c ∈ integralClosure(B), identity(integralClosure(B))(c) ∈ algebraCarrier(B)
+    intros c hc
+    rw (identity.apply at c, integralClosure(B) with hc)
+    exact ((intHelp.closure_mem at B, c).forward with hc).right.left
+  have idF := FunctionBetween.codomain_of_values with (identity.function at integralClosure(B)), ICB
+  have hom : AlgebraHom(identity(integralClosure(B)), Algebra.mk(Algebra.base(B), subringRing(Algebra.ring(B), integralClosure(B)), Algebra.map(B)), B)
+    unfold AlgebraHom
+    rw [Algebra.mk.base, Algebra.mk.ring, Algebra.mk.map]
+    refine ⟨algC, algebra, rfl, incl, ?_⟩
+    intros a ha
+    rw Algebra.mk.base at ha
+    have mIC := IsRingHom.function with rh
+    have v := FunctionBetween.apply_closed with mIC, ha
+    exact identity.apply at Algebra.map(B)(a), integralClosure(B) with v
+  unfold IsIntegralClosure
+  unfold algebraCarrier
+  rw Algebra.mk.ring
+  rw cc
+  have idF2 := idF
+  unfold algebraCarrier at idF2
+  have cancel : ∀ u ∈ integralClosure(B), ∀ v ∈ integralClosure(B), identity(integralClosure(B))(u) = identity(integralClosure(B))(v) → u = v
+    intros u hu v hv e
+    rw (identity.apply at u, integralClosure(B) with hu) at e
+    rw (identity.apply at v, integralClosure(B) with hv) at e
+    exact e
+  have inj := Injective.of_pointwise with idF2, cancel
+  refine ⟨hom, inj, ?_⟩
+  ext y
+  constructor
+  . intro hy
+    obtain ⟨_, c, hc, yc⟩ := functionImage.membership.forward with hy
+    rw yc
+    rw (identity.apply at c, integralClosure(B) with hc)
+    exact hc
+  . intro hy
+    apply functionImage.membership.backward
+    have yB := ((intHelp.closure_mem at B, y).forward with hy).right.left
+    unfold algebraCarrier at yB
+    refine ⟨yB, y, hy, ?_⟩
+    symm
+    exact identity.apply at y, integralClosure(B) with hy
+
+theorem IsIntegralClosure.unique (C C2 B j j2 : Set)
+  requires first : IsIntegralClosure(C, B, j)
+  requires second : IsIntegralClosure(C2, B, j2)
+  shows ∃ e, e : C ≃ₐ C2
+proof
+  sorry
+
+-- An integral closure is integral over R (IsIntegralClosure.isIntegral),
+-- and when B is a finite algebra over a Noetherian ring it is finite
+-- (IsIntegralClosure.finite, IsIntegralClosure.isNoetherian under
+-- finiteness of B).
+theorem IsIntegralClosure.integral (C B j : Set)
+  requires closure : IsIntegralClosure(C, B, j)
+  shows IntegralAlgebra(C)
+proof
+  obtain ⟨hom, inj, image⟩ := closure
+  have algC := AlgebraHom.source with hom
+  have algB := AlgebraHom.target with hom
+  have baseEq := AlgebraHom.base_eq with hom
+  have jF := AlgebraHom.function with hom
+  have rh := AlgebraHom.ring_hom with hom
+  unfold IntegralAlgebra
+  refine ⟨algC, ?_⟩
+  intros c hc
+  have jc := FunctionBetween.apply_closed with jF, hc
+  have inImage : j(c) ∈ functionImage(j, algebraCarrier(C), algebraCarrier(B))
+    apply functionImage.membership.backward
+    exact ⟨jc, c, hc, rfl⟩
+  rw image at inImage
+  have ij := (intHelp.closure_mem at B, j(c)).forward with inImage
+  obtain ⟨_, _, p, monic, root⟩ := ij
+  rw ← baseEq at monic
+  have pIn := monic.left
+  have ap := polyAeval.algebra_hom_apply at C, B, j, c, p with algC, hom, hc, pIn
+  rw root at ap
+  have base := Algebra.base_comm_ring at C with algC
+  have ringC := Algebra.comm_ring at C with algC
+  have polys := polynomialRing.comm_ring at Algebra.base(C), {0} with base
+  have vIn : polyAeval(C, c, p) ∈ algebraCarrier(C)
+    have sh := Algebra.structure_hom at C with algC
+    have pt := hc
+    unfold algebraCarrier at pt
+    have H := polyEval2.hom at Algebra.base(C), Algebra.ring(C), Algebra.map(C), c with base, polys, ringC, sh, pt
+    have Hf := IsRingHom.function with (RingHom.parts with H)
+    unfold polyAeval
+    unfold polyEval2
+    unfold algebraCarrier
+    exact FunctionBetween.apply_closed with Hf, pIn
+  have zC : Ring.zero(Algebra.ring(C)) ∈ algebraCarrier(C)
+    unfold algebraCarrier
+    typecheck
+  have z := RingHom.map_zero with rh
+  rw ← z at ap
+  have eq := Injective.apply_cancel with inj, vIn, zC, ap
+  unfold IntegralElement
+  exact ⟨algC, hc, p, monic, eq⟩
+
+theorem IsIntegralClosure.finite_of_finite (C B j : Set)
+  requires closure : IsIntegralClosure(C, B, j)
+  requires noetherian : NoetherianRing(Algebra.base(B))
+  requires finite : FiniteAlgebra(B)
+  shows FiniteAlgebra(C) ∧ NoetherianRing(Algebra.ring(C))
+proof
+  sorry

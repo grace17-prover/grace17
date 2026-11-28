@@ -1,0 +1,368 @@
+-- The functions attached to a CM datum C = (Λ, t, a₁) and their Taylor
+-- series: the twisted translations U^m_y, θ = U_tσ/U_tσ(0), ξ(z) =
+-- ℘(z + t) − ℘(t), φ = (℘′(z + t) − a₁ξ)/2, G = σ(σ′θ − σ(θ′ + a₁θ/2)) and
+-- the monomial sections θ^a σ^{2b} G^c; their functional equations
+-- (θ is a section of degree one, even, with zeros t + Λ; θ² = ξσ² off Λ,
+-- the Weierstrass equation φ² + a₁ξφ = ξ³ + ξ, duplication), the sections
+-- of degree m as combinations of monomial sections, division of sections,
+-- pull-back along isogenies; Taylor series at 0 read in ℂ_p through a
+-- p-adic place, linear substitution, the integral series over 𝔬 = O_ℂp,
+-- the ring 𝔬[[φ]], exp(a) and congruence parts.
+-- Source: grh-compact/src/Lib/CM/Sigma/CurveTheta.lean (taylorAtZero,
+-- taylorVia, linearSeries, CMLattice.twistedTranslate, CMLattice.θ,
+-- translatedWp, translatedWpDeriv, phiThetaCube, translatedWpDeriv_zero,
+-- θ_mem, θ_zero, θ_eq_zero_iff, θ_neg, θ_sq, σ_two_mul_sq,
+-- weierstrass_equation, theta_add_mul_theta_sub, deriv_translatedWpDeriv_zero,
+-- phiThetaCube_spec, phiThetaCube_sq_add, θ_two_mul, comp_mul_mem_sections,
+-- QuadField.exists_latticeModule_eq_scaledIdeal), Lib/CM/Sigma/PadicSeriesDefs.lean
+-- (monomialDeg, monomialSection, monomialSection_eq, monomialSection_mem,
+-- sections_zero_le_const, section_division, sections_le_span_monomialSection,
+-- twistedTranslate_comp_mem, eq_of_taylorAtZero_eq, taylorAtZero_mul,
+-- taylorAtZero_comp_mul, valRingCp, seriesToCp),
+-- Lib/CM/LocalHeight/IntegralParameter.lean (expSubst,
+-- CMLattice.phiSeriesRing), Lib/CM/LocalHeight/IsogenyIntegrality.lean
+-- (congruencePart).
+-- Encoding. A series over 𝔬 = valRingCp p is a series over ℂ_p whose
+-- coefficients lie in the integers of ℂ_p (seriesToCp is the inclusion).
+-- The substitution F(Σ_i c_i X_i) of a series in one variable is written
+-- coefficientwise: its coefficient at z^m is F_{|m|} times that of
+-- (Σ c_i X_i)^{|m|}. The definitions are those layer 5 uses (moved here
+-- from GRH.Proof.Forward.Theta under the same names). A fractional ideal
+-- of K is read inside ℂ: a nonzero 𝓞_K-submodule 𝔞 of K = ℚ(ω) with
+-- c𝔞 ⊂ 𝓞_K for a positive integer c.
+-- Part of the GRH blueprint (layer 4, Lib/CM, stage S2).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.CM.CurveTheta
+import GRH.CM.Sigma
+import GRH.Polynomial.PowerSeries
+
+section CurveTheta
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Functions on ℂ attached to a CM datum
+-- CurveTheta.lean, CMLattice.twistedTranslate m y F:
+-- (U^m_y F)(z) = exp(−mπ(z ȳ + |y|²/2)/A) F(z + y), A the area of Λ.
+def twistedTranslate (C m y F : Set) : Set :=
+  { (z, ℂ[complexExp(ℂ[-(complexOfReal(R[realNat(m) * realPi / cmArea(C)]) *
+      (z * complexConj(y) + complexOfReal(R[complexAbs(y) ^ 2 / 2])))]) *
+      F(ℂ[z + y])]) | z ∈ complexCarrier }
+
+-- CurveTheta.lean, CMLattice.θ: z ↦ (U_tσ)(z)/(U_tσ)(0).
+def cmTheta (C : Set) : Set :=
+  { (z, complexDiv(twistedTranslate(C, (1:N), C.t, cmSigma(C))(z),
+      twistedTranslate(C, (1:N), C.t, cmSigma(C))(complexZero))) | z ∈ complexCarrier }
+
+-- CurveTheta.lean, CMLattice.translatedWp: ξ(z) = ℘(z + t) − ℘(t).
+def translatedWp (C : Set) : Set :=
+  { (z, ℂ[weierstrassValue(cmLattice(C), ℂ[z + C.t]) -
+      weierstrassValue(cmLattice(C), C.t)]) | z ∈ complexCarrier }
+
+-- CurveTheta.lean, CMLattice.translatedWpDeriv: φ(z) = (℘′(z + t) − a₁ξ(z))/2.
+def translatedWpDeriv (C : Set) : Set :=
+  { (z, complexDiv(ℂ[weierstrassDeriv(cmLattice(C), ℂ[z + C.t]) -
+      C.a1 * translatedWp(C)(z)], ℂ[2])) | z ∈ complexCarrier }
+
+-- f′ for an entire function f.
+def entireDeriv (f : Set) : Set := complexDeriv(f, complexCarrier)
+
+-- CurveTheta.lean, CMLattice.phiThetaCube: G = σ(σ′θ − σ(θ′ + (a₁/2)θ)).
+def phiThetaCube (C : Set) : Set :=
+  { (z, ℂ[cmSigma(C)(z) * (entireDeriv(cmSigma(C))(z) * cmTheta(C)(z) -
+      cmSigma(C)(z) * (entireDeriv(cmTheta(C))(z) +
+        complexDiv(C.a1, ℂ[2]) * cmTheta(C)(z)))]) | z ∈ complexCarrier }
+
+-- PadicSeriesDefs.lean, CMLattice.monomialDeg (a, b, c) = a + 2b + 3c.
+def cmMonomialDeg (x : Set) : Set :=
+  add(fst(x), add(mul(fst(snd(x)), 2), mul(snd(snd(x)), 3)))
+
+-- PadicSeriesDefs.lean, CMLattice.monomialSection (a, b, c): θ^a σ^{2b} G^c.
+def monomialSection (C x : Set) : Set :=
+  { (z, ℂ[cmTheta(C)(z) ^ fst(x) * (cmSigma(C)(z) * cmSigma(C)(z)) ^ fst(snd(x)) *
+      phiThetaCube(C)(z) ^ snd(snd(x))]) | z ∈ complexCarrier }
+
+-- Section: Taylor series
+-- CurveTheta.lean, taylorAtZero f: Σ_n f⁽ⁿ⁾(0)/n! Xⁿ.
+def taylorAtZero (f : Set) : Set :=
+  { (n, ℂ[complexOfReal(realInvValue(realNat(n !))) *
+      holomorphicIteratedDeriv(f, complexCarrier, n)(complexZero)]) | n ∈ ℕ }
+
+-- CurveTheta.lean, taylorVia ιₚ f: the Taylor series read in ℂ_p.
+def taylorVia (p ι f : Set) : Set :=
+  seriesMap(complexRing, placeCp(p, ι), placeHom(ι))(taylorAtZero(f))
+
+-- CurveTheta.lean, linearSeries c = Σ_i c_i X_i over a ring R.
+def linearCoeff (R I c m : Set) : Set :=
+  ⋃({ a ∈ Ring.carrier(R) | (∃ i ∈ I, m = monomialVariable(I, i) ∧ a = c(i)) ∨
+    (¬(∃ i ∈ I, m = monomialVariable(I, i)) ∧ a = Ring.zero(R)) })
+
+def linearSeries (R I c : Set) : Set := { (m, linearCoeff(R, I, c, m)) | m ∈ monomials(I) }
+
+-- PowerSeries.subst (linearSeries c) F: the coefficient at z^m is F_{|m|}
+-- times that of (Σ c_i X_i)^{|m|}.
+def linearSubst (R I F c : Set) : Set :=
+  { (m, call2(Ring.mul(R), F(monomialDegree(I, m)),
+      Ring.pow(mvPowerSeriesRing(R, I), linearSeries(R, I, c), monomialDegree(I, m))(m))) |
+    m ∈ monomials(I) }
+
+-- The series over 𝔬: series over ℂ_p with coefficients in O_C
+-- (seriesToCp's range).
+def integralSeries (p ι : Set) : Set :=
+  { F ∈ powerSeriesCarrier(placeCp(p, ι)) | ∀ n ∈ ℕ, F(n) ∈ placeCpIntegers(p, ι) }
+
+def integralMvSeries (p ι I : Set) : Set :=
+  { F ∈ mvSeriesCarrier(placeCp(p, ι), I) |
+    ∀ m ∈ monomials(I), F(m) ∈ placeCpIntegers(p, ι) }
+
+-- IntegralParameter.lean, CMLattice.phiSeriesRing: 𝔬[[φ]], the series
+-- S(φ) for S over 𝔬, φ the Taylor series of translatedWpDeriv read in ℂ_p.
+def phiSeriesRing (p ι C : Set) : Set :=
+  { F ∈ powerSeriesCarrier(placeCp(p, ι)) | ∃ S ∈ integralSeries(p, ι),
+    F = seriesSubst(placeCp(p, ι), S, taylorVia(p, ι, translatedWpDeriv(C))) }
+
+-- IntegralParameter.lean, expSubst a = exp(a), the exponential series
+-- substituted into a (a with constant coefficient 0), in I variables.
+def mvExpTerms (R I a m : Set) : Set :=
+  { (k, call2(Ring.mul(R), seriesExp(R)(k),
+      Ring.pow(mvPowerSeriesRing(R, I), a, k)(m))) | k ∈ succ(monomialDegree(I, m)) }
+
+def mvExpSubst (R I a : Set) : Set :=
+  { (m, finiteRingSum(succ(monomialDegree(I, m)), Ring.carrier(R), Ring.add(R),
+      Ring.zero(R), Ring.neg(R), Ring.mul(R), Ring.one(R), mvExpTerms(R, I, a, m))) |
+    m ∈ monomials(I) }
+
+-- IsogenyIntegrality.lean, congruencePart m r f: the part of f in the
+-- degrees n ≡ r mod m.
+def congruenceCoeff (R M r f n : Set) : Set :=
+  ⋃({ a ∈ Ring.carrier(R) | (CongruentMod(n, r, M) ∧ a = f(n)) ∨
+    (¬CongruentMod(n, r, M) ∧ a = Ring.zero(R)) })
+
+def congruencePart (R M r f : Set) : Set := { (n, congruenceCoeff(R, M, r, f, n)) | n ∈ ℕ }
+
+-- Section: Facts on θ, ξ, φ and G
+-- The value of a function at 2z, and f ∘ (a·).
+def scaleArg (a f : Set) : Set := { (z, f(ℂ[a * z])) | z ∈ complexCarrier }
+
+-- CurveTheta.lean, θ_mem, θ_zero, θ_eq_zero_iff, θ_neg: θ is a section of
+-- degree one with θ(0) = 1, θ(z) = 0 exactly for z + t ∈ Λ, and θ is even.
+theorem cmTheta.facts (C : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  shows cmTheta(C) ∈ cmSections(C, (1:N)) ∧ cmTheta(C)(complexZero) = complexOne ∧
+    (∀ z ∈ complexCarrier, cmTheta(C)(z) = complexZero ↔ ℂ[z + C.t] ∈ cmLattice(C)) ∧
+    (∀ z ∈ complexCarrier, cmTheta(C)(ℂ[-z]) = cmTheta(C)(z))
+proof
+  sorry
+
+-- CurveTheta.lean, θ_sq: for z ∉ Λ, θ(z)² = (℘(z) − ℘(t)) σ(z)².
+theorem cmTheta.sq (C z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hz : z ∈ complexCarrier
+  requires off : z ∉ cmLattice(C)
+  shows ℂ[cmTheta(C)(z) ^ 2] = ℂ[(weierstrassValue(cmLattice(C), z) -
+    weierstrassValue(cmLattice(C), C.t)) * cmSigma(C)(z) ^ 2]
+proof
+  sorry
+
+-- CurveTheta.lean, σ_two_mul_sq and θ_two_mul (duplication):
+-- σ(2z)² = σ(z)²θ(z)²(4(θ(z)⁴ + σ(z)⁴) + (a₁θ(z)σ(z))²) and θ(2z) = θ(z)⁴ − σ(z)⁴.
+theorem cmTheta.two_mul (C z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hz : z ∈ complexCarrier
+  shows ℂ[cmSigma(C)(ℂ[2 * z]) ^ 2] = ℂ[(cmSigma(C)(z) * cmTheta(C)(z)) ^ 2 *
+      (4 * (cmTheta(C)(z) ^ 4 + cmSigma(C)(z) ^ 4) + (C.a1 * cmTheta(C)(z) * cmSigma(C)(z)) ^ 2)] ∧
+    cmTheta(C)(ℂ[2 * z]) = ℂ[cmTheta(C)(z) ^ 4 - cmSigma(C)(z) ^ 4]
+proof
+  sorry
+
+-- ℂ ∖ (Λ − t), where ξ and φ are holomorphic.
+def offTranslate (C : Set) : Set := { w ∈ complexCarrier | ℂ[w + C.t] ∉ cmLattice(C) }
+
+-- CurveTheta.lean, translatedWpDeriv_zero, deriv_translatedWpDeriv_zero and
+-- weierstrass_equation: φ(0) = 0, φ′(0) = 1, and for z + t ∉ Λ,
+-- φ(z)² + a₁ξ(z)φ(z) = ξ(z)³ + ξ(z).
+theorem translatedWpDeriv.facts (C z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hz : z ∈ complexCarrier
+  requires off : ℂ[z + C.t] ∉ cmLattice(C)
+  shows translatedWpDeriv(C)(complexZero) = complexZero ∧
+    complexDeriv(translatedWpDeriv(C), offTranslate(C))(complexZero) = complexOne ∧
+    ℂ[translatedWpDeriv(C)(z) ^ 2 + C.a1 * translatedWp(C)(z) * translatedWpDeriv(C)(z)] =
+      ℂ[translatedWp(C)(z) ^ 3 + translatedWp(C)(z)]
+proof
+  sorry
+
+-- CurveTheta.lean, theta_add_mul_theta_sub: for z + t ∉ Λ and all w,
+-- θ(z + w)θ(z − w) = θ(z)²(θ(w)² − ξ(z)σ(w)²).
+theorem cmTheta.add_mul_sub (C z w : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hz : z ∈ complexCarrier
+  requires hw : w ∈ complexCarrier
+  requires off : ℂ[z + C.t] ∉ cmLattice(C)
+  shows ℂ[cmTheta(C)(ℂ[z + w]) * cmTheta(C)(ℂ[z - w])] =
+    ℂ[cmTheta(C)(z) ^ 2 * (cmTheta(C)(w) ^ 2 - translatedWp(C)(z) * cmSigma(C)(w) ^ 2)]
+proof
+  sorry
+
+-- CurveTheta.lean, phiThetaCube_spec and phiThetaCube_sq_add: G is entire;
+-- off t + Λ, σ² = ξθ² and G = φθ³; and G² + a₁σ²θG = σ⁶ + σ²θ⁴ on ℂ.
+theorem phiThetaCube.facts (C z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hz : z ∈ complexCarrier
+  shows HolomorphicOn(phiThetaCube(C), complexCarrier) ∧
+    (ℂ[z + C.t] ∉ cmLattice(C) →
+      ℂ[cmSigma(C)(z) ^ 2] = ℂ[translatedWp(C)(z) * cmTheta(C)(z) ^ 2] ∧
+      phiThetaCube(C)(z) = ℂ[translatedWpDeriv(C)(z) * cmTheta(C)(z) ^ 3]) ∧
+    ℂ[phiThetaCube(C)(z) ^ 2 + C.a1 * cmSigma(C)(z) ^ 2 * cmTheta(C)(z) * phiThetaCube(C)(z)] =
+      ℂ[cmSigma(C)(z) ^ 6 + cmSigma(C)(z) ^ 2 * cmTheta(C)(z) ^ 4]
+proof
+  sorry
+
+-- CurveTheta.lean, comp_mul_mem_sections: if aΛ ⊂ Λ′ with a ā area(Λ) =
+-- N area(Λ′), and g is a section of degree k of C′, then z ↦ g(az) is a
+-- section of degree kN of C.
+theorem cmSections.comp_mul (C D a g : Set) (d k N : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires cm2 : IsCMLattice(d, D)
+  requires prime : PrimeSevenModEight(d)
+  requires isogeny : IsCMIsogeny(C, D, a, N)
+  requires hg : g ∈ cmSections(D, k)
+  shows scaleArg(a, g) ∈ cmSections(C, mul(k, N))
+proof
+  sorry
+
+-- Section: Monomial sections
+-- PadicSeriesDefs.lean, monomialSection_eq and monomialSection_mem:
+-- θ^a σ^{2b} G^c is a section of degree a + 2b + 3c, equal to
+-- θ^{a+2b+3c} ξ^b φ^c off t + Λ.
+theorem monomialSection.facts (C x z : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hx : x ∈ ℕ × (ℕ × ℕ)
+  requires hz : z ∈ complexCarrier
+  shows monomialSection(C, x) ∈ cmSections(C, cmMonomialDeg(x)) ∧
+    (ℂ[z + C.t] ∉ cmLattice(C) →
+      monomialSection(C, x)(z) = ℂ[cmTheta(C)(z) ^ cmMonomialDeg(x) *
+        translatedWp(C)(z) ^ fst(snd(x)) * translatedWpDeriv(C)(z) ^ snd(snd(x))])
+proof
+  sorry
+
+-- PadicSeriesDefs.lean, sections_zero_le_const: a section of degree 0 is
+-- constant.
+theorem cmSections.zero_const (C f : Set) (d : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hf : f ∈ cmSections(C, (0:N))
+  shows ∀ z ∈ complexCarrier, f(z) = f(complexZero)
+proof
+  sorry
+
+-- The monomial triples of degree m with c ≤ 1.
+def sectionTriples (m : Set) : Set :=
+  { x ∈ ℕ × (ℕ × ℕ) | snd(snd(x)) ∈ 2 ∧ cmMonomialDeg(x) = m }
+
+def sectionTerms (C c z : Set) : Set :=
+  { (x, ℂ[c(x) * monomialSection(C, x)(z)]) | x ∈ domain(c) }
+
+def sectionCombination (C c z : Set) : Set :=
+  groupFiniteSum(complexAdditiveGroup, domain(c), sectionTerms(C, c, z))
+
+-- PadicSeriesDefs.lean, sections_le_span_monomialSection: every section of
+-- degree m is a combination of the θ^a σ^{2b} G^c with c ≤ 1 and
+-- a + 2b + 3c = m.
+theorem cmSections.span_monomial (C f : Set) (d m : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires hf : f ∈ cmSections(C, m)
+  shows ∃ c, FunctionBetween(c, sectionTriples(m), complexCarrier) ∧
+    ∀ z ∈ complexCarrier, f(z) = sectionCombination(C, c, z)
+proof
+  sorry
+
+-- PadicSeriesDefs.lean, section_division: let g(z) = (U_y θ_D)(az), a ≠ 0,
+-- be a section of degree m of C, and S a set of functions containing the
+-- sections of degree k. A section f of degree m + k vanishing at the zeros
+-- of g is cg for some c ∈ S.
+theorem cmSections.division (C D y a g f S : Set) (d m k : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires cm2 : IsCMLattice(d, D)
+  requires ha : a ∈ complexCarrier
+  requires nonzero : a ≠ complexZero
+  requires hy : y ∈ complexCarrier
+  requires sub : cmSections(C, k) ⊆ S
+  requires hg : g ∈ cmSections(C, m)
+  requires hf : f ∈ cmSections(C, add(m, k))
+  requires shape : g = scaleArg(a, twistedTranslate(D, (1:N), y, cmTheta(D)))
+  requires zeros : ∀ z ∈ complexCarrier, g(z) = complexZero → f(z) = complexZero
+  shows ∃ c ∈ S, ∀ z ∈ complexCarrier, f(z) = ℂ[c(z) * g(z)]
+proof
+  sorry
+
+-- PadicSeriesDefs.lean, twistedTranslate_comp_mem: if 0 ≠ δ ∈ 𝓞_K with
+-- conj(δ) an isogeny of degree N of Λ to itself and δy ∈ Λ, then
+-- z ↦ (U_y θ)(δ̄z) is a section of degree N.
+theorem twistedTranslate.comp_mem (C δ y : Set) (d N : Nat)
+  requires cm : IsCMLattice(d, C)
+  requires prime : PrimeSevenModEight(d)
+  requires isogeny : IsCMIsogeny(C, C, complexConj(δ), N)
+  requires nonzero : δ ≠ complexZero
+  requires hy : y ∈ complexCarrier
+  requires torsion : ℂ[δ * y] ∈ cmLattice(C)
+  shows scaleArg(complexConj(δ), twistedTranslate(C, (1:N), y, cmTheta(C))) ∈ cmSections(C, N)
+proof
+  sorry
+
+-- Section: Taylor series
+-- PadicSeriesDefs.lean, eq_of_taylorAtZero_eq, taylorAtZero_mul and
+-- taylorAtZero_comp_mul: entire functions with the same Taylor series are
+-- equal; the series of fg is the product, that of z ↦ f(az) the rescaling.
+def productFunction (f g : Set) : Set := { (z, ℂ[f(z) * g(z)]) | z ∈ complexCarrier }
+
+theorem taylorAtZero.facts (f g a : Set)
+  requires hf : HolomorphicOn(f, complexCarrier)
+  requires hg : HolomorphicOn(g, complexCarrier)
+  requires ha : a ∈ complexCarrier
+  shows (taylorAtZero(f) = taylorAtZero(g) → ∀ z ∈ complexCarrier, f(z) = g(z)) ∧
+    taylorAtZero(productFunction(f, g)) =
+      call2(Ring.mul(powerSeriesRing(complexRing)), taylorAtZero(f), taylorAtZero(g)) ∧
+    taylorAtZero(scaleArg(a, f)) = seriesRescale(complexRing, a, taylorAtZero(f))
+proof
+  sorry
+
+-- A fractional ideal of K inside ℂ: a nonzero 𝓞_K-submodule 𝔞 of
+-- K = ℚ(ω) with c𝔞 ⊂ 𝓞_K for some positive integer c.
+def quadFieldInC (d : Nat) : Set :=
+  { z ∈ complexCarrier | ∃ c ∈ ℕ, c ≠ (0:N) ∧ ℂ[intComplex(c) * z] ∈ quadIntegers(d) }
+
+predicate QuadFractionalIdeal (d : Nat, 𝔞 : Set) :=
+  𝔞 ⊆ quadFieldInC(d) ∧ (∃ z ∈ 𝔞, z ≠ complexZero) ∧
+  (∀ x ∈ 𝔞, ∀ y ∈ 𝔞, ℂ[x + y] ∈ 𝔞) ∧
+  (∀ a ∈ quadIntegers(d), ∀ x ∈ 𝔞, ℂ[a * x] ∈ 𝔞) ∧
+  (∃ c ∈ ℕ, c ≠ (0:N) ∧ ∀ x ∈ 𝔞, ℂ[intComplex(c) * x] ∈ quadIntegers(d))
+
+def scaledSet (u 𝔞 : Set) : Set := { z ∈ complexCarrier | ∃ x ∈ 𝔞, z = ℂ[u * x] }
+
+-- CurveTheta.lean, QuadField.exists_latticeModule_eq_scaledIdeal: every
+-- nonzero fractional ideal 𝔠 of K has a multiple u𝔠, u ≠ 0, that is the
+-- lattice of a CM datum.
+theorem QuadFractionalIdeal.exists_cm (𝔠 : Set) (d : Nat)
+  requires prime : PrimeSevenModEight(d)
+  requires ideal : QuadFractionalIdeal(d, 𝔠)
+  shows ∃ C, ∃ u ∈ complexCarrier, u ≠ complexZero ∧ IsCMLattice(d, C) ∧
+    cmLattice(C) = scaledSet(u, 𝔠)
+proof
+  sorry
+
+-- Section: Series over ℂ_p
+-- The ring of series over ℂ_p and the ring 𝔬[[φ]] is a subring
+-- (CMLattice.phiSeriesRing is a Subalgebra).
+theorem phiSeriesRing.subring (p ι C : Set) (d : Nat)
+  requires prime : Prime(p)
+  requires place : ι ∈ padicPlaces(p)
+  requires cm : IsCMLattice(d, C)
+  shows Subring(powerSeriesRing(placeCp(p, ι)), phiSeriesRing(p, ι, C)) ∧
+    integralSeries(p, ι) ⊆ phiSeriesRing(p, ι, C)
+proof
+  sorry
+
+end CurveTheta

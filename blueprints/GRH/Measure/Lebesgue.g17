@@ -1,0 +1,3531 @@
+-- Measures and Lebesgue measure: a measure on a measurable space as a
+-- countably additive function from its measurable sets to [0, ∞]; its
+-- extension to all subsets, null sets and "almost everywhere"; finite,
+-- probability, σ-finite and s-finite measures; restriction, push-forward,
+-- scalar multiples, countable sums, Dirac and counting measures, and
+-- measure-preserving maps; uniqueness from a generating π-system; outer
+-- measures and Carathéodory's theorem; Lebesgue measure on ℝ from
+-- coverings by intervals and on ℝⁿ from coverings by boxes (Mathlib's
+-- volume), with the volumes of intervals and boxes, translation and
+-- scaling, null sets, regularity, and measures of balls.
+-- Part of the GRH blueprint.
+-- Planned home: MeasureTheory/Measure/Lebesgue.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Measure.Lebesgue
+import GRH.Measure.Spaces
+import Grace.Cumulus.Algebra.Ring.FiniteProduct
+
+section Measures
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Measures
+-- The family n ↦ μ(f(n)) of the measures of a sequence of sets.
+def measureSequence (μ f : Set) : Set := { (n, μ(f(n))) | n ∈ ℕ }
+def measureFamily (μ f I : Set) : Set := { (i, μ(f(i))) | i ∈ I }
+
+-- A measure on the measurable space X: a function from the measurable
+-- sets of X to [0, ∞], vanishing at ∅ and countably additive on pairwise
+-- disjoint sequences (Mathlib's Measure, read on measurable sets; its
+-- values on other sets are measureOf below).
+predicate Measure (X μ : Set) :=
+  MeasurableSpace(X) ∧
+  FunctionBetween(μ, MeasurableSpace.sets(X), ennreal) ∧
+  μ(∅) = realZero ∧
+  (∀ f, (∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X)) →
+    PairwiseDisjointSequence(f) →
+    μ(sequenceUnion(f)) = ennTsum(measureSequence(μ, f), ℕ))
+
+-- The measure of any subset A of the carrier: the infimum of the measures
+-- of the measurable sets containing it (the outer measure Mathlib's
+-- Measure carries).
+def measurableSupersets (X A : Set) : Set :=
+  { B ∈ MeasurableSpace.sets(X) | A ⊆ B }
+def supersetMeasures (X μ A : Set) : Set := { μ(B) | B ∈ measurableSupersets(X, A) }
+def measureOf (X μ A : Set) : Set := ennInf(supersetMeasures(X, μ, A))
+def outerMeasureOf (X μ : Set) : Set :=
+  { (A, measureOf(X, μ, A)) | A ∈ 𝒫(MeasurableSpace.carrier(X)) }
+
+-- The real number μ(S), 0 when μ(S) = ∞ (Mathlib's Measure.real).
+def measureReal (μ S : Set) : Set := ennToReal(μ(S))
+
+-- A is null when a measurable set of measure 0 contains it; a property
+-- holds almost everywhere when the points of the carrier outside the set
+-- S it cuts out form a null set (Mathlib's ae as a filter: S ∈ ae μ).
+predicate NullSet (X μ A : Set) :=
+  ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B ∧ μ(B) = realZero
+predicate AlmostEverywhere (X μ S : Set) :=
+  NullSet(X, μ, MeasurableSpace.carrier(X) ∖ S)
+
+-- f = g almost everywhere (Mathlib's f =ᵐ[μ] g).
+predicate AEEqual (X μ f g : Set) :=
+  AlmostEverywhere(X, μ, equalizer(f, g, MeasurableSpace.carrier(X)))
+
+-- Finite, probability, σ-finite measures.
+predicate FiniteMeasure (X μ : Set) :=
+  Measure(X, μ) ∧ μ(MeasurableSpace.carrier(X)) ≠ ennTop
+predicate ProbabilityMeasure (X μ : Set) :=
+  Measure(X, μ) ∧ μ(MeasurableSpace.carrier(X)) = realOne
+predicate SigmaFinite (X μ : Set) :=
+  Measure(X, μ) ∧ ∃ f, (∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X) ∧
+    μ(f(n)) ≠ ennTop) ∧ sequenceUnion(f) = MeasurableSpace.carrier(X)
+
+-- The countable sum Σₙ m(n) of a sequence of measures, and an s-finite
+-- measure: a countable sum of finite measures (Mathlib's SFinite).
+def sumMeasure (X m : Set) : Set :=
+  { (S, ennTsum(familyAt(m, ℕ, S), ℕ)) | S ∈ MeasurableSpace.sets(X) }
+predicate SFinite (X μ : Set) :=
+  Measure(X, μ) ∧ ∃ m, (∀ n ∈ ℕ, FiniteMeasure(X, m(n))) ∧ μ = sumMeasure(X, m)
+
+-- μ restricted to A (Mathlib's Measure.restrict): S ↦ μ(S ∩ A), A any
+-- subset; the push-forward of μ along f : X → Y (Measure.map); c · μ;
+-- the zero measure.
+def restrictMeasure (X μ A : Set) : Set :=
+  { (S, measureOf(X, μ, S ∩ A)) | S ∈ MeasurableSpace.sets(X) }
+def mapMeasure (f X μ Y : Set) : Set :=
+  { (B, μ(functionPreimage(f, MeasurableSpace.carrier(X), B))) |
+    B ∈ MeasurableSpace.sets(Y) }
+def smulMeasure (c X μ : Set) : Set :=
+  { (S, ennMul(c, μ(S))) | S ∈ MeasurableSpace.sets(X) }
+def zeroMeasure (X : Set) : Set := MeasurableSpace.sets(X) × {realZero}
+
+-- The Dirac measure at a (Mathlib's Measure.dirac) and the counting
+-- measure (Measure.count): the number of points of a finite set, ∞ for an
+-- infinite one.
+def diracMeasure (X a : Set) : Set :=
+  { p ∈ MeasurableSpace.sets(X) × ennreal |
+    (a ∈ fst(p) ∧ snd(p) = realOne) ∨ (a ∉ fst(p) ∧ snd(p) = realZero) }
+def ennCard (S : Set) : Set :=
+  ⋃({ v ∈ ennreal | (∃ n ∈ ℕ, HasCardinality(S, n) ∧ v = realNat(n)) ∨
+    (¬Finite(S) ∧ v = ennTop) })
+def countMeasure (X : Set) : Set := { (S, ennCard(S)) | S ∈ MeasurableSpace.sets(X) }
+
+-- f carries μ to ν (Mathlib's MeasurePreserving).
+predicate MeasurePreserving (f X μ Y ν : Set) :=
+  Measurable(f, X, Y) ∧ Measure(X, μ) ∧ mapMeasure(f, X, μ, Y) = ν
+
+-- Section: Measures on topological spaces
+-- For a measure on the Borel sets of a topological space T: finite on
+-- compact sets (IsFiniteMeasureOnCompacts), positive on nonempty open
+-- sets (IsOpenPosMeasure), and regular (Measure.Regular: outer regular by
+-- open sets, inner regular on open sets by compact sets).
+predicate FiniteOnCompacts (T μ : Set) :=
+  ∀ K ∈ borelSigma(T), Compact(T, K) → μ(K) ≠ ennTop
+predicate OpenPositive (T μ : Set) :=
+  ∀ U ∈ TopologicalSpace.opens(T), U ≠ ∅ → μ(U) ≠ realZero
+def openSupersets (T A : Set) : Set := { U ∈ TopologicalSpace.opens(T) | A ⊆ U }
+def compactSubsets (T U : Set) : Set :=
+  { K ∈ borelSigma(T) | K ⊆ U ∧ Compact(T, K) }
+predicate RegularMeasure (T μ : Set) :=
+  Measure(borelSpace(T), μ) ∧ FiniteOnCompacts(T, μ) ∧
+  (∀ A ∈ borelSigma(T), μ(A) = ennInf(valuesOn(μ, openSupersets(T, A)))) ∧
+  (∀ U ∈ TopologicalSpace.opens(T), μ(U) = ennSup(valuesOn(μ, compactSubsets(T, U))))
+
+-- Section: Outer measures
+-- An outer measure on A: a monotone, countably subadditive function on
+-- all subsets of A, vanishing at ∅ (Mathlib's OuterMeasure); the
+-- Carathéodory-measurable sets, which split every set additively.
+predicate OuterMeasure (A m : Set) :=
+  FunctionBetween(m, 𝒫(A), ennreal) ∧ m(∅) = realZero ∧
+  (∀ S ∈ 𝒫(A), ∀ T ∈ 𝒫(A), S ⊆ T → EnnLe(m(S), m(T))) ∧
+  (∀ f, (∀ n ∈ ℕ, f(n) ∈ 𝒫(A)) →
+    EnnLe(m(sequenceUnion(f)), ennTsum(measureSequence(m, f), ℕ)))
+def caratheodorySets (A m : Set) : Set :=
+  { S ∈ 𝒫(A) | ∀ T ∈ 𝒫(A), m(T) = ennAdd(m(T ∩ S), m(T ∖ S)) }
+def restrictTo (m M : Set) : Set := { p ∈ m | fst(p) ∈ M }
+
+-- Section: Lebesgue measure on ℝ
+-- The outer measure of A ⊆ ℝ: the infimum of Σₖ (bₖ − aₖ) over the
+-- sequences of closed intervals [aₖ, bₖ] covering A; Lebesgue measure is
+-- its restriction to the Borel sets (Mathlib's volume on ℝ).
+def realSequences : Set := functionSpace(ℕ, ℝ)
+def coverIntervals (a b : Set) : Set := { realIcc(a(k), b(k)) | k ∈ ℕ }
+def intervalLengths (a b : Set) : Set := { (k, ennOfReal(R[b(k) - a(k)])) | k ∈ ℕ }
+def intervalCoverSums (A : Set) : Set :=
+  { s ∈ ennreal | ∃ a ∈ realSequences, ∃ b ∈ realSequences,
+    A ⊆ ⋃(coverIntervals(a, b)) ∧ s = ennTsum(intervalLengths(a, b), ℕ) }
+def realOuter (A : Set) : Set := ennInf(intervalCoverSums(A))
+def realOuterMeasure : Set := { (A, realOuter(A)) | A ∈ 𝒫(ℝ) }
+def realVolume : Set :=
+  { (S, realOuter(S)) | S ∈ MeasurableSpace.sets(realMeasurableSpace) }
+
+-- Section: Lebesgue measure on ℝⁿ
+-- The closed box ∏ᵢ [a(i), b(i)] and its volume ∏ᵢ (b(i) − a(i))⁺ (1 for
+-- n = 0); the outer measure of A ⊆ ℝⁿ as the infimum of the total
+-- volumes of countable coverings by boxes, and Lebesgue measure on ℝⁿ
+-- its restriction to the Borel sets (Mathlib's volume on Fin n → ℝ, the
+-- product of the volumes of the coordinates).
+def boxSet (n : Nat, a b : Set) : Set :=
+  { x ∈ functionSpace(n, ℝ) | ∀ i ∈ n, a(i) ≤ x(i) ∧ x(i) ≤ b(i) }
+def sideLengths (n : Nat, a b : Set) : Set :=
+  { (i, ennOfReal(R[b(i) - a(i)])) | i ∈ n }
+def boxVolume (n : Nat, a b : Set) : Set :=
+  finiteRingProduct(n, ℝ, realAdd, realZero, realNeg, realMul, realOne,
+    sideLengths(n, a, b))
+def vectorSequences (n : Nat) : Set := functionSpace(ℕ, functionSpace(n, ℝ))
+def coverBoxes (n : Nat, a b : Set) : Set := { boxSet(n, a(k), b(k)) | k ∈ ℕ }
+def boxVolumes (n : Nat, a b : Set) : Set :=
+  { (k, boxVolume(n, a(k), b(k))) | k ∈ ℕ }
+def boxCoverSums (n : Nat, A : Set) : Set :=
+  { s ∈ ennreal | ∃ a ∈ vectorSequences(n), ∃ b ∈ vectorSequences(n),
+    A ⊆ ⋃(coverBoxes(n, a, b)) ∧ s = ennTsum(boxVolumes(n, a, b), ℕ) }
+def lebesgueOuter (n : Nat, A : Set) : Set := ennInf(boxCoverSums(n, A))
+def lebesgueOuterMeasure (n : Nat) : Set :=
+  { (A, lebesgueOuter(n, A)) | A ∈ 𝒫(functionSpace(n, ℝ)) }
+def euclideanVolume (n : Nat) : Set :=
+  { (S, lebesgueOuter(n, S)) | S ∈ MeasurableSpace.sets(euclideanMeasurableSpace(n)) }
+
+-- Translates and dilates of sets of reals and of vectors.
+def realTranslate (A : Set, c : Real) : Set := { R[c + X] | X ∈ A }
+def realDilate (A : Set, c : Real) : Set := { R[c * X] | X ∈ A }
+def vectorAdd (n : Nat, x y : Set) : Set := { (i, R[x(i) + y(i)]) | i ∈ n }
+def vectorScale (n : Nat, c x : Set) : Set := { (i, R[c * x(i)]) | i ∈ n }
+def vectorTranslate (n : Nat, A c : Set) : Set := { vectorAdd(n, c, x) | x ∈ A }
+def vectorDilate (n : Nat, A c : Set) : Set := { vectorScale(n, c, x) | x ∈ A }
+def zeroVector (n : Nat) : Set := n × {realZero}
+
+-- The coordinate hyperplane {x | x(i) = c} of ℝⁿ.
+def hyperplane (n : Nat, i c : Set) : Set := { x ∈ functionSpace(n, ℝ) | x(i) = c }
+
+-- The vector (X) of ℝ¹ = functions 1 → ℝ.
+def realToVector : Set := { (X, {(∅, X)}) | X ∈ ℝ }
+
+-- Section: Helpers
+theorem measureSequence.apply (μ f n : Set)
+  requires member : n ∈ ℕ
+  shows measureSequence(μ, f)(n) = μ(f(n))
+proof
+  have edge : (n, μ(f(n))) ∈ measureSequence(μ, f)
+    apply measureSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ measureSequence(μ, f), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := measureSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, μ(f(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ measureSequence(μ, f) → (a, c) ∈ measureSequence(μ, f) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := measureSequence.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := measureSequence.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem measureFamily.apply (μ f I i : Set)
+  requires member : i ∈ I
+  shows measureFamily(μ, f, I)(i) = μ(f(i))
+proof
+  have edge : (i, μ(f(i))) ∈ measureFamily(μ, f, I)
+    apply measureFamily.membership.backward
+    exact ⟨i, member, rfl⟩
+  have pairs : ∀ p ∈ measureFamily(μ, f, I), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := measureFamily.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, μ(f(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ measureFamily(μ, f, I) → (a, c) ∈ measureFamily(μ, f, I) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := measureFamily.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := measureFamily.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+-- The sequence S, T, ∅, ∅, … of sets.
+def pairSequence (S T : Set) : Set :=
+  piecewiseOn(ℕ, {(0:N)}, ℕ × {S}, piecewiseOn(ℕ, {(1:N)}, ℕ × {T}, ℕ × {∅}))
+
+theorem pairSequence.zero (S T : Set)
+  shows pairSequence(S, T)((0:N)) = S
+proof
+  have zN : (0:N) ∈ ℕ by typecheck
+  have zIn : (0:N) ∈ {(0:N)} by simp
+  unfold pairSequence
+  rw piecewiseOn.apply_in with zN, zIn
+  exact constGraph.apply at ℕ, S, (0:N) with zN
+
+theorem pairSequence.one (S T : Set)
+  shows pairSequence(S, T)((1:N)) = T
+proof
+  have oN : (1:N) ∈ ℕ by typecheck
+  have oNot : (1:N) ∉ {(0:N)} by simp
+  have oIn : (1:N) ∈ {(1:N)} by simp
+  unfold pairSequence
+  rw piecewiseOn.apply_out with oN, oNot
+  rw piecewiseOn.apply_in with oN, oIn
+  exact constGraph.apply at ℕ, T, (1:N) with oN
+
+theorem pairSequence.other (S T n : Set)
+  requires member : n ∈ ℕ
+  requires notZero : n ≠ (0:N)
+  requires notOne : n ≠ (1:N)
+  shows pairSequence(S, T)(n) = ∅
+proof
+  have n0 : n ∉ {(0:N)} by simp
+  have n1 : n ∉ {(1:N)} by simp
+  unfold pairSequence
+  rw piecewiseOn.apply_out with member, n0
+  rw piecewiseOn.apply_out with member, n1
+  exact constGraph.apply at ℕ, ∅, n with member
+
+theorem pairSequence.union (S T : Set)
+  shows sequenceUnion(pairSequence(S, T)) = S ∪ T
+proof
+  have zN : (0:N) ∈ ℕ by typecheck
+  have oN : (1:N) ∈ ℕ by typecheck
+  have v0 := pairSequence.zero at S, T
+  have v1 := pairSequence.one at S, T
+  unfold sequenceUnion
+  ext x
+  constructor
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+    by_cases n0 : n = (0:N)
+    . rw [← e, n0, v0] at xE
+      simp
+    . by_cases n1 : n = (1:N)
+      . rw [← e, n1, v1] at xE
+        simp
+      . have vo := pairSequence.other at S, T, n with hn, n0, n1
+        rw [← e, vo] at xE
+        simp at xE
+  . intro h
+    have split := union2.membership.forward with h
+    cases split with xS | xT
+    . have inV : pairSequence(S, T)((0:N)) ∈ valuesOn(pairSequence(S, T), ℕ) := valuesOn.membership.backward with ⟨(0:N), zN, rfl⟩
+      rw v0 at inV
+      exact union.membership.backward with ⟨S, inV, xS⟩
+    . have inV : pairSequence(S, T)((1:N)) ∈ valuesOn(pairSequence(S, T), ℕ) := valuesOn.membership.backward with ⟨(1:N), oN, rfl⟩
+      rw v1 at inV
+      exact union.membership.backward with ⟨T, inV, xT⟩
+
+theorem pairSequence.disjoint (S T : Set)
+  requires disjoint : Disjoint(S, T)
+  shows PairwiseDisjointSequence(pairSequence(S, T))
+proof
+  have v0 := pairSequence.zero at S, T
+  have v1 := pairSequence.one at S, T
+  have dEmpty : ∀ A, Disjoint(A, ∅)
+    intro A
+    unfold Disjoint
+    ext x
+    simp
+  have dEmpty2 : ∀ A, Disjoint(∅, A)
+    intro A
+    unfold Disjoint
+    ext x
+    simp
+  have dTS : Disjoint(T, S)
+    unfold Disjoint
+    unfold Disjoint at disjoint
+    rw intersection.commutative
+    exact disjoint
+  unfold PairwiseDisjointSequence
+  intros m hm n hn ne
+  by_cases m0 : m = (0:N)
+  . by_cases n1 : n = (1:N)
+    . rw [m0, n1, v0, v1]
+      exact disjoint
+    . have n0 : n ≠ (0:N)
+        intro e
+        rw [e, ← m0] at ne
+        exact ne with rfl
+      rw pairSequence.other at S, T, n with hn, n0, n1
+      exact dEmpty with pairSequence(S, T)(m)
+  . by_cases m1 : m = (1:N)
+    . by_cases n0 : n = (0:N)
+      . rw [m1, n0, v0, v1]
+        exact dTS
+      . have n1 : n ≠ (1:N)
+          intro e
+          rw [e, ← m1] at ne
+          exact ne with rfl
+        rw pairSequence.other at S, T, n with hn, n0, n1
+        exact dEmpty with pairSequence(S, T)(m)
+    . rw pairSequence.other at S, T, m with hm, m0, m1
+      exact dEmpty2 with pairSequence(S, T)(n)
+
+-- The disjointed sequence n ↦ f(n) ∖ ⋃_{k < n} f(k).
+def disjointed (f : Set) : Set := { (n, f(n) ∖ ⋃(valuesOn(f, n))) | n ∈ ℕ }
+
+theorem disjointed.apply (f n : Set)
+  requires member : n ∈ ℕ
+  shows disjointed(f)(n) = f(n) ∖ ⋃(valuesOn(f, n))
+proof
+  have edge : (n, f(n) ∖ ⋃(valuesOn(f, n))) ∈ disjointed(f)
+    apply disjointed.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ disjointed(f), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := disjointed.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, f(k) ∖ ⋃(valuesOn(f, k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ disjointed(f) → (a, c) ∈ disjointed(f) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := disjointed.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := disjointed.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem disjointed.subset (f n : Set)
+  requires member : n ∈ ℕ
+  shows disjointed(f)(n) ⊆ f(n)
+proof
+  rw disjointed.apply with member
+  intros x hx
+  obtain ⟨xf, rest⟩ := difference.membership.forward with hx
+  exact xf
+
+theorem disjointed.measurable (X f : Set)
+  requires space : MeasurableSpace(X)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  shows ∀ n ∈ ℕ, MeasurableSet(X, disjointed(f)(n))
+proof
+  intros n hn
+  rw disjointed.apply with hn
+  have nsub : n ⊆ ℕ
+    intros k hk
+    exact natural.member at n with hk
+  have cN := naturals.countable
+  have cn := Countable.subset with cN, nsub
+  have fs : ∀ k ∈ n, MeasurableSet(X, f(k))
+    intros k hk
+    exact sets with k, (nsub with k, hk)
+  have u := MeasurableSet.indexed_union with space, cn, fs
+  have fn := sets with n, hn
+  exact MeasurableSet.diff with space, fn, u
+
+theorem disjointed.disjoint (f : Set)
+  shows PairwiseDisjointSequence(disjointed(f))
+proof
+  unfold PairwiseDisjointSequence
+  intros m hm n hn ne
+  rw disjointed.apply at f, m with hm
+  rw disjointed.apply at f, n with hn
+  have mO := Ordinal.natural at m
+  have nO := Ordinal.natural at n
+  have tri := Ordinal.trichotomy at m with mO, n, nO
+  apply Disjoint.iff.backward
+  intros x hx hx2
+  obtain ⟨xfm, xnUm⟩ := difference.membership.forward with hx
+  obtain ⟨xfn, xnUn⟩ := difference.membership.forward with hx2
+  rcases tri with mn | same | nm
+  . have inV : f(m) ∈ valuesOn(f, n) := valuesOn.membership.backward with ⟨m, mn, rfl⟩
+    have xU := union.membership.backward with ⟨f(m), inV, xfm⟩
+    exact xnUn with xU
+  . exact ne with same
+  . have inV : f(n) ∈ valuesOn(f, m) := valuesOn.membership.backward with ⟨n, nm, rfl⟩
+    have xU := union.membership.backward with ⟨f(n), inV, xfn⟩
+    exact xnUm with xU
+
+-- The naturals k with x ∈ f(k).
+def hitting (f x : Set) : Set := { k ∈ ℕ | x ∈ f(k) }
+
+theorem disjointed.union (f : Set)
+  shows sequenceUnion(disjointed(f)) = sequenceUnion(f)
+proof
+  unfold sequenceUnion
+  ext x
+  constructor
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have sub := disjointed.subset at f, n with hn
+    have xf := sub with x, xE
+    have inV : f(n) ∈ valuesOn(f, ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+    exact union.membership.backward with ⟨f(n), inV, xf⟩
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have nH : n ∈ hitting(f, x) := hitting.membership.backward with ⟨hn, xE⟩
+    have ne : Nonempty(hitting(f, x)) := ⟨n, nH⟩
+    have hsub : hitting(f, x) ⊆ ℕ
+      intros k hk
+      obtain ⟨kN, rest⟩ := hitting.membership.forward with hk
+      exact kN
+    have kH := leastNatural.member with ne, hsub
+    obtain ⟨kN, xk⟩ := hitting.membership.forward with kH
+    have notBefore : x ∉ ⋃(valuesOn(f, leastNatural(hitting(f, x))))
+      intro hU
+      obtain ⟨F, FIn, xF⟩ := union.membership.forward with hU
+      obtain ⟨j, hj, eF⟩ := valuesOn.membership.forward with FIn
+      rw ← eF at xF
+      have jN := natural.member at leastNatural(hitting(f, x)) with hj
+      have jH : j ∈ hitting(f, x) := hitting.membership.backward with ⟨jN, xF⟩
+      have le := leastNatural.least at hitting(f, x), j with ne, hsub, jH
+      have lnat : Nat(leastNatural(hitting(f, x))) by exact kN
+      have lt := Less.of_membership at j, leastNatural(hitting(f, x)) with hj
+      have nle := Less.not_LessEqual at j, leastNatural(hitting(f, x)) with lt
+      exact nle with le
+    have xd : x ∈ disjointed(f)(leastNatural(hitting(f, x)))
+      rw disjointed.apply with kN
+      exact difference.membership.backward with ⟨xk, notBefore⟩
+    have inV : disjointed(f)(leastNatural(hitting(f, x))) ∈ valuesOn(disjointed(f), ℕ) := valuesOn.membership.backward with ⟨leastNatural(hitting(f, x)), kN, rfl⟩
+    exact union.membership.backward with ⟨disjointed(f)(leastNatural(hitting(f, x))), inV, xd⟩
+
+-- Null measurable supersets, and a sequence of them chosen by the axiom
+-- of choice.
+def nullSupersets (X μ S : Set) : Set :=
+  { B ∈ MeasurableSpace.sets(X) | S ⊆ B ∧ μ(B) = realZero }
+def nullSupersetFamily (X μ f : Set) : Set := { nullSupersets(X, μ, f(n)) | n ∈ ℕ }
+def chosenSequence (c X μ f : Set) : Set := { (n, c(nullSupersets(X, μ, f(n)))) | n ∈ ℕ }
+
+theorem chosenSequence.apply (c X μ f n : Set)
+  requires member : n ∈ ℕ
+  shows chosenSequence(c, X, μ, f)(n) = c(nullSupersets(X, μ, f(n)))
+proof
+  have edge : (n, c(nullSupersets(X, μ, f(n)))) ∈ chosenSequence(c, X, μ, f)
+    apply chosenSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ chosenSequence(c, X, μ, f), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := chosenSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, c(nullSupersets(X, μ, f(k))), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ d, (a, b) ∈ chosenSequence(c, X, μ, f) → (a, d) ∈ chosenSequence(c, X, μ, f) → b = d
+    intros a b d hb hd
+    obtain ⟨k, hk, bEq⟩ := chosenSequence.membership.forward with hb
+    obtain ⟨m, hm, dEq⟩ := chosenSequence.membership.forward with hd
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, dd⟩ := orderedPair.injective with dEq
+    rw [← bb, ← dd, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem NullSet.choose (X μ f : Set)
+  requires null : ∀ n ∈ ℕ, NullSet(X, μ, f(n))
+  shows ∃ g, ∀ n ∈ ℕ, g(n) ∈ MeasurableSpace.sets(X) ∧ f(n) ⊆ g(n) ∧ μ(g(n)) = realZero
+proof
+  have inhabited : ∀ A ∈ nullSupersetFamily(X, μ, f), ∃ y, y ∈ A
+    intros A hA
+    obtain ⟨n, hn, e⟩ := nullSupersetFamily.membership.forward with hA
+    have nn := null with n, hn
+    obtain ⟨B, hB, sub, z⟩ := nn
+    rw ← e
+    have mem : B ∈ nullSupersets(X, μ, f(n)) := nullSupersets.membership.backward with ⟨hB, sub, z⟩
+    exact ⟨B, mem⟩
+  obtain ⟨c, fnc, sel⟩ := set.choice with inhabited
+  witness chosenSequence(c, X, μ, f)
+  intros n hn
+  rw chosenSequence.apply with hn
+  have mem : nullSupersets(X, μ, f(n)) ∈ nullSupersetFamily(X, μ, f) := nullSupersetFamily.membership.backward with ⟨n, hn, rfl⟩
+  have s := sel with nullSupersets(X, μ, f(n)), mem
+  obtain ⟨hB, sub, z⟩ := nullSupersets.membership.forward with s
+  exact ⟨hB, sub, z⟩
+
+theorem EnnLe.zero_iff (a : Set)
+  requires le : EnnLe(a, realZero)
+  shows a = realZero
+proof
+  have l2 := le
+  obtain ⟨aM, zM, alt⟩ := l2
+  have z := EnnLe.zero with aM
+  exact EnnLe.antisymmetric with le, z
+
+-- Values and graphs of the constructed measures.
+def interSequence (f A : Set) : Set := { (n, f(n) ∩ A) | n ∈ ℕ }
+
+theorem interSequence.apply (f A n : Set)
+  requires member : n ∈ ℕ
+  shows interSequence(f, A)(n) = f(n) ∩ A
+proof
+  have edge : (n, f(n) ∩ A) ∈ interSequence(f, A)
+    apply interSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ interSequence(f, A), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := interSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, f(k) ∩ A, rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ interSequence(f, A) → (a, c) ∈ interSequence(f, A) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := interSequence.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := interSequence.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+def preimageSequence (g D f : Set) : Set := { (n, functionPreimage(g, D, f(n))) | n ∈ ℕ }
+
+theorem preimageSequence.apply (g D f n : Set)
+  requires member : n ∈ ℕ
+  shows preimageSequence(g, D, f)(n) = functionPreimage(g, D, f(n))
+proof
+  have edge : (n, functionPreimage(g, D, f(n))) ∈ preimageSequence(g, D, f)
+    apply preimageSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ preimageSequence(g, D, f), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := preimageSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, functionPreimage(g, D, f(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ preimageSequence(g, D, f) → (a, c) ∈ preimageSequence(g, D, f) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := preimageSequence.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := preimageSequence.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem restrictMeasure.value (X μ A S : Set)
+  requires member : S ∈ MeasurableSpace.sets(X)
+  shows restrictMeasure(X, μ, A)(S) = measureOf(X, μ, S ∩ A)
+proof
+  have edge : (S, measureOf(X, μ, S ∩ A)) ∈ restrictMeasure(X, μ, A)
+    apply restrictMeasure.membership.backward
+    exact ⟨S, member, rfl⟩
+  have pairs : ∀ p ∈ restrictMeasure(X, μ, A), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := restrictMeasure.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, measureOf(X, μ, k ∩ A), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ restrictMeasure(X, μ, A) → (a, c) ∈ restrictMeasure(X, μ, A) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := restrictMeasure.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := restrictMeasure.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem mapMeasure.value (f X μ Y B : Set)
+  requires member : B ∈ MeasurableSpace.sets(Y)
+  shows mapMeasure(f, X, μ, Y)(B) = μ(functionPreimage(f, MeasurableSpace.carrier(X), B))
+proof
+  have edge : (B, μ(functionPreimage(f, MeasurableSpace.carrier(X), B))) ∈ mapMeasure(f, X, μ, Y)
+    apply mapMeasure.membership.backward
+    exact ⟨B, member, rfl⟩
+  have pairs : ∀ p ∈ mapMeasure(f, X, μ, Y), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := mapMeasure.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, μ(functionPreimage(f, MeasurableSpace.carrier(X), k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ mapMeasure(f, X, μ, Y) → (a, c) ∈ mapMeasure(f, X, μ, Y) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := mapMeasure.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := mapMeasure.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem smulMeasure.value (c X μ S : Set)
+  requires member : S ∈ MeasurableSpace.sets(X)
+  shows smulMeasure(c, X, μ)(S) = ennMul(c, μ(S))
+proof
+  have edge : (S, ennMul(c, μ(S))) ∈ smulMeasure(c, X, μ)
+    apply smulMeasure.membership.backward
+    exact ⟨S, member, rfl⟩
+  have pairs : ∀ p ∈ smulMeasure(c, X, μ), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := smulMeasure.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, ennMul(c, μ(k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ d, (a, b) ∈ smulMeasure(c, X, μ) → (a, d) ∈ smulMeasure(c, X, μ) → b = d
+    intros a b d hb hd
+    obtain ⟨k, hk, bEq⟩ := smulMeasure.membership.forward with hb
+    obtain ⟨m, hm, dEq⟩ := smulMeasure.membership.forward with hd
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, dd⟩ := orderedPair.injective with dEq
+    rw [← bb, ← dd, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+-- Section: Laws of measures
+theorem Measure.space (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows MeasurableSpace(X)
+proof
+  obtain ⟨space, fn, emp, additive⟩ := measure
+  exact space
+
+theorem Measure.member (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows μ(S) ∈ ennreal
+proof
+  obtain ⟨space, fn, emp, additive⟩ := measure
+  unfold MeasurableSet at set
+  exact FunctionBetween.apply_closed with fn, set
+
+theorem Measure.empty (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows μ(∅) = realZero
+proof
+  obtain ⟨space, fn, emp, additive⟩ := measure
+  exact emp
+
+theorem Measure.union_disjoint_helper (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires disjoint : Disjoint(S, T)
+  shows μ(S ∪ T) = ennAdd(μ(S), μ(T))
+proof
+  have m2 := measure
+  obtain ⟨space, fn, emp, additive⟩ := m2
+  have sS : S ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at setS
+    exact setS
+  have sT : T ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at setT
+    exact setT
+  have eS := MeasurableSet.empty with space
+  unfold MeasurableSet at eS
+  have zN : (0:N) ∈ ℕ by typecheck
+  have oN : (1:N) ∈ ℕ by typecheck
+  have sets : ∀ n ∈ ℕ, pairSequence(S, T)(n) ∈ MeasurableSpace.sets(X)
+    intros n hn
+    by_cases n0 : n = (0:N)
+    . rw n0
+      rw pairSequence.zero
+      exact sS
+    . by_cases n1 : n = (1:N)
+      . rw n1
+        rw pairSequence.one
+        exact sT
+      . rw pairSequence.other at S, T, n with hn, n0, n1
+        exact eS
+  have pd := pairSequence.disjoint with disjoint
+  have add := additive with pairSequence(S, T), sets, pd
+  rw pairSequence.union at add
+  rw add
+  have values : ∀ n ∈ ℕ, measureSequence(μ, pairSequence(S, T))(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    have m := sets with n, hn
+    exact FunctionBetween.apply_closed with fn, m
+  have fin := Finite.pair_set at (0:N), (1:N)
+  have inside : {(0:N), (1:N)} ⊆ ℕ
+    intros n hn
+    simp at hn
+    cases hn with a | b
+    . rw a
+      exact zN
+    . rw b
+      exact oN
+  have zero : ∀ n ∈ ℕ, n ∉ {(0:N), (1:N)} → measureSequence(μ, pairSequence(S, T))(n) = realZero
+    intros n hn out
+    have n0 : n ≠ (0:N)
+      intro e
+      apply out
+      simp
+    have n1 : n ≠ (1:N)
+      intro e
+      apply out
+      simp
+    rw measureSequence.apply with hn
+    rw pairSequence.other at S, T, n with hn, n0, n1
+    exact emp
+  rw ennTsum.support with values, fin, inside, zero
+  have d01 : (0:N) ≠ (1:N) by arith
+  have va := values with (0:N), zN
+  have vb := values with (1:N), oN
+  rw ennFiniteSum.pair with va, vb, d01
+  rw measureSequence.apply at μ, pairSequence(S, T), (0:N) with zN
+  rw measureSequence.apply at μ, pairSequence(S, T), (1:N) with oN
+  rw pairSequence.zero
+  rw pairSequence.one
+
+-- Mathlib's measure_mono.
+theorem Measure.mono (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  shows EnnLe(μ(S), μ(T))
+proof
+  have space := Measure.space with measure
+  have d := MeasurableSet.diff with space, setT, setS
+  have disjoint : Disjoint(S, T ∖ S)
+    unfold Disjoint
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xS, xD⟩ := intersection.membership.forward with h
+      obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+      exfalso
+      exact xnS with xS
+    . intro h
+      simp at h
+  have u := Measure.union_disjoint_helper with measure, setS, d, disjoint
+  have e : S ∪ (T ∖ S) = T
+    ext x
+    constructor
+    . intro h
+      have split := union2.membership.forward with h
+      cases split with xS | xD
+      . exact inside with x, xS
+      . obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+        exact xT
+    . intro h
+      by_cases xS : x ∈ S
+      . simp
+      . simp
+  rw e at u
+  rw u
+  have mS := Measure.member with measure, setS
+  have mD := Measure.member with measure, d
+  exact EnnLe.self_add with mS, mD
+
+theorem Measure.union_disjoint (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires disjoint : Disjoint(S, T)
+  shows μ(S ∪ T) = ennAdd(μ(S), μ(T))
+proof
+  exact Measure.union_disjoint_helper with measure, setS, setT, disjoint
+
+-- Mathlib's measure_union_le and measure_iUnion_le.
+theorem Measure.union_le (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  shows EnnLe(μ(S ∪ T), ennAdd(μ(S), μ(T)))
+proof
+  have space := Measure.space with measure
+  have d := MeasurableSet.diff with space, setT, setS
+  have disjoint : Disjoint(S, T ∖ S)
+    unfold Disjoint
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xS, xD⟩ := intersection.membership.forward with h
+      obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+      exfalso
+      exact xnS with xS
+    . intro h
+      simp at h
+  have u := Measure.union_disjoint_helper with measure, setS, d, disjoint
+  have e : S ∪ (T ∖ S) = S ∪ T
+    ext x
+    constructor
+    . intro h
+      have split := union2.membership.forward with h
+      cases split with xS | xD
+      . simp
+      . obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+        simp
+    . intro h
+      by_cases xS : x ∈ S
+      . simp
+      . simp at h
+        simp
+  rw e at u
+  rw u
+  have mS := Measure.member with measure, setS
+  have rS := EnnLe.reflexive with mS
+  have sub : T ∖ S ⊆ T
+    intros x hx
+    obtain ⟨xT, rest⟩ := difference.membership.forward with hx
+    exact xT
+  have le := Measure.mono with measure, d, setT, sub
+  exact ennAdd.mono with rS, le
+
+theorem Measure.sequence_union_le (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  shows EnnLe(μ(sequenceUnion(f)), ennTsum(measureSequence(μ, f), ℕ))
+proof
+  have m2 := measure
+  obtain ⟨space, fn, emp, additive⟩ := m2
+  have dm := disjointed.measurable with space, sets
+  have dsets : ∀ n ∈ ℕ, disjointed(f)(n) ∈ MeasurableSpace.sets(X)
+    intros n hn
+    have m := dm with n, hn
+    unfold MeasurableSet at m
+    exact m
+  have pd := disjointed.disjoint at f
+  have add := additive with disjointed(f), dsets, pd
+  rw disjointed.union at add
+  rw add
+  have valuesD : ∀ n ∈ ℕ, measureSequence(μ, disjointed(f))(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    exact Measure.member with measure, (dm with n, hn)
+  have valuesF : ∀ n ∈ ℕ, measureSequence(μ, f)(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    exact Measure.member with measure, (sets with n, hn)
+  have le : ∀ n ∈ ℕ, EnnLe(measureSequence(μ, disjointed(f))(n), measureSequence(μ, f)(n))
+    intros n hn
+    rw measureSequence.apply at μ, disjointed(f), n with hn
+    rw measureSequence.apply at μ, f, n with hn
+    have sub := disjointed.subset at f, n with hn
+    exact Measure.mono with measure, (dm with n, hn), (sets with n, hn), sub
+  exact ennTsum.mono with valuesD, valuesF, le
+
+-- Mathlib's measure_iUnion and tsum_meas_le_meas_iUnion_of_disjoint.
+theorem Measure.sequence_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires disjoint : PairwiseDisjointSequence(f)
+  shows μ(sequenceUnion(f)) = ennTsum(measureSequence(μ, f), ℕ)
+proof
+  obtain ⟨space, fn, emp, additive⟩ := measure
+  have sets2 : ∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X)
+    intros n hn
+    have m := sets with n, hn
+    unfold MeasurableSet at m
+    exact m
+  exact additive with f, sets2, disjoint
+
+theorem valuesOn.union_insert (g F a : Set)
+  shows ⋃(valuesOn(g, F ∪ {a})) = ⋃(valuesOn(g, F)) ∪ g(a)
+proof
+  ext x
+  constructor
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨i, hi, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have c := union2.membership.forward with hi
+    cases c with iF | ia
+    . have inV : g(i) ∈ valuesOn(g, F) := valuesOn.membership.backward with ⟨i, iF, rfl⟩
+      have xU := union.membership.backward with ⟨g(i), inV, xE⟩
+      simp [xU]
+    . simp at ia
+      rw ia at xE
+      simp [xE]
+  . intro h
+    have c := union2.membership.forward with h
+    cases c with xU | xa
+    . obtain ⟨E, EIn, xE⟩ := union.membership.forward with xU
+      obtain ⟨i, hi, e⟩ := valuesOn.membership.forward with EIn
+      have iU : i ∈ F ∪ {a} by simp [hi]
+      rw ← e at xE
+      have inV : g(i) ∈ valuesOn(g, F ∪ {a}) := valuesOn.membership.backward with ⟨i, iU, rfl⟩
+      exact union.membership.backward with ⟨g(i), inV, xE⟩
+    . have aU : a ∈ F ∪ {a} by simp
+      have inV : g(a) ∈ valuesOn(g, F ∪ {a}) := valuesOn.membership.backward with ⟨a, aU, rfl⟩
+      exact union.membership.backward with ⟨g(a), inV, xa⟩
+
+theorem valuesOn.union_empty (g : Set)
+  shows ⋃(valuesOn(g, ∅)) = ∅
+proof
+  ext x
+  constructor
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨i, hi, e⟩ := valuesOn.membership.forward with EIn
+    simp at hi
+  . intro h
+    simp at h
+
+def additiveSubfamilies (μ g h E : Set) : Set :=
+  { F ∈ 𝒫(E) | μ(⋃(valuesOn(g, F))) = ennFiniteSum(h, F) }
+def subadditiveSubfamilies (μ g h E : Set) : Set :=
+  { F ∈ 𝒫(E) | EnnLe(μ(⋃(valuesOn(g, F))), ennFiniteSum(h, F)) }
+
+-- Finite additivity over an indexed family of disjoint measurable sets.
+theorem Measure.finite_indexed_union (X μ E g h : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ i ∈ E, MeasurableSet(X, g(i))
+  requires disjoint : ∀ i ∈ E, ∀ j ∈ E, i ≠ j → Disjoint(g(i), g(j))
+  requires values : ∀ i ∈ E, h(i) = μ(g(i))
+  shows ∀ F ⊆ E, Finite(F) → μ(⋃(valuesOn(g, F))) = ennFiniteSum(h, F)
+proof
+  have space := Measure.space with measure
+  have base : ∅ ∈ additiveSubfamilies(μ, g, h, E)
+    have eP : ∅ ∈ 𝒫(E)
+      apply (powerset.membership_iff at ∅, E).backward
+      intros x hx
+      simp at hx
+    apply additiveSubfamilies.membership.backward
+    refine ⟨eP, ?_⟩
+    rw valuesOn.union_empty
+    rw Measure.empty with measure
+    rw ennFiniteSum.empty
+  have step : ∀ F ⊆ E, Finite(F) → ∀ a ∈ E, a ∉ F → F ∈ additiveSubfamilies(μ, g, h, E) → F ∪ {a} ∈ additiveSubfamilies(μ, g, h, E)
+    intros F FE finite a aE aF FS
+    obtain ⟨FP, eq⟩ := additiveSubfamilies.membership.forward with FS
+    have UE : F ∪ {a} ⊆ E
+      intros x hx
+      have c := union2.membership.forward with hx
+      cases c with xF | xa
+      . exact FE with x, xF
+      . simp at xa
+        rw xa
+        exact aE
+    have UP := (powerset.membership_iff at F ∪ {a}, E).backward with UE
+    apply additiveSubfamilies.membership.backward
+    refine ⟨UP, ?_⟩
+    rw valuesOn.union_insert
+    have cF := Countable.of_finite with finite
+    have sF : ∀ i ∈ F, MeasurableSet(X, g(i))
+      intros i hi
+      exact sets with i, (FE with i, hi)
+    have mU := MeasurableSet.indexed_union with space, cF, sF
+    have ma := sets with a, aE
+    have dis : Disjoint(⋃(valuesOn(g, F)), g(a))
+      apply Disjoint.iff.backward
+      intros x hx xa
+      obtain ⟨G, GIn, xG⟩ := union.membership.forward with hx
+      obtain ⟨i, hi, e⟩ := valuesOn.membership.forward with GIn
+      rw ← e at xG
+      have ne : i ≠ a
+        intro same
+        rw same at hi
+        exact aF with hi
+      have d := disjoint with i, (FE with i, hi), a, aE, ne
+      have d2 := Disjoint.iff.forward with d
+      exact d2 with x, xG, xa
+    rw Measure.union_disjoint with measure, mU, ma, dis
+    rw eq
+    have vU : ∀ j ∈ F ∪ {a}, h(j) ∈ ennreal
+      intros j hj
+      rw values with j, (UE with j, hj)
+      exact Measure.member with measure, (sets with j, (UE with j, hj))
+    rw ennFiniteSum.insert with finite, vU, aF
+    rw values with a, aE
+  have all := Finite.induction at E, additiveSubfamilies(μ, g, h, E) with base, step
+  intros F FE finite
+  have m := all with F, FE, finite
+  obtain ⟨FP, eq⟩ := additiveSubfamilies.membership.forward with m
+  exact eq
+
+theorem Measure.finite_indexed_union_le (X μ E g h : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ i ∈ E, MeasurableSet(X, g(i))
+  requires values : ∀ i ∈ E, h(i) = μ(g(i))
+  shows ∀ F ⊆ E, Finite(F) → EnnLe(μ(⋃(valuesOn(g, F))), ennFiniteSum(h, F))
+proof
+  have space := Measure.space with measure
+  have base : ∅ ∈ subadditiveSubfamilies(μ, g, h, E)
+    have eP : ∅ ∈ 𝒫(E)
+      apply (powerset.membership_iff at ∅, E).backward
+      intros x hx
+      simp at hx
+    apply subadditiveSubfamilies.membership.backward
+    refine ⟨eP, ?_⟩
+    rw valuesOn.union_empty
+    rw Measure.empty with measure
+    rw ennFiniteSum.empty
+    exact EnnLe.reflexive with ennreal.zero_member
+  have step : ∀ F ⊆ E, Finite(F) → ∀ a ∈ E, a ∉ F → F ∈ subadditiveSubfamilies(μ, g, h, E) → F ∪ {a} ∈ subadditiveSubfamilies(μ, g, h, E)
+    intros F FE finite a aE aF FS
+    obtain ⟨FP, le⟩ := subadditiveSubfamilies.membership.forward with FS
+    have UE : F ∪ {a} ⊆ E
+      intros x hx
+      have c := union2.membership.forward with hx
+      cases c with xF | xa
+      . exact FE with x, xF
+      . simp at xa
+        rw xa
+        exact aE
+    have UP := (powerset.membership_iff at F ∪ {a}, E).backward with UE
+    apply subadditiveSubfamilies.membership.backward
+    refine ⟨UP, ?_⟩
+    rw valuesOn.union_insert
+    have cF := Countable.of_finite with finite
+    have sF : ∀ i ∈ F, MeasurableSet(X, g(i))
+      intros i hi
+      exact sets with i, (FE with i, hi)
+    have mU := MeasurableSet.indexed_union with space, cF, sF
+    have ma := sets with a, aE
+    have l1 := Measure.union_le with measure, mU, ma
+    have vU : ∀ j ∈ F ∪ {a}, h(j) ∈ ennreal
+      intros j hj
+      rw values with j, (UE with j, hj)
+      exact Measure.member with measure, (sets with j, (UE with j, hj))
+    rw ennFiniteSum.insert with finite, vU, aF
+    rw values with a, aE
+    have rr := EnnLe.reflexive with (Measure.member with measure, ma)
+    have l2 := ennAdd.mono with le, rr
+    exact EnnLe.transitive with l1, l2
+  have all := Finite.induction at E, subadditiveSubfamilies(μ, g, h, E) with base, step
+  intros F FE finite
+  have m := all with F, FE, finite
+  obtain ⟨FP, le⟩ := subadditiveSubfamilies.membership.forward with m
+  exact le
+
+-- Mathlib's measure_iUnion_fintype_le: a finite union.
+theorem Measure.finite_union_le (X μ F f : Set)
+  requires measure : Measure(X, μ)
+  requires finite : Finite(F)
+  requires sets : ∀ i ∈ F, MeasurableSet(X, f(i))
+  shows EnnLe(μ(⋃(valuesOn(f, F))), ennFiniteSum(measureFamily(μ, f, F), F))
+proof
+  have values : ∀ i ∈ F, measureFamily(μ, f, F)(i) = μ(f(i))
+    intros i hi
+    exact measureFamily.apply with hi
+  have all := Measure.finite_indexed_union_le with measure, sets, values
+  have refl : F ⊆ F
+    intros x hx
+    exact hx
+  exact all with F, refl, finite
+
+-- Mathlib's measure_diff: μ(T ∖ S) = μ(T) − μ(S) for S ⊆ T, μ(S) < ∞,
+-- stated additively.
+theorem Measure.diff_add (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  shows μ(T) = ennAdd(μ(T ∖ S), μ(S))
+proof
+  have space := Measure.space with measure
+  have d := MeasurableSet.diff with space, setT, setS
+  have disjoint : Disjoint(T ∖ S, S)
+    unfold Disjoint
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xD, xS⟩ := intersection.membership.forward with h
+      obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+      exfalso
+      exact xnS with xS
+    . intro h
+      simp at h
+  have u := Measure.union_disjoint with measure, d, setS, disjoint
+  have e : (T ∖ S) ∪ S = T
+    ext x
+    constructor
+    . intro h
+      have split := union2.membership.forward with h
+      cases split with xD | xS
+      . obtain ⟨xT, xnS⟩ := difference.membership.forward with xD
+        exact xT
+      . exact inside with x, xS
+    . intro h
+      by_cases xS : x ∈ S
+      . simp
+      . simp
+  rw e at u
+  exact u
+
+theorem increasing.prefix_union (f n : Set)
+  requires member : n ∈ ℕ
+  requires increasing : ∀ m ∈ ℕ, ∀ k ∈ ℕ, m ⊆ k → f(m) ⊆ f(k)
+  shows ⋃(valuesOn(f, succ(n))) = f(n)
+proof
+  have nN : Nat(n) by exact member
+  have nO := Ordinal.natural at n
+  ext x
+  constructor
+  . intro h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨j, hj, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have js : j ⊆ n
+      have c := membership.successor_forward at j with hj
+      cases c with jn | jeq
+      . exact Ordinal.member_subset with nO, jn
+      . rw jeq
+        intros y hy
+        exact hy
+    have sN : succ(n) ∈ ℕ by typecheck
+    have jN : j ∈ ℕ := natural.member at succ(n), j with hj
+    have sub := increasing with j, jN, n, member, js
+    exact sub with x, xE
+  . intro h
+    have nIn : n ∈ succ(n) by simp
+    have inV : f(n) ∈ valuesOn(f, succ(n)) := valuesOn.membership.backward with ⟨n, nIn, rfl⟩
+    exact union.membership.backward with ⟨f(n), inV, h⟩
+
+theorem Measure.disjointed_partial (X μ f : Set, n : Nat)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ k ∈ ℕ, MeasurableSet(X, f(k))
+  requires increasing : ∀ m ∈ ℕ, ∀ k ∈ ℕ, m ⊆ k → f(m) ⊆ f(k)
+  shows ennFiniteSum(measureSequence(μ, disjointed(f)), n ∪ {n}) = μ(f(n))
+proof
+  induction n
+  | zero =>
+    have space := Measure.space with measure
+    have dm := disjointed.measurable with space, sets
+    have vals : ∀ i ∈ ℕ, measureSequence(μ, disjointed(f))(i) ∈ ennreal
+      intros i hi
+      rw measureSequence.apply with hi
+      exact Measure.member with measure, (dm with i, hi)
+    have zN : zero ∈ ℕ by typecheck
+    have finZ := Finite.natural at zero
+    have fresh : zero ∉ zero
+      intro bad
+      exact membership.irreflexive with bad
+    have vU : ∀ j ∈ zero ∪ {zero}, measureSequence(μ, disjointed(f))(j) ∈ ennreal
+      intros j hj
+      have c := union2.membership.forward with hj
+      cases c with a | b
+      . unfold zero at a
+        simp at a
+      . simp at b
+        rw b
+        exact vals with zero, zN
+    rw ennFiniteSum.insert with finZ, vU, fresh
+    have emp : ennFiniteSum(measureSequence(μ, disjointed(f)), zero) = realZero
+      unfold zero
+      exact ennFiniteSum.empty at measureSequence(μ, disjointed(f))
+    rw emp
+    have zm := ennreal.zero_member
+    have v0 := vals with zero, zN
+    rw ennAdd.comm with zm, v0
+    rw ennAdd.zero with v0
+    rw measureSequence.apply with zN
+    rw disjointed.apply with zN
+    have same : f(zero) ∖ ⋃(valuesOn(f, zero)) = f(zero)
+      ext x
+      constructor
+      . intro h
+        obtain ⟨a, b⟩ := difference.membership.forward with h
+        exact a
+      . intro h
+        have nU : x ∉ ⋃(valuesOn(f, zero))
+          intro hU
+          obtain ⟨E, EIn, xE⟩ := union.membership.forward with hU
+          obtain ⟨j, hj, e⟩ := valuesOn.membership.forward with EIn
+          unfold zero at hj
+          simp at hj
+        exact difference.membership.backward with ⟨h, nU⟩
+    rw same
+  | succ(k) using ih =>
+    have space := Measure.space with measure
+    have dm := disjointed.measurable with space, sets
+    have vals : ∀ i ∈ ℕ, measureSequence(μ, disjointed(f))(i) ∈ ennreal
+      intros i hi
+      rw measureSequence.apply with hi
+      exact Measure.member with measure, (dm with i, hi)
+    have kN : k ∈ ℕ by typecheck
+    have skN : succ(k) ∈ ℕ by typecheck
+    have shapeK : succ(k) = k ∪ {k}
+      ext x
+      simp
+    have finK := Finite.natural at succ(k)
+    have fresh : succ(k) ∉ succ(k)
+      intro bad
+      exact membership.irreflexive with bad
+    have vU : ∀ j ∈ succ(k) ∪ {succ(k)}, measureSequence(μ, disjointed(f))(j) ∈ ennreal
+      intros j hj
+      have c := union2.membership.forward with hj
+      cases c with a | b
+      . exact vals with j, (natural.member at succ(k), j with a)
+      . simp at b
+        rw b
+        exact vals with succ(k), skN
+    have ih2 : ennFiniteSum(measureSequence(μ, disjointed(f)), succ(k)) = μ(f(k))
+      rw shapeK
+      exact ih
+    rw ennFiniteSum.insert with finK, vU, fresh
+    rw ih2
+    rw measureSequence.apply with skN
+    rw disjointed.apply with skN
+    rw increasing.prefix_union with kN, increasing
+    have fk := sets with k, kN
+    have fsk := sets with succ(k), skN
+    have kSub : k ⊆ succ(k)
+      intros y hy
+      simp [hy]
+    have sub := increasing with k, kN, succ(k), skN, kSub
+    have da := Measure.diff_add with measure, fk, fsk, sub
+    have dM := MeasurableSet.diff with space, fsk, fk
+    have m1 := Measure.member with measure, fk
+    have m2 := Measure.member with measure, dM
+    rw ennAdd.comm with m1, m2
+    rw da
+
+-- Continuity from below (Mathlib's measure_iUnion_eq_iSup for an
+-- increasing sequence) and from above for sets of finite measure.
+theorem Measure.increasing_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires increasing : ∀ m ∈ ℕ, ∀ n ∈ ℕ, m ⊆ n → f(m) ⊆ f(n)
+  shows μ(sequenceUnion(f)) = ennSupOn(measureSequence(μ, f), ℕ)
+proof
+  have space := Measure.space with measure
+  have dm := disjointed.measurable with space, sets
+  have dd := disjointed.disjoint at f
+  have u := Measure.sequence_union with measure, dm, dd
+  rw disjointed.union at u
+  have vals : ∀ i ∈ ℕ, measureSequence(μ, disjointed(f))(i) ∈ ennreal
+    intros i hi
+    rw measureSequence.apply with hi
+    exact Measure.member with measure, (dm with i, hi)
+  rw ennTsum.nat_eq_sup with vals at u
+  rw u
+  have pM : ∀ n ∈ ℕ, ennFiniteSum(measureSequence(μ, disjointed(f)), n) ∈ ennreal
+    intros n hn
+    obtain ⟨fin, sub, fs⟩ := natural.finite_subset with hn
+    have vn : ∀ i ∈ n, measureSequence(μ, disjointed(f))(i) ∈ ennreal
+      intros i hi
+      exact vals with i, (sub with i, hi)
+    exact ennFiniteSum.member with fin, vn
+  have BM : valuesOn(ennPartialSums(measureSequence(μ, disjointed(f))), ℕ) ⊆ ennreal
+    intros a ha
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with ha
+    rw ← e
+    rw ennPartialSums.apply with hn
+    exact pM with n, hn
+  have AM : valuesOn(measureSequence(μ, f), ℕ) ⊆ ennreal
+    intros a ha
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with ha
+    rw ← e
+    rw measureSequence.apply with hn
+    exact Measure.member with measure, (sets with n, hn)
+  obtain ⟨ubB, leastB⟩ := ennSup.least_upper with BM
+  obtain ⟨ubA, leastA⟩ := ennSup.least_upper with AM
+  unfold ennSupOn
+  have first : EnnLe(ennSup(valuesOn(ennPartialSums(measureSequence(μ, disjointed(f))), ℕ)), ennSup(valuesOn(measureSequence(μ, f), ℕ)))
+    apply leastB
+    unfold EnnUpperBound
+    refine ⟨ubA.left, ?_⟩
+    intros a ha
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with ha
+    rw ← e
+    rw ennPartialSums.apply with hn
+    have nN : Nat(n) by exact hn
+    have snN : succ(n) ∈ ℕ by typecheck
+    obtain ⟨fin, sub, fs⟩ := natural.finite_subset with snN
+    have vn : ∀ i ∈ succ(n), measureSequence(μ, disjointed(f))(i) ∈ ennreal
+      intros i hi
+      exact vals with i, (sub with i, hi)
+    have nS : n ⊆ succ(n)
+      intros y hy
+      simp [hy]
+    have l1 := ennFiniteSum.mono_set with fin, nS, vn
+    have shapeN : succ(n) = n ∪ {n}
+      ext x
+      simp
+    rw shapeN at l1
+    rw Measure.disjointed_partial at X, μ, f, n with measure, sets, increasing at l1
+    have inA : measureSequence(μ, f)(n) ∈ valuesOn(measureSequence(μ, f), ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+    rw measureSequence.apply with hn at inA
+    have l2 := ubA.right with μ(f(n)), inA
+    exact EnnLe.transitive with l1, l2
+  have second : EnnLe(ennSup(valuesOn(measureSequence(μ, f), ℕ)), ennSup(valuesOn(ennPartialSums(measureSequence(μ, disjointed(f))), ℕ)))
+    apply leastA
+    unfold EnnUpperBound
+    refine ⟨ubB.left, ?_⟩
+    intros a ha
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with ha
+    rw ← e
+    rw measureSequence.apply with hn
+    have nN : Nat(n) by exact hn
+    have snN : succ(n) ∈ ℕ by typecheck
+    have inB : ennPartialSums(measureSequence(μ, disjointed(f)))(succ(n)) ∈ valuesOn(ennPartialSums(measureSequence(μ, disjointed(f))), ℕ) := valuesOn.membership.backward with ⟨succ(n), snN, rfl⟩
+    rw ennPartialSums.apply with snN at inB
+    have shapeN : succ(n) = n ∪ {n}
+      ext x
+      simp
+    rw shapeN at inB
+    rw Measure.disjointed_partial at X, μ, f, n with measure, sets, increasing at inB
+    exact ubB.right with μ(f(n)), inB
+  exact EnnLe.antisymmetric with first, second
+
+theorem Measure.decreasing_inter (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+  requires decreasing : ∀ m ∈ ℕ, ∀ n ∈ ℕ, m ⊆ n → f(n) ⊆ f(m)
+  requires finite : μ(f(∅)) ≠ ennTop
+  shows μ(sequenceInter(MeasurableSpace.carrier(X), f)) =
+    ennInfOn(measureSequence(μ, f), ℕ)
+proof
+  sorry
+
+-- Mathlib's measure_ne_top_of_subset / measure_lt_top_mono.
+theorem Measure.finite_of_subset (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires inside : S ⊆ T
+  requires finite : μ(T) ≠ ennTop
+  shows μ(S) ≠ ennTop
+proof
+  have le := Measure.mono with measure, setS, setT, inside
+  intro e
+  rw e at le
+  obtain ⟨m1, m2, alt⟩ := le
+  cases alt with tT | fin
+  . exact finite with tT
+  . exact fin.left with rfl
+
+-- Mathlib's nonempty_of_measure_ne_zero.
+theorem Measure.nonempty_of_ne_zero (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  requires positive : μ(S) ≠ realZero
+  shows S ≠ ∅
+proof
+  intro e
+  apply positive
+  rw e
+  exact Measure.empty with measure
+
+theorem measureReal.nonneg (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows measureReal(μ, S) ∈ ℝ ∧ realZero ≤ measureReal(μ, S)
+proof
+  have m := Measure.member with measure, set
+  unfold measureReal
+  by_cases top : μ(S) = ennTop
+  . rw top
+    rw ennToReal.top
+    have zR : realZero ∈ ℝ by typecheck
+    refine ⟨zR, ?_⟩
+    linarith
+  . have of := ennToReal.of_finite with m, top
+    obtain ⟨e, nn⟩ := of
+    obtain ⟨r, nn2⟩ := ennreal.finite with m, top
+    rw e
+    exact ⟨r, nn2⟩
+
+-- Mathlib's measureReal_ne_zero_iff for a finite value.
+theorem measureReal.ne_zero_iff (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  requires finite : μ(S) ≠ ennTop
+  shows measureReal(μ, S) ≠ realZero ↔ μ(S) ≠ realZero
+proof
+  have m := Measure.member with measure, set
+  have of := ennToReal.of_finite with m, finite
+  obtain ⟨e, nn⟩ := of
+  unfold measureReal
+  rw e
+
+-- Section: The measure of arbitrary sets
+theorem measureOf.eq_of_measurable (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows measureOf(X, μ, S) = μ(S)
+proof
+  have sS : S ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at set
+    exact set
+  have m := Measure.member with measure, set
+  have refl := Subset.reflexive at S
+  have sup : S ∈ measurableSupersets(X, S) := measurableSupersets.membership.backward with ⟨sS, refl⟩
+  have inSM : μ(S) ∈ supersetMeasures(X, μ, S) := supersetMeasures.membership.backward with ⟨S, sup, rfl⟩
+  have lower : EnnLowerBound(supersetMeasures(X, μ, S), μ(S))
+    unfold EnnLowerBound
+    refine ⟨m, ?_⟩
+    intros a ha
+    obtain ⟨B, hB, e⟩ := supersetMeasures.membership.forward with ha
+    obtain ⟨Bs, SB⟩ := measurableSupersets.membership.forward with hB
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact Bs
+    rw ← e
+    exact Measure.mono with measure, set, mB, SB
+  have greatest : ∀ c, EnnLowerBound(supersetMeasures(X, μ, S), c) → EnnLe(c, μ(S))
+    intros c hc
+    obtain ⟨cM, bounds⟩ := hc
+    exact bounds with μ(S), inSM
+  unfold measureOf
+  exact ennInf.eq_of_glb with m, lower, greatest
+
+theorem measureOf.mono (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires inside : A ⊆ B
+  shows EnnLe(measureOf(X, μ, A), measureOf(X, μ, B))
+proof
+  have insideA : supersetMeasures(X, μ, A) ⊆ ennreal
+    intros a ha
+    obtain ⟨C, hC, e⟩ := supersetMeasures.membership.forward with ha
+    obtain ⟨Cs, AC⟩ := measurableSupersets.membership.forward with hC
+    have mC : MeasurableSet(X, C)
+      unfold MeasurableSet
+      exact Cs
+    rw ← e
+    exact Measure.member with measure, mC
+  have insideB : supersetMeasures(X, μ, B) ⊆ ennreal
+    intros a ha
+    obtain ⟨C, hC, e⟩ := supersetMeasures.membership.forward with ha
+    obtain ⟨Cs, BC⟩ := measurableSupersets.membership.forward with hC
+    have mC : MeasurableSet(X, C)
+      unfold MeasurableSet
+      exact Cs
+    rw ← e
+    exact Measure.member with measure, mC
+  have gA := ennInf.greatest_lower with insideA
+  obtain ⟨lowerA, greatestA⟩ := gA
+  have gB := ennInf.greatest_lower with insideB
+  obtain ⟨lowerB, greatestB⟩ := gB
+  obtain ⟨mA, boundsA⟩ := lowerA
+  have lower : EnnLowerBound(supersetMeasures(X, μ, B), ennInf(supersetMeasures(X, μ, A)))
+    unfold EnnLowerBound
+    refine ⟨mA, ?_⟩
+    intros a ha
+    obtain ⟨C, hC, e⟩ := supersetMeasures.membership.forward with ha
+    obtain ⟨Cs, BC⟩ := measurableSupersets.membership.forward with hC
+    have AC := Subset.transitive with inside, BC
+    have hC2 : C ∈ measurableSupersets(X, A) := measurableSupersets.membership.backward with ⟨Cs, AC⟩
+    have aIn : a ∈ supersetMeasures(X, μ, A) := supersetMeasures.membership.backward with ⟨C, hC2, e⟩
+    exact boundsA with a, aIn
+  unfold measureOf
+  exact greatestB with ennInf(supersetMeasures(X, μ, A)), lower
+
+-- Every set has a measurable hull of the same measure
+-- (Mathlib's toMeasurable).
+-- Measurable supersets of A whose measure is within dyadicRadius(n) of
+-- the outer value of A, and a choice of one for every n.
+def approxSupersets (X μ A n : Set) : Set :=
+  { B ∈ measurableSupersets(X, A) |
+    μ(B) ∈ ℝ ∧ μ(B) < R[measureOf(X, μ, A) + dyadicRadii(n)] }
+def approxFamily (X μ A : Set) : Set := { approxSupersets(X, μ, A, n) | n ∈ ℕ }
+def hullSequence (c X μ A : Set) : Set :=
+  { (n, c(approxSupersets(X, μ, A, n))) | n ∈ ℕ }
+
+theorem hullSequence.apply (c X μ A n : Set)
+  requires member : n ∈ ℕ
+  shows hullSequence(c, X, μ, A)(n) = c(approxSupersets(X, μ, A, n))
+proof
+  have edge : (n, c(approxSupersets(X, μ, A, n))) ∈ hullSequence(c, X, μ, A)
+    apply hullSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ hullSequence(c, X, μ, A), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := hullSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, c(approxSupersets(X, μ, A, k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ d, (a, b) ∈ hullSequence(c, X, μ, A) → (a, d) ∈ hullSequence(c, X, μ, A) → b = d
+    intros a b d hb hd
+    obtain ⟨k, hk, bEq⟩ := hullSequence.membership.forward with hb
+    obtain ⟨m, hm, dEq⟩ := hullSequence.membership.forward with hd
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, dd⟩ := orderedPair.injective with dEq
+    rw [← bb, ← dd, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+-- The outer value is below the measure of every measurable superset.
+theorem measureOf.le_superset (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, B)
+  requires inside : A ⊆ B
+  shows EnnLe(measureOf(X, μ, A), μ(B))
+proof
+  have m := measureOf.mono with measure, inside
+  rw measureOf.eq_of_measurable with measure, set at m
+  exact m
+
+theorem measureOf.hull (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires inside : A ⊆ MeasurableSpace.carrier(X)
+  shows ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B ∧ μ(B) = measureOf(X, μ, A)
+proof
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have u2 := u
+  unfold MeasurableSet at u2
+  have inside2 : supersetMeasures(X, μ, A) ⊆ ennreal
+    intros s hs
+    obtain ⟨B, hB, e⟩ := supersetMeasures.membership.forward with hs
+    obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+    rw ← e
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB2
+    exact Measure.member with measure, mB
+  obtain ⟨lower, greatest⟩ := ennInf.greatest_lower with inside2
+  have mM : measureOf(X, μ, A) ∈ ennreal
+    unfold measureOf
+    exact lower.left
+  by_cases top : measureOf(X, μ, A) = ennTop
+  . have le := measureOf.le_superset with measure, u, inside
+    rw top at le
+    have e := EnnLe.top_eq with le
+    refine ⟨MeasurableSpace.carrier(X), u2, inside, ?_⟩
+    rw [e, top]
+  . obtain ⟨mR, mN⟩ := ennreal.finite with mM, top
+    have mReal : Real(measureOf(X, μ, A)) by exact mR
+    have inhabited : ∀ S ∈ approxFamily(X, μ, A), ∃ y, y ∈ S
+      intros S hS
+      obtain ⟨n, hn, e⟩ := approxFamily.membership.forward with hS
+      rw ← e
+      have nN : Nat(n) by exact hn
+      have rv := dyadicRadii.value at n
+      have rp := dyadicRadius.positive at n
+      have rR : Real(dyadicRadius(n)) := dyadicRadius.real at n
+      by_contra none
+      have bound : EnnLowerBound(supersetMeasures(X, μ, A), R[measureOf(X, μ, A) + dyadicRadii(n)])
+        rw rv
+        have tR : R[measureOf(X, μ, A) + dyadicRadius(n)] ∈ ℝ by typecheck
+        have tN : realZero ≤ R[measureOf(X, μ, A) + dyadicRadius(n)] by linarith
+        have tM := ennreal.of_real with tR, tN
+        have tT := ennreal.not_top_of_real with tR
+        unfold EnnLowerBound
+        refine ⟨tM, ?_⟩
+        intros s hs
+        obtain ⟨B, hB, es⟩ := supersetMeasures.membership.forward with hs
+        have sM := inside2 with s, hs
+        unfold EnnLe
+        refine ⟨tM, sM, ?_⟩
+        by_cases st : s = ennTop
+        . left
+          exact st
+        . right
+          refine ⟨tT, ?_⟩
+          obtain ⟨sR, sN⟩ := ennreal.finite with sM, st
+          have sReal : Real(s) by exact sR
+          by_contra notLe
+          have lt : s < R[measureOf(X, μ, A) + dyadicRadius(n)] by linarith
+          apply none
+          rw ← es at sR
+          rw ← es at lt
+          rw ← rv at lt
+          have mem : B ∈ approxSupersets(X, μ, A, n) := approxSupersets.membership.backward with ⟨hB, sR, lt⟩
+          exact ⟨B, mem⟩
+      have g := greatest with R[measureOf(X, μ, A) + dyadicRadii(n)], bound
+      rw rv at g
+      have mdef : ennInf(supersetMeasures(X, μ, A)) = measureOf(X, μ, A)
+        unfold measureOf
+        rfl
+      rw mdef at g
+      obtain ⟨g1, g2, alt⟩ := g
+      cases alt with t | fin
+      . exact top with t
+      . have l := fin.right
+        linarith
+    obtain ⟨c, fnc, sel⟩ := set.choice with inhabited
+    have hs : ∀ n ∈ ℕ, hullSequence(c, X, μ, A)(n) ∈ approxSupersets(X, μ, A, n)
+      intros n hn
+      rw hullSequence.apply with hn
+      have mem : approxSupersets(X, μ, A, n) ∈ approxFamily(X, μ, A) := approxFamily.membership.backward with ⟨n, hn, rfl⟩
+      exact sel with approxSupersets(X, μ, A, n), mem
+    have hm : ∀ n ∈ ℕ, MeasurableSet(X, hullSequence(c, X, μ, A)(n))
+      intros n hn
+      obtain ⟨hB, rest⟩ := approxSupersets.membership.forward with (hs with n, hn)
+      obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+      unfold MeasurableSet
+      exact hB2
+    have Bm := MeasurableSet.sequence_inter with space, hm
+    have Bm2 := Bm
+    unfold MeasurableSet at Bm2
+    have AB : A ⊆ sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))
+      intros x hx
+      apply sequenceInter.membership.backward
+      refine ⟨(inside with x, hx), ?_⟩
+      intros n hn
+      obtain ⟨hB, rest⟩ := approxSupersets.membership.forward with (hs with n, hn)
+      obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+      exact sub with x, hx
+    refine ⟨sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)), Bm2, AB, ?_⟩
+    have ge := measureOf.le_superset with measure, Bm, AB
+    have below : ∀ n ∈ ℕ, EnnLe(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))), μ(hullSequence(c, X, μ, A)(n)))
+      intros n hn
+      have sub : sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)) ⊆ hullSequence(c, X, μ, A)(n)
+        intros x hx
+        obtain ⟨xX, all⟩ := sequenceInter.membership.forward with hx
+        exact all with n, hn
+      exact Measure.mono with measure, Bm, (hm with n, hn), sub
+    have zN : zero ∈ ℕ by typecheck
+    obtain ⟨hB0, r0, lt0⟩ := approxSupersets.membership.forward with (hs with zero, zN)
+    have b0 := below with zero, zN
+    have bM := Measure.member with measure, Bm
+    have bT : μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) ≠ ennTop
+      intro t
+      rw t at b0
+      have e := EnnLe.top_eq with b0
+      have nt := ennreal.not_top_of_real with r0
+      exact nt with e
+    obtain ⟨bR, bN⟩ := ennreal.finite with bM, bT
+    have bReal : Real(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A)))) by exact bR
+    have le : μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) ≤ measureOf(X, μ, A)
+      by_contra notLe
+      have pos : realZero < R[μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) - measureOf(X, μ, A)] by linarith
+      obtain ⟨N, hN, small⟩ := dyadicRadii.eventually_below at R[μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))) - measureOf(X, μ, A)] with pos
+      have NN : Nat(N) by exact hN
+      have refl : N ≤ N by arith
+      have sN := small with N, hN, refl
+      obtain ⟨hBN, rN, ltN⟩ := approxSupersets.membership.forward with (hs with N, hN)
+      have rv := dyadicRadii.value at N
+      rw rv at ltN
+      have bNle := below with N, hN
+      obtain ⟨x1, x2, alt⟩ := bNle
+      have rNReal : Real(μ(hullSequence(c, X, μ, A)(N))) by exact rN
+      have rRe : Real(dyadicRadius(N)) := dyadicRadius.real at N
+      cases alt with t | fin
+      . have nt := ennreal.not_top_of_real with rN
+        exact nt with t
+      . have l := fin.right
+        linarith
+    have mT := ennreal.not_top_of_real with bR
+    have le2 : EnnLe(μ(sequenceInter(MeasurableSpace.carrier(X), hullSequence(c, X, μ, A))), measureOf(X, μ, A))
+      unfold EnnLe
+      refine ⟨bM, mM, ?_⟩
+      right
+      exact ⟨mT, le⟩
+    exact EnnLe.antisymmetric with le2, ge
+
+theorem measureOf.outer (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows OuterMeasure(MeasurableSpace.carrier(X), outerMeasureOf(X, μ))
+proof
+  sorry
+
+theorem NullSet.union2 (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires nullA : NullSet(X, μ, A)
+  requires nullB : NullSet(X, μ, B)
+  shows NullSet(X, μ, A ∪ B)
+proof
+  have space := Measure.space with measure
+  obtain ⟨C, hC, AC, zC⟩ := nullA
+  obtain ⟨D, hD, BD, zD⟩ := nullB
+  have mC : MeasurableSet(X, C)
+    unfold MeasurableSet
+    exact hC
+  have mD : MeasurableSet(X, D)
+    unfold MeasurableSet
+    exact hD
+  have u := MeasurableSet.union with space, mC, mD
+  have le := Measure.union_le with measure, mC, mD
+  rw [zC, zD] at le
+  have zm := ennreal.zero_member
+  rw ennAdd.zero at realZero with zm at le
+  have z := EnnLe.zero_iff with le
+  have sub : A ∪ B ⊆ C ∪ D
+    intros x hx
+    have split := union2.membership.forward with hx
+    cases split with xA | xB
+    . have xC := AC with x, xA
+      simp
+    . have xD := BD with x, xB
+      simp
+  unfold MeasurableSet at u
+  unfold NullSet
+  exact ⟨C ∪ D, u, sub, z⟩
+
+-- Section: Null sets and almost everywhere
+theorem NullSet.iff_measureOf (X μ A : Set)
+  requires measure : Measure(X, μ)
+  shows NullSet(X, μ, A) ↔ measureOf(X, μ, A) = realZero
+proof
+  constructor
+  . intro null
+    obtain ⟨B, hB, sub, z⟩ := null
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB
+    have le := measureOf.le_superset with measure, mB, sub
+    rw z at le
+    exact EnnLe.zero_iff with le
+  . intro z
+    have some : ∃ B ∈ MeasurableSpace.sets(X), A ⊆ B
+      by_contra none
+      have empty : supersetMeasures(X, μ, A) = ∅
+        ext s
+        constructor
+        . intro hs
+          obtain ⟨B, hB, e⟩ := supersetMeasures.membership.forward with hs
+          obtain ⟨hB2, sub⟩ := measurableSupersets.membership.forward with hB
+          exfalso
+          exact none with ⟨B, hB2, sub⟩
+        . intro hs
+          simp at hs
+      unfold measureOf at z
+      rw empty at z
+      rw ennInf.empty at z
+      have t := ennreal.top_ne_zero
+      exact t with z
+    obtain ⟨B, hB, sub⟩ := some
+    have space := Measure.space with measure
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB
+    have BX := MeasurableSet.subset with space, mB
+    have AX := Subset.transitive with sub, BX
+    obtain ⟨C, hC, AC, e⟩ := measureOf.hull with measure, AX
+    rw z at e
+    unfold NullSet
+    exact ⟨C, hC, AC, e⟩
+
+theorem NullSet.subset (X μ A B : Set)
+  requires null : NullSet(X, μ, B)
+  requires inside : A ⊆ B
+  shows NullSet(X, μ, A)
+proof
+  obtain ⟨C, hC, BC, z⟩ := null
+  have AC := Subset.transitive with inside, BC
+  unfold NullSet
+  exact ⟨C, hC, AC, z⟩
+
+-- Mathlib's measure_iUnion_null_iff: a countable union of null sets is
+-- null.
+theorem NullSet.sequence_union (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires null : ∀ n ∈ ℕ, NullSet(X, μ, f(n))
+  shows NullSet(X, μ, sequenceUnion(f))
+proof
+  have space := Measure.space with measure
+  obtain ⟨g, hg⟩ := NullSet.choose with null
+  have gm : ∀ n ∈ ℕ, MeasurableSet(X, g(n))
+    intros n hn
+    have h := hg with n, hn
+    unfold MeasurableSet
+    exact h.left
+  have u := MeasurableSet.sequence_union with space, gm
+  have le := Measure.sequence_union_le with measure, gm
+  have values : ∀ n ∈ ℕ, measureSequence(μ, g)(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    exact Measure.member with measure, (gm with n, hn)
+  have fe := Finite.empty
+  have es : ∅ ⊆ ℕ
+    intros x hx
+    simp at hx
+  have zero : ∀ n ∈ ℕ, n ∉ ∅ → measureSequence(μ, g)(n) = realZero
+    intros n hn out
+    rw measureSequence.apply with hn
+    have h := hg with n, hn
+    exact h.right.right
+  rw ennTsum.support with values, fe, es, zero at le
+  rw ennFiniteSum.empty at le
+  have z := EnnLe.zero_iff with le
+  have sub : sequenceUnion(f) ⊆ sequenceUnion(g)
+    intros x hx
+    unfold sequenceUnion at hx
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with hx
+    obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have h := hg with n, hn
+    have xg := h.right.left with x, xE
+    have inV : g(n) ∈ valuesOn(g, ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+    unfold sequenceUnion
+    exact union.membership.backward with ⟨g(n), inV, xg⟩
+  unfold MeasurableSet at u
+  unfold NullSet
+  exact ⟨sequenceUnion(g), u, sub, z⟩
+
+-- The members of C with index n under an injection e of C into ℕ.
+def indexFiber (C e n : Set) : Set := { A ∈ C | e(A) = n }
+def injectionSlices (C e : Set) : Set := { (n, ⋃(indexFiber(C, e, n))) | n ∈ ℕ }
+
+theorem injectionSlices.apply (C e n : Set)
+  requires member : n ∈ ℕ
+  shows injectionSlices(C, e)(n) = ⋃(indexFiber(C, e, n))
+proof
+  have edge : (n, ⋃(indexFiber(C, e, n))) ∈ injectionSlices(C, e)
+    apply injectionSlices.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ injectionSlices(C, e), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := injectionSlices.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, ⋃(indexFiber(C, e, k)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ injectionSlices(C, e) → (a, c) ∈ injectionSlices(C, e) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := injectionSlices.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := injectionSlices.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem NullSet.countable_union (X μ C : Set)
+  requires measure : Measure(X, μ)
+  requires countable : Countable(C)
+  requires null : ∀ A ∈ C, NullSet(X, μ, A)
+  shows NullSet(X, μ, ⋃(C))
+proof
+  have space := Measure.space with measure
+  obtain ⟨e, inj⟩ := countable
+  have fn := inj.left
+  have null2 : ∀ n ∈ ℕ, NullSet(X, μ, injectionSlices(C, e)(n))
+    intros n hn
+    rw injectionSlices.apply with hn
+    by_cases ex : ∃ A ∈ C, e(A) = n
+    . obtain ⟨A, hA, eA⟩ := ex
+      have sub : ⋃(indexFiber(C, e, n)) ⊆ A
+        intros x hx
+        obtain ⟨B, BIn, xB⟩ := union.membership.forward with hx
+        obtain ⟨hB, eB⟩ := indexFiber.membership.forward with BIn
+        have same : e(B) = e(A)
+          rw [eB, eA]
+        have BA := Injective.apply_cancel with inj, hB, hA, same
+        rw ← BA
+        exact xB
+      exact NullSet.subset with (null with A, hA), sub
+    . have em := MeasurableSet.empty with space
+      unfold MeasurableSet at em
+      have z := Measure.empty with measure
+      have sub : ⋃(indexFiber(C, e, n)) ⊆ ∅
+        intros x hx
+        obtain ⟨B, BIn, xB⟩ := union.membership.forward with hx
+        obtain ⟨hB, eB⟩ := indexFiber.membership.forward with BIn
+        exfalso
+        exact ex with ⟨B, hB, eB⟩
+      unfold NullSet
+      exact ⟨∅, em, sub, z⟩
+  have u := NullSet.sequence_union with measure, null2
+  have sub : ⋃(C) ⊆ sequenceUnion(injectionSlices(C, e))
+    intros x hx
+    obtain ⟨A, hA, xA⟩ := union.membership.forward with hx
+    have nN := FunctionBetween.apply_closed with fn, hA
+    have inSlice : x ∈ injectionSlices(C, e)(e(A))
+      rw injectionSlices.apply with nN
+      have AIn : A ∈ indexFiber(C, e, e(A)) := indexFiber.membership.backward with ⟨hA, rfl⟩
+      exact union.membership.backward with ⟨A, AIn, xA⟩
+    have inV : injectionSlices(C, e)(e(A)) ∈ valuesOn(injectionSlices(C, e), ℕ) := valuesOn.membership.backward with ⟨e(A), nN, rfl⟩
+    unfold sequenceUnion
+    exact union.membership.backward with ⟨injectionSlices(C, e)(e(A)), inV, inSlice⟩
+  exact NullSet.subset with u, sub
+
+-- Mathlib's ae_of_all and Filter.Eventually.mono.
+theorem AlmostEverywhere.of_all (X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires everywhere : MeasurableSpace.carrier(X) ⊆ S
+  shows AlmostEverywhere(X, μ, S)
+proof
+  have space := Measure.space with measure
+  have eS := MeasurableSet.empty with space
+  unfold MeasurableSet at eS
+  have z := Measure.empty with measure
+  have sub : MeasurableSpace.carrier(X) ∖ S ⊆ ∅
+    intros x hx
+    obtain ⟨xX, xnS⟩ := difference.membership.forward with hx
+    exfalso
+    exact xnS with (everywhere with x, xX)
+  unfold AlmostEverywhere
+  unfold NullSet
+  exact ⟨∅, eS, sub, z⟩
+
+theorem AlmostEverywhere.mono (X μ S T : Set)
+  requires ae : AlmostEverywhere(X, μ, S)
+  requires inside : S ∩ MeasurableSpace.carrier(X) ⊆ T
+  shows AlmostEverywhere(X, μ, T)
+proof
+  unfold AlmostEverywhere at ae
+  unfold AlmostEverywhere
+  have sub : MeasurableSpace.carrier(X) ∖ T ⊆ MeasurableSpace.carrier(X) ∖ S
+    intros x hx
+    obtain ⟨xX, xnT⟩ := difference.membership.forward with hx
+    have xnS : x ∉ S
+      intro xS
+      have both : x ∈ S ∩ MeasurableSpace.carrier(X) := intersection.membership.backward with xS, xX
+      exact xnT with (inside with x, both)
+    exact difference.membership.backward with ⟨xX, xnS⟩
+  exact NullSet.subset with ae, sub
+
+theorem AlmostEverywhere.inter (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires first : AlmostEverywhere(X, μ, S)
+  requires second : AlmostEverywhere(X, μ, T)
+  shows AlmostEverywhere(X, μ, S ∩ T)
+proof
+  unfold AlmostEverywhere at first
+  unfold AlmostEverywhere at second
+  have u := NullSet.union2 with measure, first, second
+  have sub : MeasurableSpace.carrier(X) ∖ (S ∩ T) ⊆ (MeasurableSpace.carrier(X) ∖ S) ∪ (MeasurableSpace.carrier(X) ∖ T)
+    intros x hx
+    obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+    by_cases xS : x ∈ S
+    . have xnT : x ∉ T
+        intro xT
+        apply xn
+        simp
+      simp
+    . simp
+  unfold AlmostEverywhere
+  exact NullSet.subset with u, sub
+
+-- Mathlib's ae_all_iff: countably many almost-everywhere properties hold
+-- together almost everywhere.
+theorem AlmostEverywhere.sequence_inter (X μ f : Set)
+  requires measure : Measure(X, μ)
+  requires ae : ∀ n ∈ ℕ, AlmostEverywhere(X, μ, f(n))
+  shows AlmostEverywhere(X, μ, sequenceInter(MeasurableSpace.carrier(X), f))
+proof
+  have null : ∀ n ∈ ℕ, NullSet(X, μ, complementSequence(MeasurableSpace.carrier(X), f)(n))
+    intros n hn
+    rw complementSequence.value with hn
+    have a := ae with n, hn
+    unfold AlmostEverywhere at a
+    exact a
+  have u := NullSet.sequence_union with measure, null
+  have sub : MeasurableSpace.carrier(X) ∖ sequenceInter(MeasurableSpace.carrier(X), f) ⊆ sequenceUnion(complementSequence(MeasurableSpace.carrier(X), f))
+    intros x hx
+    obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+    have ex : ∃ n ∈ ℕ, x ∉ f(n)
+      by_contra none
+      apply xn
+      apply sequenceInter.membership.backward
+      refine ⟨xX, ?_⟩
+      intros n hn
+      by_contra out
+      apply none
+      exact ⟨n, hn, out⟩
+    obtain ⟨n, hn, xnf⟩ := ex
+    have v := complementSequence.value at MeasurableSpace.carrier(X), f, n with hn
+    have xc : x ∈ complementSequence(MeasurableSpace.carrier(X), f)(n)
+      rw v
+      exact difference.membership.backward with ⟨xX, xnf⟩
+    have inV : complementSequence(MeasurableSpace.carrier(X), f)(n) ∈ valuesOn(complementSequence(MeasurableSpace.carrier(X), f), ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+    unfold sequenceUnion
+    exact union.membership.backward with ⟨complementSequence(MeasurableSpace.carrier(X), f)(n), inV, xc⟩
+  unfold AlmostEverywhere
+  exact NullSet.subset with u, sub
+
+-- Mathlib's compl_mem_ae_iff.
+theorem AlmostEverywhere.compl_iff (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires inside : A ⊆ MeasurableSpace.carrier(X)
+  shows AlmostEverywhere(X, μ, MeasurableSpace.carrier(X) ∖ A) ↔ NullSet(X, μ, A)
+proof
+  have eq : MeasurableSpace.carrier(X) ∖ (MeasurableSpace.carrier(X) ∖ A) = A
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, xn⟩ := difference.membership.forward with h
+      by_contra xnA
+      exact xn with (difference.membership.backward with ⟨xX, xnA⟩)
+    . intro xA
+      have xX := inside with x, xA
+      have xn : x ∉ MeasurableSpace.carrier(X) ∖ A
+        intro h
+        obtain ⟨a, b⟩ := difference.membership.forward with h
+        exact b with xA
+      exact difference.membership.backward with ⟨xX, xn⟩
+  unfold AlmostEverywhere
+  rw eq
+
+-- Mathlib's measure_inter_conull and measure_congr: intersecting with an
+-- almost-everywhere set does not change a measure.
+theorem Measure.inter_conull (X μ S T : Set)
+  requires measure : Measure(X, μ)
+  requires setS : MeasurableSet(X, S)
+  requires setT : MeasurableSet(X, T)
+  requires conull : AlmostEverywhere(X, μ, T)
+  shows μ(S ∩ T) = μ(S)
+proof
+  have space := Measure.space with measure
+  have i := MeasurableSet.inter with space, setS, setT
+  have d := MeasurableSet.diff with space, setS, setT
+  have disjoint : Disjoint(S ∩ T, S ∖ T)
+    unfold Disjoint
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xi, xd⟩ := intersection.membership.forward with h
+      obtain ⟨xS, xT⟩ := intersection.membership.forward with xi
+      obtain ⟨xS2, xnT⟩ := difference.membership.forward with xd
+      exfalso
+      exact xnT with xT
+    . intro h
+      simp at h
+  have u := Measure.union_disjoint with measure, i, d, disjoint
+  have e : (S ∩ T) ∪ (S ∖ T) = S
+    ext x
+    constructor
+    . intro h
+      have split := union2.membership.forward with h
+      cases split with xi | xd
+      . obtain ⟨xS, xT⟩ := intersection.membership.forward with xi
+        exact xS
+      . obtain ⟨xS, xnT⟩ := difference.membership.forward with xd
+        exact xS
+    . intro h
+      by_cases xT : x ∈ T
+      . simp
+      . simp
+  rw e at u
+  unfold AlmostEverywhere at conull
+  obtain ⟨B, hB, sub, z⟩ := conull
+  have mB : MeasurableSet(X, B)
+    unfold MeasurableSet
+    exact hB
+  have SX := MeasurableSet.subset with space, setS
+  have dB : S ∖ T ⊆ B
+    intros x hx
+    obtain ⟨xS, xnT⟩ := difference.membership.forward with hx
+    have xX := SX with x, xS
+    have xc := difference.membership.backward with ⟨xX, xnT⟩
+    exact sub with x, xc
+  have le := Measure.mono with measure, d, mB, dB
+  rw z at le
+  have dz := EnnLe.zero_iff with le
+  rw dz at u
+  have mi := Measure.member with measure, i
+  rw ennAdd.zero at μ(S ∩ T) with mi at u
+  symm
+  exact u
+
+theorem AEEqual.symm (X μ f g : Set)
+  requires equal : AEEqual(X, μ, f, g)
+  shows AEEqual(X, μ, g, f)
+proof
+  unfold AEEqual at equal
+  unfold AEEqual
+  have e : equalizer(f, g, MeasurableSpace.carrier(X)) = equalizer(g, f, MeasurableSpace.carrier(X))
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, fg⟩ := h
+      symm at fg
+      exact equalizer.membership.backward with ⟨xX, fg⟩
+    . intro h
+      obtain ⟨xX, gf⟩ := h
+      symm at gf
+      exact equalizer.membership.backward with ⟨xX, gf⟩
+  rw ← e
+  exact equal
+
+theorem AEEqual.trans (X μ f g h : Set)
+  requires measure : Measure(X, μ)
+  requires first : AEEqual(X, μ, f, g)
+  requires second : AEEqual(X, μ, g, h)
+  shows AEEqual(X, μ, f, h)
+proof
+  unfold AEEqual at first
+  unfold AEEqual at second
+  have i := AlmostEverywhere.inter with measure, first, second
+  have inside : equalizer(f, g, MeasurableSpace.carrier(X)) ∩ equalizer(g, h, MeasurableSpace.carrier(X)) ∩ MeasurableSpace.carrier(X) ⊆ equalizer(f, h, MeasurableSpace.carrier(X))
+    intros x hx
+    obtain ⟨xi, xX⟩ := intersection.membership.forward with hx
+    obtain ⟨x1, x2⟩ := intersection.membership.forward with xi
+    obtain ⟨xX1, fg⟩ := x1
+    obtain ⟨xX2, gh⟩ := x2
+    have fh : f(x) = h(x)
+      rw fg
+      exact gh
+    exact equalizer.membership.backward with ⟨xX, fh⟩
+  unfold AEEqual
+  exact AlmostEverywhere.mono with i, inside
+
+theorem measureOf.member (X μ A : Set)
+  requires measure : Measure(X, μ)
+  shows measureOf(X, μ, A) ∈ ennreal
+proof
+  have inside : supersetMeasures(X, μ, A) ⊆ ennreal
+    intros a ha
+    obtain ⟨B, hB, e⟩ := supersetMeasures.membership.forward with ha
+    obtain ⟨Bs, AB⟩ := measurableSupersets.membership.forward with hB
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact Bs
+    rw ← e
+    exact Measure.member with measure, mB
+  have g := ennInf.greatest_lower with inside
+  obtain ⟨lower, greatest⟩ := g
+  obtain ⟨m, rest⟩ := lower
+  unfold measureOf
+  exact m
+
+-- A measure is determined by its values: two measures equal on every
+-- measurable set are equal.
+theorem Measure.ext (X μ ν : Set)
+  requires first : Measure(X, μ)
+  requires second : Measure(X, ν)
+  requires agree : ∀ S ∈ MeasurableSpace.sets(X), μ(S) = ν(S)
+  shows μ = ν
+proof
+  obtain ⟨s1, f1, e1, a1⟩ := first
+  obtain ⟨s2, f2, e2, a2⟩ := second
+  exact FunctionBetween.ext with f1, f2, agree
+
+-- Section: Constructions of measures
+theorem restrictMeasure.measure (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  shows Measure(X, restrictMeasure(X, μ, A))
+proof
+  have space := Measure.space with measure
+  have m2 := measure
+  obtain ⟨sp, fn, emp, additive⟩ := m2
+  have fnR : FunctionBetween(restrictMeasure(X, μ, A), MeasurableSpace.sets(X), ennreal)
+    apply FunctionBetween.of_graph
+    . intros p hp
+      obtain ⟨S, hS, e⟩ := restrictMeasure.membership.forward with hp
+      have mo := measureOf.member at X, μ, S ∩ A with measure
+      symm at e
+      exact ⟨S, hS, measureOf(X, μ, S ∩ A), mo, e⟩
+    . intros a b c hb hc
+      obtain ⟨k, hk, bEq⟩ := restrictMeasure.membership.forward with hb
+      obtain ⟨m, hm, cEq⟩ := restrictMeasure.membership.forward with hc
+      obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+      obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+      rw [← bb, ← cc, ka, ← ma]
+    . intros S hS
+      have mo := measureOf.member at X, μ, S ∩ A with measure
+      have edge : (S, measureOf(X, μ, S ∩ A)) ∈ restrictMeasure(X, μ, A)
+        apply restrictMeasure.membership.backward
+        exact ⟨S, hS, rfl⟩
+      exact ⟨measureOf(X, μ, S ∩ A), mo, edge⟩
+  have me := MeasurableSet.empty with space
+  have eS := me
+  unfold MeasurableSet at eS
+  have emptyR : restrictMeasure(X, μ, A)(∅) = realZero
+    rw restrictMeasure.value with eS
+    have e : ∅ ∩ A = ∅
+      ext x
+      simp
+    rw e
+    rw measureOf.eq_of_measurable with measure, me
+    exact emp
+  unfold Measure
+  refine ⟨space, fnR, emptyR, ?_⟩
+  intros f fs pd
+  have fm : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+    intros n hn
+    unfold MeasurableSet
+    exact fs with n, hn
+  have gs : ∀ n ∈ ℕ, MeasurableSet(X, interSequence(f, A)(n))
+    intros n hn
+    rw interSequence.apply with hn
+    exact MeasurableSet.inter with space, (fm with n, hn), set
+  have gsets : ∀ n ∈ ℕ, interSequence(f, A)(n) ∈ MeasurableSpace.sets(X)
+    intros n hn
+    have g := gs with n, hn
+    unfold MeasurableSet at g
+    exact g
+  have gpd : PairwiseDisjointSequence(interSequence(f, A))
+    unfold PairwiseDisjointSequence
+    intros m hm n hn ne
+    rw interSequence.apply at f, A, m with hm
+    rw interSequence.apply at f, A, n with hn
+    have d := pd with m, hm, n, hn, ne
+    have d2 := Disjoint.iff.forward with d
+    apply Disjoint.iff.backward
+    intros x hx hx2
+    obtain ⟨xm, xA⟩ := intersection.membership.forward with hx
+    obtain ⟨xn, xA2⟩ := intersection.membership.forward with hx2
+    have nn := d2 with x, xm
+    exact nn with xn
+  have add := additive with interSequence(f, A), gsets, gpd
+  have uS := MeasurableSet.sequence_union with space, fm
+  have uSets := uS
+  unfold MeasurableSet at uSets
+  have ui := MeasurableSet.inter with space, uS, set
+  have eU : sequenceUnion(f) ∩ A = sequenceUnion(interSequence(f, A))
+    unfold sequenceUnion
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xu, xA⟩ := intersection.membership.forward with h
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with xu
+      obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at xE
+      have xi : x ∈ interSequence(f, A)(n)
+        rw interSequence.apply with hn
+        exact intersection.membership.backward with xE, xA
+      have inV : interSequence(f, A)(n) ∈ valuesOn(interSequence(f, A), ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+      exact union.membership.backward with ⟨interSequence(f, A)(n), inV, xi⟩
+    . intro h
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+      obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at xE
+      rw interSequence.apply with hn at xE
+      obtain ⟨xf, xA⟩ := intersection.membership.forward with xE
+      have inV : f(n) ∈ valuesOn(f, ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+      have xu := union.membership.backward with ⟨f(n), inV, xf⟩
+      exact intersection.membership.backward with xu, xA
+  rw restrictMeasure.value with uSets
+  rw measureOf.eq_of_measurable with measure, ui
+  rw eU
+  rw add
+  apply ennTsum.congr
+  intros n hn
+  rw measureSequence.apply at μ, interSequence(f, A), n with hn
+  rw measureSequence.apply at restrictMeasure(X, μ, A), f, n with hn
+  rw restrictMeasure.value with (fs with n, hn)
+  have gi := gs with n, hn
+  rw interSequence.apply with hn at gi
+  rw interSequence.apply with hn
+  rw measureOf.eq_of_measurable with measure, gi
+
+theorem restrictMeasure.apply (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires setA : MeasurableSet(X, A)
+  requires setS : MeasurableSet(X, S)
+  shows restrictMeasure(X, μ, A)(S) = μ(S ∩ A)
+proof
+  have sS : S ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at setS
+    exact setS
+  have space := Measure.space with measure
+  have i := MeasurableSet.inter with space, setS, setA
+  rw restrictMeasure.value with sS
+  exact measureOf.eq_of_measurable with measure, i
+
+theorem restrictMeasure.whole (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows restrictMeasure(X, μ, MeasurableSpace.carrier(X)) = μ
+proof
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have rm := restrictMeasure.measure with measure, u
+  apply Measure.ext with rm, measure
+  intros S hS
+  have mS : MeasurableSet(X, S)
+    unfold MeasurableSet
+    exact hS
+  rw restrictMeasure.apply with measure, u, mS
+  have sub := MeasurableSet.subset with space, mS
+  have e : S ∩ MeasurableSpace.carrier(X) = S
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xS, xX⟩ := intersection.membership.forward with h
+      exact xS
+    . intro h
+      have xX := sub with x, h
+      exact intersection.membership.backward with h, xX
+  rw e
+
+-- Mathlib's Measure.restrict_restrict.
+theorem restrictMeasure.restrict (X μ A B : Set)
+  requires measure : Measure(X, μ)
+  requires setA : MeasurableSet(X, A)
+  requires setB : MeasurableSet(X, B)
+  shows restrictMeasure(X, restrictMeasure(X, μ, A), B) = restrictMeasure(X, μ, A ∩ B)
+proof
+  have space := Measure.space with measure
+  have rA := restrictMeasure.measure with measure, setA
+  have l := restrictMeasure.measure with rA, setB
+  have AB := MeasurableSet.inter with space, setA, setB
+  have r := restrictMeasure.measure with measure, AB
+  apply Measure.ext with l, r
+  intros S hS
+  have mS : MeasurableSet(X, S)
+    unfold MeasurableSet
+    exact hS
+  have SB := MeasurableSet.inter with space, mS, setB
+  rw restrictMeasure.apply with rA, setB, mS
+  rw restrictMeasure.apply with measure, setA, SB
+  rw restrictMeasure.apply with measure, AB, mS
+  have e : S ∩ B ∩ A = S ∩ (A ∩ B)
+    ext x
+    simp
+  rw e
+
+-- Mathlib's ae_restrict_of_forall_mem and ae_restrict_mem.
+theorem AlmostEverywhere.restrict_of_forall (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  requires holds : A ⊆ S
+  shows AlmostEverywhere(X, restrictMeasure(X, μ, A), S)
+proof
+  have space := Measure.space with measure
+  have rm := restrictMeasure.measure with measure, set
+  have c := MeasurableSet.compl with space, set
+  have v := restrictMeasure.apply with measure, set, c
+  have e : (MeasurableSpace.carrier(X) ∖ A) ∩ A = ∅
+    ext x
+    simp
+  rw e at v
+  rw Measure.empty with measure at v
+  have sub : MeasurableSpace.carrier(X) ∖ S ⊆ MeasurableSpace.carrier(X) ∖ A
+    intros x hx
+    obtain ⟨xX, xnS⟩ := difference.membership.forward with hx
+    have xnA : x ∉ A
+      intro xA
+      exact xnS with (holds with x, xA)
+    exact difference.membership.backward with ⟨xX, xnA⟩
+  have cS := c
+  unfold MeasurableSet at cS
+  unfold AlmostEverywhere
+  unfold NullSet
+  exact ⟨MeasurableSpace.carrier(X) ∖ A, cS, sub, v⟩
+
+-- Mathlib's ae_restrict_iff': almost everywhere on A.
+theorem AlmostEverywhere.restrict_iff (X μ A S : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  shows AlmostEverywhere(X, restrictMeasure(X, μ, A), S) ↔
+    AlmostEverywhere(X, μ, S ∪ (MeasurableSpace.carrier(X) ∖ A))
+proof
+  have space := Measure.space with measure
+  have AX := MeasurableSet.subset with space, set
+  constructor
+  . intro ae
+    unfold AlmostEverywhere at ae
+    obtain ⟨B, hB, sub, z⟩ := ae
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB
+    rw restrictMeasure.apply with measure, set, mB at z
+    have iB := MeasurableSet.inter with space, mB, set
+    have iB2 := iB
+    unfold MeasurableSet at iB2
+    have sub2 : MeasurableSpace.carrier(X) ∖ (S ∪ (MeasurableSpace.carrier(X) ∖ A)) ⊆ B ∩ A
+      intros x hx
+      obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+      have xnS : x ∉ S
+        intro xS
+        apply xn
+        simp [xS]
+      have xA : x ∈ A
+        by_contra xnA
+        apply xn
+        have d := difference.membership.backward with ⟨xX, xnA⟩
+        simp [d]
+      have xD := difference.membership.backward with ⟨xX, xnS⟩
+      exact intersection.membership.backward with (sub with x, xD), xA
+    unfold AlmostEverywhere
+    unfold NullSet
+    exact ⟨B ∩ A, iB2, sub2, z⟩
+  . intro ae
+    unfold AlmostEverywhere at ae
+    obtain ⟨B, hB, sub, z⟩ := ae
+    have mB : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB
+    have cA := MeasurableSet.compl with space, set
+    have uB := MeasurableSet.union with space, mB, cA
+    have uB2 := uB
+    unfold MeasurableSet at uB2
+    have sub2 : MeasurableSpace.carrier(X) ∖ S ⊆ B ∪ (MeasurableSpace.carrier(X) ∖ A)
+      intros x hx
+      obtain ⟨xX, xnS⟩ := difference.membership.forward with hx
+      by_cases xA : x ∈ A
+      . have xn : x ∉ S ∪ (MeasurableSpace.carrier(X) ∖ A)
+          intro h
+          have c := union2.membership.forward with h
+          cases c with a | b
+          . exact xnS with a
+          . obtain ⟨p, q⟩ := difference.membership.forward with b
+            exact q with xA
+        have xD := difference.membership.backward with ⟨xX, xn⟩
+        have xB := sub with x, xD
+        simp [xB]
+      . have d := difference.membership.backward with ⟨xX, xA⟩
+        simp [d]
+    have iB := MeasurableSet.inter with space, uB, set
+    have sub3 : (B ∪ (MeasurableSpace.carrier(X) ∖ A)) ∩ A ⊆ B
+      intros x hx
+      obtain ⟨xU, xA⟩ := intersection.membership.forward with hx
+      have c := union2.membership.forward with xU
+      cases c with a | b
+      . exact a
+      . obtain ⟨p, q⟩ := difference.membership.forward with b
+        exfalso
+        exact q with xA
+    have le := Measure.mono with measure, iB, mB, sub3
+    rw z at le
+    have z2 := EnnLe.zero_iff with le
+    rw ← restrictMeasure.apply with measure, set, uB at z2
+    unfold AlmostEverywhere
+    unfold NullSet
+    exact ⟨B ∪ (MeasurableSpace.carrier(X) ∖ A), uB2, sub2, z2⟩
+
+theorem mapMeasure.measure (f X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  shows Measure(Y, mapMeasure(f, X, μ, Y))
+proof
+  have m2 := measure
+  obtain ⟨spX, fn, emp, additive⟩ := m2
+  have mf := measurable
+  obtain ⟨sX, sY, maps, pre⟩ := mf
+  have fnR : FunctionBetween(mapMeasure(f, X, μ, Y), MeasurableSpace.sets(Y), ennreal)
+    apply FunctionBetween.of_graph
+    . intros p hp
+      obtain ⟨B, hB, e⟩ := mapMeasure.membership.forward with hp
+      have pB := pre with B, hB
+      have mo := FunctionBetween.apply_closed with fn, pB
+      symm at e
+      exact ⟨B, hB, μ(functionPreimage(f, MeasurableSpace.carrier(X), B)), mo, e⟩
+    . intros a b c hb hc
+      obtain ⟨k, hk, bEq⟩ := mapMeasure.membership.forward with hb
+      obtain ⟨m, hm, cEq⟩ := mapMeasure.membership.forward with hc
+      obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+      obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+      rw [← bb, ← cc, ka, ← ma]
+    . intros B hB
+      have pB := pre with B, hB
+      have mo := FunctionBetween.apply_closed with fn, pB
+      have edge : (B, μ(functionPreimage(f, MeasurableSpace.carrier(X), B))) ∈ mapMeasure(f, X, μ, Y)
+        apply mapMeasure.membership.backward
+        exact ⟨B, hB, rfl⟩
+      exact ⟨μ(functionPreimage(f, MeasurableSpace.carrier(X), B)), mo, edge⟩
+  have me := MeasurableSet.empty with sY
+  unfold MeasurableSet at me
+  have emptyR : mapMeasure(f, X, μ, Y)(∅) = realZero
+    rw mapMeasure.value with me
+    have e : functionPreimage(f, MeasurableSpace.carrier(X), ∅) = ∅
+      ext x
+      constructor
+      . intro h
+        obtain ⟨xX, fe⟩ := functionPreimage.membership.forward with h
+        simp at fe
+      . intro h
+        simp at h
+    rw e
+    exact emp
+  unfold Measure
+  refine ⟨sY, fnR, emptyR, ?_⟩
+  intros g gs pd
+  have psets : ∀ n ∈ ℕ, preimageSequence(f, MeasurableSpace.carrier(X), g)(n) ∈ MeasurableSpace.sets(X)
+    intros n hn
+    rw preimageSequence.apply with hn
+    exact pre with g(n), (gs with n, hn)
+  have ppd : PairwiseDisjointSequence(preimageSequence(f, MeasurableSpace.carrier(X), g))
+    unfold PairwiseDisjointSequence
+    intros m hm n hn ne
+    rw preimageSequence.apply at f, MeasurableSpace.carrier(X), g, m with hm
+    rw preimageSequence.apply at f, MeasurableSpace.carrier(X), g, n with hn
+    have d := pd with m, hm, n, hn, ne
+    have d2 := Disjoint.iff.forward with d
+    apply Disjoint.iff.backward
+    intros x hx hx2
+    obtain ⟨xX, fm⟩ := functionPreimage.membership.forward with hx
+    obtain ⟨xX2, fn2⟩ := functionPreimage.membership.forward with hx2
+    have nn := d2 with f(x), fm
+    exact nn with fn2
+  have add := additive with preimageSequence(f, MeasurableSpace.carrier(X), g), psets, ppd
+  have gm : ∀ n ∈ ℕ, MeasurableSet(Y, g(n))
+    intros n hn
+    unfold MeasurableSet
+    exact gs with n, hn
+  have uS := MeasurableSet.sequence_union with sY, gm
+  unfold MeasurableSet at uS
+  have eU : functionPreimage(f, MeasurableSpace.carrier(X), sequenceUnion(g)) = sequenceUnion(preimageSequence(f, MeasurableSpace.carrier(X), g))
+    unfold sequenceUnion
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, fu⟩ := functionPreimage.membership.forward with h
+      obtain ⟨E, EIn, fE⟩ := union.membership.forward with fu
+      obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at fE
+      have xi : x ∈ preimageSequence(f, MeasurableSpace.carrier(X), g)(n)
+        rw preimageSequence.apply with hn
+        exact functionPreimage.membership.backward with ⟨xX, fE⟩
+      have inV : preimageSequence(f, MeasurableSpace.carrier(X), g)(n) ∈ valuesOn(preimageSequence(f, MeasurableSpace.carrier(X), g), ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+      exact union.membership.backward with ⟨preimageSequence(f, MeasurableSpace.carrier(X), g)(n), inV, xi⟩
+    . intro h
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+      obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at xE
+      rw preimageSequence.apply with hn at xE
+      obtain ⟨xX, fg⟩ := functionPreimage.membership.forward with xE
+      have inV : g(n) ∈ valuesOn(g, ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+      have fu := union.membership.backward with ⟨g(n), inV, fg⟩
+      exact functionPreimage.membership.backward with ⟨xX, fu⟩
+  rw mapMeasure.value with uS
+  rw eU
+  rw add
+  apply ennTsum.congr
+  intros n hn
+  rw measureSequence.apply at μ, preimageSequence(f, MeasurableSpace.carrier(X), g), n with hn
+  rw measureSequence.apply at mapMeasure(f, X, μ, Y), g, n with hn
+  rw mapMeasure.value with (gs with n, hn)
+  rw preimageSequence.apply with hn
+
+-- Mathlib's Measure.map_apply.
+theorem mapMeasure.apply (f X μ Y B : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  requires set : MeasurableSet(Y, B)
+  shows mapMeasure(f, X, μ, Y)(B) = μ(functionPreimage(f, MeasurableSpace.carrier(X), B))
+proof
+  have sB : B ∈ MeasurableSpace.sets(Y)
+    unfold MeasurableSet at set
+    exact set
+  exact mapMeasure.value with sB
+
+-- Mathlib's Measure.map_map and Measure.map_id.
+theorem mapMeasure.comp (f g h X μ Y Z : Set)
+  requires measure : Measure(X, μ)
+  requires measurableF : Measurable(f, X, Y)
+  requires measurableG : Measurable(g, Y, Z)
+  requires composite : ∀ x ∈ MeasurableSpace.carrier(X), h(x) = g(f(x))
+  shows mapMeasure(g, Y, mapMeasure(f, X, μ, Y), Z) = mapMeasure(h, X, μ, Z)
+proof
+  have mh := Measurable.comp with measurableF, measurableG, composite
+  have mfm := mapMeasure.measure with measure, measurableF
+  have l := mapMeasure.measure with mfm, measurableG
+  have r := mapMeasure.measure with measure, mh
+  apply Measure.ext with l, r
+  intros B hB
+  have mg := measurableG
+  obtain ⟨sY, sZ, mapsG, preG⟩ := mg
+  have mf := measurableF
+  obtain ⟨sX, sY2, mapsF, preF⟩ := mf
+  have pg := preG with B, hB
+  rw mapMeasure.value at g, Y, mapMeasure(f, X, μ, Y), Z, B with hB
+  rw mapMeasure.value at f, X, μ, Y, functionPreimage(g, MeasurableSpace.carrier(Y), B) with pg
+  rw mapMeasure.value at h, X, μ, Z, B with hB
+  rw functionPreimage.comp with mapsF, composite
+
+theorem mapMeasure.identity (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows mapMeasure(identity(MeasurableSpace.carrier(X)), X, μ, X) = μ
+proof
+  have mid := Measurable.identity with (Measure.space with measure)
+  have mm := mapMeasure.measure with measure, mid
+  apply Measure.ext with mm, measure
+  intros B hB
+  rw mapMeasure.value with hB
+  have space := Measure.space with measure
+  obtain ⟨shape, sub, carr, compl, unionClosed⟩ := space
+  have Bp := sub with B, hB
+  have BX := (powerset.membership_iff at B, MeasurableSpace.carrier(X)).forward with Bp
+  have e : functionPreimage(identity(MeasurableSpace.carrier(X)), MeasurableSpace.carrier(X), B) = B
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, fx⟩ := functionPreimage.membership.forward with h
+      rw identity.apply with xX at fx
+      exact fx
+    . intro h
+      have xX := BX with x, h
+      have v := identity.apply at x, MeasurableSpace.carrier(X) with xX
+      have fx : identity(MeasurableSpace.carrier(X))(x) ∈ B
+        rw v
+        exact h
+      exact functionPreimage.membership.backward with ⟨xX, fx⟩
+  rw e
+
+-- Mathlib's Measure.map_congr.
+theorem mapMeasure.congr (f g X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires measurableF : Measurable(f, X, Y)
+  requires measurableG : Measurable(g, X, Y)
+  requires equal : AEEqual(X, μ, f, g)
+  shows mapMeasure(f, X, μ, Y) = mapMeasure(g, X, μ, Y)
+proof
+  have space := Measure.space with measure
+  have mf := mapMeasure.measure with measure, measurableF
+  have mg := mapMeasure.measure with measure, measurableG
+  have e2 := equal
+  unfold AEEqual at e2
+  unfold AlmostEverywhere at e2
+  unfold NullSet at e2
+  obtain ⟨N, hN, sub, zN⟩ := e2
+  have mN : MeasurableSet(X, N)
+    unfold MeasurableSet
+    exact hN
+  have u := MeasurableSet.univ with space
+  have mT := MeasurableSet.diff with space, u, mN
+  have conull : AlmostEverywhere(X, μ, MeasurableSpace.carrier(X) ∖ N)
+    unfold AlmostEverywhere
+    unfold NullSet
+    have s2 : MeasurableSpace.carrier(X) ∖ (MeasurableSpace.carrier(X) ∖ N) ⊆ N
+      intros x hx
+      obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+      by_contra nn
+      apply xn
+      exact difference.membership.backward with ⟨xX, nn⟩
+    exact ⟨N, hN, s2, zN⟩
+  apply Measure.ext with mf, mg
+  intros B hB
+  have mB : MeasurableSet(Y, B)
+    unfold MeasurableSet
+    exact hB
+  rw mapMeasure.apply with measure, measurableF, mB
+  rw mapMeasure.apply with measure, measurableG, mB
+  have pf := Measurable.preimage with measurableF, mB
+  have pg := Measurable.preimage with measurableG, mB
+  rw ← Measure.inter_conull with measure, pf, mT, conull
+  rw ← Measure.inter_conull with measure, pg, mT, conull
+  have agree : ∀ x ∈ MeasurableSpace.carrier(X) ∖ N, f(x) = g(x)
+    intros x hx
+    obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+    by_contra ne
+    apply xn
+    apply sub with x
+    apply difference.membership.backward
+    refine ⟨xX, ?_⟩
+    intro xe
+    obtain ⟨xX2, fg⟩ := equalizer.membership.forward with xe
+    apply ne
+    exact fg
+  have same : functionPreimage(f, MeasurableSpace.carrier(X), B) ∩ (MeasurableSpace.carrier(X) ∖ N) = functionPreimage(g, MeasurableSpace.carrier(X), B) ∩ (MeasurableSpace.carrier(X) ∖ N)
+    ext x
+    constructor
+    . intro h
+      obtain ⟨a, b⟩ := intersection.membership.forward with h
+      obtain ⟨xX, fB⟩ := functionPreimage.membership.forward with a
+      rw agree with x, b at fB
+      have a2 : x ∈ functionPreimage(g, MeasurableSpace.carrier(X), B) := functionPreimage.membership.backward with ⟨xX, fB⟩
+      exact intersection.membership.backward with a2, b
+    . intro h
+      obtain ⟨a, b⟩ := intersection.membership.forward with h
+      obtain ⟨xX, gB⟩ := functionPreimage.membership.forward with a
+      rw ← agree with x, b at gB
+      have a2 : x ∈ functionPreimage(f, MeasurableSpace.carrier(X), B) := functionPreimage.membership.backward with ⟨xX, gB⟩
+      exact intersection.membership.backward with a2, b
+  rw same
+
+-- Mathlib's ae_map_iff and ae_of_ae_map.
+theorem AlmostEverywhere.of_map (f X μ Y S : Set)
+  requires measure : Measure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  requires ae : AlmostEverywhere(Y, mapMeasure(f, X, μ, Y), S)
+  shows AlmostEverywhere(X, μ, functionPreimage(f, MeasurableSpace.carrier(X), S))
+proof
+  have mf := measurable
+  obtain ⟨sX, sY, maps, pre⟩ := mf
+  unfold AlmostEverywhere at ae
+  obtain ⟨B, hB, sub, z⟩ := ae
+  rw mapMeasure.value with hB at z
+  have pB := pre with B, hB
+  have inside : MeasurableSpace.carrier(X) ∖ functionPreimage(f, MeasurableSpace.carrier(X), S) ⊆ functionPreimage(f, MeasurableSpace.carrier(X), B)
+    intros x hx
+    obtain ⟨xX, xn⟩ := difference.membership.forward with hx
+    have fx := maps with x, xX
+    have fnS : f(x) ∉ S
+      intro fS
+      apply xn
+      exact functionPreimage.membership.backward with ⟨xX, fS⟩
+    have fd := difference.membership.backward with ⟨fx, fnS⟩
+    have fB := sub with f(x), fd
+    exact functionPreimage.membership.backward with ⟨xX, fB⟩
+  unfold AlmostEverywhere
+  unfold NullSet
+  exact ⟨functionPreimage(f, MeasurableSpace.carrier(X), B), pB, inside, z⟩
+
+theorem smulMeasure.measure (c X μ : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  shows Measure(X, smulMeasure(c, X, μ))
+proof
+  have space := Measure.space with measure
+  have m2 := measure
+  obtain ⟨sp, fn, emp, additive⟩ := m2
+  have fnS : FunctionBetween(smulMeasure(c, X, μ), MeasurableSpace.sets(X), ennreal)
+    apply FunctionBetween.of_graph
+    . intros p hp
+      obtain ⟨S, hS, e⟩ := smulMeasure.membership.forward with hp
+      have mS : MeasurableSet(X, S)
+        unfold MeasurableSet
+        exact hS
+      have mo := ennMul.member with member, (Measure.member with measure, mS)
+      symm at e
+      exact ⟨S, hS, ennMul(c, μ(S)), mo, e⟩
+    . intros a b d hb hd
+      obtain ⟨k, hk, bEq⟩ := smulMeasure.membership.forward with hb
+      obtain ⟨m, hm, dEq⟩ := smulMeasure.membership.forward with hd
+      obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+      obtain ⟨ma, dd⟩ := orderedPair.injective with dEq
+      rw [← bb, ← dd, ka, ← ma]
+    . intros S hS
+      have mS : MeasurableSet(X, S)
+        unfold MeasurableSet
+        exact hS
+      have mo := ennMul.member with member, (Measure.member with measure, mS)
+      have edge : (S, ennMul(c, μ(S))) ∈ smulMeasure(c, X, μ)
+        apply smulMeasure.membership.backward
+        exact ⟨S, hS, rfl⟩
+      exact ⟨ennMul(c, μ(S)), mo, edge⟩
+  have me := MeasurableSet.empty with space
+  have eS := me
+  unfold MeasurableSet at eS
+  have emptyS : smulMeasure(c, X, μ)(∅) = realZero
+    rw smulMeasure.value with eS
+    rw emp
+    exact ennMul.zero_right with member, rfl
+  unfold Measure
+  refine ⟨space, fnS, emptyS, ?_⟩
+  intros f fs pd
+  have fm : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+    intros n hn
+    unfold MeasurableSet
+    exact fs with n, hn
+  have uS := MeasurableSet.sequence_union with space, fm
+  have uS2 := uS
+  unfold MeasurableSet at uS2
+  rw smulMeasure.value with uS2
+  rw additive with f, fs, pd
+  have values : ∀ n ∈ ℕ, measureSequence(μ, f)(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    exact Measure.member with measure, (fm with n, hn)
+  have product : ∀ n ∈ ℕ, measureSequence(smulMeasure(c, X, μ), f)(n) = ennMul(c, measureSequence(μ, f)(n))
+    intros n hn
+    rw measureSequence.apply with hn
+    exact smulMeasure.value with (fs with n, hn)
+  rw ennTsum.mul_left with values, member, product
+
+theorem smulMeasure.apply (c X μ S : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires set : MeasurableSet(X, S)
+  shows smulMeasure(c, X, μ)(S) = ennMul(c, μ(S))
+proof
+  have sS : S ∈ MeasurableSpace.sets(X)
+    unfold MeasurableSet at set
+    exact set
+  exact smulMeasure.value with sS
+
+-- Mathlib's Measure.map_smul and Measure.restrict_smul.
+theorem smulMeasure.map (c f X μ Y : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires measurable : Measurable(f, X, Y)
+  shows mapMeasure(f, X, smulMeasure(c, X, μ), Y) =
+    smulMeasure(c, Y, mapMeasure(f, X, μ, Y))
+proof
+  have sm := smulMeasure.measure with measure, member
+  have m1 := mapMeasure.measure with sm, measurable
+  have mm := mapMeasure.measure with measure, measurable
+  have m2 := smulMeasure.measure with mm, member
+  apply Measure.ext with m1, m2
+  intros B hB
+  rw mapMeasure.value with hB
+  rw smulMeasure.value with hB
+  rw mapMeasure.value with hB
+  have m3 := measurable
+  obtain ⟨sx, sy, maps, pre⟩ := m3
+  rw smulMeasure.value with (pre with B, hB)
+
+theorem smulMeasure.restrict (c X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires set : MeasurableSet(X, A)
+  shows restrictMeasure(X, smulMeasure(c, X, μ), A) =
+    smulMeasure(c, X, restrictMeasure(X, μ, A))
+proof
+  have space := Measure.space with measure
+  have sm := smulMeasure.measure with measure, member
+  have m1 := restrictMeasure.measure with sm, set
+  have rm := restrictMeasure.measure with measure, set
+  have m2 := smulMeasure.measure with rm, member
+  apply Measure.ext with m1, m2
+  intros S hS
+  have mS : MeasurableSet(X, S)
+    unfold MeasurableSet
+    exact hS
+  have iS := MeasurableSet.inter with space, mS, set
+  rw restrictMeasure.apply with sm, set, mS
+  rw smulMeasure.value with hS
+  rw restrictMeasure.apply with measure, set, mS
+  rw smulMeasure.apply with measure, member, iS
+
+theorem sumMeasure.measure (X m : Set)
+  requires measures : ∀ n ∈ ℕ, Measure(X, m(n))
+  shows Measure(X, sumMeasure(X, m))
+proof
+  sorry
+
+theorem zeroMeasure.measure (X : Set)
+  requires space : MeasurableSpace(X)
+  shows Measure(X, zeroMeasure(X))
+proof
+  have fnZ : FunctionBetween(zeroMeasure(X), MeasurableSpace.sets(X), ennreal)
+    have zm := ennreal.zero_member
+    unfold zeroMeasure
+    apply FunctionBetween.of_graph
+    . intros p hp
+      obtain ⟨bound, a, ha, b, hb, pEq⟩ := product.membership.forward with hp
+      simp at hb
+      rw hb at pEq
+      exact ⟨a, ha, realZero, zm, pEq⟩
+    . intros a b c hb hc
+      obtain ⟨b1, a1, ha1, b2, hb2, e1⟩ := product.membership.forward with hb
+      obtain ⟨c1, a3, ha3, c2, hc2, e2⟩ := product.membership.forward with hc
+      obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+      obtain ⟨x2, y2⟩ := orderedPair.injective with e2
+      simp at hb2
+      simp at hc2
+      rw [y1, y2, hb2, hc2]
+    . intros S hS
+      have z1 : realZero ∈ {realZero} by simp
+      have pr := product.pair with hS, z1
+      exact ⟨realZero, zm, pr⟩
+  have zeroV : ∀ S ∈ MeasurableSpace.sets(X), zeroMeasure(X)(S) = realZero
+    intros S hS
+    unfold zeroMeasure
+    exact constGraph.apply at MeasurableSpace.sets(X), realZero, S with hS
+  have me := MeasurableSet.empty with space
+  unfold MeasurableSet at me
+  unfold Measure
+  refine ⟨space, fnZ, (zeroV with ∅, me), ?_⟩
+  intros f fs pd
+  have fm : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+    intros n hn
+    unfold MeasurableSet
+    exact fs with n, hn
+  have uS := MeasurableSet.sequence_union with space, fm
+  unfold MeasurableSet at uS
+  rw zeroV with sequenceUnion(f), uS
+  have values : ∀ n ∈ ℕ, measureSequence(zeroMeasure(X), f)(n) ∈ ennreal
+    intros n hn
+    rw measureSequence.apply with hn
+    rw zeroV with f(n), (fs with n, hn)
+    exact ennreal.zero_member
+  have fe := Finite.empty
+  have es : ∅ ⊆ ℕ
+    intros x hx
+    simp at hx
+  have zero : ∀ n ∈ ℕ, n ∉ ∅ → measureSequence(zeroMeasure(X), f)(n) = realZero
+    intros n hn out
+    rw measureSequence.apply with hn
+    exact zeroV with f(n), (fs with n, hn)
+  rw ennTsum.support with values, fe, es, zero
+  rw ennFiniteSum.empty
+
+theorem diracMeasure.graph (X a : Set)
+  shows (∀ p ∈ diracMeasure(X, a), ∃ x ∈ MeasurableSpace.sets(X), ∃ y ∈ ennreal, p = (x, y)) ∧
+    (∀ s, ∀ b, ∀ c, (s, b) ∈ diracMeasure(X, a) → (s, c) ∈ diracMeasure(X, a) → b = c)
+proof
+  constructor
+  . intros p hp
+    obtain ⟨pIn, alt⟩ := diracMeasure.membership.forward with hp
+    obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with pIn
+    exact ⟨x, hx, y, hy, pEq⟩
+  . intros s b c hb hc
+    obtain ⟨pb, altB⟩ := diracMeasure.membership.forward with hb
+    obtain ⟨pc, altC⟩ := diracMeasure.membership.forward with hc
+    simp [fst.pair, snd.pair] at altB
+    simp [fst.pair, snd.pair] at altC
+    cases altB with inB | outB
+    . cases altC with inC | outC
+      . rw [inB.right, inC.right]
+      . exfalso
+        exact outC.left with inB.left
+    . cases altC with inC | outC
+      . exfalso
+        exact outB.left with inC.left
+      . rw [outB.right, outC.right]
+
+theorem diracMeasure.value (X a S : Set)
+  requires set : S ∈ MeasurableSpace.sets(X)
+  shows (a ∈ S → diracMeasure(X, a)(S) = realOne) ∧
+    (a ∉ S → diracMeasure(X, a)(S) = realZero)
+proof
+  obtain ⟨shape, functional⟩ := diracMeasure.graph at X, a
+  have pairs : ∀ p ∈ diracMeasure(X, a), ∃ x, ∃ y, p = (x, y)
+    intros p hp
+    obtain ⟨x, hx, y, hy, e⟩ := shape with p, hp
+    exact ⟨x, y, e⟩
+  have oR : realOne ∈ ℝ by typecheck
+  have oN : realZero ≤ realOne by linarith
+  have om := ennreal.of_real with oR, oN
+  have zm := ennreal.zero_member
+  constructor
+  . intro aS
+    have pr := product.pair with set, om
+    have edge : (S, realOne) ∈ diracMeasure(X, a)
+      apply diracMeasure.membership.backward
+      refine ⟨pr, ?_⟩
+      left
+      simp [fst.pair, snd.pair, aS]
+    exact pairGraph.apply with pairs, functional, edge
+  . intro aS
+    have pr := product.pair with set, zm
+    have edge : (S, realZero) ∈ diracMeasure(X, a)
+      apply diracMeasure.membership.backward
+      refine ⟨pr, ?_⟩
+      right
+      simp [fst.pair, snd.pair, aS]
+    exact pairGraph.apply with pairs, functional, edge
+
+theorem diracMeasure.probability (X a : Set)
+  requires space : MeasurableSpace(X)
+  requires member : a ∈ MeasurableSpace.carrier(X)
+  shows ProbabilityMeasure(X, diracMeasure(X, a))
+proof
+  obtain ⟨shape, functional⟩ := diracMeasure.graph at X, a
+  have oR : realOne ∈ ℝ by typecheck
+  have oN : realZero ≤ realOne by linarith
+  have om := ennreal.of_real with oR, oN
+  have zm := ennreal.zero_member
+  have fnD : FunctionBetween(diracMeasure(X, a), MeasurableSpace.sets(X), ennreal)
+    apply FunctionBetween.of_graph with shape, functional
+    intros S hS
+    by_cases aS : a ∈ S
+    . have pr := product.pair with hS, om
+      have edge : (S, realOne) ∈ diracMeasure(X, a)
+        apply diracMeasure.membership.backward
+        refine ⟨pr, ?_⟩
+        left
+        simp [fst.pair, snd.pair, aS]
+      exact ⟨realOne, om, edge⟩
+    . have pr := product.pair with hS, zm
+      have edge : (S, realZero) ∈ diracMeasure(X, a)
+        apply diracMeasure.membership.backward
+        refine ⟨pr, ?_⟩
+        right
+        simp [fst.pair, snd.pair, aS]
+      exact ⟨realZero, zm, edge⟩
+  have me := MeasurableSet.empty with space
+  unfold MeasurableSet at me
+  have aE : a ∉ ∅ by simp
+  have emptyD := (diracMeasure.value at X, a, ∅ with me).right with aE
+  have vals : ∀ S ∈ MeasurableSpace.sets(X), diracMeasure(X, a)(S) ∈ ennreal
+    intros S hS
+    obtain ⟨i, o⟩ := diracMeasure.value at X, a, S with hS
+    by_cases aS : a ∈ S
+    . rw i with aS
+      exact om
+    . rw o with aS
+      exact zm
+  have additive : ∀ f, (∀ n ∈ ℕ, f(n) ∈ MeasurableSpace.sets(X)) → PairwiseDisjointSequence(f) → diracMeasure(X, a)(sequenceUnion(f)) = ennTsum(measureSequence(diracMeasure(X, a), f), ℕ)
+    intros f fs pd
+    have fm : ∀ n ∈ ℕ, MeasurableSet(X, f(n))
+      intros n hn
+      unfold MeasurableSet
+      exact fs with n, hn
+    have uS := MeasurableSet.sequence_union with space, fm
+    unfold MeasurableSet at uS
+    have values : ∀ n ∈ ℕ, measureSequence(diracMeasure(X, a), f)(n) ∈ ennreal
+      intros n hn
+      rw measureSequence.apply with hn
+      exact vals with f(n), (fs with n, hn)
+    obtain ⟨iU, oU⟩ := diracMeasure.value at X, a, sequenceUnion(f) with uS
+    by_cases hit : a ∈ sequenceUnion(f)
+    . rw iU with hit
+      have h2 := hit
+      unfold sequenceUnion at h2
+      obtain ⟨E, EIn, aE2⟩ := union.membership.forward with h2
+      obtain ⟨k, hk, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at aE2
+      have fs1 := Finite.singleton at k
+      have ks : {k} ⊆ ℕ
+        intros x hx
+        simp at hx
+        rw hx
+        exact hk
+      have zero : ∀ n ∈ ℕ, n ∉ {k} → measureSequence(diracMeasure(X, a), f)(n) = realZero
+        intros n hn out
+        rw measureSequence.apply with hn
+        have ne : n ≠ k
+          intro same
+          apply out
+          simp [same]
+        have d := pd with n, hn, k, hk, ne
+        have d2 := Disjoint.iff.forward with d
+        have an : a ∉ f(n)
+          intro an
+          exact d2 with a, an, aE2
+        exact (diracMeasure.value at X, a, f(n) with (fs with n, hn)).right with an
+      rw ennTsum.support with values, fs1, ks, zero
+      rw ennFiniteSum.singleton with (values with k, hk)
+      rw measureSequence.apply with hk
+      rw (diracMeasure.value at X, a, f(k) with (fs with k, hk)).left with aE2
+    . rw oU with hit
+      have zero : ∀ n ∈ ℕ, measureSequence(diracMeasure(X, a), f)(n) = realZero
+        intros n hn
+        rw measureSequence.apply with hn
+        have an : a ∉ f(n)
+          intro an
+          apply hit
+          have inV : f(n) ∈ valuesOn(f, ℕ) := valuesOn.membership.backward with ⟨n, hn, rfl⟩
+          unfold sequenceUnion
+          exact union.membership.backward with ⟨f(n), inV, an⟩
+        exact (diracMeasure.value at X, a, f(n) with (fs with n, hn)).right with an
+      rw ennTsum.zero with zero
+  have meas : Measure(X, diracMeasure(X, a))
+    unfold Measure
+    exact ⟨space, fnD, emptyD, additive⟩
+  have u := MeasurableSet.univ with space
+  unfold MeasurableSet at u
+  have one := (diracMeasure.value at X, a, MeasurableSpace.carrier(X) with u).left with member
+  unfold ProbabilityMeasure
+  exact ⟨meas, one⟩
+
+theorem countMeasure.measure (X : Set)
+  requires space : MeasurableSpace(X)
+  shows Measure(X, countMeasure(X))
+proof
+  sorry
+
+-- Mathlib's Measure.count_apply for a finite set.
+theorem countMeasure.apply_finite (X S : Set, n : Nat)
+  requires space : MeasurableSpace(X)
+  requires set : MeasurableSet(X, S)
+  requires card : HasCardinality(S, n)
+  shows countMeasure(X)(S) = realNat(n)
+proof
+  sorry
+
+-- Mathlib's Measure.ae_count_iff: almost everywhere for the counting
+-- measure is everywhere, when singletons are measurable.
+theorem AlmostEverywhere.count_iff (X S : Set)
+  requires space : MeasurableSpace(X)
+  requires singletons : ∀ x ∈ MeasurableSpace.carrier(X), MeasurableSet(X, {x})
+  shows AlmostEverywhere(X, countMeasure(X), S) ↔ MeasurableSpace.carrier(X) ⊆ S
+proof
+  sorry
+
+-- Finite and σ-finite measures.
+theorem FiniteMeasure.sigma_finite (X μ : Set)
+  requires finite : FiniteMeasure(X, μ)
+  shows SigmaFinite(X, μ)
+proof
+  obtain ⟨measure, fin⟩ := finite
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have uS := u
+  unfold MeasurableSet at uS
+  have cv : ∀ n ∈ ℕ, (ℕ × {MeasurableSpace.carrier(X)})(n) = MeasurableSpace.carrier(X)
+    intros n hn
+    exact constGraph.apply at ℕ, MeasurableSpace.carrier(X), n with hn
+  unfold SigmaFinite
+  refine ⟨measure, ℕ × {MeasurableSpace.carrier(X)}, ?_, ?_⟩
+  . intros n hn
+    rw cv with n, hn
+    exact ⟨uS, fin⟩
+  . unfold sequenceUnion
+    have zN : (0:N) ∈ ℕ by typecheck
+    ext x
+    constructor
+    . intro h
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+      obtain ⟨n, hn, e⟩ := valuesOn.membership.forward with EIn
+      rw ← e at xE
+      rw cv with n, hn at xE
+      exact xE
+    . intro h
+      have inV : (ℕ × {MeasurableSpace.carrier(X)})((0:N)) ∈ valuesOn(ℕ × {MeasurableSpace.carrier(X)}, ℕ) := valuesOn.membership.backward with ⟨(0:N), zN, rfl⟩
+      rw cv with (0:N), zN at inV
+      exact union.membership.backward with ⟨MeasurableSpace.carrier(X), inV, h⟩
+
+theorem SigmaFinite.s_finite (X μ : Set)
+  requires sigma : SigmaFinite(X, μ)
+  shows SFinite(X, μ)
+proof
+  sorry
+
+theorem FiniteMeasure.restrict (X μ A : Set)
+  requires measure : Measure(X, μ)
+  requires set : MeasurableSet(X, A)
+  requires finite : μ(A) ≠ ennTop
+  shows FiniteMeasure(X, restrictMeasure(X, μ, A))
+proof
+  have rm := restrictMeasure.measure with measure, set
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have v := restrictMeasure.apply with measure, set, u
+  have sub := MeasurableSet.subset with space, set
+  have e : MeasurableSpace.carrier(X) ∩ A = A
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, xA⟩ := intersection.membership.forward with h
+      exact xA
+    . intro h
+      have xX := sub with x, h
+      exact intersection.membership.backward with xX, h
+  rw e at v
+  unfold FiniteMeasure
+  refine ⟨rm, ?_⟩
+  rw v
+  exact finite
+
+-- Mathlib's prob_le_one and measureReal_le_one.
+theorem ProbabilityMeasure.le_one (X μ S : Set)
+  requires probability : ProbabilityMeasure(X, μ)
+  requires set : MeasurableSet(X, S)
+  shows EnnLe(μ(S), realOne)
+proof
+  obtain ⟨measure, one⟩ := probability
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have sub := MeasurableSet.subset with space, set
+  have le := Measure.mono with measure, set, u, sub
+  rw one at le
+  exact le
+
+-- Mathlib's Measure.isProbabilityMeasure_map.
+theorem ProbabilityMeasure.map (f X μ Y : Set)
+  requires probability : ProbabilityMeasure(X, μ)
+  requires measurable : Measurable(f, X, Y)
+  shows ProbabilityMeasure(Y, mapMeasure(f, X, μ, Y))
+proof
+  obtain ⟨measure, one⟩ := probability
+  have mm := mapMeasure.measure with measure, measurable
+  have mf := measurable
+  obtain ⟨sX, sY, maps, pre⟩ := mf
+  have u := MeasurableSet.univ with sY
+  have v := mapMeasure.apply with measure, measurable, u
+  rw functionPreimage.whole with maps at v
+  unfold ProbabilityMeasure
+  refine ⟨mm, ?_⟩
+  rw v
+  exact one
+
+-- Section: Measure-preserving maps
+theorem MeasurePreserving.identity (X μ : Set)
+  requires measure : Measure(X, μ)
+  shows MeasurePreserving(identity(MeasurableSpace.carrier(X)), X, μ, X, μ)
+proof
+  have space := Measure.space with measure
+  have mid := Measurable.identity with space
+  have e := mapMeasure.identity with measure
+  unfold MeasurePreserving
+  exact ⟨mid, measure, e⟩
+
+theorem MeasurePreserving.comp (f g h X μ Y ν Z ρ : Set)
+  requires first : MeasurePreserving(f, X, μ, Y, ν)
+  requires second : MeasurePreserving(g, Y, ν, Z, ρ)
+  requires composite : ∀ x ∈ MeasurableSpace.carrier(X), h(x) = g(f(x))
+  shows MeasurePreserving(h, X, μ, Z, ρ)
+proof
+  obtain ⟨mf, mμ, ef⟩ := first
+  obtain ⟨mg, mν, eg⟩ := second
+  have mh := Measurable.comp with mf, mg, composite
+  have c := mapMeasure.comp with mμ, mf, mg, composite
+  rw ef at c
+  rw eg at c
+  unfold MeasurePreserving
+  refine ⟨mh, mμ, ?_⟩
+  symm
+  exact c
+
+-- The preimage of S under the inverse of a bijection f is f(S).
+theorem cldCConverse.preimage (f A B S : Set)
+  requires bijective : BijectiveBetween(f, A, B)
+  requires inside : S ⊆ A
+  shows functionPreimage(converse(f, A, B), B, S) = valuesOn(f, S)
+proof
+  have injective := Bijective.injective with bijective
+  have function := Injective.function with injective
+  have inverse := converse.function_of_bijective with bijective
+  ext y
+  constructor
+  . intro h
+    obtain ⟨yB, gS⟩ := functionPreimage.membership.forward with h
+    have e := Bijective.apply_inverse with bijective, yB
+    exact valuesOn.membership.backward with ⟨converse(f, A, B)(y), gS, e⟩
+  . intro h
+    obtain ⟨x, xS, e⟩ := valuesOn.membership.forward with h
+    have xA := inside with x, xS
+    have fB := FunctionBetween.apply_closed with function, xA
+    rw ← e
+    have gi := Bijective.inverse_apply with bijective, xA
+    have gS : converse(f, A, B)(f(x)) ∈ S
+      rw gi
+      exact xS
+    exact functionPreimage.membership.backward with ⟨fB, gS⟩
+
+-- Mathlib's MeasurableEmbedding / MeasurePreserving image form: for a
+-- measure-preserving embedding, μ(S) = ν(f(S)).
+theorem MeasurePreserving.image_of_embedding (f X μ Y ν S : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires embedding : MeasurableEmbedding(f, X, Y)
+  requires set : MeasurableSet(X, S)
+  shows ν(valuesOn(f, S)) = μ(S)
+proof
+  obtain ⟨mf, measure, push⟩ := preserving
+  have space := Measure.space with measure
+  have em := embedding
+  obtain ⟨mf2, inj, images⟩ := em
+  have sS := set
+  unfold MeasurableSet at sS
+  have iS := images with S, sS
+  have mI : MeasurableSet(Y, valuesOn(f, S))
+    unfold MeasurableSet
+    exact iS
+  have SX := MeasurableSet.subset with space, set
+  rw ← push
+  rw mapMeasure.apply with measure, mf, mI
+  have same : functionPreimage(f, MeasurableSpace.carrier(X), valuesOn(f, S)) = S
+    ext x
+    constructor
+    . intro h
+      obtain ⟨xX, fx⟩ := functionPreimage.membership.forward with h
+      obtain ⟨y, hy, e⟩ := valuesOn.membership.forward with fx
+      have yX := SX with y, hy
+      have xy := Injective.apply_cancel with inj, yX, xX, e
+      rw ← xy
+      exact hy
+    . intro h
+      have xX := SX with x, h
+      have fx : f(x) ∈ valuesOn(f, S) := valuesOn.membership.backward with ⟨x, h, rfl⟩
+      exact functionPreimage.membership.backward with ⟨xX, fx⟩
+  rw same
+
+-- Mathlib's MeasurePreserving.symm for a measurable equivalence.
+theorem MeasurePreserving.inverse (f X μ Y ν : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires equivalence : MeasurableEquiv(f, X, Y)
+  shows MeasurePreserving(converse(f, MeasurableSpace.carrier(X),
+    MeasurableSpace.carrier(Y)), Y, ν, X, μ)
+proof
+  have p2 := preserving
+  obtain ⟨mf, measure, push⟩ := p2
+  have e2 := equivalence
+  obtain ⟨embedding, bij⟩ := e2
+  have injective := Bijective.injective with bij
+  have inverse := converse.function_of_bijective with bij
+  have mf2 := mf
+  obtain ⟨sX, sY, maps, pre⟩ := mf2
+  have em := embedding
+  obtain ⟨mf3, inj, images⟩ := em
+  have mν := mapMeasure.measure with measure, mf
+  rw push at mν
+  have mg : Measurable(converse(f, MeasurableSpace.carrier(X), MeasurableSpace.carrier(Y)), Y, X)
+    unfold Measurable
+    refine ⟨sY, sX, ?_, ?_⟩
+    . unfold MapsInto
+      intros y hy
+      exact FunctionBetween.apply_closed with inverse, hy
+    . intros S hS
+      have mS : MeasurableSet(X, S)
+        unfold MeasurableSet
+        exact hS
+      have SX := MeasurableSet.subset with sX, mS
+      rw cldCConverse.preimage with bij, SX
+      exact images with S, hS
+  have mg2 := mapMeasure.measure with mν, mg
+  have eq : mapMeasure(converse(f, MeasurableSpace.carrier(X), MeasurableSpace.carrier(Y)), Y, ν, X) = μ
+    apply Measure.ext with mg2, measure
+    intros S hS
+    have mS : MeasurableSet(X, S)
+      unfold MeasurableSet
+      exact hS
+    have SX := MeasurableSet.subset with sX, mS
+    rw mapMeasure.apply with mν, mg, mS
+    rw cldCConverse.preimage with bij, SX
+    exact MeasurePreserving.image_of_embedding with preserving, embedding, mS
+  unfold MeasurePreserving
+  exact ⟨mg, mν, eq⟩
+
+theorem MeasurePreserving.preimage (f X μ Y ν B : Set)
+  requires preserving : MeasurePreserving(f, X, μ, Y, ν)
+  requires set : MeasurableSet(Y, B)
+  shows μ(functionPreimage(f, MeasurableSpace.carrier(X), B)) = ν(B)
+proof
+  obtain ⟨mf, mμ, ef⟩ := preserving
+  have sB : B ∈ MeasurableSpace.sets(Y)
+    unfold MeasurableSet at set
+    exact set
+  rw ← ef
+  rw mapMeasure.value with sB
+
+-- Section: Uniqueness of measures
+-- Two finite measures agreeing on a π-system that generates the
+-- σ-algebra and on the whole space agree (Mathlib's
+-- ext_of_generate_finite).
+theorem Measure.ext_of_generate_finite (X μ ν G : Set)
+  requires firstFinite : FiniteMeasure(X, μ)
+  requires secondFinite : FiniteMeasure(X, ν)
+  requires pi : PiSystem(G)
+  requires generates : MeasurableSpace.sets(X) =
+    generatedSigma(MeasurableSpace.carrier(X), G)
+  requires agree : ∀ S ∈ G, μ(S) = ν(S)
+  requires whole : μ(MeasurableSpace.carrier(X)) = ν(MeasurableSpace.carrier(X))
+  shows μ = ν
+proof
+  sorry
+
+-- The σ-finite form: a generating π-system containing an increasing
+-- sequence of sets of finite measure exhausting the space (Mathlib's
+-- ext_of_generateFrom_of_iUnion).
+theorem Measure.ext_of_generate_exhausting (X μ ν G f : Set)
+  requires firstMeasure : Measure(X, μ)
+  requires secondMeasure : Measure(X, ν)
+  requires pi : PiSystem(G)
+  requires generates : MeasurableSpace.sets(X) =
+    generatedSigma(MeasurableSpace.carrier(X), G)
+  requires spanning : ∀ n ∈ ℕ, f(n) ∈ G ∧ μ(f(n)) ≠ ennTop
+  requires exhausts : sequenceUnion(f) = MeasurableSpace.carrier(X)
+  requires agree : ∀ S ∈ G, μ(S) = ν(S)
+  shows μ = ν
+proof
+  sorry
+
+-- Section: Carathéodory's theorem
+-- The Carathéodory-measurable sets of an outer measure form a σ-algebra,
+-- and the outer measure is a measure on them (Mathlib's
+-- OuterMeasure.caratheodory and OuterMeasure.toMeasure).
+theorem caratheodorySets.sigma (A m : Set)
+  requires outer : OuterMeasure(A, m)
+  shows SigmaAlgebra(A, caratheodorySets(A, m))
+proof
+  sorry
+
+theorem caratheodorySets.measure (A m : Set)
+  requires outer : OuterMeasure(A, m)
+  shows Measure(MeasurableSpace.mk(A, caratheodorySets(A, m)),
+    restrictTo(m, caratheodorySets(A, m)))
+proof
+  sorry
+
+-- Section: Lebesgue measure on ℝ
+theorem realOuterMeasure.outer
+  shows OuterMeasure(ℝ, realOuterMeasure)
+proof
+  sorry
+
+-- The Borel sets are Carathéodory measurable for the Lebesgue outer
+-- measure, so Lebesgue measure is a measure.
+theorem realOuterMeasure.borel_caratheodory
+  shows MeasurableSpace.sets(realMeasurableSpace) ⊆
+    caratheodorySets(ℝ, realOuterMeasure)
+proof
+  sorry
+
+theorem realVolume.measure
+  shows Measure(realMeasurableSpace, realVolume)
+proof
+  sorry
+
+-- Mathlib's Real.volume_Icc, volume_Ioo, volume_Ioc, volume_Ico.
+theorem realVolume.intervals (A B : Real)
+  shows realVolume(realIcc(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIoo(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIoc(A, B)) = ennOfReal(R[B - A]) ∧
+    realVolume(realIco(A, B)) = ennOfReal(R[B - A])
+proof
+  sorry
+
+theorem realVolume.rays (A : Real)
+  shows realVolume(realIoi(A)) = ennTop ∧ realVolume(realIic(A)) = ennTop
+proof
+  sorry
+
+theorem realVolume.whole
+  shows realVolume(ℝ) = ennTop
+proof
+  sorry
+
+-- Mathlib's Set.Countable.measure_zero and Set.Countable.ae_notMem for
+-- Lebesgue measure: countable sets are null.
+theorem realVolume.countable_null (C : Set)
+  requires countable : Countable(C)
+  requires inside : C ⊆ ℝ
+  shows realVolume(C) = realZero
+proof
+  sorry
+
+-- Translation invariance and scaling (Mathlib's map_add_left_eq_self and
+-- Real.volume_preimage_mul_left / Real.smul_map_volume_mul_left).
+theorem realVolume.translate (S : Set, c : Real)
+  requires set : MeasurableSet(realMeasurableSpace, S)
+  shows realVolume(realTranslate(S, c)) = realVolume(S)
+proof
+  sorry
+
+theorem realVolume.dilate (S : Set, c : Real)
+  requires set : MeasurableSet(realMeasurableSpace, S)
+  shows realVolume(realDilate(S, c)) = ennMul(abs(c), realVolume(S))
+proof
+  sorry
+
+theorem realVolume.sigma_finite
+  shows SigmaFinite(realMeasurableSpace, realVolume)
+proof
+  sorry
+
+theorem realVolume.regular
+  shows RegularMeasure(realLine, realVolume) ∧ OpenPositive(realLine, realVolume)
+proof
+  sorry
+
+-- Section: Lebesgue measure on ℝⁿ
+theorem lebesgueOuterMeasure.outer (n : Nat)
+  shows OuterMeasure(functionSpace(n, ℝ), lebesgueOuterMeasure(n))
+proof
+  sorry
+
+theorem lebesgueOuterMeasure.borel_caratheodory (n : Nat)
+  shows MeasurableSpace.sets(euclideanMeasurableSpace(n)) ⊆
+    caratheodorySets(functionSpace(n, ℝ), lebesgueOuterMeasure(n))
+proof
+  sorry
+
+theorem euclideanVolume.measure (n : Nat)
+  shows Measure(euclideanMeasurableSpace(n), euclideanVolume(n))
+proof
+  sorry
+
+-- The volume of a box is the product of its side lengths.
+theorem euclideanVolume.box (n : Nat, a b : Set)
+  requires lower : a ∈ functionSpace(n, ℝ)
+  requires upper : b ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(boxSet(n, a, b)) = boxVolume(n, a, b)
+proof
+  sorry
+
+-- Mathlib's volume_pi_pi and Measure.pi_pi: the volume of a product of
+-- Borel sets of ℝ is the product of their volumes, in [0, ∞].
+theorem euclideanVolume.pi_set_null (n : Nat, S : Set)
+  requires sets : ∀ i ∈ n, MeasurableSet(realMeasurableSpace, S(i))
+  requires null : ∃ i ∈ n, realVolume(S(i)) = realZero
+  shows euclideanVolume(n)(piSet(n, ℝ, S)) = realZero
+proof
+  sorry
+
+theorem euclideanVolume.pi_set_finite (n : Nat, S : Set)
+  requires sets : ∀ i ∈ n, MeasurableSet(realMeasurableSpace, S(i))
+  requires finite : ∀ i ∈ n, realVolume(S(i)) ≠ ennTop
+  shows euclideanVolume(n)(piSet(n, ℝ, S)) =
+    finiteRingProduct(n, ℝ, realAdd, realZero, realNeg, realMul, realOne,
+      measureSequence(realVolume, S))
+proof
+  sorry
+
+-- Mathlib's Measure.pi_univ / volume_pi_eq_dirac: ℝ⁰ is one point of
+-- mass 1.
+theorem euclideanVolume.zero_dimension
+  shows euclideanVolume(0)(functionSpace(0, ℝ)) = realOne
+proof
+  sorry
+
+-- ℝ and ℝ¹ (Mathlib's volume_preserving_funUnique).
+theorem realToVector.measure_preserving
+  shows MeasurePreserving(realToVector, realMeasurableSpace, realVolume,
+    euclideanMeasurableSpace(1), euclideanVolume(1))
+proof
+  sorry
+
+theorem euclideanVolume.translate (n : Nat, S c : Set)
+  requires set : MeasurableSet(euclideanMeasurableSpace(n), S)
+  requires vector : c ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(vectorTranslate(n, S, c)) = euclideanVolume(n)(S)
+proof
+  sorry
+
+-- Mathlib's Measure.addHaar_smul: dilating by c multiplies volume by |c|ⁿ.
+theorem euclideanVolume.dilate (n : Nat, S : Set, c : Real)
+  requires set : MeasurableSet(euclideanMeasurableSpace(n), S)
+  shows euclideanVolume(n)(vectorDilate(n, S, c)) =
+    ennMul(abs(c) ^ n, euclideanVolume(n)(S))
+proof
+  sorry
+
+theorem euclideanVolume.sigma_finite (n : Nat)
+  shows SigmaFinite(euclideanMeasurableSpace(n), euclideanVolume(n))
+proof
+  sorry
+
+theorem euclideanVolume.regular (n : Nat)
+  shows RegularMeasure(euclideanTopology(n), euclideanVolume(n)) ∧
+    OpenPositive(euclideanTopology(n), euclideanVolume(n))
+proof
+  sorry
+
+-- Mathlib's Measure.ae_eval_ne: coordinate hyperplanes are null in ℝⁿ.
+theorem euclideanVolume.hyperplane_null (n : Nat, i : Set, c : Real)
+  requires member : i ∈ n
+  shows euclideanVolume(n)(hyperplane(n, i, c)) = realZero
+proof
+  sorry
+
+-- Countable sets are null in ℝⁿ for n ≥ 1.
+theorem euclideanVolume.countable_null (n : Nat, C : Set)
+  requires positive : 0 < n
+  requires countable : Countable(C)
+  requires inside : C ⊆ functionSpace(n, ℝ)
+  shows NullSet(euclideanMeasurableSpace(n), euclideanVolume(n), C)
+proof
+  sorry
+
+-- Balls (Mathlib's addHaar_ball_center, addHaar_ball_mul_of_pos,
+-- measure_ball_pos, measure_ball_ne_top).
+theorem euclideanVolume.ball_center (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) =
+    euclideanVolume(n)(euclideanBall(n, zeroVector(n), r))
+proof
+  sorry
+
+theorem euclideanVolume.ball_scale (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  requires positive : realZero < r
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) =
+    ennMul(r ^ n, euclideanVolume(n)(euclideanBall(n, zeroVector(n), realOne)))
+proof
+  sorry
+
+theorem euclideanVolume.ball_positive_finite (n : Nat, c : Set, r : Real)
+  requires center : c ∈ functionSpace(n, ℝ)
+  requires positive : realZero < r
+  shows euclideanVolume(n)(euclideanBall(n, c, r)) ≠ realZero ∧
+    euclideanVolume(n)(euclideanBall(n, c, r)) ≠ ennTop
+proof
+  sorry
+
+end Measures

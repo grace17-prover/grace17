@@ -1,0 +1,239 @@
+-- The ramified columns: for each prime w of E dividing π a central unit
+-- ν_w (an integral norm-one finite adele, 1 away from w and w̄, whose
+-- w-component generates the units modulo w), the translation z_w of the
+-- columns by the scalar ν_w, the ramifying operator ∏_{w∈s}(1 − z_w) and
+-- its range, the ramified columns; short forms; the dimension bounds and
+-- the spanning by short ramified columns.
+-- Source: grh-compact/src/New/Columns/ChainValuation.lean ("Short integral
+-- algebraic forms span; ramified columns have nearly full dimension.";
+-- IsShort, Data.exists_centralGen, Data.centralGen, Data.centralRep,
+-- Data.ramifyingOp, Data.ramifiedColumns, exists_eq_sub_centralGen,
+-- sum_height_mul_kappa_le, finrank_ker_one_sub_centralGen_le,
+-- ramifyingOp_finrank_comap_and_short, span_short_ramifiedColumns,
+-- norm_star_piG_le_one).
+-- Encoding. The source chooses ν_w by exists_centralGen (Data.centralGen);
+-- here the family w ↦ ν_w is the field centralGen of the record of
+-- choices (AutoChoices), bound by CentralGens, the property it is chosen
+-- by. The scalar of ∏_{w∈T} ν_w is a product in the unit group of 𝔸_f(E),
+-- and ∏_{w∈s}(1 − z_w) is written out as Σ_{T⊆s} (−1)^{|T|} z_T. Not
+-- stated here: the determinant theta periods (detKernel, detPeriod,
+-- detPeriod_eq_stdClassSum_sum, detPeriod_insert: θ_{α,α} of the pair
+-- (I_n, I_n) of Lib/Weil), the general span_isShort_eq_top
+-- (shortBasisConst of Lib/Adelic), and the good finite data and chains
+-- (pairTranslates, admissibleTranslations, IsGoodDatum,
+-- exists_chain_eq_sum, IsGoodDatum.gaugeLe_chain: the chains of lift
+-- kernels of New/Seesaw and New/Rows).
+-- Part of the GRH blueprint (layer 5, the argument).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Proof.Columns.ChainValuation
+import GRH.Proof.Columns.ColumnDefs
+import GRH.Proof.Columns.JetExponentBound
+
+section ChainValuation
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: The central units
+-- ChainValuation.lean, Data.exists_centralGen at a prime w dividing π: ν
+-- is an integral norm-one finite adele of E (ν ν̄ = 1), equal to 1 at
+-- every place other than w and w̄, and every i with ν_w^i ≡ 1 modulo w is
+-- divisible by N − 1.
+predicate CentralGenAt (P D N w ν : Set) :=
+  ν ∈ finInt(dataE(P, D)) ∧
+  finMul(dataE(P, D), ν, finStar(dataE(P, D))(ν)) = finOne(dataE(P, D)) ∧
+  (∀ u ∈ finPlaces(dataE(P, D)), u ≠ w → conjugatePlace(dataE(P, D), u) ≠ w →
+    ν(u) = Ring.one(adicCompletionField(dataE(P, D), u))) ∧
+  (∀ i ∈ ℕ,
+    monoidPow(Ring.mul(resField(dataE(P, D), w)), Ring.one(resField(dataE(P, D), w)),
+      reduceAt(dataE(P, D), w, ν), i) = Ring.one(resField(dataE(P, D), w)) →
+    sub(N, 1) ∣ i)
+
+-- The family w ↦ ν_w over the primes dividing π (Data.centralGen).
+predicate CentralGens (P D N π ν : Set) :=
+  (ν : piPlacesOf(P, D, π) → finAdeles(dataE(P, D))) ∧
+  ∀ w ∈ piPlacesOf(P, D, π), CentralGenAt(P, D, N, w, ν(w))
+
+-- The central unit ν_w of the record of choices.
+def centralGen (P D L w : Set) : Set := AutoChoices.centralGen(LiftChoices.choices(L))(w)
+
+-- Section: Translation by central scalars
+-- ∏_{w∈T} ν_w, a product in the unit group of 𝔸_f(E).
+def centralGenFamily (P D L : Set) : Set :=
+  { (w, centralGen(P, D, L, w)) | w ∈ piPlaces(P, D, L) }
+
+def centralProduct (P D L T : Set) : Set :=
+  groupFiniteSum(unitGroup(finiteAdeleRing(dataE(P, D))), T, centralGenFamily(P, D, L))
+
+-- The domain G_f × WeylIndex of the columns.
+def columnDomain (P D : Set) : Set :=
+  gfMatrices(dataE(P, D), dataRank(D, (0:N))) × WeightDatum.index(stageWeight(P, D, (0:N)))
+
+-- (z_a φ)(g, i) = φ(g · a, i), the right translation by the scalar matrix
+-- of the finite adele a (algFormRep (scalarFin n a), Data.centralRep).
+def centralTranslate (P D a φ : Set) : Set :=
+  { (q, φ((matMul(finiteAdeleRing(dataE(P, D)), dataRank(D, (0:N)), dataRank(D, (0:N)),
+      dataRank(D, (0:N)), fst(q),
+      matScalar(finiteAdeleRing(dataE(P, D)), dataRank(D, (0:N)), a)), snd(q)))) |
+    q ∈ columnDomain(P, D) }
+
+-- (−1)^{|T|} as a complex number.
+def subsetSign (T : Set) : Set :=
+  ⋃({ z ∈ complexCarrier | (Odd(cardinality(T)) ∧ z = ℂ[-1]) ∨
+    (¬Odd(cardinality(T)) ∧ z = ℂ[1]) })
+
+def ramifyingTerms (P D L s φ q : Set) : Set :=
+  { (T, ℂ[subsetSign(T) * centralTranslate(P, D, centralProduct(P, D, L, T), φ)(q)]) |
+    T ∈ 𝒫(s) }
+
+-- ChainValuation.lean, Data.ramifyingOp s: ∏_{w∈s}(1 − z_w) on the
+-- columns, as Σ_{T⊆s} (−1)^{|T|} z_{∏_{w∈T} ν_w} (the translations
+-- commute and z_a z_b = z_{ab}).
+def ramifyingImage (P D L s φ : Set) : Set :=
+  { (q, groupFiniteSum(complexAdditiveGroup, 𝒫(s), ramifyingTerms(P, D, L, s, φ, q))) |
+    q ∈ columnDomain(P, D) }
+
+def ramifyingOp (P D L s : Set) : Set :=
+  { (φ, ramifyingImage(P, D, L, s, φ)) | φ ∈ columnForms(P, D, L) }
+
+-- ChainValuation.lean, Data.ramifiedColumns: the range of
+-- ∏_{w∣π}(1 − z_w) on the columns.
+def ramifiedColumnSet (P D L : Set) : Set :=
+  { ψ ∈ columnForms(P, D, L) | ∃ φ ∈ columnForms(P, D, L),
+    ψ = ramifyingOp(P, D, L, piPlaces(P, D, L))(φ) }
+
+-- The kernel of 1 − z_w on the columns.
+def centralFixed (P D L w : Set) : Set :=
+  { φ ∈ columnForms(P, D, L) | centralTranslate(P, D, centralGen(P, D, L, w), φ) = φ }
+
+-- Section: Short forms
+-- ChainValuation.lean, IsShort B φ: φ is integral at every p-adic place
+-- (GaugeLe 1 1: weylGauge(g, φ(g)) ≤ 1 for every g) and every conjugate
+-- σ ∘ φ(g), σ ∈ Aut ℂ, has squared norm at most B.
+predicate IsShortForm (E n ω B φ : Set) :=
+  (∀ p ∈ ℕ, Prime(p) → ∀ ι ∈ padicPlaces(p), ∀ g ∈ gfMatrices(E, n),
+    RealLe(weightGauge(ω, ι, g, formAt(ω, φ, g)), realOne)) ∧
+  (∀ σ ∈ complexAutomorphisms, ∀ g ∈ gfMatrices(E, n),
+    RealLe(weylNormSq(ω, conjFormAt(ω, σ, φ, g)), B))
+
+-- The B-short columns.
+def shortColumns (P D L B : Set) : Set :=
+  { φ ∈ columnForms(P, D, L) |
+    IsShortForm(dataE(P, D), dataRank(D, (0:N)), stageWeight(P, D, (0:N)), B, φ) }
+
+-- The preimage T_s⁻¹(X) of a set of columns.
+def ramifyingPreimage (P D L s X : Set) : Set :=
+  { φ ∈ columnForms(P, D, L) | ramifyingOp(P, D, L, s)(φ) ∈ X }
+
+-- The ℂ-span of a set of columns, as a module.
+def columnSubmodule (P D L X : Set) : Set :=
+  submoduleModule(columnModule(P, D, L), complexRing, X)
+
+-- Section: Facts
+-- ChainValuation.lean, Data.exists_centralGen: the central units exist.
+theorem CentralGens.exists (P D N π : Set)
+  requires data : Data(P, D)
+  requires level : LevelPrime(P, D, N)
+  requires pi : LevelPi(P, D, N, π)
+  shows ∃ ν, CentralGens(P, D, N, π, ν)
+proof
+  sorry
+
+-- ChainValuation.lean, Data.exists_eq_sub_centralGen: every ramified
+-- column is ψ − z_w ψ for some column ψ, at each prime w dividing π.
+theorem ramifiedColumnSet.eq_sub_centralGen (P D L w φ : Set)
+  requires data : Data(P, D)
+  requires record : LiftChoices.Data(L)
+  requires level : LevelPrime(P, D, L.N)
+  requires choices : AutoChoices.Data(LiftChoices.choices(L))
+  requires pi : LevelPi(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)))
+  requires gens : CentralGens(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)),
+    AutoChoices.centralGen(LiftChoices.choices(L)))
+  requires hw : w ∈ piPlaces(P, D, L)
+  requires hφ : φ ∈ ramifiedColumnSet(P, D, L)
+  shows ∃ ψ ∈ columnForms(P, D, L), ∀ q ∈ columnDomain(P, D),
+    φ(q) = ℂ[ψ(q) - centralTranslate(P, D, centralGen(P, D, L, w), ψ)(q)]
+proof
+  sorry
+
+-- ChainValuation.lean, Data.sum_height_mul_kappa_le: Σ_{h < n₀} h κ_τ(h) ≤ a
+-- at every place τ.
+theorem columnCounts.boxes_le (P D τ : Set)
+  requires data : Data(P, D)
+  requires hτ : τ ∈ dataPlaces(P, D)
+  shows realPartialSum(boxTerms(columnCounts(P, D), τ), dataRank(D, (0:N))) ≤
+    realNat(dataA(P, D))
+proof
+  sorry
+
+-- ChainValuation.lean, Data.finrank_ker_one_sub_centralGen_le: the kernel
+-- of 1 − z_w has dimension at most dim(columns)/(N − 1).
+theorem centralFixed.finrank_le (P D L w : Set)
+  requires data : Data(P, D)
+  requires record : LiftChoices.Data(L)
+  requires level : LevelPrime(P, D, L.N)
+  requires choices : AutoChoices.Data(LiftChoices.choices(L))
+  requires pi : LevelPi(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)))
+  requires gens : CentralGens(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)),
+    AutoChoices.centralGen(LiftChoices.choices(L)))
+  requires hw : w ∈ piPlaces(P, D, L)
+  shows realNat(finrank(columnSubmodule(P, D, L, centralFixed(P, D, L, w)), complexRing)) ≤
+    R[realNat(finrank(columnModule(P, D, L), complexRing)) / (realNat(L.N) - 1)]
+proof
+  sorry
+
+-- ChainValuation.lean, Data.ramifyingOp_finrank_comap_and_short: for a set
+-- s of primes dividing π and a subspace X of the columns,
+-- dim T_s⁻¹X ≤ dim X + |s| dim(columns)/(N − 1), and T_s makes B-short
+-- columns 4^{|s|}B-short.
+theorem ramifyingOp.finrank_comap_and_short (P D L s X : Set)
+  requires data : Data(P, D)
+  requires record : LiftChoices.Data(L)
+  requires level : LevelPrime(P, D, L.N)
+  requires choices : AutoChoices.Data(LiftChoices.choices(L))
+  requires pi : LevelPi(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)))
+  requires gens : CentralGens(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)),
+    AutoChoices.centralGen(LiftChoices.choices(L)))
+  requires hs : s ⊆ piPlaces(P, D, L)
+  requires sub : SubmoduleOf(X, columnModule(P, D, L), complexRing)
+  shows realNat(finrank(columnSubmodule(P, D, L, ramifyingPreimage(P, D, L, s, X)),
+      complexRing)) ≤
+      R[realNat(finrank(columnSubmodule(P, D, L, X), complexRing)) +
+        realNat(cardinality(s)) / (realNat(L.N) - 1) *
+          realNat(finrank(columnModule(P, D, L), complexRing))] ∧
+    (∀ B ∈ ℝ, ∀ φ ∈ shortColumns(P, D, L, B),
+      ramifyingOp(P, D, L, s)(φ) ∈
+        shortColumns(P, D, L, R[4 ^ cardinality(s) * B]))
+proof
+  sorry
+
+-- ChainValuation.lean, Data.span_short_ramifiedColumns: the ramified
+-- columns are spanned by the exp(f a (log b)³)-short ramified columns.
+theorem ramifiedColumnSet.span_short (P D L : Set)
+  requires data : Data(P, D)
+  requires record : LiftChoices.Data(L)
+  requires level : LevelPrime(P, D, L.N)
+  requires choices : AutoChoices.Data(LiftChoices.choices(L))
+  requires pi : LevelPi(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)))
+  requires gens : CentralGens(P, D, L.N, AutoChoices.pi(LiftChoices.choices(L)),
+    AutoChoices.centralGen(LiftChoices.choices(L)))
+  shows ramifiedColumnSet(P, D, L) ⊆
+    moduleSpan(columnModule(P, D, L), complexRing,
+      ramifiedColumnSet(P, D, L) ∩ shortColumns(P, D, L, realExp(budget(P, D))))
+proof
+  sorry
+
+-- ChainValuation.lean, norm_star_piG_le_one: |ι(π̄_G)| ≤ 1 at every
+-- p-adic place.
+theorem piGBar.integral (P D p ι : Set)
+  requires data : Data(P, D)
+  requires prime : Prime(p)
+  requires place : ι ∈ padicPlaces(p)
+  shows RealLe(padicPlaceNorm(p, ι, piGBar(P, D)), realOne)
+proof
+  sorry
+
+end ChainValuation

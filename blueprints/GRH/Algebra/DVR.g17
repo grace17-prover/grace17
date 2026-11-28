@@ -1,0 +1,1143 @@
+-- Discrete valuation rings: local principal ideal domains that are not
+-- fields (Mathlib's IsDiscreteValuationRing), uniformizers, the
+-- factorization x = u πⁿ, the additive valuation on nonzero elements
+-- (IsDiscreteValuationRing.addVal) with its laws, the ideals mⁿ = (πⁿ),
+-- the Krull intersection, elements of the fraction field as u π^{±n},
+-- valuation rings (ValuationRing), characterizations of DVRs among
+-- Noetherian local domains, localizations of principal ideal domains at
+-- nonzero primes, and the lengths of the quotients R ⧸ (πⁿ).
+-- Fitting ideals over a DVR are defined in the source itself and are
+-- ported with it.
+-- Part of the GRH blueprint.
+-- Planned home: Algebra/Ring/DiscreteValuationRing.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Algebra.DVR
+import GRH.Algebra.Integral
+
+-- Section: Definitions
+-- A discrete valuation ring: a principal ideal domain that is local and
+-- not a field (IsDomain with IsDiscreteValuationRing).
+predicate DiscreteValuationRing (R : Set) :=
+  PrincipalIdealDomain(R) ∧ LocalRing(R) ∧ ¬Field(R)
+
+-- π is a uniformizer: it generates the maximal ideal
+-- (IsDiscreteValuationRing.irreducible_iff_uniformizer, read as
+-- maximalIdeal = span {π}).
+predicate Uniformizer (R π : Set) :=
+  π ∈ Ring.carrier(R) ∧ localMaximalIdeal(R) = ringMultiples(R, π)
+
+-- Helpers (DVR track): ring identities in a domain, membership in every
+-- power, and the Krull intersection ⋂ mⁿ = 0, proved from the maximal
+-- condition on the principal ideals (y) with x = πⁿ y.
+section DvrRingHelpers
+variable (R : Set)
+hypothesis comm : CommRing(R)
+
+theorem dvrHelp.one_mul (x : R)
+  shows R[1] * x = x
+proof
+  ring
+
+theorem dvrHelp.mul_zero (x : R)
+  shows x * R[0] = R[0]
+proof
+  ring
+
+theorem dvrHelp.cancel_pow (π y z : R) (n : Nat)
+  requires domain : IntegralDomain(R)
+  requires nonzero : π ≠ R[0]
+  requires equal : π ^ n * y = π ^ succ(n) * z
+  shows y = π * z ∧ RingDvd(R, z, y)
+proof
+  have ringR := CommRing.to_ring with comm
+  have shift := add.right_one at n with *
+  have πIn : π ∈ R.carrier by assumption
+  have yIn : y ∈ R.carrier by assumption
+  have zIn : z ∈ R.carrier by assumption
+  have s := Ring.pow_succ at R, π, n with πIn, ringR
+  rw ← shift at equal
+  rw s at equal
+  have pne : π ^ n ≠ R[0]
+    intro pz
+    have πz := IntegralDomain.pow_eq_zero at R, π, n with domain, πIn, pz
+    exact nonzero with πz
+  have e2 : π ^ n * y = π ^ n * (π * z)
+    linear_combination equal
+  have pIn : π ^ n ∈ R.carrier by typecheck
+  have πzIn : π * z ∈ R.carrier by typecheck
+  have yEq := IntegralDomain.mul_cancel at R, π ^ n, y, π * z with domain, pIn, yIn, πzIn, pne, e2
+  have yEq2 : y = z * π
+    linear_combination yEq
+  have d := RingDvd.intro at R, z, y, π with zIn, yIn, πIn, comm, yEq2
+  exact ⟨yEq, d⟩
+
+theorem dvrHelp.unit_of_cycle (y z w π : R)
+  requires domain : IntegralDomain(R)
+  requires nonzero : y ≠ R[0]
+  requires first : y = π * z
+  requires second : z = y * w
+  shows RingUnit(R, π)
+proof
+  have yIn : y ∈ R.carrier by assumption
+  have πIn : π ∈ R.carrier by assumption
+  have wIn : w ∈ R.carrier by assumption
+  have e : y * (π * w) = y * R[1]
+    linear_combination -first - π * second
+  have pw : π * w ∈ R.carrier by typecheck
+  have one : R[1] ∈ R.carrier by typecheck
+  have c := IntegralDomain.mul_cancel at R, y, π * w, R[1] with domain, yIn, pw, one, nonzero, e
+  have c2 : w * π = R[1]
+    linear_combination c
+  unfold RingUnit
+  exact ⟨πIn, w, wIn, c, c2⟩
+
+theorem dvrHelp.mul_comm (a b : R)
+  shows a * b = b * a
+proof
+  ring
+
+theorem dvrHelp.zero_mul (x : R)
+  shows R[0] * x = R[0]
+proof
+  ring
+
+theorem dvrHelp.pow_succ_mul (π c : R) (n : Nat)
+  shows π ^ n * (π * c) = π ^ succ(n) * c
+proof
+  have ringR := CommRing.to_ring with comm
+  have shift := add.right_one at n with *
+  have πIn : π ∈ R.carrier by assumption
+  have s := Ring.pow_succ at R, π, n with πIn, ringR
+  rw ← shift
+  rw s
+  ring
+
+theorem dvrHelp.one_pow_one (π : R)
+  shows R[1] * π ^ 1 = π
+proof
+  ring
+
+theorem dvrHelp.mul_pows (u w π : R) (a b : Nat)
+  shows (u * π ^ a) * (w * π ^ b) = (u * w) * π ^ (a + b)
+proof
+  have ringR := CommRing.to_ring with comm
+  have πIn : π ∈ R.carrier by assumption
+  have s := Ring.pow_add at R, π, a, b with πIn, ringR
+  rw s
+  ring
+
+end DvrRingHelpers
+
+theorem dvrHelp.add_eq_one (a b : Nat)
+  requires sum : 1 = a + b
+  requires nonzero : a ≠ 0
+  shows b = 0
+proof
+  have pos := Less.positive_of_ne_zero at a with nonzero
+  arith
+
+theorem dvrHelp.all_pows (R I x : Set) (n : Nat)
+  requires step : ∀ k ∈ ℕ, x ∈ idealPow(R, I, k) → x ∈ idealPow(R, I, succ(k))
+  requires base : x ∈ idealPow(R, I, 0)
+  shows x ∈ idealPow(R, I, n)
+proof
+  induction n
+  | zero =>
+    exact base
+  | succ(k) using ih =>
+    have kIn : k ∈ ℕ by typecheck
+    exact step with k, kIn, ih
+
+def dvrKrullFamily (R π x : Set) : Set :=
+  { J ∈ 𝒫(Ring.carrier(R)) | ∃ y ∈ Ring.carrier(R), ∃ n ∈ ℕ,
+    x = call2(Ring.mul(R), Ring.pow(R, π, n), y) ∧ J = ringMultiples(R, y) }
+
+theorem dvrHelp.krull (R x : Set)
+  requires dvr : DiscreteValuationRing(R)
+  requires member : x ∈ Ring.carrier(R)
+  requires all : ∀ n ∈ ℕ, x ∈ idealPow(R, localMaximalIdeal(R), n)
+  shows x = Ring.zero(R)
+proof
+  have d0 := dvr
+  obtain ⟨pid, local, notField⟩ := d0
+  have pid0 := pid
+  obtain ⟨domain, allP⟩ := pid0
+  have comm := LocalRing.comm_ring at R with local
+  have ringR := CommRing.to_ring with comm
+  have noeth := NoetherianRing.of_pid at R with comm, pid
+  have nm := (NoetherianRing.iff_module at R with comm).forward with noeth
+  have selfMod := Ring.to_module at R with ringR
+  have maxC := NoetherianModule.maximal at R, selfModule(R) with comm, selfMod, nm
+  have mi := localMaximalIdeal.ideal at R with local
+  obtain ⟨_, π, πR, mπ⟩ := allP with localMaximalIdeal(R), mi
+  have zeroR := Ring.zero_mem at R with ringR
+  have πne : π ≠ Ring.zero(R)
+    intro πz
+    have m2 := mπ
+    rw πz at m2
+    have mz := (ringMultiples.eq_zero_iff at R, Ring.zero(R) with zeroR, comm).backward with rfl
+    rw mz at m2
+    have f := (LocalRing.maximal_zero_iff at R with local).forward with m2
+    exact notField with f
+  by_contra xne
+  have zeroN : 0 ∈ ℕ by typecheck
+  have p0 := Ring.pow_zero at R, π with πR, ringR
+  have om := dvrHelp.one_mul at R, x with comm, member
+  have e : x = call2(Ring.mul(R), Ring.pow(R, π, 0), x)
+    rw p0
+    symm
+    exact om
+  have mx := ringMultiples.ideal at R, x with member, comm
+  have mxS := Ideal.subset at R, ringMultiples(R, x) with mx
+  have xF : ringMultiples(R, x) ∈ dvrKrullFamily(R, π, x)
+    apply dvrKrullFamily.membership.backward
+    exact ⟨(powerset.membership_iff.backward with mxS), x, member, 0, zeroN, e, rfl⟩
+  have nonE : Nonempty(dvrKrullFamily(R, π, x))
+    exact ⟨ringMultiples(R, x), xF⟩
+  have ne := Nonempty.ne_empty with nonE
+  have subsF : ∀ J ∈ dvrKrullFamily(R, π, x), SubmoduleOf(J, selfModule(R), R)
+    intros J hJ
+    obtain ⟨_, y, yR, n, nN, _, Jy⟩ := dvrKrullFamily.membership.forward with hJ
+    have my := ringMultiples.ideal at R, y with yR, comm
+    rw Jy
+    exact (Ideal.iff_submodule at R, ringMultiples(R, y) with comm).forward with my
+  obtain ⟨J0, hJ0, maxJ⟩ := maxC with dvrKrullFamily(R, π, x), ne, subsF
+  obtain ⟨_, y, yR, n, nN, xy, J0y⟩ := dvrKrullFamily.membership.forward with hJ0
+  have nNat : Nat(n) := nN
+  have sN : succ(n) ∈ ℕ by typecheck
+  have xm := all with succ(n), sN
+  rw mπ at xm
+  rw (idealPow.multiples at R, π, succ(n) with πR, comm) at xm
+  have pR : Ring.pow(R, π, succ(n)) ∈ R.carrier by typecheck
+  have dvd := (ringMultiples.mem_iff at R, Ring.pow(R, π, succ(n)), x with pR, member, comm).forward with xm
+  obtain ⟨_, _, z, zR, xz⟩ := dvd
+  have eqyz : call2(Ring.mul(R), Ring.pow(R, π, n), y) = call2(Ring.mul(R), Ring.pow(R, π, succ(n)), z)
+    rw ← xy
+    exact xz
+  obtain ⟨yπz, zdy⟩ := dvrHelp.cancel_pow at R, π, y, z, n with comm, πR, yR, zR, domain, πne, eqyz
+  have mz := ringMultiples.ideal at R, z with zR, comm
+  have mzS := Ideal.subset at R, ringMultiples(R, z) with mz
+  have zF : ringMultiples(R, z) ∈ dvrKrullFamily(R, π, x)
+    apply dvrKrullFamily.membership.backward
+    exact ⟨(powerset.membership_iff.backward with mzS), z, zR, succ(n), sN, xz, rfl⟩
+  have yz := (ringMultiples.subset_iff at R, y, z with yR, zR, comm).backward with zdy
+  rw ← J0y at yz
+  have same := maxJ with ringMultiples(R, z), zF, yz
+  rw J0y at same
+  have zIn := ringMultiples.self_mem at R, z with zR, comm
+  rw same at zIn
+  have ydz := (ringMultiples.mem_iff at R, y, z with yR, zR, comm).forward with zIn
+  obtain ⟨_, _, w, wR, zyw⟩ := ydz
+  have yne : y ≠ Ring.zero(R)
+    intro yz0
+    rw yz0 at xy
+    have pnR : Ring.pow(R, π, n) ∈ R.carrier by typecheck
+    have mz0 := dvrHelp.mul_zero at R, Ring.pow(R, π, n) with comm, pnR
+    rw mz0 at xy
+    exact xne with xy
+  have unit := dvrHelp.unit_of_cycle at R, y, z, w, π with comm, yR, zR, wR, πR, domain, yne, yπz, zyw
+  have πm := ringMultiples.self_mem at R, π with πR, comm
+  rw ← mπ at πm
+  have nonunit := (localMaximalIdeal.mem_iff at R, π with local, πR).forward with πm
+  exact nonunit with unit
+
+-- The valuation of a nonzero x: the n with x ∈ mⁿ ∖ mⁿ⁺¹
+-- (IsDiscreteValuationRing.addVal on nonzero elements; Mathlib's value
+-- ⊤ at 0 is not part of the definition, and no uniformizer is chosen).
+defunique dvrValuation (R x : Set) (n ∈ ℕ) :=
+  x ∈ idealPow(R, localMaximalIdeal(R), n) ∧
+  x ∉ idealPow(R, localMaximalIdeal(R), succ(n))
+requires dvr : DiscreteValuationRing(R)
+requires member : x ∈ Ring.carrier(R)
+requires nonzero : x ≠ Ring.zero(R)
+proof
+  have d0 := dvr
+  obtain ⟨_, local, _⟩ := d0
+  have comm := LocalRing.comm_ring at R with local
+  by_contra none
+  have step : ∀ k ∈ ℕ, x ∈ idealPow(R, localMaximalIdeal(R), k) →
+      x ∈ idealPow(R, localMaximalIdeal(R), succ(k))
+    intros k hk xk
+    by_contra notS
+    apply none
+    witness k
+    exact ⟨hk, xk, notS⟩
+  have base : x ∈ idealPow(R, localMaximalIdeal(R), 0)
+    rw (idealPow.zero at R, localMaximalIdeal(R) with comm)
+    exact member
+  have allPow : ∀ n ∈ ℕ, x ∈ idealPow(R, localMaximalIdeal(R), n)
+    intros n hn
+    have nNat : Nat(n) := hn
+    exact dvrHelp.all_pows at R, localMaximalIdeal(R), x, n with step, base
+  have z := dvrHelp.krull at R, x with dvr, member, allPow
+  exact nonzero with z
+uniqueness
+  intros u hu first v hv second
+  have d0 := dvr
+  obtain ⟨_, local, _⟩ := d0
+  have comm := LocalRing.comm_ring at R with local
+  have mi := localMaximalIdeal.ideal at R with local
+  have uNat := nat.omega.backward with hu
+  have vNat := nat.omega.backward with hv
+  obtain ⟨xu, nxu⟩ := first
+  obtain ⟨xv, nxv⟩ := second
+  have ule : u ≤ v
+    by_contra gt
+    have le : succ(v) ≤ u by arith
+    have sub := idealPow.antitone at R, localMaximalIdeal(R), succ(v), u with comm, mi, le
+    apply nxv
+    exact sub with x, xu
+  have vle : v ≤ u
+    by_contra gt
+    have le : succ(u) ≤ v by arith
+    have sub := idealPow.antitone at R, localMaximalIdeal(R), succ(u), v with comm, mi, le
+    apply nxu
+    exact sub with x, xv
+  arith
+
+-- A valuation ring: a domain in which of any two elements one divides the
+-- other (ValuationRing).
+predicate ValuationRing (R : Set) :=
+  IntegralDomain(R) ∧
+  (∀ a b ∈ Ring.carrier(R), RingDvd(R, a, b) ∨ RingDvd(R, b, a))
+
+-- A ring in which of any two elements one divides the other
+-- (PreValuationRing); ValuationRing is the domain case.
+predicate PreValuationRing (R : Set) :=
+  CommRing(R) ∧
+  (∀ a ∈ Ring.carrier(R), ∀ b ∈ Ring.carrier(R), RingDvd(R, a, b) ∨ RingDvd(R, b, a))
+
+-- A Dedekind domain: a Noetherian integrally closed domain in which every
+-- nonzero prime is maximal (IsDedekindDomain; Mathlib does not exclude
+-- fields, and neither does this).
+predicate DedekindDomain (R : Set) :=
+  IntegralDomain(R) ∧ NoetherianRing(R) ∧ IntegrallyClosedDomain(R) ∧
+  (∀ P, PrimeIdeal(R, P) → P ≠ {Ring.zero(R)} → MaximalIdeal(R, P))
+
+-- Section: Laws of discrete valuation rings
+section DiscreteValuationRings
+variable (R : Set)
+hypothesis dvr : DiscreteValuationRing(R)
+
+theorem DiscreteValuationRing.pid
+  shows PrincipalIdealDomain(R)
+proof
+  obtain ⟨pid, _, _⟩ := dvr
+  exact pid
+
+theorem DiscreteValuationRing.local_ring
+  shows LocalRing(R)
+proof
+  obtain ⟨_, local, _⟩ := dvr
+  exact local
+
+theorem DiscreteValuationRing.domain
+  shows IntegralDomain(R)
+proof
+  obtain ⟨pid, _, _⟩ := dvr
+  obtain ⟨domain, _⟩ := pid
+  exact domain
+
+-- IsDiscreteValuationRing.not_a_field: m ≠ 0.
+theorem DiscreteValuationRing.maximal_nonzero
+  shows localMaximalIdeal(R) ≠ {R.zero}
+proof
+  obtain ⟨_, local, notField⟩ := dvr
+  intro h
+  have f := (LocalRing.maximal_zero_iff at R with local).forward with h
+  exact notField with f
+
+-- IsDiscreteValuationRing.exists_irreducible: a uniformizer exists, and
+-- uniformizers are exactly the irreducible elements
+-- (irreducible_iff_uniformizer).
+theorem Uniformizer.exists
+  shows ∃ π ∈ R.carrier, Uniformizer(R, π)
+proof
+  obtain ⟨pid, local, _⟩ := dvr
+  obtain ⟨_, all⟩ := pid
+  have mi := localMaximalIdeal.ideal at R with local
+  obtain ⟨_, a, aR, ma⟩ := all with localMaximalIdeal(R), mi
+  refine ⟨a, aR, ?_⟩
+  unfold Uniformizer
+  exact ⟨aR, ma⟩
+
+-- Two uniformizers are associated.
+theorem Uniformizer.associated (π ϖ : Set)
+  requires first : Uniformizer(R, π)
+  requires second : Uniformizer(R, ϖ)
+  shows RingAssociated(R, π, ϖ)
+proof
+  have domain := DiscreteValuationRing.domain at R with dvr
+  have f0 := first
+  have s0 := second
+  obtain ⟨πR, mπ⟩ := f0
+  obtain ⟨ϖR, mϖ⟩ := s0
+  have eq : ringMultiples(R, π) = ringMultiples(R, ϖ)
+    rw ← mπ
+    exact mϖ
+  exact (IntegralDomain.multiples_eq_iff at R, π, ϖ with domain, πR, ϖR).forward with eq
+
+theorem Uniformizer.maximal_pow (π : Set) (n : Nat)
+  requires uniformizer : Uniformizer(R, π)
+  shows idealPow(R, localMaximalIdeal(R), n) = ringMultiples(R, Ring.pow(R, π, n))
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  obtain ⟨πR, mEq⟩ := uniformizer
+  rw mEq
+  exact idealPow.multiples at R, π, n with πR, comm
+
+-- IsDiscreteValuationRing.eq_unit_mul_pow_irreducible: every nonzero x is
+-- u πⁿ for a unit u, with n the valuation of x.
+theorem Uniformizer.factorization (π x : Set)
+  requires uniformizer : Uniformizer(R, π)
+  requires member : x ∈ R.carrier
+  requires nonzero : x ≠ R.zero
+  shows ∃ u ∈ ringUnits(R),
+    x = call2(R.mul, u, Ring.pow(R, π, dvrValuation(R, x)))
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have un0 := uniformizer
+  obtain ⟨πR, mπ⟩ := un0
+  obtain ⟨vN, xv, nxv⟩ := dvrValuation.selected at R, x with dvr, member, nonzero
+  have vNat : Nat(dvrValuation(R, x)) := vN
+  rw (Uniformizer.maximal_pow at R, π, dvrValuation(R, x) with dvr, uniformizer) at xv
+  rw (Uniformizer.maximal_pow at R, π, succ(dvrValuation(R, x)) with dvr, uniformizer) at nxv
+  have pR : Ring.pow(R, π, dvrValuation(R, x)) ∈ R.carrier by typecheck
+  have p2R : Ring.pow(R, π, succ(dvrValuation(R, x))) ∈ R.carrier by typecheck
+  have d := (ringMultiples.mem_iff at R, Ring.pow(R, π, dvrValuation(R, x)), x with pR, member, comm).forward with xv
+  obtain ⟨_, _, u, uR, xu⟩ := d
+  have unit : RingUnit(R, u)
+    by_contra nu
+    have um := (localMaximalIdeal.mem_iff at R, u with local, uR).backward with nu
+    rw mπ at um
+    have du := (ringMultiples.mem_iff at R, π, u with πR, uR, comm).forward with um
+    obtain ⟨_, _, c, cR, uc⟩ := du
+    have ps := dvrHelp.pow_succ_mul at R, π, c, dvrValuation(R, x) with comm, πR, cR
+    rw uc at xu
+    rw ps at xu
+    have dd := RingDvd.intro at R, Ring.pow(R, π, succ(dvrValuation(R, x))), x, c with p2R, member, cR, comm, xu
+    have inS := (ringMultiples.mem_iff at R, Ring.pow(R, π, succ(dvrValuation(R, x))), x with p2R, member, comm).backward with dd
+    exact nxv with inS
+  have uU := ringUnits.mem_of_unit at R, u with comm, unit
+  refine ⟨u, uU, ?_⟩
+  have c := dvrHelp.mul_comm at R, Ring.pow(R, π, dvrValuation(R, x)), u with comm, pR, uR
+  rw c at xu
+  exact xu
+
+-- Membership in mⁿ is valuation at least n, for nonzero x.
+theorem dvrValuation.mem_pow_iff (x : Set) (n : Nat)
+  requires member : x ∈ R.carrier
+  requires nonzero : x ≠ R.zero
+  shows x ∈ idealPow(R, localMaximalIdeal(R), n) ↔ n ≤ dvrValuation(R, x)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have mi := localMaximalIdeal.ideal at R with local
+  obtain ⟨vN, xv, nxv⟩ := dvrValuation.selected at R, x with dvr, member, nonzero
+  have vNat : Nat(dvrValuation(R, x)) := vN
+  constructor
+  . intro xn
+    by_contra gt
+    have le : succ(dvrValuation(R, x)) ≤ n by arith
+    have sub := idealPow.antitone at R, localMaximalIdeal(R), succ(dvrValuation(R, x)), n with comm, mi, le
+    exact nxv with (sub with x, xn)
+  . intro le
+    have sub := idealPow.antitone at R, localMaximalIdeal(R), n, dvrValuation(R, x) with comm, mi, le
+    exact sub with x, xv
+
+-- Helper (DVR track): u πᵏ is nonzero with valuation k for a unit u.
+theorem dvrHelp.val_unit_pow (π u : Set) (k : Nat)
+  requires uniformizer : Uniformizer(R, π)
+  requires unit : RingUnit(R, u)
+  shows call2(R.mul, u, Ring.pow(R, π, k)) ∈ R.carrier ∧
+    call2(R.mul, u, Ring.pow(R, π, k)) ≠ R.zero ∧
+    dvrValuation(R, call2(R.mul, u, Ring.pow(R, π, k))) = k
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have domain := DiscreteValuationRing.domain at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have ringR := CommRing.to_ring with comm
+  have u0 := unit
+  obtain ⟨uR, _⟩ := u0
+  have un0 := uniformizer
+  obtain ⟨πR, mπ⟩ := un0
+  have pR : Ring.pow(R, π, k) ∈ R.carrier by typecheck
+  have yR := Ring.mul_mem at R, u, Ring.pow(R, π, k) with uR, pR, ringR
+  have πne : π ≠ R.zero
+    intro πz
+    have mz := DiscreteValuationRing.maximal_nonzero at R with dvr
+    apply mz
+    rw mπ
+    rw πz
+    exact (ringMultiples.eq_zero_iff at R, R.zero with (Ring.zero_mem at R with ringR), comm).backward with rfl
+  have une : u ≠ R.zero
+    intro uz
+    have u1 := unit
+    obtain ⟨_, b, bR, ub, _⟩ := u1
+    rw uz at ub
+    have zb := dvrHelp.zero_mul at R, b with comm, bR
+    rw zb at ub
+    have nt := IntegralDomain.nontrivial at R with domain
+    exact nt with ub
+  have yne : call2(R.mul, u, Ring.pow(R, π, k)) ≠ R.zero
+    intro yz
+    have cases := (IntegralDomain.mul_eq_zero at R, u, Ring.pow(R, π, k) with domain, uR, pR).forward with yz
+    cases cases with a | b
+    . exact une with a
+    . exact πne with (IntegralDomain.pow_eq_zero at R, π, k with domain, πR, b)
+  refine ⟨yR, yne, ?_⟩
+  have inK : call2(R.mul, u, Ring.pow(R, π, k)) ∈ idealPow(R, localMaximalIdeal(R), k)
+    rw (Uniformizer.maximal_pow at R, π, k with dvr, uniformizer)
+    have c := dvrHelp.mul_comm at R, u, Ring.pow(R, π, k) with comm, uR, pR
+    have d := RingDvd.intro at R, Ring.pow(R, π, k), call2(R.mul, u, Ring.pow(R, π, k)), u with pR, yR, uR, comm, c
+    exact (ringMultiples.mem_iff at R, Ring.pow(R, π, k), call2(R.mul, u, Ring.pow(R, π, k)) with pR, yR, comm).backward with d
+  have notK : call2(R.mul, u, Ring.pow(R, π, k)) ∉ idealPow(R, localMaximalIdeal(R), succ(k))
+    intro inS
+    rw (Uniformizer.maximal_pow at R, π, succ(k) with dvr, uniformizer) at inS
+    have p2R : Ring.pow(R, π, succ(k)) ∈ R.carrier by typecheck
+    have d := (ringMultiples.mem_iff at R, Ring.pow(R, π, succ(k)), call2(R.mul, u, Ring.pow(R, π, k)) with p2R, yR, comm).forward with inS
+    obtain ⟨_, _, c, cR, yc⟩ := d
+    have e : call2(R.mul, Ring.pow(R, π, k), u) = call2(R.mul, Ring.pow(R, π, succ(k)), c)
+      rw ← yc
+      exact dvrHelp.mul_comm at R, Ring.pow(R, π, k), u with comm, pR, uR
+    obtain ⟨uπc, _⟩ := dvrHelp.cancel_pow at R, π, u, c, k with comm, πR, uR, cR, domain, πne, e
+    have um : u ∈ localMaximalIdeal(R)
+      rw mπ
+      have du := RingDvd.intro at R, π, u, c with πR, uR, cR, comm, uπc
+      exact (ringMultiples.mem_iff at R, π, u with πR, uR, comm).backward with du
+    have nu := (localMaximalIdeal.mem_iff at R, u with local, uR).forward with um
+    exact nu with unit
+  have ge := (dvrValuation.mem_pow_iff at R, call2(R.mul, u, Ring.pow(R, π, k)), k with dvr, yR, yne).forward with inK
+  have lt : ¬(succ(k) ≤ dvrValuation(R, call2(R.mul, u, Ring.pow(R, π, k))))
+    intro le
+    have i2 := (dvrValuation.mem_pow_iff at R, call2(R.mul, u, Ring.pow(R, π, k)), succ(k) with dvr, yR, yne).backward with le
+    exact notK with i2
+  obtain ⟨vN, _, _⟩ := dvrValuation.selected at R, call2(R.mul, u, Ring.pow(R, π, k)) with dvr, yR, yne
+  have vNat : Nat(dvrValuation(R, call2(R.mul, u, Ring.pow(R, π, k)))) := vN
+  arith
+
+-- The valuation: v(π) = 1 (addVal_uniformizer), v(x) = 0 iff x is a unit
+-- (addVal_eq_zero_iff), v(xy) = v(x) + v(y) (addVal_mul),
+-- v(x + y) ≥ min (v(x), v(y)) (addVal_add), v(x) ≤ v(y) iff x ∣ y
+-- (addVal_le_iff_dvd), and v(πⁿ) = n.
+theorem dvrValuation.uniformizer (π : Set)
+  requires uniformizer : Uniformizer(R, π)
+  shows dvrValuation(R, π) = 1
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have un0 := uniformizer
+  obtain ⟨πR, _⟩ := un0
+  have one := RingUnit.one at R with comm
+  obtain ⟨_, _, v⟩ := dvrHelp.val_unit_pow at R, π, R.one, 1 with dvr, uniformizer, one
+  rw (dvrHelp.one_pow_one at R, π with comm, πR) at v
+  exact v
+
+-- The exponent is unique: u πⁿ = v πᵐ with u, v units forces n = m and
+-- u = v (the uniqueness in IsDiscreteValuationRing.unit_mul_pow_congr_pow).
+theorem Uniformizer.factorization_unique (π u v : Set) (m n : Nat)
+  requires uniformizer : Uniformizer(R, π)
+  requires unitU : u ∈ ringUnits(R)
+  requires unitV : v ∈ ringUnits(R)
+  requires equal : call2(R.mul, u, Ring.pow(R, π, m)) = call2(R.mul, v, Ring.pow(R, π, n))
+  shows m = n ∧ u = v
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have domain := DiscreteValuationRing.domain at R with dvr
+  have un0 := uniformizer
+  obtain ⟨πR, _⟩ := un0
+  obtain ⟨uR, uUnit⟩ := ringUnits.membership.forward with unitU
+  obtain ⟨vR, vUnit⟩ := ringUnits.membership.forward with unitV
+  obtain ⟨_, ne1, val1⟩ := dvrHelp.val_unit_pow at R, π, u, m with dvr, uniformizer, uUnit
+  obtain ⟨_, _, val2⟩ := dvrHelp.val_unit_pow at R, π, v, n with dvr, uniformizer, vUnit
+  rw equal at val1
+  rw val2 at val1
+  have mn : m = n
+    symm
+    exact val1
+  refine ⟨mn, ?_⟩
+  rw mn at equal
+  rw mn at ne1
+  have pR : Ring.pow(R, π, n) ∈ R.carrier by typecheck
+  have pne : Ring.pow(R, π, n) ≠ R.zero
+    intro pz
+    rw pz at ne1
+    have mz := dvrHelp.mul_zero at R, u with comm, uR
+    exact ne1 with mz
+  have c1 := dvrHelp.mul_comm at R, u, Ring.pow(R, π, n) with comm, uR, pR
+  have c2 := dvrHelp.mul_comm at R, v, Ring.pow(R, π, n) with comm, vR, pR
+  rw [c1, c2] at equal
+  exact IntegralDomain.mul_cancel at R, Ring.pow(R, π, n), u, v with domain, pR, uR, vR, pne, equal
+
+theorem dvrValuation.zero_iff_unit (x : Set)
+  requires member : x ∈ R.carrier
+  requires nonzero : x ≠ R.zero
+  shows dvrValuation(R, x) = 0 ↔ RingUnit(R, x)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have mi := localMaximalIdeal.ideal at R with local
+  obtain ⟨vN, xv, nxv⟩ := dvrValuation.selected at R, x with dvr, member, nonzero
+  have one := idealPow.one at R, localMaximalIdeal(R) with comm, mi
+  constructor
+  . intro v0
+    rw v0 at nxv
+    have s1 : succ(0) = 1 by arith
+    rw s1 at nxv
+    rw one at nxv
+    by_contra nu
+    have xm := (localMaximalIdeal.mem_iff at R, x with local, member).backward with nu
+    exact nxv with xm
+  . intro unit
+    have vNat : Nat(dvrValuation(R, x)) := vN
+    by_contra ne0
+    have le : 1 ≤ dvrValuation(R, x) by arith
+    have x1 := (dvrValuation.mem_pow_iff at R, x, 1 with dvr, member, nonzero).backward with le
+    rw one at x1
+    have nu := (localMaximalIdeal.mem_iff at R, x with local, member).forward with x1
+    exact nu with unit
+
+theorem dvrValuation.mul (x y : Set)
+  requires first : x ∈ R.carrier
+  requires second : y ∈ R.carrier
+  requires firstNonzero : x ≠ R.zero
+  requires secondNonzero : y ≠ R.zero
+  shows dvrValuation(R, call2(R.mul, x, y)) = dvrValuation(R, x) + dvrValuation(R, y)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  obtain ⟨π, πR, unif⟩ := Uniformizer.exists at R with dvr
+  obtain ⟨u, uU, xu⟩ := Uniformizer.factorization at R, π, x with dvr, unif, first, firstNonzero
+  obtain ⟨w, wU, yw⟩ := Uniformizer.factorization at R, π, y with dvr, unif, second, secondNonzero
+  obtain ⟨uR, uUnit⟩ := ringUnits.membership.forward with uU
+  obtain ⟨wR, wUnit⟩ := ringUnits.membership.forward with wU
+  obtain ⟨aN, _, _⟩ := dvrValuation.selected at R, x with dvr, first, firstNonzero
+  obtain ⟨bN, _, _⟩ := dvrValuation.selected at R, y with dvr, second, secondNonzero
+  have aNat : Nat(dvrValuation(R, x)) := aN
+  have bNat : Nat(dvrValuation(R, y)) := bN
+  have m := dvrHelp.mul_pows at R, u, w, π, dvrValuation(R, x), dvrValuation(R, y) with comm, uR, wR, πR
+  rw ← xu at m
+  rw ← yw at m
+  have uw := RingUnit.mul at R, u, w with comm, uUnit, wUnit
+  obtain ⟨_, _, v⟩ := dvrHelp.val_unit_pow at R, π, call2(R.mul, u, w), dvrValuation(R, x) + dvrValuation(R, y) with dvr, unif, uw
+  rw ← m at v
+  exact v
+
+theorem Uniformizer.iff_irreducible (π : Set)
+  requires member : π ∈ R.carrier
+  shows Uniformizer(R, π) ↔ RingIrreducible(R, π)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  constructor
+  . intro unif
+    have un0 := unif
+    obtain ⟨πR, mπ⟩ := un0
+    have one := RingUnit.one at R with comm
+    obtain ⟨_, πne1, _⟩ := dvrHelp.val_unit_pow at R, π, R.one, 1 with dvr, unif, one
+    rw (dvrHelp.one_pow_one at R, π with comm, πR) at πne1
+    have v1 := dvrValuation.uniformizer at R, π with dvr, unif
+    have πm : π ∈ localMaximalIdeal(R)
+      rw mπ
+      exact ringMultiples.self_mem at R, π with πR, comm
+    have nu := (localMaximalIdeal.mem_iff at R, π with local, πR).forward with πm
+    unfold RingIrreducible
+    refine ⟨πR, nu, ?_⟩
+    intros a ha b hb πab
+    have ane : a ≠ R.zero
+      intro az
+      rw az at πab
+      rw (dvrHelp.zero_mul at R, b with comm, hb) at πab
+      exact πne1 with πab
+    have bne : b ≠ R.zero
+      intro bz
+      rw bz at πab
+      rw (dvrHelp.mul_zero at R, a with comm, ha) at πab
+      exact πne1 with πab
+    have vm := dvrValuation.mul at R, a, b with dvr, ha, hb, ane, bne
+    rw ← πab at vm
+    rw v1 at vm
+    obtain ⟨aN, _, _⟩ := dvrValuation.selected at R, a with dvr, ha, ane
+    obtain ⟨bN, _, _⟩ := dvrValuation.selected at R, b with dvr, hb, bne
+    have aNat : Nat(dvrValuation(R, a)) := aN
+    have bNat : Nat(dvrValuation(R, b)) := bN
+    by_cases a0 : dvrValuation(R, a) = 0
+    . left
+      exact (dvrValuation.zero_iff_unit at R, a with dvr, ha, ane).forward with a0
+    . right
+      have b0 := dvrHelp.add_eq_one at dvrValuation(R, a), dvrValuation(R, b) with vm, a0
+      exact (dvrValuation.zero_iff_unit at R, b with dvr, hb, bne).forward with b0
+  . intro irr
+    have i0 := irr
+    obtain ⟨πR, πnu, split⟩ := i0
+    obtain ⟨ϖ, ϖR, unifϖ⟩ := Uniformizer.exists at R with dvr
+    have u0 := unifϖ
+    obtain ⟨_, mϖ⟩ := u0
+    have πm := (localMaximalIdeal.mem_iff at R, π with local, πR).backward with πnu
+    rw mϖ at πm
+    have d := (ringMultiples.mem_iff at R, ϖ, π with ϖR, πR, comm).forward with πm
+    obtain ⟨_, _, c, cR, πϖc⟩ := d
+    have ϖm : ϖ ∈ localMaximalIdeal(R)
+      rw mϖ
+      exact ringMultiples.self_mem at R, ϖ with ϖR, comm
+    have ϖnu := (localMaximalIdeal.mem_iff at R, ϖ with local, ϖR).forward with ϖm
+    cases (split with ϖ, ϖR, c, cR, πϖc) with uϖ | uc
+    . exfalso
+      exact ϖnu with uϖ
+    . have mu := ringMultiples.mul_unit at R, ϖ, c with ϖR, cR, comm, uc
+      rw ← πϖc at mu
+      unfold Uniformizer
+      refine ⟨πR, ?_⟩
+      rw [mϖ, mu]
+
+theorem dvrValuation.add (x y : Set) (n : Nat)
+  requires first : x ∈ R.carrier
+  requires second : y ∈ R.carrier
+  requires firstNonzero : x ≠ R.zero
+  requires secondNonzero : y ≠ R.zero
+  requires sumNonzero : call2(R.add, x, y) ≠ R.zero
+  requires firstBound : n ≤ dvrValuation(R, x)
+  requires secondBound : n ≤ dvrValuation(R, y)
+  shows n ≤ dvrValuation(R, call2(R.add, x, y))
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have ringR := CommRing.to_ring with comm
+  have mi := localMaximalIdeal.ideal at R with local
+  have xn := (dvrValuation.mem_pow_iff at R, x, n with dvr, first, firstNonzero).backward with firstBound
+  have yn := (dvrValuation.mem_pow_iff at R, y, n with dvr, second, secondNonzero).backward with secondBound
+  have pi := idealPow.ideal at R, localMaximalIdeal(R), n with comm, mi
+  have s := Ideal.add_mem at R, idealPow(R, localMaximalIdeal(R), n), x, y with xn, yn, pi
+  have sR := Ring.add_mem at R, x, y with first, second, ringR
+  exact (dvrValuation.mem_pow_iff at R, call2(R.add, x, y), n with dvr, sR, sumNonzero).forward with s
+
+theorem dvrValuation.le_iff_dvd (x y : Set)
+  requires first : x ∈ R.carrier
+  requires second : y ∈ R.carrier
+  requires firstNonzero : x ≠ R.zero
+  requires secondNonzero : y ≠ R.zero
+  shows dvrValuation(R, x) ≤ dvrValuation(R, y) ↔ RingDvd(R, x, y)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have mi := localMaximalIdeal.ideal at R with local
+  obtain ⟨π, πR, unif⟩ := Uniformizer.exists at R with dvr
+  obtain ⟨u, uU, xu⟩ := Uniformizer.factorization at R, π, x with dvr, unif, first, firstNonzero
+  obtain ⟨uR, uUnit⟩ := ringUnits.membership.forward with uU
+  obtain ⟨aN, _, _⟩ := dvrValuation.selected at R, x with dvr, first, firstNonzero
+  obtain ⟨bN, yb, _⟩ := dvrValuation.selected at R, y with dvr, second, secondNonzero
+  have aNat : Nat(dvrValuation(R, x)) := aN
+  have bNat : Nat(dvrValuation(R, y)) := bN
+  have pR : Ring.pow(R, π, dvrValuation(R, x)) ∈ R.carrier by typecheck
+  have c := dvrHelp.mul_comm at R, u, Ring.pow(R, π, dvrValuation(R, x)) with comm, uR, pR
+  have xu2 := xu
+  rw c at xu2
+  have mx : ringMultiples(R, x) = ringMultiples(R, Ring.pow(R, π, dvrValuation(R, x)))
+    have mu := ringMultiples.mul_unit at R, Ring.pow(R, π, dvrValuation(R, x)), u with pR, uR, comm, uUnit
+    rw ← xu2 at mu
+    exact mu
+  have mp := Uniformizer.maximal_pow at R, π, dvrValuation(R, x) with dvr, unif
+  constructor
+  . intro le
+    have sub := idealPow.antitone at R, localMaximalIdeal(R), dvrValuation(R, x), dvrValuation(R, y) with comm, mi, le
+    have ya := sub with y, yb
+    rw mp at ya
+    rw ← mx at ya
+    exact (ringMultiples.mem_iff at R, x, y with first, second, comm).forward with ya
+  . intro d
+    have yx := (ringMultiples.mem_iff at R, x, y with first, second, comm).backward with d
+    rw mx at yx
+    rw ← mp at yx
+    exact (dvrValuation.mem_pow_iff at R, y, dvrValuation(R, x) with dvr, second, secondNonzero).forward with yx
+
+theorem dvrValuation.pow (π : Set) (n : Nat)
+  requires uniformizer : Uniformizer(R, π)
+  shows dvrValuation(R, Ring.pow(R, π, n)) = n
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have un0 := uniformizer
+  obtain ⟨πR, _⟩ := un0
+  have one := RingUnit.one at R with comm
+  obtain ⟨_, _, v⟩ := dvrHelp.val_unit_pow at R, π, R.one, n with dvr, uniformizer, one
+  have pR : Ring.pow(R, π, n) ∈ R.carrier by typecheck
+  rw (dvrHelp.one_mul at R, Ring.pow(R, π, n) with comm, pR) at v
+  exact v
+
+-- The ideals: every nonzero ideal is mⁿ = (πⁿ) for a unique n
+-- (IsDiscreteValuationRing.ideal_eq_span_pow_irreducible), and
+-- mⁿ = (πⁿ) (Ideal.span_singleton_pow).
+theorem DiscreteValuationRing.ideals (π I : Set)
+  requires uniformizer : Uniformizer(R, π)
+  requires ideal : Ideal(R, I)
+  requires nonzero : I ≠ {R.zero}
+  shows ∃ n ∈ ℕ, I = ringMultiples(R, Ring.pow(R, π, n)) ∧
+    I = idealPow(R, localMaximalIdeal(R), n)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have pid := DiscreteValuationRing.pid at R with dvr
+  obtain ⟨_, allP⟩ := pid
+  obtain ⟨_, a, aR, Ia⟩ := allP with I, ideal
+  have ane : a ≠ R.zero
+    intro az
+    rw az at Ia
+    have mz := (ringMultiples.eq_zero_iff at R, R.zero with (Ring.zero_mem at R with (CommRing.to_ring with comm)), comm).backward with rfl
+    rw mz at Ia
+    exact nonzero with Ia
+  obtain ⟨u, uU, au⟩ := Uniformizer.factorization at R, π, a with dvr, uniformizer, aR, ane
+  have un0 := uniformizer
+  obtain ⟨πR, _⟩ := un0
+  obtain ⟨uR, uUnit⟩ := ringUnits.membership.forward with uU
+  obtain ⟨vN, _, _⟩ := dvrValuation.selected at R, a with dvr, aR, ane
+  have vNat : Nat(dvrValuation(R, a)) := vN
+  have pR : Ring.pow(R, π, dvrValuation(R, a)) ∈ R.carrier by typecheck
+  have c := dvrHelp.mul_comm at R, u, Ring.pow(R, π, dvrValuation(R, a)) with comm, uR, pR
+  rw c at au
+  have mu := ringMultiples.mul_unit at R, Ring.pow(R, π, dvrValuation(R, a)), u with pR, uR, comm, uUnit
+  rw ← au at mu
+  have mp := Uniformizer.maximal_pow at R, π, dvrValuation(R, a) with dvr, uniformizer
+  refine ⟨dvrValuation(R, a), vN, ?_, ?_⟩
+  . rw Ia
+    exact mu
+  . rw [Ia, mu, mp]
+
+-- The Krull intersection: ⋂ mⁿ = 0 (IsDiscreteValuationRing.addVal_eq_top_iff
+-- in the form: an element of every mⁿ is zero).
+theorem DiscreteValuationRing.krull_intersection (x : Set)
+  requires member : x ∈ R.carrier
+  requires all : ∀ n ∈ ℕ, x ∈ idealPow(R, localMaximalIdeal(R), n)
+  shows x = R.zero
+proof
+  exact dvrHelp.krull at R, x with dvr, member, all
+
+-- A DVR is a valuation ring, Noetherian, and integrally closed; its only
+-- primes are 0 and m (dimension one).
+theorem DiscreteValuationRing.valuation_ring
+  shows ValuationRing(R)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have domain := DiscreteValuationRing.domain at R with dvr
+  unfold ValuationRing
+  refine ⟨domain, ?_⟩
+  intros a ha b hb
+  by_cases az : a = R.zero
+  . right
+    rw az
+    exact RingDvd.zero at R, b with hb, comm
+  . by_cases bz : b = R.zero
+    . left
+      rw bz
+      exact RingDvd.zero at R, a with ha, comm
+    . obtain ⟨aN, _, _⟩ := dvrValuation.selected at R, a with dvr, ha, az
+      obtain ⟨bN, _, _⟩ := dvrValuation.selected at R, b with dvr, hb, bz
+      have aNat : Nat(dvrValuation(R, a)) := aN
+      have bNat : Nat(dvrValuation(R, b)) := bN
+      by_cases le : dvrValuation(R, a) ≤ dvrValuation(R, b)
+      . left
+        exact (dvrValuation.le_iff_dvd at R, a, b with dvr, ha, hb, az, bz).forward with le
+      . right
+        have le2 : dvrValuation(R, b) ≤ dvrValuation(R, a) by arith
+        exact (dvrValuation.le_iff_dvd at R, b, a with dvr, hb, ha, bz, az).forward with le2
+
+theorem DiscreteValuationRing.noetherian
+  shows NoetherianRing(R)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have pid := DiscreteValuationRing.pid at R with dvr
+  exact NoetherianRing.of_pid at R with comm, pid
+
+theorem DiscreteValuationRing.integrally_closed
+  shows IntegrallyClosedDomain(R)
+proof
+  sorry
+
+theorem DiscreteValuationRing.primes (P : Set)
+  requires prime : PrimeIdeal(R, P)
+  shows P = {R.zero} ∨ P = localMaximalIdeal(R)
+proof
+  have local := DiscreteValuationRing.local_ring at R with dvr
+  have comm := LocalRing.comm_ring at R with local
+  have ringR := CommRing.to_ring with comm
+  have p0 := prime
+  obtain ⟨proper, _⟩ := p0
+  have p1 := proper
+  obtain ⟨ideal, notOne⟩ := p1
+  by_cases pz : P = {R.zero}
+  . left
+    exact pz
+  . right
+    obtain ⟨π, πR, unif⟩ := Uniformizer.exists at R with dvr
+    obtain ⟨k, kN, Pk, _⟩ := DiscreteValuationRing.ideals at R, π, P with dvr, unif, ideal, pz
+    have kNat : Nat(k) := kN
+    have pR := Ring.pow_mem at R, π, k with πR, ringR
+    have inP : Ring.pow(R, π, k) ∈ P
+      rw Pk
+      exact ringMultiples.self_mem at R, Ring.pow(R, π, k) with pR, comm
+    by_cases k0 : k = 0
+    . exfalso
+      rw k0 at inP
+      rw (Ring.pow_zero at R, π with πR, ringR) at inP
+      exact notOne with inP
+    . have kpos : 0 < k by arith
+      have πP := PrimeIdeal.mem_of_pow_mem at R, P, π, k with comm, prime, πR, inP, kpos
+      have un0 := unif
+      obtain ⟨_, mπ⟩ := un0
+      have le := (ringMultiples.subset_ideal_iff at R, π, P with comm, πR, ideal).backward with πP
+      rw ← mπ at le
+      have ge := localMaximalIdeal.contains_proper at R, P with local, proper
+      exact Subset.antisymmetric with ge, le
+
+-- IsDiscreteValuationRing.exists_units_eq_smul_zpow_of_irreducible: every
+-- nonzero element of a fraction field K is u πⁿ or u π⁻ⁿ.
+theorem DiscreteValuationRing.fraction_field (π K z : Set)
+  requires uniformizer : Uniformizer(R, π)
+  requires fractions : IsFractionRing(K)
+  requires base : Algebra.base(K) = R
+  requires member : z ∈ algebraCarrier(K)
+  requires nonzero : z ≠ Ring.zero(Algebra.ring(K))
+  shows ∃ u ∈ ringUnits(R), ∃ n ∈ ℕ,
+    z = call2(Ring.mul(Algebra.ring(K)), Algebra.map(K)(u),
+      Ring.pow(Algebra.ring(K), Algebra.map(K)(π), n)) ∨
+    call2(Ring.mul(Algebra.ring(K)), z,
+      Ring.pow(Algebra.ring(K), Algebra.map(K)(π), n)) = Algebra.map(K)(u)
+proof
+  sorry
+
+-- The quotient R ⧸ (πⁿ) has length n as an R-module, and R ⧸ m is the
+-- residue field (IsLocalRing.length... over a DVR, used by the source's
+-- relative lengths).
+theorem DiscreteValuationRing.quotient_length (π : Set) (n : Nat)
+  requires uniformizer : Uniformizer(R, π)
+  shows FiniteLength(quotientModule(selfModule(R), R,
+      ringMultiples(R, Ring.pow(R, π, n))), R) ∧
+    moduleLength(quotientModule(selfModule(R), R,
+      ringMultiples(R, Ring.pow(R, π, n))), R) = n
+proof
+  sorry
+
+-- A finite-length module over a DVR is a finite direct sum of the
+-- R ⧸ (πⁿ); its length is the sum of the exponents. Stated for a cyclic
+-- torsion module: R ⧸ (x) has length v(x) for x ≠ 0.
+theorem DiscreteValuationRing.cyclic_length (x : Set)
+  requires member : x ∈ R.carrier
+  requires nonzero : x ≠ R.zero
+  shows FiniteLength(quotientModule(selfModule(R), R, ringMultiples(R, x)), R) ∧
+    moduleLength(quotientModule(selfModule(R), R, ringMultiples(R, x)), R) =
+      dvrValuation(R, x)
+proof
+  sorry
+
+end DiscreteValuationRings
+
+-- Section: Characterizations
+-- A Noetherian local domain that is not a field and whose maximal ideal
+-- is principal is a DVR (IsDiscreteValuationRing.TFAE, the principal
+-- maximal ideal case); so is an integrally closed Noetherian local domain
+-- whose only primes are 0 and m (the integrally closed case of the TFAE).
+theorem DiscreteValuationRing.of_principal_maximal (R : Set)
+  requires domain : IntegralDomain(R)
+  requires localRing : LocalRing(R)
+  requires noetherian : NoetherianRing(R)
+  requires notField : ¬Field(R)
+  requires principal : PrincipalIdeal(R, localMaximalIdeal(R))
+  shows DiscreteValuationRing(R)
+proof
+  sorry
+
+theorem DiscreteValuationRing.of_integrally_closed (R : Set)
+  requires closed : IntegrallyClosedDomain(R)
+  requires localRing : LocalRing(R)
+  requires noetherian : NoetherianRing(R)
+  requires notField : ¬Field(R)
+  requires dimensionOne : ∀ P, PrimeIdeal(R, P) → P = {Ring.zero(R)} ∨
+    P = localMaximalIdeal(R)
+  shows DiscreteValuationRing(R)
+proof
+  sorry
+
+-- A local domain with an irreducible π such that every nonzero element is
+-- u πⁿ is a DVR (IsDiscreteValuationRing.ofHasUnitMulPowIrreducibleFactorization).
+theorem DiscreteValuationRing.of_factorization (R π : Set)
+  requires domain : IntegralDomain(R)
+  requires irreducible : RingIrreducible(R, π)
+  requires factorization : ∀ x ∈ Ring.carrier(R), x ≠ Ring.zero(R) →
+    (∃ u ∈ ringUnits(R), ∃ n ∈ ℕ, x = call2(Ring.mul(R), u, Ring.pow(R, π, n)))
+  shows DiscreteValuationRing(R) ∧ Uniformizer(R, π)
+proof
+  sorry
+
+-- The localization of a PID at a nonzero prime is a DVR
+-- (IsLocalization.AtPrime.isDiscreteValuationRing_of_dedekind_domain in
+-- the principal case).
+theorem DiscreteValuationRing.localization_pid (P A : Set)
+  requires pid : PrincipalIdealDomain(Algebra.base(A))
+  requires atPrime : IsLocalizationAtPrime(P, A)
+  requires nonzero : P ≠ {Ring.zero(Algebra.base(A))}
+  shows DiscreteValuationRing(Algebra.ring(A))
+proof
+  sorry
+
+-- Helper (DVR track): in a ring whose divisibility is total, a nonempty
+-- finite set has a member dividing all its members.
+theorem dvrHelp.finite_common_divisor (R G : Set)
+  requires comm : CommRing(R)
+  requires total : ∀ a b ∈ Ring.carrier(R), RingDvd(R, a, b) ∨ RingDvd(R, b, a)
+  requires bounded : G ⊆ Ring.carrier(R)
+  requires finite : Finite(G)
+  shows G = ∅ ∨ (∃ g ∈ G, ∀ x ∈ G, RingDvd(R, g, x))
+proof
+  induction finite with H a
+  | empty =>
+    left
+    rfl
+  | insert using ih =>
+    right
+    have aIn := union2.right at a, H, {a} with (singleton.self at a)
+    have aa := RingDvd.refl at R, a with aMember, comm
+    cases ih with emptyH | found
+    . refine ⟨a, aIn, ?_⟩
+      intros x hx
+      cases (union2.membership.forward with hx) with inH | isA
+      . rw emptyH at inH
+        simp at inH
+      . have xa := singleton.membership.forward with isA
+        rw xa
+        exact aa
+    . obtain ⟨g, gH, gAll⟩ := found
+      have gR := HSubset with g, gH
+      cases (total with a, aMember, g, gR) with ag | ga
+      . refine ⟨a, aIn, ?_⟩
+        intros x hx
+        cases (union2.membership.forward with hx) with inH | isA
+        . have xR := HSubset with x, inH
+          exact RingDvd.trans at R, a, g, x with aMember, gR, xR, comm, ag, (gAll with x, inH)
+        . have xa := singleton.membership.forward with isA
+          rw xa
+          exact aa
+      . refine ⟨g, (union2.left at g, H, {a} with gH), ?_⟩
+        intros x hx
+        cases (union2.membership.forward with hx) with inH | isA
+        . exact gAll with x, inH
+        . have xa := singleton.membership.forward with isA
+          rw xa
+          exact ga
+
+-- A valuation ring is local, and its ideals are totally ordered by
+-- inclusion (ValuationRing.isLocalRing, ValuationRing.le_total... on
+-- ideals); a Noetherian valuation ring that is not a field is a DVR.
+theorem ValuationRing.local_ring (R : Set)
+  requires valuation : ValuationRing(R)
+  shows LocalRing(R)
+proof
+  have v0 := valuation
+  obtain ⟨domain, total⟩ := v0
+  have comm := IntegralDomain.comm_ring at R with domain
+  have nt := IntegralDomain.nontrivial at R with domain
+  have one := RingUnit.one at R with comm
+  have oneR := Ring.one_mem at R with (CommRing.to_ring with comm)
+  unfold LocalRing
+  refine ⟨comm, nt, ?_⟩
+  intros a aIn b bIn sum
+  cases (total with a, aIn, b, bIn) with ab | ba
+  . left
+    have aa := RingDvd.refl at R, a with aIn, comm
+    have d := RingDvd.add at R, a, a, b with aIn, aIn, bIn, comm, aa, ab
+    rw sum at d
+    exact RingUnit.of_dvd_unit at R, a, R.one with aIn, oneR, comm, d, one
+  . right
+    have bb := RingDvd.refl at R, b with bIn, comm
+    have d := RingDvd.add at R, b, a, b with bIn, aIn, bIn, comm, ba, bb
+    rw sum at d
+    exact RingUnit.of_dvd_unit at R, b, R.one with bIn, oneR, comm, d, one
+
+theorem ValuationRing.ideals_total (R I J : Set)
+  requires valuation : ValuationRing(R)
+  requires first : Ideal(R, I)
+  requires second : Ideal(R, J)
+  shows I ⊆ J ∨ J ⊆ I
+proof
+  have v0 := valuation
+  obtain ⟨domain, total⟩ := v0
+  have comm := IntegralDomain.comm_ring at R with domain
+  have ringR := CommRing.to_ring with comm
+  have IR := Ideal.subset at R, I with first
+  have JR := Ideal.subset at R, J with second
+  by_cases IJ : I ⊆ J
+  . left
+    exact IJ
+  . right
+    intros b hb
+    by_contra bI
+    apply IJ
+    intros a ha
+    by_contra aJ
+    have aR := IR with a, ha
+    have bR := JR with b, hb
+    cases (total with a, aR, b, bR) with ab | ba
+    . obtain ⟨_, _, c, cR, bac⟩ := ab
+      apply bI
+      rw bac
+      exact Ideal.mul_right_mem at R, I, c, a with cR, ha, ringR, first
+    . obtain ⟨_, _, c, cR, abc⟩ := ba
+      apply aJ
+      rw abc
+      exact Ideal.mul_right_mem at R, J, c, b with cR, hb, ringR, second
+
+theorem ValuationRing.noetherian_dvr (R : Set)
+  requires valuation : ValuationRing(R)
+  requires noetherian : NoetherianRing(R)
+  requires notField : ¬Field(R)
+  shows DiscreteValuationRing(R)
+proof
+  have local := ValuationRing.local_ring at R with valuation
+  have v0 := valuation
+  obtain ⟨domain, total⟩ := v0
+  have comm := IntegralDomain.comm_ring at R with domain
+  have ringR := CommRing.to_ring with comm
+  obtain ⟨_, allFG⟩ := noetherian
+  have pid : PrincipalIdealDomain(R)
+    unfold PrincipalIdealDomain
+    refine ⟨domain, ?_⟩
+    intros I ideal
+    obtain ⟨_, G, GR, finG, IG⟩ := allFG with I, ideal
+    unfold PrincipalIdeal
+    refine ⟨ideal, ?_⟩
+    cases (dvrHelp.finite_common_divisor at R, G with comm, total, GR, finG) with emptyG | found
+    . have zR := Ring.zero_mem at R with ringR
+      refine ⟨R.zero, zR, ?_⟩
+      rw [IG, emptyG]
+      rw (generatedIdeal.empty at R with comm)
+      symm
+      exact (ringMultiples.eq_zero_iff at R, R.zero with zR, comm).backward with rfl
+    . obtain ⟨g, gG, gAll⟩ := found
+      have gR := GR with g, gG
+      refine ⟨g, gR, ?_⟩
+      have mg := ringMultiples.ideal at R, g with gR, comm
+      have genIdeal := generatedIdeal.ideal at R, G with comm
+      have le : generatedIdeal(R, G) ⊆ ringMultiples(R, g)
+        apply generatedIdeal.least at R, G, ringMultiples(R, g) with comm, mg
+        intros x hx
+        have xR := GR with x, hx
+        exact (ringMultiples.mem_iff at R, g, x with gR, xR, comm).backward with (gAll with x, hx)
+      have gIn := generatedIdeal.contains at R, G with comm, GR
+      have ge := (ringMultiples.subset_ideal_iff at R, g, generatedIdeal(R, G) with comm, gR, genIdeal).backward with (gIn with g, gG)
+      rw IG
+      exact Subset.antisymmetric with le, ge
+  unfold DiscreteValuationRing
+  exact ⟨pid, local, notField⟩
+
+-- A valuation ring is integrally closed (ValuationRing.isIntegrallyClosed).
+theorem ValuationRing.integrally_closed (R : Set)
+  requires valuation : ValuationRing(R)
+  shows IntegrallyClosedDomain(R)
+proof
+  sorry

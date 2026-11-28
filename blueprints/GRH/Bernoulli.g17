@@ -1,0 +1,3462 @@
+-- The Bernoulli numbers, with B₁ = −1/2; the Bernoulli polynomials
+-- Bₙ(x) = Σ_{k ≤ n} C(n, k) Bₖ x^(n − k) on ℝ, their derivatives,
+-- differences, values at 0 and 1, and integrals; the integer floor and the
+-- fractional part on all of ℝ; and the periodic Bernoulli functions
+-- P̃ₙ(x) = Bₙ(x − ⌊x⌋), bounded, continuous for n ≥ 2, and integrated
+-- against unit periods.
+-- Part of the GRH blueprint.
+-- Planned home: NumberTheory/Bernoulli.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Bernoulli
+import Grace.Cumulus.Real.Analysis.Integration
+import Grace.Cumulus.Real.Rationals
+import Grace.Cumulus.NumberTheory.Binomial
+import Grace.Cumulus.Real.Floor
+import Grace.Cumulus.Real.Analysis.ChainRule
+import Grace.Cumulus.Real.Analysis.Locality
+
+-- The Bernoulli numbers
+
+-- The terms C(n + 1, k) b(k) of the defining recurrence at n.
+defgraph bernoulliRecurrenceTerms (b : Set, n : Nat) (k ∈ ℕ) : ℝ :=
+  realNat(choose(succ(n), k)) * b(k)
+requires sequence : RealSequence(b)
+proof
+  have kNat := nat.omega.backward with member
+  have term := RealSequence.value at b, k with sequence
+  have natural := realNat.real at choose(succ(n), k)
+  typecheck
+
+-- The Bernoulli numbers are the real sequence with B₀ = 1 and
+-- Σ_{k ≤ n} C(n + 1, k) Bₖ = 0 for every n ≥ 1; so
+-- Bₙ = −(1/(n + 1)) Σ_{k < n} C(n + 1, k) Bₖ, and B₁ = −1/2. This is the
+-- convention of Mathlib's `bernoulli` (not `bernoulli'`, which has
+-- B₁ = 1/2), and the one in which the Euler–Maclaurin formula reads
+-- Σ_{a ≤ n < b} f(n) = ∫_a^b f + Σ_{k=1}^{K} Bₖ/k! (f^(k−1)(b) − f^(k−1)(a))
+-- + remainder. The values are rational: `bernoulli.rational`.
+predicate BernoulliSequence (b : Set) :=
+  RealSequence(b) ∧ b(0) = (1:R) ∧
+  (∀ n ∈ ℕ, 0 < n →
+    ∑ k < succ(n), bernoulliRecurrenceTerms(b, n)(k) = (0:R))
+
+-- Construction of the sequence
+
+-- C(n + 1, n) = n + 1.
+theorem choose.succ_left (n : Nat)
+  shows choose(succ(n), n) = succ(n)
+proof
+  induction n
+  | zero =>
+    rw choose.zero_right
+    arith
+  | succ(k) using ih =>
+    rw [choose.succ_succ, ih, choose.diagonal]
+    arith
+
+-- The recurrence at n, with its last term separated:
+-- Σ_{k ≤ n} C(n + 1, k) b(k) = Σ_{k < n} C(n + 1, k) b(k) + (n + 1) b(n).
+theorem bernoulliRecurrenceTerms.split (b : Set, n : Nat)
+  requires sequence : RealSequence(b)
+  shows ∑ k < succ(n), bernoulliRecurrenceTerms(b, n)(k) =
+    (∑ k < n, bernoulliRecurrenceTerms(b, n)(k)) + realNat(succ(n)) * b(n)
+proof
+  have last := bernoulliRecurrenceTerms.value at b, n, n with sequence
+  rw [realPartialSum.succ, last, choose.succ_left]
+  unfold realAddValue
+  unfold call2
+  rfl
+
+-- The recurrence terms only see the sequence below the index.
+theorem bernoulliRecurrenceTerms.eq_prefix (b c : Set, n m : Nat)
+  requires first : RealSequence(b)
+  requires second : RealSequence(c)
+  requires agree : ∀ k ∈ ℕ, k < m → b(k) = c(k)
+  shows ∑ k < m, bernoulliRecurrenceTerms(b, n)(k) =
+    ∑ k < m, bernoulliRecurrenceTerms(c, n)(k)
+proof
+  have firstTerms := bernoulliRecurrenceTerms.function at b, n with first
+  have secondTerms := bernoulliRecurrenceTerms.function at c, n with second
+  have firstSequence : RealSequence(bernoulliRecurrenceTerms(b, n))
+    by exact firstTerms
+  have secondSequence : RealSequence(bernoulliRecurrenceTerms(c, n))
+    by exact secondTerms
+  apply realPartialSum.eq_prefix with firstSequence, secondSequence
+  intros k kMember below
+  have kNat := nat.omega.backward with kMember
+  have same := agree with k, kMember, below
+  have left := bernoulliRecurrenceTerms.value at b, n, k with first
+  have right := bernoulliRecurrenceTerms.value at c, n, k with second
+  rw [left, right, same]
+
+-- A sequence satisfying the defining conditions below m.
+predicate BernoulliPrefix (f : Set, m : Nat) :=
+  RealSequence(f) ∧ f(0) = (1:R) ∧
+  (∀ n ∈ ℕ, 0 < n → n < m →
+    ∑ k < succ(n), bernoulliRecurrenceTerms(f, n)(k) = (0:R))
+
+theorem BernoulliPrefix.of_sequence (b : Set, m : Nat)
+  requires sequence : BernoulliSequence(b)
+  shows BernoulliPrefix(b, m)
+proof
+  obtain ⟨real, start, recurrence⟩ := sequence
+  refine ⟨real, start, ?_⟩
+  intros n member positive below
+  exact recurrence with n, member, positive
+
+theorem BernoulliPrefix.mono (f : Set, m p : Nat)
+  requires prefix : BernoulliPrefix(f, m)
+  requires smaller : p ≤ m
+  shows BernoulliPrefix(f, p)
+proof
+  obtain ⟨real, start, recurrence⟩ := prefix
+  refine ⟨real, start, ?_⟩
+  intros n member positive below
+  have nNat := nat.omega.backward with member
+  have within : n < m by arith
+  exact recurrence with n, member, positive, within
+
+-- Two prefixes for m agree below m: the recurrence at n determines the
+-- n-th term from the earlier ones.
+theorem BernoulliPrefix.agree (f g : Set, m i : Nat)
+  requires first : BernoulliPrefix(f, m)
+  requires second : BernoulliPrefix(g, m)
+  shows ∀ k ∈ ℕ, k < i → k < m → f(k) = g(k)
+proof
+  induction i
+  | zero =>
+    intros k member below within
+    have kNat := nat.omega.backward with member
+    exfalso
+    arith
+  | succ(j) using ih =>
+    intros k member below within
+    have kNat := nat.omega.backward with member
+    by_cases earlier : k < j
+    . exact ih with k, member, earlier, within
+    . have same : k = j by arith
+      rw same
+      rw same at within
+      obtain ⟨fReal, fStart, fRecurrence⟩ := first
+      obtain ⟨gReal, gStart, gRecurrence⟩ := second
+      by_cases zero : j = 0
+      . rw [zero, fStart, gStart]
+      . have positive : 0 < j by arith
+        have jMember : j ∈ ℕ by typecheck
+        have fZero := fRecurrence with j, jMember, positive, within
+        have gZero := gRecurrence with j, jMember, positive, within
+        have fSplit := bernoulliRecurrenceTerms.split at f, j with fReal
+        have gSplit := bernoulliRecurrenceTerms.split at g, j with gReal
+        have earlierAgree : ∀ k ∈ ℕ, k < j → f(k) = g(k)
+          intros l lMember lBelow
+          have lNat := nat.omega.backward with lMember
+          have lWithin : l < m by arith
+          exact ih with l, lMember, lBelow, lWithin
+        have prefixes := bernoulliRecurrenceTerms.eq_prefix at f, g, j, j
+          with fReal, gReal, earlierAgree
+        have fTerms := bernoulliRecurrenceTerms.function at f, j with fReal
+        have fSequence : RealSequence(bernoulliRecurrenceTerms(f, j))
+          by exact fTerms
+        have fSum := realPartialSum.real
+          at bernoulliRecurrenceTerms(f, j), j with fSequence
+        have fValue := RealSequence.value at f, j with fReal
+        have gValue := RealSequence.value at g, j with gReal
+        have scale := realNat.real at succ(j)
+        have succNonzero : succ(j) ≠ 0 by arith
+        have nonzero := realNat.ne_zero with succNonzero
+        have scaled : realNat(succ(j)) * f(j) = realNat(succ(j)) * g(j)
+          by linarith
+        have cancel := realInvValue.mul_left with nonzero
+        have inverse := realInvValue.real at realNat(succ(j))
+        linear_combination realInvValue(realNat(succ(j))) * scaled -
+          (f(j) - g(j)) * cancel
+
+-- Changing a real sequence at the single index m to the value v.
+defgraph bernoulliAdjust (f : Set, m : Nat, v : Real) (k ∈ ℕ) : ℝ :=
+  f(k) + realNat(choose(k, m) * choose(m, k)) * (v - f(k))
+requires sequence : RealSequence(f)
+proof
+  have kNat := nat.omega.backward with member
+  have value := RealSequence.value at f, k with sequence
+  have natural := realNat.real at choose(k, m) * choose(m, k)
+  typecheck
+
+theorem bernoulliAdjust.at (f : Set, m : Nat, v : Real)
+  requires sequence : RealSequence(f)
+  shows bernoulliAdjust(f, m, v)(m) = v
+proof
+  have value := RealSequence.value at f, m with sequence
+  have adjusted := bernoulliAdjust.value at f, m, v, m with sequence
+  rw [adjusted, choose.diagonal]
+  have unit : 1 * 1 = 1 by arith
+  rw [unit, realNat.one]
+  ring
+
+theorem bernoulliAdjust.other (f : Set, m : Nat, v : Real, k : Nat)
+  requires sequence : RealSequence(f)
+  requires different : k ≠ m
+  shows bernoulliAdjust(f, m, v)(k) = f(k)
+proof
+  have value := RealSequence.value at f, k with sequence
+  have adjusted := bernoulliAdjust.value at f, m, v, k with sequence
+  have vanishing : choose(k, m) * choose(m, k) = 0
+    by_cases below : k < m
+    . obtain ⟨j, jNat, shape⟩ := Less.exists_add_one with below
+      have form : m = k + succ(j) by arith
+      have zero := choose.above at k
+      have instance := zero with j, jNat
+      rw ← form at instance
+      rw instance
+      arith
+    . have above : m < k by arith
+      obtain ⟨j, jNat, shape⟩ := Less.exists_add_one with above
+      have form : k = m + succ(j) by arith
+      have zero := choose.above at m
+      have instance := zero with j, jNat
+      rw ← form at instance
+      rw instance
+      arith
+  rw [adjusted, vanishing, realNat.zero]
+  ring
+
+-- Prefixes of every length exist.
+theorem BernoulliPrefix.exists (m : Nat)
+  shows ∃ f, BernoulliPrefix(f, m)
+proof
+  induction m
+  | zero =>
+    have one : Real((1:R)) by typecheck
+    have function := constantSequence.function at (1:R)
+    have related := constantSequence.relates at (1:R), 0
+    have zeroMember : 0 ∈ ℕ by typecheck
+    have start := FunctionBetween.apply_value with function, zeroMember,
+      related
+    witness constantSequence((1:R))
+    refine ⟨function, start, ?_⟩
+    intros n member positive below
+    have nNat := nat.omega.backward with member
+    exfalso
+    arith
+  | succ(q) using ih =>
+    obtain ⟨f, prefix⟩ := ih
+    obtain ⟨real, start, recurrence⟩ := prefix
+    by_cases zero : q = 0
+    . witness f
+      refine ⟨real, start, ?_⟩
+      intros n member positive below
+      have nNat := nat.omega.backward with member
+      exfalso
+      rw zero at below
+      arith
+    . -- Solve the recurrence at q for the q-th term.
+      have mPositive : 0 < q by arith
+      have terms := bernoulliRecurrenceTerms.function at f, q with real
+      have termSequence : RealSequence(bernoulliRecurrenceTerms(f, q))
+        by exact terms
+      have sum := realPartialSum.real at bernoulliRecurrenceTerms(f, q), q
+        with termSequence
+      have scale := realNat.real at succ(q)
+      have succNonzero : succ(q) ≠ 0 by arith
+      have nonzero := realNat.ne_zero with succNonzero
+      have inverse := realInvValue.real at realNat(succ(q))
+      set v := -(realInvValue(realNat(succ(q))) *
+        (∑ i < q, bernoulliRecurrenceTerms(f, q)(i))) with vDefinition
+      have solved : Real(v)
+        rw vDefinition
+        typecheck
+      have adjust := bernoulliAdjust.function at f, q, v with real
+      have adjustSequence : RealSequence(bernoulliAdjust(f, q, v))
+        by exact adjust
+      witness bernoulliAdjust(f, q, v)
+      have otherwise : ∀ k ∈ ℕ, k < q → bernoulliAdjust(f, q, v)(k) = f(k)
+        intros k kMember kBelow
+        have kNat := nat.omega.backward with kMember
+        have different : k ≠ q by arith
+        exact bernoulliAdjust.other with real, different
+      refine ⟨adjustSequence, ?_, ?_⟩
+      . have zeroMember : 0 ∈ ℕ by typecheck
+        have kept := otherwise with 0, zeroMember, mPositive
+        rw [kept, start]
+      . intros n member positive below
+        have nNat := nat.omega.backward with member
+        by_cases earlier : n < q
+        . have agree : ∀ k ∈ ℕ, k < succ(n) →
+              bernoulliAdjust(f, q, v)(k) = f(k)
+            intros k kMember kBelow
+            have kNat := nat.omega.backward with kMember
+            have kEarlier : k < q by arith
+            exact otherwise with k, kMember, kEarlier
+          have same := bernoulliRecurrenceTerms.eq_prefix
+            at bernoulliAdjust(f, q, v), f, n, succ(n)
+            with adjustSequence, real, agree
+          have old := recurrence with n, member, positive, earlier
+          rw [same, old]
+        . have equal : n = q by arith
+          rw equal
+          have split := bernoulliRecurrenceTerms.split
+            at bernoulliAdjust(f, q, v), q with adjustSequence
+          have same := bernoulliRecurrenceTerms.eq_prefix
+            at bernoulliAdjust(f, q, v), f, q, q
+            with adjustSequence, real, otherwise
+          have last := bernoulliAdjust.at at f, q, v with real
+          have cancel := realInvValue.mul_right with nonzero
+          rw [split, same, last, vDefinition]
+          linear_combination (-(∑ i < q, bernoulliRecurrenceTerms(f, q)(i))) *
+            cancel
+
+-- The graph of the Bernoulli numbers: n is sent to the n-th term of any
+-- prefix of length n + 1.
+def bernoulliGraph : Set :=
+  { p ∈ ℕ × ℝ | ∃ n ∈ ℕ, ∃ f, BernoulliPrefix(f, succ(n)) ∧ p = (n, f(n)) }
+
+theorem bernoulliGraph.function
+  shows bernoulliGraph : ℕ → ℝ
+proof
+  refine ⟨?_, ?_, ?_⟩
+  . intros p member
+    unfold bernoulliGraph at member
+    exact member.left
+  . intros x y first z second
+    unfold relates at first, second
+    unfold bernoulliGraph at first, second
+    obtain ⟨_, n, nMember, f, fPrefix, fShape⟩ := first
+    obtain ⟨_, l, lMember, g, gPrefix, gShape⟩ := second
+    obtain ⟨xn, yf⟩ := orderedPair.injective with fShape
+    obtain ⟨xl, zg⟩ := orderedPair.injective with gShape
+    have nNat := nat.omega.backward with nMember
+    have lNat := nat.omega.backward with lMember
+    have same : n = l by cc
+    rw ← same at gPrefix
+    have agree := BernoulliPrefix.agree at f, g, succ(n), succ(n)
+      with fPrefix, gPrefix
+    have below : n < succ(n) by arith
+    have equal := agree with n, nMember, below, below
+    rw [yf, zg, ← same, equal]
+  . intros n member
+    have nNat := nat.omega.backward with member
+    obtain ⟨f, prefix⟩ := BernoulliPrefix.exists at succ(n)
+    have real := prefix.left
+    have value := RealSequence.value at f, n with real
+    have valueMember : f(n) ∈ ℝ by typecheck
+    refine ⟨f(n), valueMember, ?_⟩
+    unfold relates
+    unfold bernoulliGraph
+    have pair := product.pair with member, valueMember
+    exact ⟨pair, n, member, f, prefix, rfl⟩
+
+theorem bernoulliGraph.value (f : Set, n : Nat)
+  requires prefix : BernoulliPrefix(f, succ(n))
+  shows bernoulliGraph(n) = f(n)
+proof
+  have function := bernoulliGraph.function
+  have member : n ∈ ℕ by typecheck
+  have real := prefix.left
+  have value := RealSequence.value at f, n with real
+  have valueMember : f(n) ∈ ℝ by typecheck
+  apply FunctionBetween.apply_value with function, member
+  unfold relates
+  unfold bernoulliGraph
+  have pair := product.pair with member, valueMember
+  exact ⟨pair, n, member, f, prefix, rfl⟩
+
+theorem bernoulliGraph.sequence
+  shows BernoulliSequence(bernoulliGraph)
+proof
+  have function := bernoulliGraph.function
+  refine ⟨function, ?_, ?_⟩
+  . obtain ⟨f, prefix⟩ := BernoulliPrefix.exists at succ(0)
+    have value := bernoulliGraph.value with prefix
+    rw value
+    exact prefix.right.left
+  . intros n member positive
+    have nNat := nat.omega.backward with member
+    obtain ⟨f, prefix⟩ := BernoulliPrefix.exists at succ(n)
+    have real := prefix.left
+    have agree : ∀ k ∈ ℕ, k < succ(n) → bernoulliGraph(k) = f(k)
+      intros k kMember below
+      have kNat := nat.omega.backward with kMember
+      have within : succ(k) ≤ succ(n) by arith
+      have shorter := BernoulliPrefix.mono with prefix, within
+      exact bernoulliGraph.value with shorter
+    have same := bernoulliRecurrenceTerms.eq_prefix
+      at bernoulliGraph, f, n, succ(n) with function, real, agree
+    obtain ⟨_, _, recurrence⟩ := prefix
+    have below : n < succ(n) by arith
+    have zero := recurrence with n, member, positive, below
+    rw [same, zero]
+
+theorem BernoulliSequence.unique (b c : Set)
+  requires first : BernoulliSequence(b)
+  requires second : BernoulliSequence(c)
+  shows b = c
+proof
+  have bFunction := first.left
+  have cFunction := second.left
+  apply FunctionBetween.ext at b, c, ℕ, ℝ with bFunction, cFunction
+  intros k member
+  have kNat := nat.omega.backward with member
+  have bPrefix := BernoulliPrefix.of_sequence at b, succ(k) with first
+  have cPrefix := BernoulliPrefix.of_sequence at c, succ(k) with second
+  have agree := BernoulliPrefix.agree at b, c, succ(k), succ(k)
+    with bPrefix, cPrefix
+  have below : k < succ(k) by arith
+  exact agree with k, member, below, below
+
+-- The n-th Bernoulli number Bₙ: the n-th term of the sequence above, which
+-- exists and is unique (`BernoulliSequence.unique`).
+defunique bernoulli (n : Nat) (B ∈ ℝ) :=
+  ∃ b, BernoulliSequence(b) ∧ B = b(n)
+proof
+  have sequence := bernoulliGraph.sequence
+  have function := bernoulliGraph.function
+  have member : n ∈ ℕ by typecheck
+  have value := FunctionBetween.apply_closed with function, member
+  witness bernoulliGraph(n)
+  exact ⟨value, bernoulliGraph, sequence, rfl⟩
+uniqueness
+  intros x xMember xProperty y yMember yProperty
+  obtain ⟨b, bSequence, bValue⟩ := xProperty
+  obtain ⟨c, cSequence, cValue⟩ := yProperty
+  have same := BernoulliSequence.unique with bSequence, cSequence
+  rw [bValue, cValue, same]
+
+-- The sequence n ↦ Bₙ.
+defgraph bernoulliNumbers (n ∈ ℕ) : ℝ := bernoulli(n)
+proof
+  have nNat := nat.omega.backward with member
+  have selected := bernoulli.selected at n
+  exact selected.left
+
+-- The Bernoulli polynomials
+
+-- The terms C(n, k) Bₖ x^(n − k) of Bₙ(x).
+defgraph bernoulliPolynomialTerms (n : Nat, x : Real) (k ∈ ℕ) : ℝ :=
+  realNat(choose(n, k)) * bernoulli(k) * x ^ (n - k)
+proof
+  have kNat := nat.omega.backward with member
+  have selected := bernoulli.selected at k
+  have value : Real(bernoulli(k)) by exact selected.left
+  have natural := realNat.real at choose(n, k)
+  typecheck
+
+-- The n-th Bernoulli polynomial at x: Bₙ(x) = Σ_{k ≤ n} C(n, k) Bₖ x^(n − k).
+def bernoulliPolynomial (n : Nat, x : Real) : Set :=
+  ∑ k < succ(n), bernoulliPolynomialTerms(n, x)(k)
+
+-- Bₙ as a function ℝ → ℝ.
+defgraph bernoulliFunction (n : Nat) (x ∈ ℝ) : ℝ := bernoulliPolynomial(n, x)
+proof
+  have xReal : Real(x) by exact member
+  have terms := bernoulliPolynomialTerms.function at n, x
+  have sequence : RealSequence(bernoulliPolynomialTerms(n, x)) by exact terms
+  have sum := realPartialSum.real at bernoulliPolynomialTerms(n, x), succ(n)
+    with sequence
+  unfold bernoulliPolynomial
+  exact sum
+
+-- The integer floor and the fractional part on ℝ
+
+-- ⌊X⌋, the integer k with k ≤ X < k + 1.
+defunique integerFloor (X : Real) (k ∈ ℤ) :=
+  realInt(k) ≤ X ∧ X < realInt(k) + 1
+proof
+  -- Shift X by a natural M into [0, ∞) and take the natural floor there.
+  obtain ⟨M, mNat, above⟩ := Real.below_natural at -X
+  have mReal := realNat.real at M
+  have shifted : (0:R) ≤ X + realNat(M) by linarith
+  have shiftedReal : Real(X + realNat(M)) by typecheck
+  have floorNat := realFloor.natural at X + realNat(M) with shifted
+  have lower := realFloor.le at X + realNat(M) with shifted
+  have upper := realFloor.lt at X + realNat(M) with shifted
+  have value := realInt.class at realFloor(X + realNat(M)), M
+  have integer := integerClass.integer at realFloor(X + realNat(M)), M
+  have floorReal := realNat.real at realFloor(X + realNat(M))
+  witness integerClass(realFloor(X + realNat(M)), M)
+  refine ⟨?_, ?_, ?_⟩
+  . typecheck
+  . rw value
+    linarith
+  . rw value
+    linarith
+uniqueness
+  intros k kMember kBounds l lMember lBounds
+  obtain ⟨kLower, kUpper⟩ := kBounds
+  obtain ⟨lLower, lUpper⟩ := lBounds
+  have kInteger : Integer(k) by typecheck
+  have lInteger : Integer(l) by typecheck
+  have kReal := realInt.real at k
+  have lReal := realInt.real at l
+  have difference := realInt.sub at k, l
+  obtain ⟨n, nNat, sign⟩ := Integer.signed_natural at k - l
+  have nReal := realNat.real at n
+  have nZero : n = 0
+    by_contra nonzero
+    have positive : 0 < n by arith
+    have gap := realNat.add_one_le at 0, n with positive
+    rw realNat.zero at gap
+    cases sign with plus | minus
+    . rw [plus, realInt.nat] at difference
+      linarith
+    . rw [minus, ← integerOfNat.neg, realInt.neg, realInt.nat] at difference
+      linarith
+  have zeroDifference : k - l = integerZero
+    cases sign with plus | minus
+    . rw [plus, nZero, integerOfNat.zero]
+    . rw [minus, nZero, ← integerOfNat.neg, integerOfNat.zero]
+      ring
+  linear_combination zeroDifference
+
+-- The fractional part X − ⌊X⌋, in [0, 1).
+def fractionalPart (X : Real) : Set := X - realInt(integerFloor(X))
+
+-- The periodic Bernoulli functions
+
+-- P̃ₙ(x) = Bₙ(x − ⌊x⌋), of period 1, equal to Bₙ on [0, 1).
+defgraph periodicBernoulli (n : Nat) (x ∈ ℝ) : ℝ :=
+  bernoulliPolynomial(n, fractionalPart(x))
+proof
+  have xReal : Real(x) by exact member
+  have selected := integerFloor.selected at x
+  have floorInteger : Integer(integerFloor(x)) by exact selected.left
+  have floorReal := realInt.real at integerFloor(x)
+  have fracReal : Real(fractionalPart(x))
+    unfold fractionalPart
+    typecheck
+  have terms := bernoulliPolynomialTerms.function at n, fractionalPart(x)
+  have sequence : RealSequence(bernoulliPolynomialTerms(n, fractionalPart(x)))
+    by exact terms
+  have sum := realPartialSum.real
+    at bernoulliPolynomialTerms(n, fractionalPart(x)), succ(n) with sequence
+  unfold bernoulliPolynomial
+  exact sum
+
+-- An explicit bound for P̃ₙ: Σ_{k ≤ n} C(n, k) |Bₖ|.
+defgraph bernoulliBoundTerms (n : Nat) (k ∈ ℕ) : ℝ :=
+  realNat(choose(n, k)) * abs(bernoulli(k))
+proof
+  have kNat := nat.omega.backward with member
+  have selected := bernoulli.selected at k
+  have value : Real(bernoulli(k)) by exact selected.left
+  have natural := realNat.real at choose(n, k)
+  typecheck
+
+def bernoulliBound (n : Nat) : Set := ∑ k < succ(n), bernoulliBoundTerms(n)(k)
+
+-- Facts about the Bernoulli numbers
+
+-- Each Bernoulli number is the value of the constructed sequence.
+theorem bernoulli.graph (n : Nat)
+  shows bernoulli(n) = bernoulliGraph(n)
+proof
+  obtain ⟨_, b, sequence, value⟩ := bernoulli.selected at n
+  have constructed := bernoulliGraph.sequence
+  have same := BernoulliSequence.unique with sequence, constructed
+  rw [value, same]
+
+theorem bernoulliNumbers.eq_graph
+  shows bernoulliNumbers = bernoulliGraph
+proof
+  have first := bernoulliNumbers.function
+  have second := bernoulliGraph.function
+  apply FunctionBetween.ext at bernoulliNumbers, bernoulliGraph, ℕ, ℝ
+    with first, second
+  intros n member
+  have nNat := nat.omega.backward with member
+  have value := bernoulliNumbers.value at n with member
+  rw [value, bernoulli.graph]
+
+theorem bernoulliNumbers.bernoulli_sequence
+  shows BernoulliSequence(bernoulliNumbers)
+proof
+  rw bernoulliNumbers.eq_graph
+  exact bernoulliGraph.sequence
+
+theorem bernoulli.real (n : Nat)
+  shows Real(bernoulli(n))
+proof
+  have selected := bernoulli.selected at n
+  exact selected.left
+
+theorem bernoulli.zero
+  shows bernoulli(0) = (1:R)
+proof
+  obtain ⟨member, b, sequence, value⟩ := bernoulli.selected at 0
+  obtain ⟨real, start, recurrence⟩ := sequence
+  rw value
+  exact start
+
+theorem bernoulli.recurrence (n : Nat)
+  requires positive : 0 < n
+  shows ∑ k < succ(n), bernoulliRecurrenceTerms(bernoulliNumbers, n)(k) =
+    (0:R)
+proof
+  have sequence := bernoulliNumbers.bernoulli_sequence
+  obtain ⟨_, _, recurrence⟩ := sequence
+  have member : n ∈ ℕ by typecheck
+  exact recurrence with n, member, positive
+
+-- The recurrence solved for Bₙ: (n + 1) Bₙ = −Σ_{k < n} C(n + 1, k) Bₖ.
+theorem bernoulli.recurrence_solved (n : Nat)
+  requires positive : 0 < n
+  shows realNat(succ(n)) * bernoulli(n) =
+    -(∑ k < n, bernoulliRecurrenceTerms(bernoulliNumbers, n)(k))
+proof
+  have sequence := bernoulliNumbers.bernoulli_sequence
+  have real := sequence.left
+  have zero := bernoulli.recurrence with positive
+  have split := bernoulliRecurrenceTerms.split at bernoulliNumbers, n
+    with real
+  have member : n ∈ ℕ by typecheck
+  have value := bernoulliNumbers.value at n with member
+  rw value at split
+  have terms := bernoulliRecurrenceTerms.function at bernoulliNumbers, n
+    with real
+  have termSequence : RealSequence(bernoulliRecurrenceTerms(bernoulliNumbers,
+      n)) by exact terms
+  have sum := realPartialSum.real at bernoulliRecurrenceTerms(bernoulliNumbers,
+    n), n with termSequence
+  have number := bernoulli.real at n
+  have scale := realNat.real at succ(n)
+  linarith
+
+-- The first few binomial coefficients the small cases use.
+theorem choose.two_one
+  shows choose(2, 1) = 2
+proof
+  compute
+
+theorem choose.three_one
+  shows choose(3, 1) = 3
+proof
+  compute
+
+theorem bernoulli.one
+  shows bernoulli(1) = -(1:R) / (2:R)
+proof
+  have positive : 0 < 1 by arith
+  have solved := bernoulli.recurrence_solved at 1 with positive
+  have sequence := bernoulliNumbers.bernoulli_sequence
+  have real := sequence.left
+  have first := bernoulliRecurrenceTerms.value at bernoulliNumbers, 1, 0
+    with real
+  have zeroMember : 0 ∈ ℕ by typecheck
+  have zeroValue := bernoulliNumbers.value at 0 with zeroMember
+  have sum : ∑ k < 1, bernoulliRecurrenceTerms(bernoulliNumbers, 1)(k) =
+      (1:R)
+    rw [realPartialSum.succ, realPartialSum.zero, first, zeroValue,
+      choose.zero_right, realNat.one, bernoulli.zero]
+    ring
+  rw [sum, realNat.two] at solved
+  have number := bernoulli.real at 1
+  rw realDiv.eq_mul_inv
+  have two : (2:R) ≠ (0:R) by linarith
+  have cancel := realInvValue.mul_left with two
+  have inverse := realInvValue.real at (2:R)
+  linear_combination realInvValue((2:R)) * solved - bernoulli(1) * cancel
+
+theorem bernoulli.two
+  shows bernoulli(2) = (1:R) / (6:R)
+proof
+  have positive : 0 < 2 by arith
+  have solved := bernoulli.recurrence_solved at 2 with positive
+  have sequence := bernoulliNumbers.bernoulli_sequence
+  have real := sequence.left
+  have first := bernoulliRecurrenceTerms.value at bernoulliNumbers, 2, 0
+    with real
+  have second := bernoulliRecurrenceTerms.value at bernoulliNumbers, 2, 1
+    with real
+  have zeroMember : 0 ∈ ℕ by typecheck
+  have oneMember : 1 ∈ ℕ by typecheck
+  have zeroValue := bernoulliNumbers.value at 0 with zeroMember
+  have oneValue := bernoulliNumbers.value at 1 with oneMember
+  have half := bernoulli.one
+  have threeChoose : choose(succ(2), 1) = 3 by exact choose.three_one
+  have three : realNat(3) = (3:R)
+    have step := realNat.succ_add at 2
+    rw [realNat.two] at step
+    rw step
+    ring
+  have twoNonzero : (2:R) ≠ (0:R) by linarith
+  have twoCancel := realInvValue.mul_left with twoNonzero
+  have twoInverse := realInvValue.real at (2:R)
+  have sum : ∑ k < 2, bernoulliRecurrenceTerms(bernoulliNumbers, 2)(k) =
+      -(1:R) / (2:R)
+    rw [realPartialSum.succ, realPartialSum.succ, realPartialSum.zero, first,
+      second, zeroValue, oneValue, choose.zero_right, threeChoose, realNat.one,
+      bernoulli.zero, half, three]
+    rw [realDiv.eq_mul_inv]
+    linear_combination -twoCancel
+  have threeSucc : realNat(succ(2)) = (3:R) by exact three
+  rw [sum, threeSucc] at solved
+  have number := bernoulli.real at 2
+  rw [realDiv.eq_mul_inv] at solved
+  rw realDiv.eq_mul_inv
+  have sixNonzero : (6:R) ≠ (0:R) by linarith
+  have sixCancel := realInvValue.mul_left with sixNonzero
+  have sixInverse := realInvValue.real at (6:R)
+  linear_combination (2:R) * realInvValue((6:R)) * solved +
+    realInvValue((6:R)) * twoCancel - bernoulli(2) * sixCancel
+
+-- A partial sum of rational terms is rational.
+theorem realPartialSum.rational (u : Set, n : Nat)
+  requires sequence : RealSequence(u)
+  requires terms : ∀ k ∈ ℕ, k < n → u(k) ∈ rationalReals
+  shows (∑ i < n, u(i)) ∈ rationalReals
+proof
+  induction n
+  | zero =>
+    intro terms
+    rw realPartialSum.zero
+    exact rationalReals.zero_mem
+  | succ(j) using ih =>
+    intro terms
+    have earlier : ∀ k ∈ ℕ, k < j → u(k) ∈ rationalReals
+      intros k member below
+      have kNat := nat.omega.backward with member
+      have within : k < succ(j) by arith
+      exact terms with k, member, within
+    have previous := ih with earlier
+    have jMember : j ∈ ℕ by typecheck
+    have last : j < succ(j) by arith
+    have value := terms with j, jMember, last
+    have sum := realPartialSum.real at u, j with sequence
+    have term := RealSequence.value at u, j with sequence
+    have closed := rationalReals.add_mem with previous, value
+    unfold call2 at closed
+    rw realPartialSum.succ
+    unfold realAddValue
+    exact closed
+
+-- The Bernoulli numbers below i are rational.
+theorem bernoulli.rational_below (i : Nat)
+  shows ∀ k ∈ ℕ, k < i → bernoulli(k) ∈ rationalReals
+proof
+  induction i
+  | zero =>
+    intros k member below
+    have kNat := nat.omega.backward with member
+    exfalso
+    arith
+  | succ(j) using ih =>
+    intros k member below
+    have kNat := nat.omega.backward with member
+    by_cases earlier : k < j
+    . exact ih with k, member, earlier
+    . have same : k = j by arith
+      rw same
+      by_cases zero : j = 0
+      . rw [zero, bernoulli.zero]
+        exact rationalReals.one_mem
+      . have positive : 0 < j by arith
+        have solved := bernoulli.recurrence_solved with positive
+        have sequence := bernoulliNumbers.bernoulli_sequence
+        have real := sequence.left
+        have terms := bernoulliRecurrenceTerms.function
+          at bernoulliNumbers, j with real
+        have termSequence : RealSequence(bernoulliRecurrenceTerms(
+            bernoulliNumbers, j)) by exact terms
+        have rationalTerms : ∀ l ∈ ℕ, l < j →
+            bernoulliRecurrenceTerms(bernoulliNumbers, j)(l) ∈ rationalReals
+          intros l lMember lBelow
+          have lNat := nat.omega.backward with lMember
+          have value := bernoulliRecurrenceTerms.value
+            at bernoulliNumbers, j, l with real
+          have number := bernoulliNumbers.value at l with lMember
+          have earlierNumber := ih with l, lMember, lBelow
+          have coefficient := rationalReals.nat_mem at choose(succ(j), l)
+          have coefficientReal := realNat.real at choose(succ(j), l)
+          have numberReal := bernoulli.real at l
+          rw [value, number]
+          exact rationalReals.mul_mem with coefficient, earlierNumber
+        have sum := realPartialSum.rational with termSequence, rationalTerms
+        have sumReal := realPartialSum.real
+          at bernoulliRecurrenceTerms(bernoulliNumbers, j), j
+          with termSequence
+        have negated := rationalReals.neg_mem with sum
+        have scale := rationalReals.nat_mem at succ(j)
+        have scaleReal := realNat.real at succ(j)
+        have succNonzero : succ(j) ≠ 0 by arith
+        have nonzero := realNat.ne_zero with succNonzero
+        have inverse := rationalReals.inv_mem with scale, nonzero
+        have inverseReal := realInvValue.real at realNat(succ(j))
+        have product := rationalReals.mul_mem with inverse, negated
+        have cancel := realInvValue.mul_left with nonzero
+        have number := bernoulli.real at j
+        have value : bernoulli(j) = realInvValue(realNat(succ(j))) *
+            -(∑ i < j, bernoulliRecurrenceTerms(bernoulliNumbers, j)(i))
+          linear_combination realInvValue(realNat(succ(j))) * solved -
+            bernoulli(j) * cancel
+        rw value
+        exact product
+
+theorem bernoulli.rational (n : Nat)
+  shows bernoulli(n) ∈ rationalReals
+proof
+  have all := bernoulli.rational_below at succ(n)
+  have member : n ∈ ℕ by typecheck
+  have below : n < succ(n) by arith
+  exact all with n, member, below
+
+-- Facts about the Bernoulli polynomials
+
+theorem bernoulliPolynomial.real (n : Nat) (x : Real)
+  shows Real(bernoulliPolynomial(n, x))
+proof
+  have terms := bernoulliPolynomialTerms.function at n, x
+  have sequence : RealSequence(bernoulliPolynomialTerms(n, x)) by exact terms
+  have sum := realPartialSum.real at bernoulliPolynomialTerms(n, x), succ(n)
+    with sequence
+  unfold bernoulliPolynomial
+  exact sum
+
+-- Bₙ(x) with its last term Bₙ separated.
+theorem bernoulliPolynomial.split (n : Nat) (x : Real)
+  shows bernoulliPolynomial(n, x) =
+    (∑ k < n, bernoulliPolynomialTerms(n, x)(k)) + bernoulli(n)
+proof
+  have last := bernoulliPolynomialTerms.value at n, x, n
+  have zero : n - n = 0 by arith
+  have number := bernoulli.real at n
+  unfold bernoulliPolynomial
+  rw [realPartialSum.succ, last, choose.diagonal, zero, realPow.zero,
+    realNat.one]
+  unfold realAddValue
+  have shape : (1:R) * bernoulli(n) * (1:R) = bernoulli(n) by ring
+  rw shape
+  unfold call2
+  rfl
+
+theorem bernoulliPolynomial.zero_index (x : Real)
+  shows bernoulliPolynomial(0, x) = (1:R)
+proof
+  have split := bernoulliPolynomial.split at 0, x
+  rw [realPartialSum.zero, bernoulli.zero] at split
+  rw split
+  ring
+
+theorem bernoulliPolynomial.one_index (x : Real)
+  shows bernoulliPolynomial(1, x) = x - (1:R) / (2:R)
+proof
+  have split := bernoulliPolynomial.split at 1, x
+  have first := bernoulliPolynomialTerms.value at 1, x, 0
+  have exponent : 1 - 0 = 1 by arith
+  have power : x ^ 1 = x
+    have step := realPow.succ at x, 0
+    rw realPow.zero at step
+    rw step
+    ring
+  rw [realPartialSum.succ, realPartialSum.zero, first, choose.zero_right,
+    realNat.one, bernoulli.zero, exponent, power, bernoulli.one] at split
+  rw split
+  ring
+
+theorem bernoulliPolynomial.two_index (x : Real)
+  shows bernoulliPolynomial(2, x) = x * x - x + (1:R) / (6:R)
+proof
+  have split := bernoulliPolynomial.split at 2, x
+  have first := bernoulliPolynomialTerms.value at 2, x, 0
+  have second := bernoulliPolynomialTerms.value at 2, x, 1
+  have firstExponent : 2 - 0 = 2 by arith
+  have secondExponent : 2 - 1 = 1 by arith
+  have square := realPow.two at x
+  have twoShape : succ(succ(0)) = 2 by arith
+  rw twoShape at square
+  have power : x ^ 1 = x
+    have step := realPow.succ at x, 0
+    rw realPow.zero at step
+    rw step
+    ring
+  rw [realPartialSum.succ, realPartialSum.succ, realPartialSum.zero, first,
+    second, choose.zero_right, choose.two_one, realNat.one, realNat.two,
+    bernoulli.zero, bernoulli.one, bernoulli.two, firstExponent,
+    secondExponent, square, power] at split
+  rw split
+  rw [realDiv.eq_mul_inv, realDiv.eq_mul_inv]
+  have twoNonzero : (2:R) ≠ (0:R) by linarith
+  have twoCancel := realInvValue.mul_left with twoNonzero
+  have twoInverse := realInvValue.real at (2:R)
+  have sixInverse := realInvValue.real at (6:R)
+  linear_combination -x * twoCancel
+
+-- Bₙ(0) = Bₙ for every n.
+theorem bernoulliPolynomial.at_zero (n : Nat)
+  shows bernoulliPolynomial(n, (0:R)) = bernoulli(n)
+proof
+  have split := bernoulliPolynomial.split at n, (0:R)
+  have terms := bernoulliPolynomialTerms.function at n, (0:R)
+  have termSequence : RealSequence(bernoulliPolynomialTerms(n, (0:R)))
+    by exact terms
+  have zeroReal : Real((0:R)) by typecheck
+  have constant := constantSequence.function at (0:R)
+  have constantSequence : RealSequence(constantSequence((0:R)))
+    by exact constant
+  have vanishing : ∀ k ∈ ℕ, k < n →
+      bernoulliPolynomialTerms(n, (0:R))(k) = constantSequence((0:R))(k)
+    intros k member below
+    have kNat := nat.omega.backward with member
+    have value := bernoulliPolynomialTerms.value at n, (0:R), k
+    have related := constantSequence.relates at (0:R), k
+    have constantValue := FunctionBetween.apply_value with constant, member,
+      related
+    obtain ⟨j, jNat, shape⟩ := Less.exists_add_one with below
+    have atMost : k ≤ n by arith
+    have difference := sub.eq_iff_of_le at n, k, succ(j) with atMost
+    have sum : n = k + succ(j) by arith
+    have exponent := difference.backward with sum
+    have number := bernoulli.real at k
+    have coefficient := realNat.real at choose(n, k)
+    rw [value, constantValue, exponent, realPow.zero_succ]
+    ring
+  have prefix := realPartialSum.eq_prefix with termSequence,
+    constantSequence, vanishing
+  have total := realPartialSum.constant at (0:R), n
+  have number := bernoulli.real at n
+  have count := realNat.real at n
+  rw [prefix, total] at split
+  rw split
+  ring
+
+-- Bₙ(1) = Bₙ for n ≠ 1; B₁(1) = 1/2 = −B₁.
+theorem bernoulliPolynomial.at_one (n : Nat)
+  requires notOne : n ≠ 1
+  shows bernoulliPolynomial(n, (1:R)) = bernoulli(n)
+proof
+  have alternatives := natural.zero_or_successor at n
+  cases alternatives with zero | successor
+  . rw [zero, bernoulli.zero]
+    exact bernoulliPolynomial.zero_index at (1:R)
+  obtain ⟨m, mNat, shape⟩ := successor
+  have positive : 0 < m
+    by_contra notPositive
+    have mZero : m = 0 by arith
+    rw [mZero] at shape
+    exact notOne with shape
+  rw shape
+  have split := bernoulliPolynomial.split at succ(m), (1:R)
+  have oneReal : Real((1:R)) by typecheck
+  have terms := bernoulliPolynomialTerms.function at succ(m), (1:R)
+  have termSequence : RealSequence(bernoulliPolynomialTerms(succ(m), (1:R)))
+    by exact terms
+  have sequence := bernoulliNumbers.bernoulli_sequence
+  have real := sequence.left
+  have recurrenceFunction := bernoulliRecurrenceTerms.function
+    at bernoulliNumbers, m with real
+  have recurrenceSequence : RealSequence(bernoulliRecurrenceTerms(
+      bernoulliNumbers, m)) by exact recurrenceFunction
+  have agree : ∀ k ∈ ℕ, k < succ(m) →
+      bernoulliPolynomialTerms(succ(m), (1:R))(k) =
+        bernoulliRecurrenceTerms(bernoulliNumbers, m)(k)
+    intros k member below
+    have kNat := nat.omega.backward with member
+    have left := bernoulliPolynomialTerms.value at succ(m), (1:R), k
+    have right := bernoulliRecurrenceTerms.value at bernoulliNumbers, m, k
+      with real
+    have number := bernoulliNumbers.value at k with member
+    have numberReal := bernoulli.real at k
+    have coefficient := realNat.real at choose(succ(m), k)
+    rw [left, right, number, realPow.one]
+    ring
+  have prefix := realPartialSum.eq_prefix with termSequence,
+    recurrenceSequence, agree
+  have zero := bernoulli.recurrence with positive
+  have number := bernoulli.real at succ(m)
+  rw [prefix, zero] at split
+  rw split
+  ring
+
+theorem bernoulliPolynomial.one_at_one
+  shows bernoulliPolynomial(1, (1:R)) = (1:R) / (2:R)
+proof
+  have value := bernoulliPolynomial.one_index at (1:R)
+  rw value
+  rw realDiv.eq_mul_inv
+  have twoNonzero : (2:R) ≠ (0:R) by linarith
+  have twoCancel := realInvValue.mul_left with twoNonzero
+  have twoInverse := realInvValue.real at (2:R)
+  linear_combination -twoCancel
+
+-- Derivatives of the Bernoulli polynomials
+
+-- x ↦ xᵉ as a function ℝ → ℝ.
+defgraph realPowFunction (e : Nat) (x ∈ ℝ) : ℝ := x ^ e
+proof
+  have xReal : Real(x) by exact member
+  typecheck
+
+theorem realPowFunction.successor (e : Nat)
+  shows realPowFunction(succ(e)) =
+    pointwiseMul(identity(ℝ), realPowFunction(e))
+proof
+  have first := realPowFunction.function at succ(e)
+  have identityFunction := identity.function at ℝ
+  have powerFunction := realPowFunction.function at e
+  have second := pointwiseMul.function with identityFunction, powerFunction
+  apply FunctionBetween.ext at realPowFunction(succ(e)),
+    pointwiseMul(identity(ℝ), realPowFunction(e)), ℝ, ℝ with first, second
+  intros x member
+  have xReal : Real(x) by exact member
+  have identityValue := identity.apply at x, ℝ with member
+  have powerValue := realPowFunction.value at e, x with member
+  have power := realPow.real at x, e
+  have identityReal : Real(identity(ℝ)(x))
+    rw identityValue
+    exact xReal
+  have powerReal : Real(realPowFunction(e)(x))
+    rw powerValue
+    exact power
+  have product := pointwiseMul.value at identity(ℝ), realPowFunction(e), x
+    with identityFunction, powerFunction, identityReal, powerReal
+  have value := realPowFunction.value at succ(e), x with member
+  rw [product, value, identityValue, powerValue, realPow.succ]
+
+-- (xᵉ)′ = e xᵉ⁻¹ (with xᵉ⁻¹ read as x⁰ = 1 when e = 0, where the factor e
+-- vanishes).
+theorem realPowFunction.derivative (e : Nat) (x : Real)
+  shows HasDerivativeAt(realPowFunction(e),
+    realNat(e) * x ^ (e - 1), x)
+proof
+  induction e
+  | zero =>
+    have constant := constantRealFunction.has_derivative_at at (1:R), x
+    have same : realPowFunction(0) = constantRealFunction((1:R))
+      have first := realPowFunction.function at 0
+      have one : Real((1:R)) by typecheck
+      have second := constantRealFunction.function at (1:R)
+      apply FunctionBetween.ext at realPowFunction(0),
+        constantRealFunction((1:R)), ℝ, ℝ with first, second
+      intros y member
+      have yReal : Real(y) by exact member
+      have value := realPowFunction.value at 0, y with member
+      have constantValue := constantRealFunction.value at (1:R), y
+      rw [value, constantValue, realPow.zero]
+    rw [same, realNat.zero]
+    have power := realPow.real at x, 0 - 1
+    have zero : (0:R) * x ^ (0 - 1) = realZero by ring
+    rw zero
+    exact constant
+  | succ(j) using ih =>
+    have identityDerivative := identity.has_derivative_at at x
+    have product := HasDerivativeAt.mul with identityDerivative, ih
+    rw ← realPowFunction.successor at product
+    have member : x ∈ ℝ by typecheck
+    have identityValue := identity.apply at x, ℝ with member
+    have powerValue := realPowFunction.value at j, x with member
+    rw [identityValue, powerValue] at product
+    have value : realAddValue(realMulValue(realOne, x ^ j),
+        realMulValue(x, realNat(j) * x ^ (j - 1))) =
+        realNat(succ(j)) * x ^ (succ(j) - 1)
+      have count := realNat.real at j
+      have power := realPow.real at x, j
+      have alternatives := natural.zero_or_successor at j
+      cases alternatives with zero | successor
+      . rw [zero, realNat.zero, realNat.succ_add, realNat.zero, realPow.zero]
+        have lower := realPow.real at x, 0 - 1
+        have exponent : 1 - 1 = 0 by arith
+        rw [exponent, realPow.zero]
+        ring
+      . obtain ⟨i, iNat, shape⟩ := successor
+        have exponent : succ(j) - 1 = j by arith
+        have lowered : j - 1 = i
+          rw shape
+          have form := sub.add_one_right at i
+          have same : succ(i) = i + 1 by arith
+          rw same
+          exact form
+        have lower := realPow.real at x, i
+        rw [exponent, realNat.succ_add, lowered, shape, realPow.succ]
+        rw shape at count
+        ring
+    rw value at product
+    exact product
+
+-- C(n + 1, k) (n + 1 − k) = (n + 1) C(n, k) for every k, read in ℝ.
+theorem choose.absorb_real (n : Nat)
+  shows ∀ k ∈ ℕ, realNat(choose(succ(n), k)) *
+    ((realNat(n) + 1) - realNat(k)) = (realNat(n) + 1) * realNat(choose(n, k))
+proof
+  induction n
+  | zero =>
+    intros k member
+    have kNat := nat.omega.backward with member
+    have alternatives := natural.zero_or_successor at k
+    cases alternatives with zero | successor
+    . rw [zero, choose.zero_right, choose.zero_right, realNat.zero, realNat.one]
+      ring
+    . obtain ⟨j, jNat, shape⟩ := successor
+      rw [shape, choose.succ_succ, choose.zero_left, realNat.add, realNat.zero,
+        realNat.succ_add]
+      have jReal := realNat.real at j
+      have entry := realNat.real at choose(0, j)
+      have cases := natural.zero_or_successor at j
+      cases cases with jZero | jSuccessor
+      . rw [jZero, realNat.zero]
+        ring
+      . obtain ⟨i, iNat, form⟩ := jSuccessor
+        rw [form, choose.zero_left, realNat.zero]
+        ring
+  | succ(m) using ih =>
+    intros k member
+    have kNat := nat.omega.backward with member
+    have alternatives := natural.zero_or_successor at k
+    cases alternatives with zero | successor
+    . rw [zero, choose.zero_right, choose.zero_right, realNat.zero, realNat.one]
+      ring
+    . obtain ⟨j, jNat, shape⟩ := successor
+      have jMember : j ∈ ℕ by typecheck
+      have succMember : succ(j) ∈ ℕ by typecheck
+      have lower := ih with j, jMember
+      have upper := ih with succ(j), succMember
+      have pascal := choose.succ_succ at succ(m), j
+      have pascalLower := choose.succ_succ at m, j
+      have pascalReal : realNat(choose(succ(m), succ(j))) =
+          realNat(choose(m, j)) + realNat(choose(m, succ(j)))
+        rw [pascalLower, realNat.add]
+      rw [realNat.succ_add] at upper
+      rw [shape, pascal, realNat.add, realNat.succ_add, realNat.succ_add]
+      have mReal := realNat.real at m
+      have jReal := realNat.real at j
+      have aReal := realNat.real at choose(succ(m), j)
+      have bReal := realNat.real at choose(succ(m), succ(j))
+      have cReal := realNat.real at choose(m, j)
+      have dReal := realNat.real at choose(m, succ(j))
+      linear_combination lower + upper - (realNat(m) + 1) * pascalReal
+
+-- The partial sums Σ_{k < m} C(N, k) Bₖ x^(N − k) as functions of x, and
+-- the termwise derivatives C(N, k) Bₖ (N − k) x^(N − k − 1).
+defgraph bernoulliPartialFunction (N m : Nat) (x ∈ ℝ) : ℝ :=
+  ∑ k < m, bernoulliPolynomialTerms(N, x)(k)
+proof
+  have xReal : Real(x) by exact member
+  have terms := bernoulliPolynomialTerms.function at N, x
+  have sequence : RealSequence(bernoulliPolynomialTerms(N, x)) by exact terms
+  exact realPartialSum.real at bernoulliPolynomialTerms(N, x), m
+    with sequence
+
+defgraph bernoulliDerivativeTerms (N : Nat, x : Real) (k ∈ ℕ) : ℝ :=
+  realNat(choose(N, k)) * bernoulli(k) * (realNat(N - k) * x ^ (N - k - 1))
+proof
+  have kNat := nat.omega.backward with member
+  have number := bernoulli.real at k
+  have coefficient := realNat.real at choose(N, k)
+  have count := realNat.real at N - k
+  have power := realPow.real at x, N - k - 1
+  typecheck
+
+theorem bernoulliPartialFunction.succ (N m : Nat)
+  shows bernoulliPartialFunction(N, succ(m)) =
+    pointwiseAdd(bernoulliPartialFunction(N, m),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulli(m)),
+        realPowFunction(N - m)))
+proof
+  have number := bernoulli.real at m
+  have coefficient := realNat.real at choose(N, m)
+  have scale : Real(realNat(choose(N, m)) * bernoulli(m)) by typecheck
+  have first := bernoulliPartialFunction.function at N, succ(m)
+  have previous := bernoulliPartialFunction.function at N, m
+  have constant := constantRealFunction.function
+    at realNat(choose(N, m)) * bernoulli(m)
+  have power := realPowFunction.function at N - m
+  have term := pointwiseMul.function with constant, power
+  have second := pointwiseAdd.function with previous, term
+  apply FunctionBetween.ext at bernoulliPartialFunction(N, succ(m)),
+    pointwiseAdd(bernoulliPartialFunction(N, m),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulli(m)),
+        realPowFunction(N - m))), ℝ, ℝ with first, second
+  intros x member
+  have xReal : Real(x) by exact member
+  have constantValue := constantRealFunction.value
+    at realNat(choose(N, m)) * bernoulli(m), x
+  have powerValue := realPowFunction.value at N - m, x with member
+  have powerReal := realPow.real at x, N - m
+  have constantReal : Real(constantRealFunction(realNat(choose(N, m)) *
+      bernoulli(m))(x))
+    rw constantValue
+    exact scale
+  have powerFunctionReal : Real(realPowFunction(N - m)(x))
+    rw powerValue
+    exact powerReal
+  have termValue := pointwiseMul.value
+    at constantRealFunction(realNat(choose(N, m)) * bernoulli(m)),
+      realPowFunction(N - m), x
+    with constant, power, constantReal, powerFunctionReal
+  have previousValue := bernoulliPartialFunction.value at N, m, x with member
+  have terms := bernoulliPolynomialTerms.function at N, x
+  have sequence : RealSequence(bernoulliPolynomialTerms(N, x)) by exact terms
+  have previousSum := realPartialSum.real at bernoulliPolynomialTerms(N, x),
+    m with sequence
+  have previousReal : Real(bernoulliPartialFunction(N, m)(x))
+    rw previousValue
+    exact previousSum
+  have termReal : Real(pointwiseMul(constantRealFunction(realNat(choose(N,
+      m)) * bernoulli(m)), realPowFunction(N - m))(x))
+    rw [termValue, constantValue, powerValue]
+    typecheck
+  have sumValue := pointwiseAdd.value
+    at bernoulliPartialFunction(N, m),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulli(m)),
+        realPowFunction(N - m)), x
+    with previous, term, previousReal, termReal
+  have value := bernoulliPartialFunction.value at N, succ(m), x with member
+  have last := bernoulliPolynomialTerms.value at N, x, m
+  rw [sumValue, termValue, constantValue, powerValue, previousValue, value,
+    realPartialSum.succ, last]
+  unfold realAddValue
+  unfold call2
+  rfl
+
+theorem bernoulliPartialFunction.derivative (N m : Nat) (x : Real)
+  shows HasDerivativeAt(bernoulliPartialFunction(N, m),
+    ∑ k < m, bernoulliDerivativeTerms(N, x)(k), x)
+proof
+  induction m
+  | zero =>
+    have constant := constantRealFunction.has_derivative_at at (0:R), x
+    have same : bernoulliPartialFunction(N, 0) = constantRealFunction((0:R))
+      have first := bernoulliPartialFunction.function at N, 0
+      have zero : Real((0:R)) by typecheck
+      have second := constantRealFunction.function at (0:R)
+      apply FunctionBetween.ext at bernoulliPartialFunction(N, 0),
+        constantRealFunction((0:R)), ℝ, ℝ with first, second
+      intros y member
+      have value := bernoulliPartialFunction.value at N, 0, y with member
+      have constantValue := constantRealFunction.value at (0:R), y
+      rw [value, constantValue, realPartialSum.zero]
+    rw [same, realPartialSum.zero]
+    exact constant
+  | succ(j) using ih =>
+    have number := bernoulli.real at j
+    have coefficient := realNat.real at choose(N, j)
+    have scale : Real(realNat(choose(N, j)) * bernoulli(j)) by typecheck
+    have constant := constantRealFunction.has_derivative_at
+      at realNat(choose(N, j)) * bernoulli(j), x
+    have power := realPowFunction.derivative at N - j, x
+    have term := HasDerivativeAt.mul with constant, power
+    have sum := HasDerivativeAt.add with ih, term
+    rw ← bernoulliPartialFunction.succ at sum
+    have member : x ∈ ℝ by typecheck
+    have constantValue := constantRealFunction.value
+      at realNat(choose(N, j)) * bernoulli(j), x
+    have powerValue := realPowFunction.value at N - j, x with member
+    rw [constantValue, powerValue] at sum
+    have derivatives := bernoulliDerivativeTerms.function at N, x
+    have derivativeSequence : RealSequence(bernoulliDerivativeTerms(N, x))
+      by exact derivatives
+    have previous := realPartialSum.real at bernoulliDerivativeTerms(N, x), j
+      with derivativeSequence
+    have last := bernoulliDerivativeTerms.value at N, x, j
+    have powerReal := realPow.real at x, N - j
+    have lowerReal := realPow.real at x, N - j - 1
+    have count := realNat.real at N - j
+    have bridgeZero : realMulValue(realZero, x ^ (N - j)) = (0:R) * x ^ (N - j)
+      unfold realMulValue
+      unfold call2
+      rfl
+    have bridgeScale : realMulValue(realNat(choose(N, j)) * bernoulli(j),
+        realNat(N - j) * x ^ (N - j - 1)) =
+        realNat(choose(N, j)) * bernoulli(j) * (realNat(N - j) *
+          x ^ (N - j - 1))
+      unfold realMulValue
+      unfold call2
+      rfl
+    have bridgeSum : realAddValue((0:R) * x ^ (N - j),
+        realNat(choose(N, j)) * bernoulli(j) * (realNat(N - j) *
+          x ^ (N - j - 1))) =
+        (0:R) * x ^ (N - j) + realNat(choose(N, j)) * bernoulli(j) *
+          (realNat(N - j) * x ^ (N - j - 1))
+      unfold realAddValue
+      unfold call2
+      rfl
+    have bridgeLast : realAddValue(∑ k < j, bernoulliDerivativeTerms(N, x)(k),
+        realNat(choose(N, j)) * bernoulli(j) * (realNat(N - j) *
+          x ^ (N - j - 1))) =
+        (∑ k < j, bernoulliDerivativeTerms(N, x)(k)) +
+          realNat(choose(N, j)) * bernoulli(j) * (realNat(N - j) *
+            x ^ (N - j - 1))
+      unfold realAddValue
+      unfold call2
+      rfl
+    rw [bridgeZero, bridgeScale, bridgeSum] at sum
+    have value : (∑ k < j, bernoulliDerivativeTerms(N, x)(k)) +
+        ((0:R) * x ^ (N - j) + realNat(choose(N, j)) * bernoulli(j) *
+          (realNat(N - j) * x ^ (N - j - 1))) =
+        ∑ k < succ(j), bernoulliDerivativeTerms(N, x)(k)
+      rw [realPartialSum.succ, last, bridgeLast]
+      ring
+    rw value at sum
+    exact sum
+
+theorem bernoulliFunction.partial (N : Nat)
+  shows bernoulliFunction(N) = bernoulliPartialFunction(N, succ(N))
+proof
+  have first := bernoulliFunction.function at N
+  have second := bernoulliPartialFunction.function at N, succ(N)
+  apply FunctionBetween.ext at bernoulliFunction(N),
+    bernoulliPartialFunction(N, succ(N)), ℝ, ℝ with first, second
+  intros x member
+  have xReal : Real(x) by exact member
+  have left := bernoulliFunction.value at N, x with member
+  have right := bernoulliPartialFunction.value at N, succ(N), x with member
+  rw [left, right]
+  unfold bernoulliPolynomial
+  rfl
+
+-- A partial sum of multiples is the multiple of the partial sum.
+theorem realPartialSum.scaled (u v : Set) (c : Real, m : Nat)
+  requires first : RealSequence(u)
+  requires second : RealSequence(v)
+  requires multiple : ∀ k ∈ ℕ, k < m → v(k) = c * u(k)
+  shows (∑ k < m, v(k)) = c * (∑ k < m, u(k))
+proof
+  induction m
+  | zero =>
+    intro multiple
+    rw [realPartialSum.zero, realPartialSum.zero]
+    ring
+  | succ(j) using ih =>
+    intro multiple
+    have earlier : ∀ k ∈ ℕ, k < j → v(k) = c * u(k)
+      intros k member below
+      have kNat := nat.omega.backward with member
+      have within : k < succ(j) by arith
+      exact multiple with k, member, within
+    have previous := ih with earlier
+    have jMember : j ∈ ℕ by typecheck
+    have last : j < succ(j) by arith
+    have term := multiple with j, jMember, last
+    have uSum := realPartialSum.real at u, j with first
+    have vSum := realPartialSum.real at v, j with second
+    have uTerm := RealSequence.value at u, j with first
+    have vTerm := RealSequence.value at v, j with second
+    rw [realPartialSum.succ, realPartialSum.succ]
+    have left : realAddValue(∑ k < j, v(k), v(j)) = (∑ k < j, v(k)) + v(j)
+      unfold realAddValue
+      unfold call2
+      rfl
+    have right : realAddValue(∑ k < j, u(k), u(j)) = (∑ k < j, u(k)) + u(j)
+      unfold realAddValue
+      unfold call2
+      rfl
+    rw [left, right, previous, term]
+    ring
+
+-- The termwise derivative of Bₙ₊₁ sums to (n + 1) Bₙ.
+theorem bernoulliDerivativeTerms.sum (n : Nat) (x : Real)
+  shows (∑ k < succ(succ(n)), bernoulliDerivativeTerms(succ(n), x)(k)) =
+    realNat(succ(n)) * bernoulliPolynomial(n, x)
+proof
+  have derivatives := bernoulliDerivativeTerms.function at succ(n), x
+  have derivativeSequence : RealSequence(bernoulliDerivativeTerms(succ(n), x))
+    by exact derivatives
+  have terms := bernoulliPolynomialTerms.function at n, x
+  have termSequence : RealSequence(bernoulliPolynomialTerms(n, x))
+    by exact terms
+  have scale := realNat.real at succ(n)
+  have multiple : ∀ k ∈ ℕ, k < succ(n) →
+      bernoulliDerivativeTerms(succ(n), x)(k) =
+        realNat(succ(n)) * bernoulliPolynomialTerms(n, x)(k)
+    intros k member below
+    have kNat := nat.omega.backward with member
+    have atMost : k ≤ n by arith
+    have left := bernoulliDerivativeTerms.value at succ(n), x, k
+    have right := bernoulliPolynomialTerms.value at n, x, k
+    have shift := sub.add_one_of_le at n, k with atMost
+    have step : succ(n) = n + 1 by arith
+    have difference : succ(n) - k = (n - k) + 1
+      rw step
+      exact shift
+    have lowered : succ(n) - k - 1 = n - k
+      rw difference
+      exact sub.add_one_right at n - k
+    have cancel := sub.add_cancel at n, k with atMost
+    have count : realNat(n - k) = realNat(n) - realNat(k)
+      have sum := realNat.add at n - k, k
+      rw cancel at sum
+      have first := realNat.real at n - k
+      have second := realNat.real at k
+      linarith
+    have absorb := choose.absorb_real at n
+    have instance := absorb with k, member
+    have number := bernoulli.real at k
+    have power := realPow.real at x, n - k
+    have high := realNat.real at choose(succ(n), k)
+    have low := realNat.real at choose(n, k)
+    have nReal := realNat.real at n
+    have kReal := realNat.real at k
+    have succCount : realNat(succ(n) - k) = realNat(n) + 1 - realNat(k)
+      rw [difference, realNat.add, realNat.one, count]
+      ring
+    rw [left, right, lowered, succCount, realNat.succ_add]
+    linear_combination bernoulli(k) * x ^ (n - k) * instance
+  have scaled := realPartialSum.scaled at bernoulliPolynomialTerms(n, x),
+    bernoulliDerivativeTerms(succ(n), x), realNat(succ(n)), succ(n)
+    with termSequence, derivativeSequence, multiple
+  have last := bernoulliDerivativeTerms.value at succ(n), x, succ(n)
+  have vanishing : succ(n) - succ(n) = 0 by arith
+  have number := bernoulli.real at succ(n)
+  have coefficient := realNat.real at choose(succ(n), succ(n))
+  have lower := realPow.real at x, 0 - 1
+  have previous := realPartialSum.real
+    at bernoulliDerivativeTerms(succ(n), x), succ(n) with derivativeSequence
+  have bridge : realAddValue(∑ k < succ(n),
+      bernoulliDerivativeTerms(succ(n), x)(k),
+      bernoulliDerivativeTerms(succ(n), x)(succ(n))) =
+      (∑ k < succ(n), bernoulliDerivativeTerms(succ(n), x)(k)) +
+        bernoulliDerivativeTerms(succ(n), x)(succ(n))
+    unfold realAddValue
+    unfold call2
+    rfl
+  rw [realPartialSum.succ, bridge, scaled, last, vanishing, realNat.zero]
+  unfold bernoulliPolynomial
+  ring
+
+-- Bₙ is differentiable everywhere, with the termwise derivative.
+theorem bernoulliFunction.derivative_terms (N : Nat) (x : Real)
+  shows HasDerivativeAt(bernoulliFunction(N),
+    ∑ k < succ(N), bernoulliDerivativeTerms(N, x)(k), x)
+proof
+  rw bernoulliFunction.partial
+  exact bernoulliPartialFunction.derivative at N, succ(N), x
+
+theorem bernoulliFunction.continuous (n : Nat)
+  shows Continuous(bernoulliFunction(n))
+proof
+  have function := bernoulliFunction.function at n
+  refine ⟨function, ?_⟩
+  intros a member
+  have aReal : Real(a) by exact member
+  have derivative := bernoulliFunction.derivative_terms at n, a
+  exact HasDerivativeAt.continuous_at with derivative
+
+-- B′ₙ₊₁ = (n + 1) Bₙ.
+theorem bernoulliFunction.derivative (n : Nat) (x : Real)
+  shows HasDerivativeAt(bernoulliFunction(succ(n)),
+    realNat(succ(n)) * bernoulliPolynomial(n, x), x)
+proof
+  have derivative := bernoulliFunction.derivative_terms at succ(n), x
+  rw bernoulliDerivativeTerms.sum at derivative
+  exact derivative
+
+-- (n + 1) ∫_A^B Bₙ = Bₙ₊₁(B) − Bₙ₊₁(A).
+theorem bernoulliFunction.integral (n : Nat) (A B : Real)
+  requires ordered : A ≤ B
+  shows realNat(succ(n)) * riemannIntegral(bernoulliFunction(n), A, B) =
+    bernoulliPolynomial(succ(n), B) - bernoulliPolynomial(succ(n), A)
+proof
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have constant := constantRealFunction.function at realInvValue(realNat(succ(n)))
+  have upper := bernoulliFunction.function at succ(n)
+  have lower := bernoulliFunction.function at n
+  have primitive := pointwiseMul.function with constant, upper
+  -- F = B_{n+1}/(n + 1) has derivative Bₙ everywhere.
+  have derivative : ∀ X ∈ ℝ, A < X → X < B →
+      HasDerivativeAt(pointwiseMul(constantRealFunction(
+        realInvValue(realNat(succ(n)))), bernoulliFunction(succ(n))),
+        bernoulliFunction(n)(X), X)
+    intros X member left right
+    have xReal : Real(X) by exact member
+    have constantDerivative := constantRealFunction.has_derivative_at
+      at realInvValue(realNat(succ(n))), X
+    have upperDerivative := bernoulliFunction.derivative at n, X
+    have product := HasDerivativeAt.mul with constantDerivative,
+      upperDerivative
+    have constantValue := constantRealFunction.value
+      at realInvValue(realNat(succ(n))), X
+    have upperValue := bernoulliFunction.value at succ(n), X with member
+    have lowerValue := bernoulliFunction.value at n, X with member
+    have polynomial := bernoulliPolynomial.real at succ(n), X
+    have lowerPolynomial := bernoulliPolynomial.real at n, X
+    rw [constantValue, upperValue] at product
+    have value : realAddValue(realMulValue(realZero,
+        bernoulliPolynomial(succ(n), X)), realMulValue(realInvValue(
+        realNat(succ(n))), realNat(succ(n)) * bernoulliPolynomial(n, X))) =
+        bernoulliFunction(n)(X)
+      rw lowerValue
+      have bridgeZero : realMulValue(realZero, bernoulliPolynomial(succ(n),
+          X)) = (0:R) * bernoulliPolynomial(succ(n), X)
+        unfold realMulValue
+        unfold call2
+        rfl
+      have bridgeScale : realMulValue(realInvValue(realNat(succ(n))),
+          realNat(succ(n)) * bernoulliPolynomial(n, X)) =
+          realInvValue(realNat(succ(n))) * (realNat(succ(n)) *
+            bernoulliPolynomial(n, X))
+        unfold realMulValue
+        unfold call2
+        rfl
+      rw [bridgeZero, bridgeScale]
+      have bridgeSum : realAddValue((0:R) * bernoulliPolynomial(succ(n), X),
+          realInvValue(realNat(succ(n))) * (realNat(succ(n)) *
+            bernoulliPolynomial(n, X))) = (0:R) * bernoulliPolynomial(succ(n),
+          X) + realInvValue(realNat(succ(n))) * (realNat(succ(n)) *
+            bernoulliPolynomial(n, X))
+        unfold realAddValue
+        unfold call2
+        rfl
+      rw bridgeSum
+      linear_combination bernoulliPolynomial(n, X) * cancel
+    rw value at product
+    exact product
+  have primitiveContinuous : Continuous(pointwiseMul(constantRealFunction(
+      realInvValue(realNat(succ(n)))), bernoulliFunction(succ(n))))
+    refine ⟨primitive, ?_⟩
+    intros X member
+    have xReal : Real(X) by exact member
+    have constantDerivative := constantRealFunction.has_derivative_at
+      at realInvValue(realNat(succ(n))), X
+    have upperDerivative := bernoulliFunction.derivative at n, X
+    have product := HasDerivativeAt.mul with constantDerivative,
+      upperDerivative
+    exact HasDerivativeAt.continuous_at with product
+  have interval := closedInterval.subset_reals at A, B
+  have primitiveOn := Continuous.continuous_on with primitiveContinuous,
+    interval
+  have lowerContinuous := bernoulliFunction.continuous at n
+  have lowerOn := Continuous.continuous_on with lowerContinuous, interval
+  have integral := FTC.continuous_derivative
+    at bernoulliFunction(n), pointwiseMul(constantRealFunction(
+      realInvValue(realNat(succ(n)))), bernoulliFunction(succ(n))), A, B
+    with ordered, primitiveOn, derivative, lowerOn
+  have value := riemannIntegral.eq_of_integral with integral
+  have bMember : B ∈ ℝ by typecheck
+  have aMember : A ∈ ℝ by typecheck
+  have constantB := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), B
+  have constantA := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), A
+  have upperB := bernoulliFunction.value at succ(n), B with bMember
+  have upperA := bernoulliFunction.value at succ(n), A with aMember
+  have polynomialB := bernoulliPolynomial.real at succ(n), B
+  have polynomialA := bernoulliPolynomial.real at succ(n), A
+  have constantRealB : Real(constantRealFunction(realInvValue(
+      realNat(succ(n))))(B))
+    rw constantB
+    exact inverse
+  have constantRealA : Real(constantRealFunction(realInvValue(
+      realNat(succ(n))))(A))
+    rw constantA
+    exact inverse
+  have upperRealB : Real(bernoulliFunction(succ(n))(B))
+    rw upperB
+    exact polynomialB
+  have upperRealA : Real(bernoulliFunction(succ(n))(A))
+    rw upperA
+    exact polynomialA
+  have atB := pointwiseMul.value at constantRealFunction(realInvValue(
+    realNat(succ(n)))), bernoulliFunction(succ(n)), B
+    with constant, upper, constantRealB, upperRealB
+  have atA := pointwiseMul.value at constantRealFunction(realInvValue(
+    realNat(succ(n)))), bernoulliFunction(succ(n)), A
+    with constant, upper, constantRealA, upperRealA
+  rw [atB, atA, constantB, constantA, upperB, upperA] at value
+  rw value
+  have rightCancel := realInvValue.mul_right with nonzero
+  linear_combination (bernoulliPolynomial(succ(n), B) -
+    bernoulliPolynomial(succ(n), A)) * rightCancel
+
+-- ∫₀¹ Bₙ = 0 for n ≥ 1.
+theorem bernoulliFunction.integral_unit (n : Nat)
+  requires positive : 0 < n
+  shows riemannIntegral(bernoulliFunction(n), (0:R), (1:R)) = (0:R)
+proof
+  have ordered : (0:R) ≤ (1:R) by linarith
+  have integral := bernoulliFunction.integral at n, (0:R), (1:R) with ordered
+  have notOne : succ(n) ≠ 1 by arith
+  have atOne := bernoulliPolynomial.at_one at succ(n) with notOne
+  have atZero := bernoulliPolynomial.at_zero at succ(n)
+  rw [atOne, atZero] at integral
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have zeroReal : Real((0:R)) by typecheck
+  have oneReal : Real((1:R)) by typecheck
+  have selected := riemannIntegral.selected at bernoulliFunction(n), (0:R),
+    (1:R)
+  have value : Real(riemannIntegral(bernoulliFunction(n), (0:R), (1:R)))
+    by exact selected.left
+  linear_combination realInvValue(realNat(succ(n))) * integral -
+    riemannIntegral(bernoulliFunction(n), (0:R), (1:R)) * cancel
+
+-- Differences of the Bernoulli polynomials
+
+-- x ↦ Bₙ(x + 1) as a function ℝ → ℝ.
+defgraph bernoulliShifted (n : Nat) (x ∈ ℝ) : ℝ :=
+  bernoulliPolynomial(n, x + (1:R))
+proof
+  have xReal : Real(x) by exact member
+  have shifted : Real(x + (1:R)) by typecheck
+  exact bernoulliPolynomial.real at n, x + (1:R)
+
+theorem bernoulliShifted.derivative (n : Nat) (x : Real)
+  shows HasDerivativeAt(bernoulliShifted(succ(n)),
+    realNat(succ(n)) * bernoulliPolynomial(n, x + (1:R)), x)
+proof
+  have shifted : Real(x + (1:R)) by typecheck
+  have base := bernoulliFunction.derivative at n, x + (1:R)
+  obtain ⟨baseFunction, limit⟩ := base
+  have function := bernoulliShifted.function at succ(n)
+  have quotients : differenceQuotient(bernoulliShifted(succ(n)), x) =
+      differenceQuotient(bernoulliFunction(succ(n)), x + (1:R))
+    have first := differenceQuotient.function at bernoulliShifted(succ(n)), x
+      with function
+    have second := differenceQuotient.function
+      at bernoulliFunction(succ(n)), x + (1:R) with baseFunction
+    apply FunctionBetween.ext at differenceQuotient(bernoulliShifted(succ(n)),
+      x), differenceQuotient(bernoulliFunction(succ(n)), x + (1:R)), ℝ, ℝ
+      with first, second
+    intros h member
+    have hReal : Real(h) by exact member
+    have left := differenceQuotient.value at bernoulliShifted(succ(n)), x, h
+      with function
+    have right := differenceQuotient.value
+      at bernoulliFunction(succ(n)), x + (1:R), h with baseFunction
+    have xMember : x ∈ ℝ by typecheck
+    have moved : Real(x + h) by typecheck
+    have movedMember : x + h ∈ ℝ by typecheck
+    have shiftedMember : x + (1:R) ∈ ℝ by typecheck
+    have both : Real(x + (1:R) + h) by typecheck
+    have bothMember : x + (1:R) + h ∈ ℝ by typecheck
+    have shiftAt := bernoulliShifted.value at succ(n), x with xMember
+    have shiftMoved := bernoulliShifted.value at succ(n), x + h with movedMember
+    have baseAt := bernoulliFunction.value at succ(n), x + (1:R)
+      with shiftedMember
+    have baseMoved := bernoulliFunction.value at succ(n), x + (1:R) + h
+      with bothMember
+    have regroup : x + h + (1:R) = x + (1:R) + h by ring
+    rw [left, right, shiftAt, shiftMoved, baseAt, baseMoved, regroup]
+  refine ⟨function, ?_⟩
+  rw quotients
+  exact limit
+
+-- A function with derivative 0 everywhere takes equal values.
+theorem HasDerivativeAt.constant_of_zero (F : Set) (A B : Real)
+  requires ordered : A < B
+  requires derivative : ∀ C ∈ ℝ, HasDerivativeAt(F, (0:R), C)
+  shows F(A) = F(B)
+proof
+  have aMember : A ∈ ℝ by typecheck
+  have function := HasDerivativeAt.function with (derivative with A, aMember)
+  have continuous : Continuous(F)
+    refine ⟨function, ?_⟩
+    intros C member
+    have here := derivative with C, member
+    exact HasDerivativeAt.continuous_at with here
+  have interval := closedInterval.subset_reals at A, B
+  have continuousOn := Continuous.continuous_on with continuous, interval
+  have differentiable : ∀ C ∈ ℝ, A < C → C < B →
+      ∃ D ∈ ℝ, HasDerivativeAt(F, D, C)
+    intros C member left right
+    have zero : (0:R) ∈ ℝ by typecheck
+    exact ⟨(0:R), zero, (derivative with C, member)⟩
+  obtain ⟨C, cMember, left, right, D, dMember, cDerivative, value⟩ :=
+    MeanValue.theorem with ordered, continuousOn, differentiable
+  have cReal : Real(C) by exact cMember
+  have dReal : Real(D) by exact dMember
+  have zero := derivative with C, cMember
+  have same := HasDerivativeAt.unique with cDerivative, zero
+  rw same at value
+  have bMember : B ∈ ℝ by typecheck
+  have fa := FunctionBetween.apply_closed with function, aMember
+  have fb := FunctionBetween.apply_closed with function, bMember
+  have faReal : Real(F(A)) by exact fa
+  have fbReal : Real(F(B)) by exact fb
+  have vanish : (0:R) * (B - A) = (0:R) by ring
+  rw vanish at value
+  linarith
+
+-- Gₙ(x) = Bₙ₊₁(x + 1) − Bₙ₊₁(x) − (n + 1) xⁿ.
+defgraph bernoulliDifferenceFunction (n : Nat) (x ∈ ℝ) : ℝ :=
+  bernoulliPolynomial(succ(n), x + (1:R)) - bernoulliPolynomial(succ(n), x) -
+    realNat(succ(n)) * x ^ n
+proof
+  have xReal : Real(x) by exact member
+  have shifted : Real(x + (1:R)) by typecheck
+  have upper := bernoulliPolynomial.real at succ(n), x + (1:R)
+  have lower := bernoulliPolynomial.real at succ(n), x
+  have scale := realNat.real at succ(n)
+  have power := realPow.real at x, n
+  typecheck
+
+theorem bernoulliDifferenceFunction.pointwise (n : Nat)
+  shows bernoulliDifferenceFunction(n) = pointwiseSub(pointwiseSub(
+    bernoulliShifted(succ(n)), bernoulliFunction(succ(n))),
+    pointwiseMul(constantRealFunction(realNat(succ(n))), realPowFunction(n)))
+proof
+  have scale := realNat.real at succ(n)
+  have first := bernoulliDifferenceFunction.function at n
+  have shiftFunction := bernoulliShifted.function at succ(n)
+  have baseFunction := bernoulliFunction.function at succ(n)
+  have constantFunction := constantRealFunction.function at realNat(succ(n))
+  have powerFunction := realPowFunction.function at n
+  have inner := pointwiseSub.function with shiftFunction, baseFunction
+  have term := pointwiseMul.function with constantFunction, powerFunction
+  have second := pointwiseSub.function with inner, term
+  apply FunctionBetween.ext at bernoulliDifferenceFunction(n),
+    pointwiseSub(pointwiseSub(bernoulliShifted(succ(n)),
+      bernoulliFunction(succ(n))), pointwiseMul(constantRealFunction(
+      realNat(succ(n))), realPowFunction(n))), ℝ, ℝ with first, second
+  intros x member
+  have xReal : Real(x) by exact member
+  have shifted : Real(x + (1:R)) by typecheck
+  have upper := bernoulliPolynomial.real at succ(n), x + (1:R)
+  have lower := bernoulliPolynomial.real at succ(n), x
+  have power := realPow.real at x, n
+  have shiftValue := bernoulliShifted.value at succ(n), x with member
+  have baseValue := bernoulliFunction.value at succ(n), x with member
+  have constantValue := constantRealFunction.value at realNat(succ(n)), x
+  have powerValue := realPowFunction.value at n, x with member
+  have shiftReal : Real(bernoulliShifted(succ(n))(x))
+    rw shiftValue
+    exact upper
+  have baseReal : Real(bernoulliFunction(succ(n))(x))
+    rw baseValue
+    exact lower
+  have constantReal : Real(constantRealFunction(realNat(succ(n)))(x))
+    rw constantValue
+    exact scale
+  have powerReal : Real(realPowFunction(n)(x))
+    rw powerValue
+    exact power
+  have innerValue := pointwiseSub.value at bernoulliShifted(succ(n)),
+    bernoulliFunction(succ(n)), x with shiftFunction, baseFunction, shiftReal,
+    baseReal
+  have termValue := pointwiseMul.value at constantRealFunction(
+    realNat(succ(n))), realPowFunction(n), x with constantFunction,
+    powerFunction, constantReal, powerReal
+  have innerReal : Real(pointwiseSub(bernoulliShifted(succ(n)),
+      bernoulliFunction(succ(n)))(x))
+    rw innerValue
+    typecheck
+  have termReal : Real(pointwiseMul(constantRealFunction(realNat(succ(n))),
+      realPowFunction(n))(x))
+    rw termValue
+    typecheck
+  have outerValue := pointwiseSub.value at pointwiseSub(bernoulliShifted(
+    succ(n)), bernoulliFunction(succ(n))), pointwiseMul(constantRealFunction(
+    realNat(succ(n))), realPowFunction(n)), x with inner, term, innerReal,
+    termReal
+  have value := bernoulliDifferenceFunction.value at n, x with member
+  rw [value, outerValue, innerValue, termValue, shiftValue, baseValue,
+    constantValue, powerValue]
+
+-- Bₙ₊₁(x + 1) − Bₙ₊₁(x) = (n + 1) xⁿ for every x.
+theorem bernoulliPolynomial.difference_succ (m : Nat)
+  shows ∀ x ∈ ℝ, bernoulliPolynomial(succ(m), x + (1:R)) -
+    bernoulliPolynomial(succ(m), x) = realNat(succ(m)) * x ^ m
+proof
+  induction m
+  | zero =>
+    intros x member
+    have xReal : Real(x) by exact member
+    have shifted : Real(x + (1:R)) by typecheck
+    have upper := bernoulliPolynomial.one_index at x + (1:R)
+    have lower := bernoulliPolynomial.one_index at x
+    have one : succ(0) = 1 by arith
+    rw [one, upper, lower, realNat.one, realPow.zero]
+    ring
+  | succ(j) using ih =>
+    intros x member
+    have xReal : Real(x) by exact member
+    -- G = G_{j+1} has derivative (n + 1)(Bₙ(C + 1) − Bₙ(C) − n Cʲ) = 0.
+    have derivative : ∀ C ∈ ℝ, HasDerivativeAt(bernoulliDifferenceFunction(
+        succ(j)), (0:R), C)
+      intros C cMember
+      have cReal : Real(C) by exact cMember
+      have scale := realNat.real at succ(succ(j))
+      have shift := bernoulliShifted.derivative at succ(j), C
+      have base := bernoulliFunction.derivative at succ(j), C
+      have constant := constantRealFunction.has_derivative_at
+        at realNat(succ(succ(j))), C
+      have power := realPowFunction.derivative at succ(j), C
+      have term := HasDerivativeAt.mul with constant, power
+      have inner := HasDerivativeAt.sub with shift, base
+      have whole := HasDerivativeAt.sub with inner, term
+      rw ← bernoulliDifferenceFunction.pointwise at whole
+      have constantValue := constantRealFunction.value
+        at realNat(succ(succ(j))), C
+      have powerValue := realPowFunction.value at succ(j), C with cMember
+      rw [constantValue, powerValue] at whole
+      have previous := ih with C, cMember
+      have lowered : succ(j) - 1 = j by arith
+      have shifted : Real(C + (1:R)) by typecheck
+      have upper := bernoulliPolynomial.real at succ(j), C + (1:R)
+      have lower := bernoulliPolynomial.real at succ(j), C
+      have count := realNat.real at succ(j)
+      have powerReal := realPow.real at C, succ(j)
+      have lowerPower := realPow.real at C, j
+      have bridgeZero : realMulValue(realZero, C ^ succ(j)) =
+          (0:R) * C ^ succ(j)
+        unfold realMulValue
+        unfold call2
+        rfl
+      have bridgeScale : realMulValue(realNat(succ(succ(j))),
+          realNat(succ(j)) * C ^ (succ(j) - 1)) =
+          realNat(succ(succ(j))) * (realNat(succ(j)) * C ^ (succ(j) - 1))
+        unfold realMulValue
+        unfold call2
+        rfl
+      have bridgeSum : realAddValue((0:R) * C ^ succ(j),
+          realNat(succ(succ(j))) * (realNat(succ(j)) * C ^ (succ(j) - 1))) =
+          (0:R) * C ^ succ(j) +
+            realNat(succ(succ(j))) * (realNat(succ(j)) * C ^ (succ(j) - 1))
+        unfold realAddValue
+        unfold call2
+        rfl
+      rw [bridgeZero, bridgeScale, bridgeSum, lowered] at whole
+      have value : realNat(succ(succ(j))) * bernoulliPolynomial(succ(j),
+          C + (1:R)) - realNat(succ(succ(j))) * bernoulliPolynomial(succ(j),
+          C) - ((0:R) * C ^ succ(j) + realNat(succ(succ(j))) *
+          (realNat(succ(j)) * C ^ j)) = (0:R)
+        linear_combination realNat(succ(succ(j))) * previous
+      rw value at whole
+      exact whole
+    have zeroMember : (0:R) ∈ ℝ by typecheck
+    have atZero : bernoulliDifferenceFunction(succ(j))((0:R)) = (0:R)
+      have value := bernoulliDifferenceFunction.value at succ(j), (0:R)
+        with zeroMember
+      have one : (0:R) + (1:R) = (1:R) by ring
+      have notOne : succ(succ(j)) ≠ 1 by arith
+      have endOne := bernoulliPolynomial.at_one at succ(succ(j)) with notOne
+      have endZero := bernoulliPolynomial.at_zero at succ(succ(j))
+      have number := bernoulli.real at succ(succ(j))
+      have scale := realNat.real at succ(succ(j))
+      rw [value, one, endOne, endZero, realPow.zero_succ]
+      ring
+    have same : bernoulliDifferenceFunction(succ(j))(x) = (0:R)
+      have order := realLess.trichotomy at x, (0:R)
+      rcases order with below | equal | above
+      . have constant := HasDerivativeAt.constant_of_zero at
+          bernoulliDifferenceFunction(succ(j)), x, (0:R) with below, derivative
+        rw [constant, atZero]
+      . rw [equal, atZero]
+      . have constant := HasDerivativeAt.constant_of_zero at
+          bernoulliDifferenceFunction(succ(j)), (0:R), x with above,
+          derivative
+        rw [← constant, atZero]
+    have value := bernoulliDifferenceFunction.value at succ(j), x with member
+    rw value at same
+    have shifted : Real(x + (1:R)) by typecheck
+    have upper := bernoulliPolynomial.real at succ(succ(j)), x + (1:R)
+    have lower := bernoulliPolynomial.real at succ(succ(j)), x
+    have scale := realNat.real at succ(succ(j))
+    have power := realPow.real at x, succ(j)
+    linarith
+
+-- Bₙ(x + 1) − Bₙ(x) = n x^(n − 1) for n ≥ 1.
+theorem bernoulliPolynomial.difference (n : Nat) (x : Real)
+  requires positive : 0 < n
+  shows bernoulliPolynomial(n, x + (1:R)) - bernoulliPolynomial(n, x) =
+    realNat(n) * x ^ (n - 1)
+proof
+  have alternatives := natural.zero_or_successor at n
+  cases alternatives with zero | successor
+  . exfalso
+    rw zero at positive
+    arith
+  obtain ⟨m, mNat, shape⟩ := successor
+  have all := bernoulliPolynomial.difference_succ at m
+  have member : x ∈ ℝ by typecheck
+  have value := all with x, member
+  have lowered : succ(m) - 1 = m by arith
+  rw [shape, lowered]
+  exact value
+
+-- The reflection Bₙ(1 − x) = (−1)ⁿ Bₙ(x)
+
+-- Rₙ(x) = Bₙ(1 − x) − (−1)ⁿ Bₙ(x).
+def bernoulliReflection (n : Nat) : Set :=
+  pointwiseSub(compose(bernoulliFunction(n), reflectBy((1:R)), ℝ, ℝ, ℝ),
+    pointwiseMul(constantRealFunction((-(1:R)) ^ n), bernoulliFunction(n)))
+
+theorem bernoulliReflection.value (n : Nat) (x : Real)
+  shows bernoulliReflection(n)(x) = bernoulliPolynomial(n, (1:R) - x) -
+    (-(1:R)) ^ n * bernoulliPolynomial(n, x)
+proof
+  have one : Real((1:R)) by typecheck
+  have sign := realPow.real at -(1:R), n
+  have reflected := reflectBy.function at (1:R)
+  have function := bernoulliFunction.function at n
+  have composite := compose.function at bernoulliFunction(n),
+    reflectBy((1:R)), ℝ, ℝ, ℝ with reflected, function
+  have constant := constantRealFunction.function at (-(1:R)) ^ n
+  have product := pointwiseMul.function with constant, function
+  have xMember : x ∈ ℝ by typecheck
+  have mirrored : (1:R) - x ∈ ℝ by typecheck
+  have applied := compose.apply with reflected, function, xMember
+  rw reflectBy.value at applied
+  have mirrorValue := bernoulliFunction.value at n, (1:R) - x with mirrored
+  have baseValue := bernoulliFunction.value at n, x with xMember
+  have constantValue := constantRealFunction.value at (-(1:R)) ^ n, x
+  have mirrorPolynomial := bernoulliPolynomial.real at n, (1:R) - x
+  have basePolynomial := bernoulliPolynomial.real at n, x
+  have compositeReal : Real(compose(bernoulliFunction(n), reflectBy((1:R)),
+      ℝ, ℝ, ℝ)(x))
+    rw [applied, mirrorValue]
+    exact mirrorPolynomial
+  have constantReal : Real(constantRealFunction((-(1:R)) ^ n)(x))
+    rw constantValue
+    exact sign
+  have baseReal : Real(bernoulliFunction(n)(x))
+    rw baseValue
+    exact basePolynomial
+  have productValue := pointwiseMul.value at constantRealFunction(
+    (-(1:R)) ^ n), bernoulliFunction(n), x with constant, function,
+    constantReal, baseReal
+  have productReal : Real(pointwiseMul(constantRealFunction((-(1:R)) ^ n),
+      bernoulliFunction(n))(x))
+    rw [productValue, constantValue, baseValue]
+    typecheck
+  have difference := pointwiseSub.value at compose(bernoulliFunction(n),
+    reflectBy((1:R)), ℝ, ℝ, ℝ), pointwiseMul(constantRealFunction(
+    (-(1:R)) ^ n), bernoulliFunction(n)), x with composite, product,
+    compositeReal, productReal
+  unfold bernoulliReflection
+  rw [difference, productValue, applied, mirrorValue, constantValue,
+    baseValue]
+
+-- R′ₙ₊₁ = −(n + 1) Rₙ.
+theorem bernoulliReflection.derivative (n : Nat) (x : Real)
+  shows HasDerivativeAt(bernoulliReflection(succ(n)),
+    -(realNat(succ(n)) * bernoulliReflection(n)(x)), x)
+proof
+  have one : Real((1:R)) by typecheck
+  have mirrored : Real((1:R) - x) by typecheck
+  have mirror := bernoulliFunction.derivative at n, (1:R) - x
+  have composite := HasDerivativeAt.comp_reflect at bernoulliFunction(succ(n)),
+    realNat(succ(n)) * bernoulliPolynomial(n, (1:R) - x), (1:R), x
+    with mirror
+  have sign := realPow.real at -(1:R), succ(n)
+  have constant := constantRealFunction.has_derivative_at
+    at (-(1:R)) ^ succ(n), x
+  have base := bernoulliFunction.derivative at n, x
+  have product := HasDerivativeAt.mul with constant, base
+  have difference := HasDerivativeAt.sub with composite, product
+  have xMember : x ∈ ℝ by typecheck
+  have constantValue := constantRealFunction.value at (-(1:R)) ^ succ(n), x
+  have baseValue := bernoulliFunction.value at succ(n), x with xMember
+  rw [constantValue, baseValue] at difference
+  have scale := realNat.real at succ(n)
+  have lowerSign := realPow.real at -(1:R), n
+  have mirrorPolynomial := bernoulliPolynomial.real at n, (1:R) - x
+  have basePolynomial := bernoulliPolynomial.real at n, x
+  have upperPolynomial := bernoulliPolynomial.real at succ(n), x
+  have value : realSubValue(-(realNat(succ(n)) *
+      bernoulliPolynomial(n, (1:R) - x)), realAddValue(realMulValue(realZero,
+      bernoulliPolynomial(succ(n), x)), realMulValue((-(1:R)) ^ succ(n),
+      realNat(succ(n)) * bernoulliPolynomial(n, x)))) =
+      -(realNat(succ(n)) * bernoulliReflection(n)(x))
+    rw [bernoulliReflection.value, realPow.succ]
+    ring
+  rw value at difference
+  unfold bernoulliReflection at difference
+  unfold bernoulliReflection
+  exact difference
+
+-- A function with derivative K everywhere rises by K over [0, 1].
+theorem HasDerivativeAt.unit_increment (F : Set) (K : Real)
+  requires derivative : ∀ C ∈ ℝ, HasDerivativeAt(F, K, C)
+  shows F((1:R)) - F((0:R)) = K
+proof
+  have zeroMember : (0:R) ∈ ℝ by typecheck
+  have function := HasDerivativeAt.function with (derivative with (0:R),
+    zeroMember)
+  have continuous : Continuous(F)
+    refine ⟨function, ?_⟩
+    intros C member
+    have here := derivative with C, member
+    exact HasDerivativeAt.continuous_at with here
+  have interval := closedInterval.subset_reals at (0:R), (1:R)
+  have continuousOn := Continuous.continuous_on with continuous, interval
+  have differentiable : ∀ C ∈ ℝ, (0:R) < C → C < (1:R) →
+      ∃ D ∈ ℝ, HasDerivativeAt(F, D, C)
+    intros C member left right
+    have kMember : K ∈ ℝ by typecheck
+    exact ⟨K, kMember, (derivative with C, member)⟩
+  have ordered : (0:R) < (1:R) by linarith
+  obtain ⟨C, cMember, _, _, D, dMember, cDerivative, value⟩ :=
+    MeanValue.theorem with ordered, continuousOn, differentiable
+  have dReal : Real(D) by exact dMember
+  have here := derivative with C, cMember
+  have same := HasDerivativeAt.unique with cDerivative, here
+  rw same at value
+  rw ← value
+  ring
+
+-- Bₙ(1 − x) = (−1)ⁿ Bₙ(x) for every x, by induction: Rₙ = 0 makes Rₙ₊₁
+-- constant, Rₙ₊₂ then has constant derivative −(n + 2) Rₙ₊₁, and
+-- Rₙ₊₂(1) = Rₙ₊₂(0) since Bₙ₊₂(1) = Bₙ₊₂(0); so Rₙ₊₁ = 0.
+theorem bernoulliReflection.zero (n : Nat)
+  shows ∀ x ∈ ℝ, bernoulliReflection(n)(x) = (0:R)
+proof
+  induction n
+  | zero =>
+    intros x xMember
+    have xReal : Real(x) by exact xMember
+    have mirrored : Real((1:R) - x) by typecheck
+    rw [bernoulliReflection.value, bernoulliPolynomial.zero_index,
+      bernoulliPolynomial.zero_index, realPow.zero]
+    ring
+  | succ(j) using ih =>
+    -- Rⱼ₊₁ has derivative 0, so it is constant.
+    have flat : ∀ C ∈ ℝ, HasDerivativeAt(bernoulliReflection(succ(j)),
+        (0:R), C)
+      intros C cMember
+      have cReal : Real(C) by exact cMember
+      have derivative := bernoulliReflection.derivative at j, C
+      have previous := ih with C, cMember
+      rw previous at derivative
+      have zero : -(realNat(succ(j)) * (0:R)) = (0:R) by ring
+      rwa zero at derivative
+    have zeroMember : (0:R) ∈ ℝ by typecheck
+    have constant : ∀ x ∈ ℝ, bernoulliReflection(succ(j))(x) =
+        bernoulliReflection(succ(j))((0:R))
+      intros x xMember
+      have xReal : Real(x) by exact xMember
+      have order := realLess.trichotomy at x, (0:R)
+      rcases order with below | equal | above
+      . exact HasDerivativeAt.constant_of_zero at
+          bernoulliReflection(succ(j)), x, (0:R) with below, flat
+      . rw equal
+      . have flipped := HasDerivativeAt.constant_of_zero at
+          bernoulliReflection(succ(j)), (0:R), x with above, flat
+        rw flipped
+    -- Rⱼ₊₂ has constant derivative −(j + 2) Rⱼ₊₁(0).
+    have origin := bernoulliReflection.value at succ(j), (0:R)
+    have mirroredZero : Real((1:R) - (0:R)) by typecheck
+    have valueReal : Real(bernoulliReflection(succ(j))((0:R)))
+      rw origin
+      have first := bernoulliPolynomial.real at succ(j), (1:R) - (0:R)
+      have second := bernoulliPolynomial.real at succ(j), (0:R)
+      have sign := realPow.real at -(1:R), succ(j)
+      typecheck
+    have slope : ∀ C ∈ ℝ, HasDerivativeAt(bernoulliReflection(succ(succ(j))),
+        -(realNat(succ(succ(j))) * bernoulliReflection(succ(j))((0:R))), C)
+      intros C cMember
+      have cReal : Real(C) by exact cMember
+      have derivative := bernoulliReflection.derivative at succ(j), C
+      have level := constant with C, cMember
+      rwa level at derivative
+    have increment := HasDerivativeAt.unit_increment with slope
+    have notOne : succ(succ(j)) ≠ 1 by arith
+    have atOne := bernoulliPolynomial.at_one with notOne
+    have atZero := bernoulliPolynomial.at_zero at succ(succ(j))
+    have endOne := bernoulliReflection.value at succ(succ(j)), (1:R)
+    have endZero := bernoulliReflection.value at succ(succ(j)), (0:R)
+    have fromOne : (1:R) - (1:R) = (0:R) by ring
+    have fromZero : (1:R) - (0:R) = (1:R) by ring
+    rw [fromOne, atOne, atZero] at endOne
+    rw [fromZero, atOne, atZero] at endZero
+    rw [endOne, endZero] at increment
+    have scale := realNat.real at succ(succ(j))
+    have number := bernoulli.real at succ(succ(j))
+    have sign := realPow.real at -(1:R), succ(succ(j))
+    have succNonzero : succ(succ(j)) ≠ 0 by arith
+    have nonzero := realNat.ne_zero with succNonzero
+    have inverse := realInvValue.real at realNat(succ(succ(j)))
+    have cancel := realInvValue.mul_left with nonzero
+    have vanish : bernoulliReflection(succ(j))((0:R)) = (0:R)
+      linear_combination realInvValue(realNat(succ(succ(j)))) * increment -
+        bernoulliReflection(succ(j))((0:R)) * cancel
+    intros x xMember
+    have level := constant with x, xMember
+    rw [level, vanish]
+
+-- Bₙ(1 − x) = (−1)ⁿ Bₙ(x).
+theorem bernoulliPolynomial.reflection (n : Nat) (x : Real)
+  shows bernoulliPolynomial(n, (1:R) - x) =
+    (-(1:R)) ^ n * bernoulliPolynomial(n, x)
+proof
+  have xMember : x ∈ ℝ by typecheck
+  have zero := bernoulliReflection.zero at n
+  have here := zero with x, xMember
+  rw bernoulliReflection.value at here
+  have mirrored : Real((1:R) - x) by typecheck
+  have first := bernoulliPolynomial.real at n, (1:R) - x
+  have second := bernoulliPolynomial.real at n, x
+  have sign := realPow.real at -(1:R), n
+  linear_combination here
+
+-- (−1)^(2m) = 1.
+theorem realPow.neg_one_even (m : Nat)
+  shows (-(1:R)) ^ (2 * m) = (1:R)
+proof
+  induction m
+  | zero =>
+    have zero : 2 * 0 = 0 by arith
+    rw [zero, realPow.zero]
+  | succ(j) using ih =>
+    have shape : 2 * succ(j) = succ(succ(2 * j)) by arith
+    have previous := realPow.real at -(1:R), 2 * j
+    rw [shape, realPow.succ, realPow.succ, ih]
+    ring
+
+-- The odd Bernoulli numbers past B₁ vanish.
+theorem bernoulli.odd (m : Nat)
+  shows bernoulli(2 * m + 3) = (0:R)
+proof
+  have zeroReal : Real((0:R)) by typecheck
+  have reflection := bernoulliPolynomial.reflection at 2 * m + 3, (0:R)
+  have fromZero : (1:R) - (0:R) = (1:R) by ring
+  have notOne : 2 * m + 3 ≠ 1 by arith
+  have atOne := bernoulliPolynomial.at_one with notOne
+  have atZero := bernoulliPolynomial.at_zero at 2 * m + 3
+  rw [fromZero, atOne, atZero] at reflection
+  have shape : 2 * m + 3 = succ(succ(succ(2 * m))) by arith
+  have even := realPow.neg_one_even at m
+  have number := bernoulli.real at 2 * m + 3
+  have sign : (-(1:R)) ^ (2 * m + 3) = -(1:R)
+    have previous := realPow.real at -(1:R), 2 * m
+    rw [shape, realPow.succ, realPow.succ, realPow.succ, even]
+    ring
+  rw sign at reflection
+  linear_combination (1:R) / (2:R) * reflection
+
+-- Facts about the integer floor and the fractional part
+
+theorem integerFloor.integer (X : Real)
+  shows Integer(integerFloor(X))
+proof
+  have selected := integerFloor.selected at X
+  exact selected.left
+
+theorem integerFloor.le (X : Real)
+  shows realInt(integerFloor(X)) ≤ X
+proof
+  obtain ⟨_, lower, _⟩ := integerFloor.selected at X
+  exact lower
+
+theorem integerFloor.lt (X : Real)
+  shows X < realInt(integerFloor(X)) + 1
+proof
+  obtain ⟨_, _, upper⟩ := integerFloor.selected at X
+  exact upper
+
+theorem integerFloor.eq_of_bounds (X : Real) (k : Integer)
+  requires lower : realInt(k) ≤ X
+  requires upper : X < realInt(k) + 1
+  shows integerFloor(X) = k
+proof
+  obtain ⟨member, floorLower, floorUpper⟩ := integerFloor.selected at X
+  have kMember : k ∈ ℤ by typecheck
+  have unique := integerFloor.unique at X
+  have step := unique with member, ⟨floorLower, floorUpper⟩
+  exact step with kMember, ⟨lower, upper⟩
+
+theorem integerFloor.of_integer (k : Integer)
+  shows integerFloor(realInt(k)) = k
+proof
+  have kReal := realInt.real at k
+  have lower := realLe.reflexive at realInt(k)
+  have upper : realInt(k) < realInt(k) + 1 by linarith
+  exact integerFloor.eq_of_bounds with lower, upper
+
+-- On the nonnegative reals ⌊X⌋ is the natural floor of Real/Floor.
+theorem integerFloor.of_nonnegative (X : Real)
+  requires nonnegative : (0:R) ≤ X
+  shows integerFloor(X) = integerOfNat(realFloor(X))
+proof
+  have floorNat := realFloor.natural with nonnegative
+  have lower := realFloor.le with nonnegative
+  have upper := realFloor.lt with nonnegative
+  have value := realInt.nat at realFloor(X)
+  rw ← value at lower, upper
+  exact integerFloor.eq_of_bounds with lower, upper
+
+theorem fractionalPart.real (X : Real)
+  shows Real(fractionalPart(X))
+proof
+  have floorInteger := integerFloor.integer at X
+  have floorReal := realInt.real at integerFloor(X)
+  unfold fractionalPart
+  typecheck
+
+theorem fractionalPart.nonnegative (X : Real)
+  shows (0:R) ≤ fractionalPart(X)
+proof
+  have floorInteger := integerFloor.integer at X
+  have floorReal := realInt.real at integerFloor(X)
+  have lower := integerFloor.le at X
+  unfold fractionalPart
+  linarith
+
+theorem fractionalPart.lt_one (X : Real)
+  shows fractionalPart(X) < (1:R)
+proof
+  have floorInteger := integerFloor.integer at X
+  have floorReal := realInt.real at integerFloor(X)
+  have upper := integerFloor.lt at X
+  unfold fractionalPart
+  linarith
+
+theorem fractionalPart.decomposition (X : Real)
+  shows X = realInt(integerFloor(X)) + fractionalPart(X)
+proof
+  have floorInteger := integerFloor.integer at X
+  have floorReal := realInt.real at integerFloor(X)
+  unfold fractionalPart
+  linarith
+
+theorem fractionalPart.add_integer (X : Real) (k : Integer)
+  shows fractionalPart(X + realInt(k)) = fractionalPart(X)
+proof
+  have kReal := realInt.real at k
+  have floorInteger := integerFloor.integer at X
+  have floorReal := realInt.real at integerFloor(X)
+  have lower := integerFloor.le at X
+  have upper := integerFloor.lt at X
+  have sum := realInt.add at integerFloor(X), k
+  have shiftedLower : realInt(integerFloor(X) + k) ≤ X + realInt(k)
+    rw sum
+    linarith
+  have shiftedUpper : X + realInt(k) < realInt(integerFloor(X) + k) + 1
+    rw sum
+    linarith
+  have floor := integerFloor.eq_of_bounds with shiftedLower, shiftedUpper
+  unfold fractionalPart
+  rw [floor, sum]
+  ring
+
+theorem fractionalPart.of_unit (X : Real)
+  requires nonnegative : (0:R) ≤ X
+  requires belowOne : X < (1:R)
+  shows fractionalPart(X) = X
+proof
+  have lower : realInt(integerZero) ≤ X
+    rw realInt.zero
+    exact nonnegative
+  have upper : X < realInt(integerZero) + 1
+    rw realInt.zero
+    linarith
+  have floor := integerFloor.eq_of_bounds with lower, upper
+  unfold fractionalPart
+  rw [floor, realInt.zero]
+  ring
+
+theorem fractionalPart.of_nonnegative (X : Real)
+  requires nonnegative : (0:R) ≤ X
+  shows fractionalPart(X) = realFrac(X)
+proof
+  have floor := integerFloor.of_nonnegative with nonnegative
+  unfold fractionalPart
+  rw [floor, realInt.nat, realFrac.value]
+
+-- Facts about the periodic Bernoulli functions
+
+theorem periodicBernoulli.periodic (n : Nat) (x : Real) (k : Integer)
+  shows periodicBernoulli(n)(x + realInt(k)) = periodicBernoulli(n)(x)
+proof
+  have kReal := realInt.real at k
+  have shifted : Real(x + realInt(k)) by typecheck
+  have left := periodicBernoulli.value at n, x + realInt(k)
+  have right := periodicBernoulli.value at n, x
+  rw [left, right, fractionalPart.add_integer]
+
+-- On [k, k + 1), P̃ₙ(x) = Bₙ(x − k).
+theorem periodicBernoulli.on_cell (n : Nat) (x : Real) (k : Integer)
+  requires lower : realInt(k) ≤ x
+  requires upper : x < realInt(k) + 1
+  shows periodicBernoulli(n)(x) = bernoulliPolynomial(n, x - realInt(k))
+proof
+  have floor := integerFloor.eq_of_bounds with lower, upper
+  have value := periodicBernoulli.value at n, x
+  have fraction : fractionalPart(x) = x - realInt(k)
+    unfold fractionalPart
+    rw floor
+  rw [value, fraction]
+
+theorem periodicBernoulli.of_unit (n : Nat) (x : Real)
+  requires nonnegative : (0:R) ≤ x
+  requires belowOne : x < (1:R)
+  shows periodicBernoulli(n)(x) = bernoulliPolynomial(n, x)
+proof
+  have value := periodicBernoulli.value at n, x
+  have fraction := fractionalPart.of_unit with nonnegative, belowOne
+  rw [value, fraction]
+
+-- P̃ₙ(k) = Bₙ at every integer k.
+theorem periodicBernoulli.at_integer (n : Nat) (k : Integer)
+  shows periodicBernoulli(n)(realInt(k)) = bernoulli(n)
+proof
+  have kReal := realInt.real at k
+  have value := periodicBernoulli.value at n, realInt(k)
+  have floor := integerFloor.of_integer at k
+  have fraction : fractionalPart(realInt(k)) = (0:R)
+    unfold fractionalPart
+    rw floor
+    ring
+  rw [value, fraction, bernoulliPolynomial.at_zero]
+
+theorem periodicBernoulli.zero_index (x : Real)
+  shows periodicBernoulli(0)(x) = (1:R)
+proof
+  have fraction := fractionalPart.real at x
+  have value := periodicBernoulli.value at 0, x
+  rw [value, bernoulliPolynomial.zero_index]
+
+-- Powers of a number in [0, 1] stay in [0, 1].
+theorem realPow.unit_interval (t : Real, m : Nat)
+  requires nonnegative : (0:R) ≤ t
+  requires atMostOne : t ≤ (1:R)
+  shows (0:R) ≤ t ^ m ∧ t ^ m ≤ (1:R)
+proof
+  induction m
+  | zero =>
+    rw realPow.zero
+    constructor
+    . linarith
+    . exact realLe.reflexive at (1:R)
+  | succ(j) using ih =>
+    obtain ⟨lower, upper⟩ := ih
+    have power := realPow.real at t, j
+    have product := realMulValue.nonnegative with nonnegative, lower
+    have scaled := realLe.mul_right_of_nonnegative at t, (1:R), t ^ j
+      with atMostOne, lower
+    rw realMulValue.one_left at scaled
+    rw realPow.succ
+    constructor
+    . exact product
+    . linarith
+
+-- On [0, 1] the partial sums of Bₙ(t) are bounded termwise.
+theorem bernoulliPolynomial.partial_bound (n : Nat) (t : Real, m : Nat)
+  requires nonnegative : (0:R) ≤ t
+  requires atMostOne : t ≤ (1:R)
+  shows abs(∑ k < m, bernoulliPolynomialTerms(n, t)(k)) ≤
+    ∑ k < m, bernoulliBoundTerms(n)(k)
+proof
+  induction m
+  | zero =>
+    rw [realPartialSum.zero, realPartialSum.zero, abs.zero]
+    exact realLe.reflexive at (0:R)
+  | succ(j) using ih =>
+    have terms := bernoulliPolynomialTerms.function at n, t
+    have termSequence : RealSequence(bernoulliPolynomialTerms(n, t))
+      by exact terms
+    have bounds := bernoulliBoundTerms.function at n
+    have boundSequence : RealSequence(bernoulliBoundTerms(n)) by exact bounds
+    have sum := realPartialSum.real at bernoulliPolynomialTerms(n, t), j
+      with termSequence
+    have boundSum := realPartialSum.real at bernoulliBoundTerms(n), j
+      with boundSequence
+    have term := bernoulliPolynomialTerms.value at n, t, j
+    have boundTerm := bernoulliBoundTerms.value at n, j
+    have number := bernoulli.real at j
+    have coefficient := realNat.real at choose(n, j)
+    have coefficientNonnegative := realNat.zero_le at choose(n, j)
+    have power := realPow.real at t, n - j
+    obtain ⟨powerNonnegative, powerSmall⟩ := realPow.unit_interval
+      at t, n - j with nonnegative, atMostOne
+    have numberAbs := abs.nonnegative at bernoulli(j)
+    have numberAbsReal := abs.real at bernoulli(j)
+    have powerAbs := abs.of_nonnegative with powerNonnegative
+    have coefficientAbs := abs.of_nonnegative with coefficientNonnegative
+    have product := abs.mul at realNat(choose(n, j)) * bernoulli(j), t ^ (n - j)
+    have inner := abs.mul at realNat(choose(n, j)), bernoulli(j)
+    rw [inner, coefficientAbs, powerAbs] at product
+    have weight := realMulValue.nonnegative with coefficientNonnegative,
+      numberAbs
+    have scaled := realLe.mul_left_of_nonnegative
+      at t ^ (n - j), (1:R), realNat(choose(n, j)) * abs(bernoulli(j))
+      with powerSmall, weight
+    have triangle := abs.triangle at ∑ k < j, bernoulliPolynomialTerms(n, t)(k),
+      bernoulliPolynomialTerms(n, t)(j)
+    have weightReal := realMulValue.real at realNat(choose(n, j)),
+      abs(bernoulli(j))
+    have unit : realNat(choose(n, j)) * abs(bernoulli(j)) * (1:R) =
+        realNat(choose(n, j)) * abs(bernoulli(j)) by ring
+    have termReal := realMulValue.real
+      at realNat(choose(n, j)) * bernoulli(j), t ^ (n - j)
+    have left : realAddValue(∑ k < j, bernoulliPolynomialTerms(n, t)(k),
+        realNat(choose(n, j)) * bernoulli(j) * t ^ (n - j)) =
+        (∑ k < j, bernoulliPolynomialTerms(n, t)(k)) +
+          realNat(choose(n, j)) * bernoulli(j) * t ^ (n - j)
+      unfold realAddValue
+      unfold call2
+      rfl
+    rw [realPartialSum.succ, realPartialSum.succ, boundTerm, term, left]
+    rw term at triangle
+    linarith
+
+-- |P̃ₙ(x)| ≤ Σ_{k ≤ n} C(n, k) |Bₖ| on all of ℝ.
+theorem periodicBernoulli.bound (n : Nat) (x : Real)
+  shows abs(periodicBernoulli(n)(x)) ≤ bernoulliBound(n)
+proof
+  have value := periodicBernoulli.value at n, x
+  have fraction := fractionalPart.real at x
+  have nonnegative := fractionalPart.nonnegative at x
+  have below := fractionalPart.lt_one at x
+  have atMostOne : fractionalPart(x) ≤ (1:R) by linarith
+  have partial := bernoulliPolynomial.partial_bound at n, fractionalPart(x),
+    succ(n) with nonnegative, atMostOne
+  rw value
+  unfold bernoulliPolynomial
+  unfold bernoulliBound
+  exact partial
+
+theorem periodicBernoulli.bounded (n : Nat)
+  shows ∃ C ∈ ℝ, ∀ x ∈ ℝ, abs(periodicBernoulli(n)(x)) ≤ C
+proof
+  have bounds := bernoulliBoundTerms.function at n
+  have boundSequence : RealSequence(bernoulliBoundTerms(n)) by exact bounds
+  have total := realPartialSum.real at bernoulliBoundTerms(n), succ(n)
+    with boundSequence
+  have member : bernoulliBound(n) ∈ ℝ
+    unfold bernoulliBound
+    typecheck
+  refine ⟨bernoulliBound(n), member, ?_⟩
+  intros x xMember
+  have xReal : Real(x) by typecheck
+  exact periodicBernoulli.bound at n, x
+
+-- x ↦ Bₙ(c + x) as a function ℝ → ℝ: P̃ₙ on each unit cell.
+def bernoulliTranslate (n : Nat, c : Real) : Set :=
+  compose(bernoulliFunction(n), translateBy(c), ℝ, ℝ, ℝ)
+
+theorem bernoulliTranslate.function (n : Nat, c : Real)
+  shows bernoulliTranslate(n, c) : ℝ → ℝ
+proof
+  have translated := translateBy.function at c
+  have function := bernoulliFunction.function at n
+  unfold bernoulliTranslate
+  exact compose.function at bernoulliFunction(n), translateBy(c), ℝ, ℝ, ℝ
+    with translated, function
+
+theorem bernoulliTranslate.value (n : Nat) (c y : Real)
+  shows bernoulliTranslate(n, c)(y) = bernoulliPolynomial(n, c + y)
+proof
+  have translated := translateBy.function at c
+  have function := bernoulliFunction.function at n
+  have yMember : y ∈ ℝ by typecheck
+  have applied := compose.apply with translated, function, yMember
+  have shifted : c + y ∈ ℝ by typecheck
+  have value := bernoulliFunction.value at n, c + y with shifted
+  unfold bernoulliTranslate
+  rw [applied, translateBy.value, value]
+
+theorem bernoulliTranslate.derivative (n : Nat) (c y : Real)
+  shows HasDerivativeAt(bernoulliTranslate(succ(n), c),
+    realNat(succ(n)) * bernoulliPolynomial(n, c + y), y)
+proof
+  have shifted : Real(c + y) by typecheck
+  have base := bernoulliFunction.derivative at n, c + y
+  have composite := HasDerivativeAt.comp_translate at
+    bernoulliFunction(succ(n)), realNat(succ(n)) * bernoulliPolynomial(n,
+    c + y), c, y with base
+  unfold bernoulliTranslate
+  exact composite
+
+theorem bernoulliTranslate.continuous (n : Nat, c : Real)
+  shows Continuous(bernoulliTranslate(n, c))
+proof
+  have function := bernoulliTranslate.function at n, c
+  refine ⟨function, ?_⟩
+  intros y yMember
+  have yReal : Real(y) by exact yMember
+  have shifted : Real(c + y) by typecheck
+  have base := bernoulliFunction.derivative_terms at n, c + y
+  have sum := realPartialSum.real at bernoulliDerivativeTerms(n, c + y),
+    succ(n) with (bernoulliDerivativeTerms.function at n, c + y)
+  have composite := HasDerivativeAt.comp_translate at bernoulliFunction(n),
+    ∑ k < succ(n), bernoulliDerivativeTerms(n, c + y)(k), c, y with base
+  have continuous := HasDerivativeAt.continuous_at with composite
+  unfold bernoulliTranslate
+  exact continuous
+
+-- On [k, k + 1), P̃ₙ(y) = Bₙ(y − k).
+theorem periodicBernoulli.eq_right (n : Nat) (k : Integer) (y : Real)
+  requires lower : realInt(k) ≤ y
+  requires upper : y < realInt(k) + 1
+  shows periodicBernoulli(n)(y) = bernoulliTranslate(n, -realInt(k))(y)
+proof
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have cell := periodicBernoulli.on_cell with lower, upper
+  have value := bernoulliTranslate.value at n, -realInt(k), y
+  have same : -realInt(k) + y = y - realInt(k) by ring
+  rw [cell, value, same]
+
+-- On (k − 1, k], for n ≠ 1, P̃ₙ(y) = Bₙ(y − k + 1), since Bₙ(1) = Bₙ(0).
+theorem periodicBernoulli.eq_left (n : Nat) (k : Integer) (y : Real)
+  requires notOne : n ≠ 1
+  requires lower : realInt(k) - 1 < y
+  requires upper : y ≤ realInt(k)
+  shows periodicBernoulli(n)(y) = bernoulliTranslate(n, 1 - realInt(k))(y)
+proof
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have value := bernoulliTranslate.value at n, 1 - realInt(k), y
+  rw value
+  have order := realLess.trichotomy at y, realInt(k)
+  rcases order with below | equal | above
+  . have oneInteger : Integer(integerOfNat(1)) by typecheck
+    have previous : Integer(k - integerOfNat(1)) by typecheck
+    have shift := realInt.sub at k, integerOfNat(1)
+    rw [realInt.nat, realNat.one] at shift
+    have cellLower : realInt(k - integerOfNat(1)) ≤ y
+      rw shift
+      linarith
+    have cellUpper : y < realInt(k - integerOfNat(1)) + 1
+      rw shift
+      linarith
+    have cell := periodicBernoulli.on_cell with cellLower, cellUpper
+    rw [cell, shift]
+    have same : y - (realInt(k) - 1) = 1 - realInt(k) + y by ring
+    rw same
+  . rw equal
+    have atInteger := periodicBernoulli.at_integer at n, k
+    have one : 1 - realInt(k) + realInt(k) = (1:R) by ring
+    have atOne := bernoulliPolynomial.at_one with notOne
+    rw [atInteger, one, atOne]
+  . exfalso
+    linarith
+
+-- A point strictly inside a unit cell is not an integer.
+theorem realInt.not_between (k : Integer) (x : Real)
+  requires lower : realInt(k) < x
+  requires upper : x < realInt(k) + 1
+  shows ∀ j ∈ ℤ, x ≠ realInt(j)
+proof
+  intros j jMember equal
+  have jInteger : Integer(j) by typecheck
+  have kMember := realInt.real at k
+  have kReal : Real(realInt(k)) by exact kMember
+  have weak : realInt(k) ≤ x by linarith
+  have floor := integerFloor.eq_of_bounds with weak, upper
+  have atJ := integerFloor.of_integer at j
+  rw ← equal at atJ
+  rw floor at atJ
+  rw atJ at lower
+  rw ← equal at lower
+  linarith
+
+-- Either x is an integer, or it lies strictly inside the cell of its floor.
+theorem integerFloor.cases (x : Real)
+  shows x = realInt(integerFloor(x)) ∨
+    (realInt(integerFloor(x)) < x ∧ x < realInt(integerFloor(x)) + 1)
+proof
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have lower := integerFloor.le at x
+  have upper := integerFloor.lt at x
+  have order := realLess.trichotomy at realInt(integerFloor(x)), x
+  rcases order with below | equal | above
+  . right
+    refine ⟨below, upper⟩
+  . left
+    rw equal
+  . exfalso
+    linarith
+
+-- P̃ₙ is continuous for n ≥ 2, since Bₙ(0) = Bₙ(1) there.
+theorem periodicBernoulli.continuous (n : Nat)
+  requires large : 2 ≤ n
+  shows Continuous(periodicBernoulli(n))
+proof
+  have function := periodicBernoulli.function at n
+  have notOne : n ≠ 1 by arith
+  refine ⟨function, ?_⟩
+  intros x xMember
+  have xReal : Real(x) by exact xMember
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have right : ∀ y ∈ ℝ, x ≤ y → y < realInt(integerFloor(x)) + 1 →
+      periodicBernoulli(n)(y) =
+        bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+    intros y yMember lower upper
+    have yReal : Real(y) by exact yMember
+    have floorLower := integerFloor.le at x
+    have cellLower : realInt(integerFloor(x)) ≤ y by linarith
+    exact periodicBernoulli.eq_right with cellLower, upper
+  have continuousRight := bernoulliTranslate.continuous at n,
+    -realInt(integerFloor(x))
+  have atRight := Continuous.at with continuousRight, xMember
+  have cases := integerFloor.cases at x
+  cases cases with integer | inside
+  . have continuousLeft := bernoulliTranslate.continuous at n,
+      1 - realInt(integerFloor(x))
+    have atLeft := Continuous.at with continuousLeft, xMember
+    have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) - 1 < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellUpper : y ≤ realInt(integerFloor(x)) by linarith
+      exact periodicBernoulli.eq_left with notOne, lower, cellUpper
+    have rightShifted : ∀ y ∈ ℝ, x ≤ y → y < x + 1 →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact right with y, yMember, lower, cellUpper
+    have leftShifted : ∀ y ∈ ℝ, x - 1 < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) - 1 < y by linarith
+      exact left with y, yMember, cellLower, upper
+    have below : x - 1 < x by linarith
+    have above : x < x + 1 by linarith
+    exact ContinuousAt.glue with atLeft, atRight, function, below, above,
+      leftShifted, rightShifted
+  . obtain ⟨lower, upper⟩ := inside
+    have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) < y → y ≤ x →
+        periodicBernoulli(n)(y) =
+          bernoulliTranslate(n, -realInt(integerFloor(x)))(y)
+      intros y yMember cellLower bound
+      have yReal : Real(y) by exact yMember
+      have weak : realInt(integerFloor(x)) ≤ y by linarith
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact periodicBernoulli.eq_right with weak, cellUpper
+    exact ContinuousAt.glue with atRight, atRight, function, lower, upper,
+      left, right
+
+-- Off the integers, P̃′ₙ₊₁ = (n + 1) P̃ₙ.
+theorem periodicBernoulli.derivative (n : Nat) (x : Real)
+  requires notInteger : ∀ k ∈ ℤ, x ≠ realInt(k)
+  shows HasDerivativeAt(periodicBernoulli(succ(n)),
+    realNat(succ(n)) * periodicBernoulli(n)(x), x)
+proof
+  have function := periodicBernoulli.function at succ(n)
+  have xMember : x ∈ ℝ by typecheck
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have weak := integerFloor.le at x
+  have upper := integerFloor.lt at x
+  have floorZ : integerFloor(x) ∈ ℤ by typecheck
+  have distinct := notInteger with integerFloor(x), floorZ
+  have lower : realInt(integerFloor(x)) < x
+    have order := realLess.trichotomy at realInt(integerFloor(x)), x
+    rcases order with below | equal | above
+    . exact below
+    . exfalso
+      have flipped : x = realInt(integerFloor(x)) by rw equal
+      exact distinct with flipped
+    . exfalso
+      linarith
+  have left : ∀ y ∈ ℝ, realInt(integerFloor(x)) < y → y ≤ x →
+      periodicBernoulli(succ(n))(y) =
+        bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+    intros y yMember cellLower bound
+    have yReal : Real(y) by exact yMember
+    have cellWeak : realInt(integerFloor(x)) ≤ y by linarith
+    have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+    exact periodicBernoulli.eq_right with cellWeak, cellUpper
+  have right : ∀ y ∈ ℝ, x ≤ y → y < realInt(integerFloor(x)) + 1 →
+      periodicBernoulli(succ(n))(y) =
+        bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+    intros y yMember bound cellUpper
+    have yReal : Real(y) by exact yMember
+    have cellWeak : realInt(integerFloor(x)) ≤ y by linarith
+    exact periodicBernoulli.eq_right with cellWeak, cellUpper
+  have translated := bernoulliTranslate.derivative at n,
+    -realInt(integerFloor(x)), x
+  have glued := HasDerivativeAt.glue with translated, translated, function,
+    lower, upper, left, right
+  have here := periodicBernoulli.eq_right at n, integerFloor(x), x
+    with weak, upper
+  have value := bernoulliTranslate.value at n, -realInt(integerFloor(x)), x
+  rw [here, value]
+  exact glued
+
+-- From index 3 on, P̃′ₙ = n P̃ₙ₋₁ everywhere. (P̃₂ has corners at the
+-- integers, where P̃₁ jumps.)
+theorem periodicBernoulli.derivative_everywhere (n : Nat) (x : Real)
+  requires large : 2 ≤ n
+  shows HasDerivativeAt(periodicBernoulli(succ(n)),
+    realNat(succ(n)) * periodicBernoulli(n)(x), x)
+proof
+  have floorInteger := integerFloor.integer at x
+  have floorMember := realInt.real at integerFloor(x)
+  have floorReal : Real(realInt(integerFloor(x))) by exact floorMember
+  have cases := integerFloor.cases at x
+  cases cases with integer | inside
+  . have function := periodicBernoulli.function at succ(n)
+    have notOne : succ(n) ≠ 1 by arith
+    have nNotOne : n ≠ 1 by arith
+    have left : ∀ y ∈ ℝ, x - 1 < y → y ≤ x →
+        periodicBernoulli(succ(n))(y) =
+          bernoulliTranslate(succ(n), 1 - realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) - 1 < y by linarith
+      have cellUpper : y ≤ realInt(integerFloor(x)) by linarith
+      exact periodicBernoulli.eq_left with notOne, cellLower, cellUpper
+    have right : ∀ y ∈ ℝ, x ≤ y → y < x + 1 →
+        periodicBernoulli(succ(n))(y) =
+          bernoulliTranslate(succ(n), -realInt(integerFloor(x)))(y)
+      intros y yMember lower upper
+      have yReal : Real(y) by exact yMember
+      have cellLower : realInt(integerFloor(x)) ≤ y by linarith
+      have cellUpper : y < realInt(integerFloor(x)) + 1 by linarith
+      exact periodicBernoulli.eq_right with cellLower, cellUpper
+    have derivativeLeft := bernoulliTranslate.derivative at n,
+      1 - realInt(integerFloor(x)), x
+    have derivativeRight := bernoulliTranslate.derivative at n,
+      -realInt(integerFloor(x)), x
+    have argumentLeft : 1 - realInt(integerFloor(x)) + x = (1:R) by linarith
+    have argumentRight : -realInt(integerFloor(x)) + x = (0:R) by linarith
+    have atOne := bernoulliPolynomial.at_one with nNotOne
+    have atZero := bernoulliPolynomial.at_zero at n
+    rw [argumentLeft, atOne] at derivativeLeft
+    rw [argumentRight, atZero] at derivativeRight
+    have below : x - 1 < x by linarith
+    have above : x < x + 1 by linarith
+    have glued := HasDerivativeAt.glue with derivativeLeft, derivativeRight,
+      function, below, above, left, right
+    have atInteger := periodicBernoulli.at_integer at n, integerFloor(x)
+    rw ← integer at atInteger
+    rw atInteger
+    exact glued
+  . obtain ⟨lower, upper⟩ := inside
+    have notInteger := realInt.not_between at integerFloor(x), x
+      with lower, upper
+    exact periodicBernoulli.derivative with notInteger
+
+-- P̃ₙ₊₁/(n + 1), an antiderivative of P̃ₙ off the integers.
+def periodicBernoulliPrimitive (n : Nat) : Set :=
+  pointwiseMul(constantRealFunction(realInvValue(realNat(succ(n)))),
+    periodicBernoulli(succ(n)))
+
+theorem periodicBernoulliPrimitive.value (n : Nat) (y : Real)
+  shows periodicBernoulliPrimitive(n)(y) =
+    realInvValue(realNat(succ(n))) * periodicBernoulli(succ(n))(y)
+proof
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have constant := constantRealFunction.function
+    at realInvValue(realNat(succ(n)))
+  have function := periodicBernoulli.function at succ(n)
+  have yMember : y ∈ ℝ by typecheck
+  have constantValue := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), y
+  have constantReal : Real(constantRealFunction(realInvValue(
+      realNat(succ(n))))(y))
+    rw constantValue
+    exact inverse
+  have periodicMember := FunctionBetween.apply_closed with function, yMember
+  have periodicReal : Real(periodicBernoulli(succ(n))(y))
+    by exact periodicMember
+  have product := pointwiseMul.value at constantRealFunction(realInvValue(
+    realNat(succ(n)))), periodicBernoulli(succ(n)), y
+    with constant, function, constantReal, periodicReal
+  unfold periodicBernoulliPrimitive
+  rw [product, constantValue]
+
+theorem periodicBernoulliPrimitive.real (n : Nat) (y : Real)
+  shows Real(periodicBernoulliPrimitive(n)(y))
+proof
+  have inverse := realInvValue.real at realNat(succ(n))
+  have function := periodicBernoulli.function at succ(n)
+  have yMember : y ∈ ℝ by typecheck
+  have periodicMember := FunctionBetween.apply_closed with function, yMember
+  have periodicReal : Real(periodicBernoulli(succ(n))(y))
+    by exact periodicMember
+  rw periodicBernoulliPrimitive.value
+  typecheck
+
+theorem periodicBernoulliPrimitive.derivative (n : Nat) (x : Real)
+  requires notInteger : ∀ k ∈ ℤ, x ≠ realInt(k)
+  shows HasDerivativeAt(periodicBernoulliPrimitive(n),
+    periodicBernoulli(n)(x), x)
+proof
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have constantDerivative := constantRealFunction.has_derivative_at
+    at realInvValue(realNat(succ(n))), x
+  have function := periodicBernoulli.function at succ(n)
+  have lower := periodicBernoulli.function at n
+  have xMember : x ∈ ℝ by typecheck
+  have upperMember := FunctionBetween.apply_closed with function, xMember
+  have upperReal : Real(periodicBernoulli(succ(n))(x)) by exact upperMember
+  have lowerMember := FunctionBetween.apply_closed with lower, xMember
+  have lowerReal : Real(periodicBernoulli(n)(x)) by exact lowerMember
+  have periodicDerivative := periodicBernoulli.derivative with notInteger
+  have product := HasDerivativeAt.mul with constantDerivative,
+    periodicDerivative
+  have constantValue := constantRealFunction.value
+    at realInvValue(realNat(succ(n))), x
+  rw constantValue at product
+  have value : realAddValue(realMulValue(realZero,
+      periodicBernoulli(succ(n))(x)), realMulValue(realInvValue(
+      realNat(succ(n))), realNat(succ(n)) * periodicBernoulli(n)(x))) =
+      periodicBernoulli(n)(x)
+    have expand : realAddValue(realMulValue(realZero,
+        periodicBernoulli(succ(n))(x)), realMulValue(realInvValue(
+        realNat(succ(n))), realNat(succ(n)) * periodicBernoulli(n)(x))) =
+        realInvValue(realNat(succ(n))) * realNat(succ(n)) *
+          periodicBernoulli(n)(x) by ring
+    rw expand
+    linear_combination periodicBernoulli(n)(x) * cancel
+  rw value at product
+  unfold periodicBernoulliPrimitive
+  exact product
+
+theorem periodicBernoulliPrimitive.continuous (n : Nat)
+  requires positive : 0 < n
+  shows Continuous(periodicBernoulliPrimitive(n))
+proof
+  have inverse := realInvValue.real at realNat(succ(n))
+  have constant := constantRealFunction.continuous
+    at realInvValue(realNat(succ(n)))
+  have large : 2 ≤ succ(n) by arith
+  have periodic := periodicBernoulli.continuous at succ(n) with large
+  unfold periodicBernoulliPrimitive
+  exact Continuous.mul with constant, periodic
+
+-- Within one unit cell, ∫_A^B P̃ₙ = F(B) − F(A) for F = P̃ₙ₊₁/(n + 1).
+theorem periodicBernoulli.cell_integral (n : Nat) (A B : Real)
+  requires positive : 0 < n
+  requires ordered : A ≤ B
+  requires within : B ≤ realInt(integerFloor(A)) + 1
+  shows HasRiemannIntegral(periodicBernoulli(n), A, B,
+    periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  have function := periodicBernoulli.function at n
+  have floorInteger := integerFloor.integer at A
+  have floorMember := realInt.real at integerFloor(A)
+  have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+  have floorLower := integerFloor.le at A
+  have interval := closedInterval.subset_reals at A, B
+  have translated := bernoulliTranslate.continuous at n,
+    -realInt(integerFloor(A))
+  have continuous := Continuous.continuous_on with translated, interval
+  have agree : ∀ x ∈ ℝ, A < x → x < B → periodicBernoulli(n)(x) =
+      bernoulliTranslate(n, -realInt(integerFloor(A)))(x)
+    intros x xMember lower upper
+    have xReal : Real(x) by exact xMember
+    have cellLower : realInt(integerFloor(A)) ≤ x by linarith
+    have cellUpper : x < realInt(integerFloor(A)) + 1 by linarith
+    exact periodicBernoulli.eq_right with cellLower, cellUpper
+  have integral := HasRiemannIntegral.of_continuous_interior
+    with function, ordered, continuous, agree
+  have primitive := periodicBernoulliPrimitive.continuous with positive
+  have primitiveOn := Continuous.continuous_on with primitive, interval
+  have derivative : ∀ X ∈ ℝ, A < X → X < B →
+      HasDerivativeAt(periodicBernoulliPrimitive(n),
+        periodicBernoulli(n)(X), X)
+    intros X xMember lower upper
+    have xReal : Real(X) by exact xMember
+    have cellLower : realInt(integerFloor(A)) < X by linarith
+    have cellUpper : X < realInt(integerFloor(A)) + 1 by linarith
+    have notInteger := realInt.not_between at integerFloor(A), X
+      with cellLower, cellUpper
+    exact periodicBernoulliPrimitive.derivative with notInteger
+  have value := HasRiemannIntegral.eq_endpoint_of_local_derivative
+    with primitiveOn, derivative, integral
+  rwa value at integral
+
+-- The same across ⌊A⌋ + m + 1, by adding one cell at a time.
+theorem periodicBernoulli.integral_cells (n m : Nat)
+  requires positive : 0 < n
+  shows ∀ A ∈ ℝ, ∀ B ∈ ℝ, A ≤ B →
+    B ≤ realInt(integerFloor(A)) + realNat(succ(m)) →
+    HasRiemannIntegral(periodicBernoulli(n), A, B,
+      periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  induction m
+  | zero =>
+    intros A aMember B bMember ordered within
+    have aReal : Real(A) by exact aMember
+    have bReal : Real(B) by exact bMember
+    have one : succ(0) = 1 by arith
+    rw [one, realNat.one] at within
+    exact periodicBernoulli.cell_integral with positive, ordered, within
+  | succ(j) using ih =>
+    intros A aMember B bMember ordered within
+    have aReal : Real(A) by exact aMember
+    have bReal : Real(B) by exact bMember
+    have floorInteger := integerFloor.integer at A
+    have floorMember := realInt.real at integerFloor(A)
+    have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+    have floorUpper := integerFloor.lt at A
+    have count := realNat.real at succ(j)
+    have alternatives : B ≤ realInt(integerFloor(A)) + 1 ∨
+        ¬(B ≤ realInt(integerFloor(A)) + 1) by tauto
+    cases alternatives with near | far
+    . exact periodicBernoulli.cell_integral with positive, ordered, near
+    have beyond := realLess.of_not_le with far
+    -- Split at C = ⌊A⌋ + 1.
+    have oneInteger : Integer(integerOfNat(1)) by typecheck
+    have nextInteger : Integer(integerFloor(A) + integerOfNat(1)) by typecheck
+    have next := realInt.add at integerFloor(A), integerOfNat(1)
+    rw [realInt.nat, realNat.one] at next
+    have middleReal : Real(realInt(integerFloor(A)) + 1) by typecheck
+    have middleMember : realInt(integerFloor(A)) + 1 ∈ ℝ by typecheck
+    have leftOrdered : A ≤ realInt(integerFloor(A)) + 1 by linarith
+    have leftWithin : realInt(integerFloor(A)) + 1 ≤
+      realInt(integerFloor(A)) + 1 by linarith
+    have leftPart := periodicBernoulli.cell_integral with positive,
+      leftOrdered, leftWithin
+    have floorNext := integerFloor.of_integer
+      at integerFloor(A) + integerOfNat(1)
+    rw next at floorNext
+    have rightOrdered : realInt(integerFloor(A)) + 1 ≤ B by linarith
+    have step := realNat.succ_add at succ(j)
+    have rightWithin : B ≤ realInt(integerFloor(realInt(integerFloor(A)) +
+        1)) + realNat(succ(j))
+      rw [floorNext, next]
+      linarith
+    have rightPart := ih with realInt(integerFloor(A)) + 1, middleMember, B,
+      bMember, rightOrdered, rightWithin
+    have bound : ∀ x ∈ closedInterval(A, B),
+        abs(periodicBernoulli(n)(x)) ≤ bernoulliBound(n)
+      intros x inside
+      obtain ⟨xMember, _, _⟩ := closedInterval.membership.forward with inside
+      have xReal : Real(x) by exact xMember
+      exact periodicBernoulli.bound at n, x
+    have bounds := bernoulliBoundTerms.function at n
+    have boundSequence : RealSequence(bernoulliBoundTerms(n)) by exact bounds
+    have boundTotal := realPartialSum.real at bernoulliBoundTerms(n), succ(n)
+      with boundSequence
+    have boundReal : Real(bernoulliBound(n))
+      unfold bernoulliBound
+      exact boundTotal
+    have sum := HasRiemannIntegral.add_adjacent with leftPart, rightPart,
+      bound
+    have primitiveA := periodicBernoulliPrimitive.real at n, A
+    have primitiveB := periodicBernoulliPrimitive.real at n, B
+    have primitiveC := periodicBernoulliPrimitive.real at n,
+      realInt(integerFloor(A)) + 1
+    have total : periodicBernoulliPrimitive(n)(realInt(integerFloor(A)) + 1) -
+        periodicBernoulliPrimitive(n)(A) + (periodicBernoulliPrimitive(n)(B) -
+        periodicBernoulliPrimitive(n)(realInt(integerFloor(A)) + 1)) =
+        periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A)
+      by ring
+    rwa total at sum
+
+-- For n ≥ 1, ∫_A^B P̃ₙ = F(B) − F(A) for F = P̃ₙ₊₁/(n + 1).
+theorem periodicBernoulli.has_integral (n : Nat) (A B : Real)
+  requires positive : 0 < n
+  requires ordered : A ≤ B
+  shows HasRiemannIntegral(periodicBernoulli(n), A, B,
+    periodicBernoulliPrimitive(n)(B) - periodicBernoulliPrimitive(n)(A))
+proof
+  have floorInteger := integerFloor.integer at A
+  have floorMember := realInt.real at integerFloor(A)
+  have floorReal : Real(realInt(integerFloor(A))) by exact floorMember
+  obtain ⟨M, mNat, above⟩ := Real.below_natural
+    at B - realInt(integerFloor(A))
+  have count := realNat.real at M
+  have step := realNat.succ_add at M
+  have within : B ≤ realInt(integerFloor(A)) + realNat(succ(M)) by linarith
+  have cells := periodicBernoulli.integral_cells at n, M with positive
+  have aMember : A ∈ ℝ by typecheck
+  have bMember : B ∈ ℝ by typecheck
+  exact cells with A, aMember, B, bMember, ordered, within
+
+theorem periodicBernoulli.integrable (n : Nat) (A B : Real)
+  requires ordered : A ≤ B
+  shows RiemannIntegrable(periodicBernoulli(n), A, B)
+proof
+  have alternatives := natural.zero_or_successor at n
+  cases alternatives with zero | successor
+  . have function := periodicBernoulli.function at n
+    have one : Real((1:R)) by typecheck
+    have constant := constantRealFunction.continuous at (1:R)
+    have interval := closedInterval.subset_reals at A, B
+    have continuous := Continuous.continuous_on with constant, interval
+    have agree : ∀ x ∈ ℝ, A < x → x < B →
+        periodicBernoulli(n)(x) = constantRealFunction((1:R))(x)
+      intros x xMember lower upper
+      have xReal : Real(x) by exact xMember
+      have value := constantRealFunction.value at (1:R), x
+      rw [zero, value, periodicBernoulli.zero_index]
+    have integral := HasRiemannIntegral.of_continuous_interior
+      with function, ordered, continuous, agree
+    obtain ⟨member, _⟩ := riemannIntegral.selected
+      at constantRealFunction((1:R)), A, B
+    exact ⟨riemannIntegral(constantRealFunction((1:R)), A, B), member,
+      integral⟩
+  . obtain ⟨m, mNat, shape⟩ := successor
+    have positive : 0 < n by arith
+    have integral := periodicBernoulli.has_integral with positive, ordered
+    have primitiveA := periodicBernoulliPrimitive.real at n, A
+    have primitiveB := periodicBernoulliPrimitive.real at n, B
+    have member : periodicBernoulliPrimitive(n)(B) -
+      periodicBernoulliPrimitive(n)(A) ∈ ℝ by typecheck
+    exact ⟨periodicBernoulliPrimitive(n)(B) -
+      periodicBernoulliPrimitive(n)(A), member, integral⟩
+
+-- For n ≥ 1, (n + 1) ∫_A^B P̃ₙ = P̃ₙ₊₁(B) − P̃ₙ₊₁(A).
+theorem periodicBernoulli.integral (n : Nat) (A B : Real)
+  requires positive : 0 < n
+  requires ordered : A ≤ B
+  shows realNat(succ(n)) * riemannIntegral(periodicBernoulli(n), A, B) =
+    periodicBernoulli(succ(n))(B) - periodicBernoulli(succ(n))(A)
+proof
+  have integral := periodicBernoulli.has_integral with positive, ordered
+  have value := riemannIntegral.eq_of_integral with integral
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_right with nonzero
+  have function := periodicBernoulli.function at succ(n)
+  have aMember : A ∈ ℝ by typecheck
+  have bMember : B ∈ ℝ by typecheck
+  have atA := FunctionBetween.apply_closed with function, aMember
+  have atB := FunctionBetween.apply_closed with function, bMember
+  have atAReal : Real(periodicBernoulli(succ(n))(A)) by exact atA
+  have atBReal : Real(periodicBernoulli(succ(n))(B)) by exact atB
+  rw [value, periodicBernoulliPrimitive.value, periodicBernoulliPrimitive.value]
+  linear_combination (periodicBernoulli(succ(n))(B) -
+    periodicBernoulli(succ(n))(A)) * cancel
+
+-- The integral of P̃ₙ over a period vanishes for n ≥ 1.
+theorem periodicBernoulli.integral_period (n : Nat) (A : Real)
+  requires positive : 0 < n
+  shows riemannIntegral(periodicBernoulli(n), A, A + (1:R)) = (0:R)
+proof
+  have ordered : A ≤ A + (1:R) by linarith
+  have integral := periodicBernoulli.integral with positive, ordered
+  have oneInteger : Integer(integerOfNat(1)) by typecheck
+  have periodic := periodicBernoulli.periodic at succ(n), A, integerOfNat(1)
+  rw [realInt.nat, realNat.one] at periodic
+  rw periodic at integral
+  have succNonzero : succ(n) ≠ 0 by arith
+  have nonzero := realNat.ne_zero with succNonzero
+  have scale := realNat.real at succ(n)
+  have inverse := realInvValue.real at realNat(succ(n))
+  have cancel := realInvValue.mul_left with nonzero
+  have function := periodicBernoulli.function at succ(n)
+  have aMember : A ∈ ℝ by typecheck
+  have atA := FunctionBetween.apply_closed with function, aMember
+  have atAReal : Real(periodicBernoulli(succ(n))(A)) by exact atA
+  obtain ⟨member, _⟩ := riemannIntegral.selected at periodicBernoulli(n), A,
+    A + (1:R)
+  have value : Real(riemannIntegral(periodicBernoulli(n), A, A + (1:R)))
+    by exact member
+  linear_combination realInvValue(realNat(succ(n))) * integral -
+    riemannIntegral(periodicBernoulli(n), A, A + (1:R)) * cancel
+
+-- The Appell property Bₙ(x + y) = Σ_{k ≤ n} C(n, k) Bₖ(x) y^(n − k)
+
+-- The Appell property: Bₙ(x + y) = Σ_{k ≤ n} C(n, k) Bₖ(x) y^(n − k).
+defgraph bernoulliShiftTerms (n : Nat, x y : Real) (k ∈ ℕ) : ℝ :=
+  realNat(choose(n, k)) * bernoulliPolynomial(k, x) * y ^ (n - k)
+proof
+  have kNat := nat.omega.backward with member
+  have value := bernoulliPolynomial.real at k, x
+  have natural := realNat.real at choose(n, k)
+  typecheck
+
+defgraph appellPartialFunction (N m : Nat, x : Real) (y ∈ ℝ) : ℝ :=
+  ∑ k < m, bernoulliShiftTerms(N, x, y)(k)
+proof
+  have xReal : Real(y) by exact member
+  have terms := bernoulliShiftTerms.function at N, x, y
+  have sequence : RealSequence(bernoulliShiftTerms(N, x, y)) by exact terms
+  exact realPartialSum.real at bernoulliShiftTerms(N, x, y), m
+    with sequence
+
+defgraph appellDerivativeTerms (N : Nat, x y : Real) (k ∈ ℕ) : ℝ :=
+  realNat(choose(N, k)) * bernoulliPolynomial(k, x) * (realNat(N - k) * y ^ (N - k - 1))
+proof
+  have kNat := nat.omega.backward with member
+  have number := bernoulliPolynomial.real at k, x
+  have coefficient := realNat.real at choose(N, k)
+  have count := realNat.real at N - k
+  have power := realPow.real at y, N - k - 1
+  typecheck
+
+theorem appellPartialFunction.succ (N m : Nat) (x : Real)
+  shows appellPartialFunction(N, succ(m), x) =
+    pointwiseAdd(appellPartialFunction(N, m, x),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulliPolynomial(m, x)),
+        realPowFunction(N - m)))
+proof
+  have number := bernoulliPolynomial.real at m, x
+  have coefficient := realNat.real at choose(N, m)
+  have scale : Real(realNat(choose(N, m)) * bernoulliPolynomial(m, x)) by typecheck
+  have first := appellPartialFunction.function at N, succ(m), x
+  have previous := appellPartialFunction.function at N, m, x
+  have constant := constantRealFunction.function
+    at realNat(choose(N, m)) * bernoulliPolynomial(m, x)
+  have power := realPowFunction.function at N - m
+  have term := pointwiseMul.function with constant, power
+  have second := pointwiseAdd.function with previous, term
+  apply FunctionBetween.ext at appellPartialFunction(N, succ(m), x),
+    pointwiseAdd(appellPartialFunction(N, m, x),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulliPolynomial(m, x)),
+        realPowFunction(N - m))), ℝ, ℝ with first, second
+  intros y member
+  have xReal : Real(y) by exact member
+  have constantValue := constantRealFunction.value
+    at realNat(choose(N, m)) * bernoulliPolynomial(m, x), y
+  have powerValue := realPowFunction.value at N - m, y with member
+  have powerReal := realPow.real at y, N - m
+  have constantReal : Real(constantRealFunction(realNat(choose(N, m)) *
+      bernoulliPolynomial(m, x))(y))
+    rw constantValue
+    exact scale
+  have powerFunctionReal : Real(realPowFunction(N - m)(y))
+    rw powerValue
+    exact powerReal
+  have termValue := pointwiseMul.value
+    at constantRealFunction(realNat(choose(N, m)) * bernoulliPolynomial(m, x)),
+      realPowFunction(N - m), y
+    with constant, power, constantReal, powerFunctionReal
+  have previousValue := appellPartialFunction.value at N, m, x, y with member
+  have terms := bernoulliShiftTerms.function at N, x, y
+  have sequence : RealSequence(bernoulliShiftTerms(N, x, y)) by exact terms
+  have previousSum := realPartialSum.real at bernoulliShiftTerms(N, x, y),
+    m with sequence
+  have previousReal : Real(appellPartialFunction(N, m, x)(y))
+    rw previousValue
+    exact previousSum
+  have termReal : Real(pointwiseMul(constantRealFunction(realNat(choose(N,
+      m)) * bernoulliPolynomial(m, x)), realPowFunction(N - m))(y))
+    rw [termValue, constantValue, powerValue]
+    typecheck
+  have sumValue := pointwiseAdd.value
+    at appellPartialFunction(N, m, x),
+      pointwiseMul(constantRealFunction(realNat(choose(N, m)) * bernoulliPolynomial(m, x)),
+        realPowFunction(N - m)), y
+    with previous, term, previousReal, termReal
+  have value := appellPartialFunction.value at N, succ(m), x, y with member
+  have last := bernoulliShiftTerms.value at N, x, y, m
+  rw [sumValue, termValue, constantValue, powerValue, previousValue, value,
+    realPartialSum.succ, last]
+  unfold realAddValue
+  unfold call2
+  rfl
+
+theorem appellPartialFunction.derivative (N m : Nat) (x y : Real)
+  shows HasDerivativeAt(appellPartialFunction(N, m, x),
+    ∑ k < m, appellDerivativeTerms(N, x, y)(k), y)
+proof
+  induction m
+  | zero =>
+    have constant := constantRealFunction.has_derivative_at at (0:R), y
+    have same : appellPartialFunction(N, 0, x) = constantRealFunction((0:R))
+      have first := appellPartialFunction.function at N, 0, x
+      have zero : Real((0:R)) by typecheck
+      have second := constantRealFunction.function at (0:R)
+      apply FunctionBetween.ext at appellPartialFunction(N, 0, x),
+        constantRealFunction((0:R)), ℝ, ℝ with first, second
+      intros z member
+      have zReal : Real(z) by exact member
+      have value := appellPartialFunction.value at N, 0, x, z with member
+      have constantValue := constantRealFunction.value at (0:R), z
+      rw [value, constantValue, realPartialSum.zero]
+    rw [same, realPartialSum.zero]
+    exact constant
+  | succ(j) using ih =>
+    have number := bernoulliPolynomial.real at j, x
+    have coefficient := realNat.real at choose(N, j)
+    have scale : Real(realNat(choose(N, j)) * bernoulliPolynomial(j, x)) by typecheck
+    have constant := constantRealFunction.has_derivative_at
+      at realNat(choose(N, j)) * bernoulliPolynomial(j, x), y
+    have power := realPowFunction.derivative at N - j, y
+    have term := HasDerivativeAt.mul with constant, power
+    have sum := HasDerivativeAt.add with ih, term
+    rw ← appellPartialFunction.succ at sum
+    have member : y ∈ ℝ by typecheck
+    have constantValue := constantRealFunction.value
+      at realNat(choose(N, j)) * bernoulliPolynomial(j, x), y
+    have powerValue := realPowFunction.value at N - j, y with member
+    rw [constantValue, powerValue] at sum
+    have derivatives := appellDerivativeTerms.function at N, x, y
+    have derivativeSequence : RealSequence(appellDerivativeTerms(N, x, y))
+      by exact derivatives
+    have previous := realPartialSum.real at appellDerivativeTerms(N, x, y), j
+      with derivativeSequence
+    have last := appellDerivativeTerms.value at N, x, y, j
+    have powerReal := realPow.real at y, N - j
+    have lowerReal := realPow.real at y, N - j - 1
+    have count := realNat.real at N - j
+    have bridgeZero : realMulValue(realZero, y ^ (N - j)) = (0:R) * y ^ (N - j)
+      unfold realMulValue
+      unfold call2
+      rfl
+    have bridgeScale : realMulValue(realNat(choose(N, j)) * bernoulliPolynomial(j, x),
+        realNat(N - j) * y ^ (N - j - 1)) =
+        realNat(choose(N, j)) * bernoulliPolynomial(j, x) * (realNat(N - j) *
+          y ^ (N - j - 1))
+      unfold realMulValue
+      unfold call2
+      rfl
+    have bridgeSum : realAddValue((0:R) * y ^ (N - j),
+        realNat(choose(N, j)) * bernoulliPolynomial(j, x) * (realNat(N - j) *
+          y ^ (N - j - 1))) =
+        (0:R) * y ^ (N - j) + realNat(choose(N, j)) * bernoulliPolynomial(j, x) *
+          (realNat(N - j) * y ^ (N - j - 1))
+      unfold realAddValue
+      unfold call2
+      rfl
+    have bridgeLast : realAddValue(∑ k < j, appellDerivativeTerms(N, x, y)(k),
+        realNat(choose(N, j)) * bernoulliPolynomial(j, x) * (realNat(N - j) *
+          y ^ (N - j - 1))) =
+        (∑ k < j, appellDerivativeTerms(N, x, y)(k)) +
+          realNat(choose(N, j)) * bernoulliPolynomial(j, x) * (realNat(N - j) *
+            y ^ (N - j - 1))
+      unfold realAddValue
+      unfold call2
+      rfl
+    rw [bridgeZero, bridgeScale, bridgeSum] at sum
+    have value : (∑ k < j, appellDerivativeTerms(N, x, y)(k)) +
+        ((0:R) * y ^ (N - j) + realNat(choose(N, j)) * bernoulliPolynomial(j, x) *
+          (realNat(N - j) * y ^ (N - j - 1))) =
+        ∑ k < succ(j), appellDerivativeTerms(N, x, y)(k)
+      rw [realPartialSum.succ, last, bridgeLast]
+      ring
+    rw value at sum
+    exact sum
+
+-- The termwise derivative of the (n + 1)-st Appell sum is (n + 1) times
+-- the n-th.
+theorem appellDerivativeTerms.sum (n : Nat) (x y : Real)
+  shows (∑ k < succ(succ(n)), appellDerivativeTerms(succ(n), x, y)(k)) =
+    realNat(succ(n)) * (∑ k < succ(n), bernoulliShiftTerms(n, x, y)(k))
+proof
+  have derivatives := appellDerivativeTerms.function at succ(n), x, y
+  have derivativeSequence : RealSequence(appellDerivativeTerms(succ(n), x, y))
+    by exact derivatives
+  have terms := bernoulliShiftTerms.function at n, x, y
+  have termSequence : RealSequence(bernoulliShiftTerms(n, x, y))
+    by exact terms
+  have scale := realNat.real at succ(n)
+  have multiple : ∀ k ∈ ℕ, k < succ(n) →
+      appellDerivativeTerms(succ(n), x, y)(k) =
+        realNat(succ(n)) * bernoulliShiftTerms(n, x, y)(k)
+    intros k member below
+    have kNat := nat.omega.backward with member
+    have atMost : k ≤ n by arith
+    have left := appellDerivativeTerms.value at succ(n), x, y, k
+    have right := bernoulliShiftTerms.value at n, x, y, k
+    have shift := sub.add_one_of_le at n, k with atMost
+    have step : succ(n) = n + 1 by arith
+    have difference : succ(n) - k = (n - k) + 1
+      rw step
+      exact shift
+    have lowered : succ(n) - k - 1 = n - k
+      rw difference
+      exact sub.add_one_right at n - k
+    have cancel := sub.add_cancel at n, k with atMost
+    have count : realNat(n - k) = realNat(n) - realNat(k)
+      have sum := realNat.add at n - k, k
+      rw cancel at sum
+      have first := realNat.real at n - k
+      have second := realNat.real at k
+      linarith
+    have absorb := choose.absorb_real at n
+    have instance := absorb with k, member
+    have number := bernoulliPolynomial.real at k, x
+    have power := realPow.real at y, n - k
+    have high := realNat.real at choose(succ(n), k)
+    have low := realNat.real at choose(n, k)
+    have nReal := realNat.real at n
+    have kReal := realNat.real at k
+    have succCount : realNat(succ(n) - k) = realNat(n) + 1 - realNat(k)
+      rw [difference, realNat.add, realNat.one, count]
+      ring
+    rw [left, right, lowered, succCount, realNat.succ_add]
+    linear_combination bernoulliPolynomial(k, x) * y ^ (n - k) * instance
+  have scaled := realPartialSum.scaled at bernoulliShiftTerms(n, x, y),
+    appellDerivativeTerms(succ(n), x, y), realNat(succ(n)), succ(n)
+    with termSequence, derivativeSequence, multiple
+  have last := appellDerivativeTerms.value at succ(n), x, y, succ(n)
+  have vanishing : succ(n) - succ(n) = 0 by arith
+  have number := bernoulliPolynomial.real at succ(n), x
+  have coefficient := realNat.real at choose(succ(n), succ(n))
+  have lower := realPow.real at y, 0 - 1
+  have previous := realPartialSum.real
+    at appellDerivativeTerms(succ(n), x, y), succ(n) with derivativeSequence
+  have bridge : realAddValue(∑ k < succ(n),
+      appellDerivativeTerms(succ(n), x, y)(k),
+      appellDerivativeTerms(succ(n), x, y)(succ(n))) =
+      (∑ k < succ(n), appellDerivativeTerms(succ(n), x, y)(k)) +
+        appellDerivativeTerms(succ(n), x, y)(succ(n))
+    unfold realAddValue
+    unfold call2
+    rfl
+  rw [realPartialSum.succ, bridge, scaled, last, vanishing, realNat.zero]
+  ring
+
+-- The Appell sum Σ_{k ≤ n} C(n, k) Bₖ(x) y^(n − k), as a function of y.
+theorem appellPartialFunction.value_sum (n : Nat) (x y : Real)
+  shows appellPartialFunction(n, succ(n), x)(y) =
+    ∑ k < succ(n), bernoulliShiftTerms(n, x, y)(k)
+proof
+  have yMember : y ∈ ℝ by typecheck
+  exact appellPartialFunction.value at n, succ(n), x, y with yMember
+
+-- At y = 0 only the last term remains: the Appell sum is Bₙ(x).
+theorem bernoulliShiftTerms.at_zero (n : Nat) (x : Real)
+  shows (∑ k < succ(n), bernoulliShiftTerms(n, x, (0:R))(k)) =
+    bernoulliPolynomial(n, x)
+proof
+  have zeroReal : Real((0:R)) by typecheck
+  have terms := bernoulliShiftTerms.function at n, x, (0:R)
+  have termSequence : RealSequence(bernoulliShiftTerms(n, x, (0:R)))
+    by exact terms
+  have constant := constantSequence.function at (0:R)
+  have constantSequence : RealSequence(constantSequence((0:R)))
+    by exact constant
+  have vanishing : ∀ k ∈ ℕ, k < n →
+      bernoulliShiftTerms(n, x, (0:R))(k) = constantSequence((0:R))(k)
+    intros k member below
+    have kNat := nat.omega.backward with member
+    have value := bernoulliShiftTerms.value at n, x, (0:R), k
+    have related := constantSequence.relates at (0:R), k
+    have constantValue := FunctionBetween.apply_value with constant, member,
+      related
+    obtain ⟨j, jNat, shape⟩ := Less.exists_add_one with below
+    have atMost : k ≤ n by arith
+    have difference := sub.eq_iff_of_le at n, k, succ(j) with atMost
+    have sum : n = k + succ(j) by arith
+    have exponent := difference.backward with sum
+    have number := bernoulliPolynomial.real at k, x
+    have coefficient := realNat.real at choose(n, k)
+    rw [value, constantValue, exponent, realPow.zero_succ]
+    ring
+  have prefix := realPartialSum.eq_prefix with termSequence,
+    constantSequence, vanishing
+  have total := realPartialSum.constant at (0:R), n
+  have last := bernoulliShiftTerms.value at n, x, (0:R), n
+  have zero : n - n = 0 by arith
+  have number := bernoulliPolynomial.real at n, x
+  have count := realNat.real at n
+  rw [realPartialSum.succ, prefix, total, last, choose.diagonal, zero,
+    realPow.zero, realNat.one]
+  ring
+
+-- Bₙ(x + y) agrees with the Appell sum for every y, by induction on n: the
+-- difference has derivative (n + 1) times the previous difference, which
+-- vanishes, and it vanishes at y = 0.
+theorem bernoulliPolynomial.add_all (x : Real, n : Nat)
+  shows ∀ y ∈ ℝ, bernoulliPolynomial(n, x + y) =
+    ∑ k < succ(n), bernoulliShiftTerms(n, x, y)(k)
+proof
+  induction n
+  | zero =>
+    intros y yMember
+    have yReal : Real(y) by exact yMember
+    have shifted : Real(x + y) by typecheck
+    have zeroAt := bernoulliShiftTerms.at_zero at 0, x
+    have same : ∀ k ∈ ℕ, k < succ(0) →
+        bernoulliShiftTerms(0, x, y)(k) = bernoulliShiftTerms(0, x, (0:R))(k)
+      intros k member below
+      have kNat := nat.omega.backward with member
+      have kZero := Nat.lt_one_zero with below
+      have left := bernoulliShiftTerms.value at 0, x, y, k
+      have right := bernoulliShiftTerms.value at 0, x, (0:R), k
+      have exponent : 0 - 0 = 0 by arith
+      rw [left, right, kZero, exponent, realPow.zero, realPow.zero]
+    have first := bernoulliShiftTerms.function at 0, x, y
+    have second := bernoulliShiftTerms.function at 0, x, (0:R)
+    have firstSequence : RealSequence(bernoulliShiftTerms(0, x, y))
+      by exact first
+    have secondSequence : RealSequence(bernoulliShiftTerms(0, x, (0:R)))
+      by exact second
+    have prefix := realPartialSum.eq_prefix with firstSequence,
+      secondSequence, same
+    rw [prefix, zeroAt, bernoulliPolynomial.zero_index,
+      bernoulliPolynomial.zero_index]
+  | succ(j) using ih =>
+    -- D(y) = Bⱼ₊₁(x + y) − Sⱼ₊₁(y) has derivative 0.
+    have upper := bernoulliTranslate.function at succ(j), x
+    have lower := appellPartialFunction.function at succ(j), succ(succ(j)), x
+    have flat : ∀ C ∈ ℝ, HasDerivativeAt(pointwiseSub(bernoulliTranslate(
+        succ(j), x), appellPartialFunction(succ(j), succ(succ(j)), x)),
+        (0:R), C)
+      intros C cMember
+      have cReal : Real(C) by exact cMember
+      have translated := bernoulliTranslate.derivative at j, x, C
+      have partial := appellPartialFunction.derivative at succ(j),
+        succ(succ(j)), x, C
+      rw appellDerivativeTerms.sum at partial
+      have difference := HasDerivativeAt.sub with translated, partial
+      have previous := ih with C, cMember
+      rw ← previous at difference
+      have shifted : Real(x + C) by typecheck
+      have polynomial := bernoulliPolynomial.real at j, x + C
+      have scale := realNat.real at succ(j)
+      have zero : realSubValue(realNat(succ(j)) * bernoulliPolynomial(j,
+          x + C), realNat(succ(j)) * bernoulliPolynomial(j, x + C)) = (0:R)
+        by ring
+      rwa zero at difference
+    have zeroMember : (0:R) ∈ ℝ by typecheck
+    have valueAt : ∀ y ∈ ℝ, pointwiseSub(bernoulliTranslate(succ(j), x),
+        appellPartialFunction(succ(j), succ(succ(j)), x))(y) =
+        bernoulliPolynomial(succ(j), x + y) -
+          ∑ k < succ(succ(j)), bernoulliShiftTerms(succ(j), x, y)(k)
+      intros y yMember
+      have yReal : Real(y) by exact yMember
+      have shifted : Real(x + y) by typecheck
+      have translatedValue := bernoulliTranslate.value at succ(j), x, y
+      have partialValue := appellPartialFunction.value_sum at succ(j), x, y
+      have polynomial := bernoulliPolynomial.real at succ(j), x + y
+      have terms := bernoulliShiftTerms.function at succ(j), x, y
+      have termSequence : RealSequence(bernoulliShiftTerms(succ(j), x, y))
+        by exact terms
+      have sum := realPartialSum.real at bernoulliShiftTerms(succ(j), x, y),
+        succ(succ(j)) with termSequence
+      have translatedReal : Real(bernoulliTranslate(succ(j), x)(y))
+        rw translatedValue
+        exact polynomial
+      have partialReal : Real(appellPartialFunction(succ(j), succ(succ(j)),
+          x)(y))
+        rw partialValue
+        exact sum
+      have difference := pointwiseSub.value at bernoulliTranslate(succ(j), x),
+        appellPartialFunction(succ(j), succ(succ(j)), x), y with upper,
+        lower, translatedReal, partialReal
+      rw [difference, translatedValue, partialValue]
+    have atZero := valueAt with (0:R), zeroMember
+    have origin : x + (0:R) = x by ring
+    rw [origin, bernoulliShiftTerms.at_zero] at atZero
+    have polynomial := bernoulliPolynomial.real at succ(j), x
+    have vanish : bernoulliPolynomial(succ(j), x) -
+      bernoulliPolynomial(succ(j), x) = (0:R) by ring
+    rw vanish at atZero
+    intros y yMember
+    have yReal : Real(y) by exact yMember
+    have level : pointwiseSub(bernoulliTranslate(succ(j), x),
+        appellPartialFunction(succ(j), succ(succ(j)), x))(y) = (0:R)
+      have order := realLess.trichotomy at y, (0:R)
+      rcases order with below | equal | above
+      . have constant := HasDerivativeAt.constant_of_zero at
+          pointwiseSub(bernoulliTranslate(succ(j), x),
+          appellPartialFunction(succ(j), succ(succ(j)), x)), y, (0:R)
+          with below, flat
+        rw [constant, atZero]
+      . rw [equal, atZero]
+      . have constant := HasDerivativeAt.constant_of_zero at
+          pointwiseSub(bernoulliTranslate(succ(j), x),
+          appellPartialFunction(succ(j), succ(succ(j)), x)), (0:R), y
+          with above, flat
+        rw [← constant, atZero]
+    have here := valueAt with y, yMember
+    rw level at here
+    have shifted : Real(x + y) by typecheck
+    have polynomialY := bernoulliPolynomial.real at succ(j), x + y
+    have terms := bernoulliShiftTerms.function at succ(j), x, y
+    have termSequence : RealSequence(bernoulliShiftTerms(succ(j), x, y))
+      by exact terms
+    have sum := realPartialSum.real at bernoulliShiftTerms(succ(j), x, y),
+      succ(succ(j)) with termSequence
+    linear_combination -here
+
+theorem bernoulliPolynomial.add (n : Nat) (x y : Real)
+  shows bernoulliPolynomial(n, x + y) =
+    ∑ k < succ(n), bernoulliShiftTerms(n, x, y)(k)
+proof
+  have yMember : y ∈ ℝ by typecheck
+  have all := bernoulliPolynomial.add_all at x, n
+  exact all with y, yMember

@@ -1,0 +1,957 @@
+-- The von Mangoldt function and primes in arithmetic progressions: Λ(n) =
+-- log p on the prime powers n = p^k and 0 elsewhere, Σ_{d ∣ n} Λ(d) =
+-- log n; the series Σ χ(n) Λ(n) n^(−s) = −L′(s, χ)/L(s, χ) for re s > 1,
+-- and its continuation through (s − 1) L(s, χ₀) for the principal
+-- character; Λ restricted to a residue class a modulo N, expanded over the
+-- characters by orthogonality, its series, and Dirichlet's theorem: the
+-- primes p ≡ a (mod N) are infinitely many, Σ_{p ≡ a} log(p)/p diverging.
+-- Part of the GRH blueprint (layer 2, track D: the L-series bridge).
+-- Source: Mathlib's NumberTheory/ArithmeticFunction/VonMangoldt,
+-- NumberTheory/LSeries/{Dirichlet, PrimesInAP}; the principal-character
+-- form of −L′/L follows the source's Lib/Analytic/Landau/PolarLandau.
+-- Planned home: NumberTheory/LSeries/PrimesInAP.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LSeries.VonMangoldt
+import GRH.LSeries.NonVanishing
+import GRH.Calculus.Analytic
+
+-- Section: Prime powers
+-- n is a power p^k, k ≥ 1, of the prime p.
+predicate PrimePowerOf (n p : Nat) :=
+  Prime(p) ∧ ∃ k ∈ ℕ, 1 ≤ k ∧ n = p ^ k
+
+predicate PrimePower (n : Nat) := ∃ p ∈ ℕ, PrimePowerOf(n, p)
+
+section VonMangoldt
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- Λ(n) = log p when n = p^k with p prime and k ≥ 1, and 0 otherwise
+-- (Mathlib's ArithmeticFunction.vonMangoldt; Λ(0) = Λ(1) = 0).
+def vonMangoldtValue (n : Nat) : Set :=
+  ⋃({ w ∈ ℝ | (∃ p ∈ ℕ, PrimePowerOf(n, p) ∧ w = realLog(realNat(p))) ∨
+    (¬PrimePower(n) ∧ w = realZero) })
+
+-- A prime power has one base, and Λ's defining value on and off the
+-- prime powers.
+theorem PrimePowerOf.divides (n p : Nat)
+  requires power : PrimePowerOf(n, p)
+  shows p ∣ n
+proof
+  obtain ⟨_, k, kIn, kPositive, shape⟩ := power
+  have kNat := nat.omega.backward with kIn
+  have alternatives := natural.zero_or_successor at k
+  rcases alternatives with kZero | ⟨m, mNat, kSucc⟩
+  . exfalso
+    rw kZero at kPositive
+    arith
+  . rw [shape, kSucc, pow.succ]
+    witness pow(p, m)
+    rfl
+
+theorem PrimePowerOf.unique_base (n p q : Nat)
+  requires first : PrimePowerOf(n, p)
+  requires second : PrimePowerOf(n, q)
+  shows p = q
+proof
+  have pDivides := PrimePowerOf.divides with first
+  have secondCopy := second
+  obtain ⟨primeP, _⟩ := first
+  obtain ⟨primeQ, j, jIn, _, shape⟩ := secondCopy
+  have jNat := nat.omega.backward with jIn
+  rw shape at pDivides
+  have base := Prime.divides_pow with primeP, pDivides
+  exact Prime.divides_prime with primeP, primeQ, base
+
+theorem vonMangoldtValue.prime_power (n p : Nat)
+  requires power : PrimePowerOf(n, p)
+  shows vonMangoldtValue(n) = realLog(realNat(p))
+proof
+  have pIn : p ∈ ℕ by typecheck
+  have logReal : realLog(realNat(p)) ∈ ℝ by typecheck
+  unfold vonMangoldtValue
+  apply union.of_unique
+  . refine ⟨logReal, ?_⟩
+    left
+    exact ⟨p, pIn, power, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨q, qIn, qPower, yValue⟩ | ⟨notPower, _⟩
+    . have qNat := nat.omega.backward with qIn
+      have same := PrimePowerOf.unique_base with qPower, power
+      rw [yValue, same]
+    . exfalso
+      exact notPower with ⟨p, pIn, power⟩
+
+theorem vonMangoldtValue.not_prime_power (n : Nat)
+  requires notPower : ¬PrimePower(n)
+  shows vonMangoldtValue(n) = realZero
+proof
+  have zero : realZero ∈ ℝ by typecheck
+  unfold vonMangoldtValue
+  apply union.of_unique
+  . refine ⟨zero, ?_⟩
+    right
+    exact ⟨notPower, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨q, qIn, qPower, _⟩ | ⟨_, yValue⟩
+    . exfalso
+      exact notPower with ⟨q, qIn, qPower⟩
+    . exact yValue
+
+theorem vonMangoldtValue.real (n : Nat)
+  shows vonMangoldtValue(n) ∈ ℝ
+proof
+  by_cases power : PrimePower(n)
+  . obtain ⟨p, pIn, pPower⟩ := power
+    have pNat := nat.omega.backward with pIn
+    rw (vonMangoldtValue.prime_power with pPower)
+    typecheck
+  . rw (vonMangoldtValue.not_prime_power with power)
+    typecheck
+
+defgraph vonMangoldt (n ∈ ℕ) : ℝ := vonMangoldtValue(n)
+proof
+  have nNat := nat.omega.backward with member
+  exact vonMangoldtValue.real at n
+
+-- Λ as complex coefficients (Mathlib's ↗Λ), and the twist n ↦ χ(n) Λ(n)
+-- (Mathlib's ↗χ * ↗Λ).
+def vonMangoldtCoefficients : Set := realCoefficients(vonMangoldt)
+
+def twistedVonMangoldt (χ : Set) : Set :=
+  coefficientMul(characterCoefficients(χ), vonMangoldtCoefficients)
+
+-- The class of n modulo N is the class of the integer a.
+predicate InResidueClass (N n : Nat, a : Set) :=
+  IntegerCongruent(integerOfNat(N), integerOfNat(n), a)
+
+-- Λ on the residue class a modulo N, 0 off it (Mathlib's
+-- ArithmeticFunction.vonMangoldt.residueClass a, for a : ZMod N; here a is
+-- an integer representing the class).
+def residueClassValue (N : Nat, a : Set, n : Nat) : Set :=
+  ⋃({ w ∈ ℝ | (InResidueClass(N, n, a) ∧ w = vonMangoldt(n)) ∨
+    (¬InResidueClass(N, n, a) ∧ w = realZero) })
+
+theorem residueClassValue.in_class (N : Nat) (a : Set) (n : Nat)
+  requires inClass : InResidueClass(N, n, a)
+  shows residueClassValue(N, a, n) = vonMangoldt(n)
+proof
+  have index : n ∈ ℕ by typecheck
+  have value := FunctionBetween.apply_closed with vonMangoldt.function, index
+  unfold residueClassValue
+  apply union.of_unique
+  . refine ⟨value, ?_⟩
+    left
+    exact ⟨inClass, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨_, yValue⟩ | ⟨notIn, _⟩
+    . exact yValue
+    . exfalso
+      exact notIn with inClass
+
+theorem residueClassValue.not_in_class (N : Nat) (a : Set) (n : Nat)
+  requires notInClass : ¬InResidueClass(N, n, a)
+  shows residueClassValue(N, a, n) = realZero
+proof
+  have zero : realZero ∈ ℝ by typecheck
+  unfold residueClassValue
+  apply union.of_unique
+  . refine ⟨zero, ?_⟩
+    right
+    exact ⟨notInClass, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨inClass, _⟩ | ⟨_, yValue⟩
+    . exfalso
+      exact notInClass with inClass
+    . exact yValue
+
+theorem residueClassValue.real (N : Nat) (a : Set) (n : Nat)
+  shows residueClassValue(N, a, n) ∈ ℝ
+proof
+  by_cases inClass : InResidueClass(N, n, a)
+  . have index : n ∈ ℕ by typecheck
+    rw (residueClassValue.in_class with inClass)
+    exact FunctionBetween.apply_closed with vonMangoldt.function, index
+  . rw (residueClassValue.not_in_class with inClass)
+    typecheck
+
+defgraph residueClass (N : Nat, a : Set) (n ∈ ℕ) : ℝ :=
+  residueClassValue(N, a, n)
+proof
+  have nNat := nat.omega.backward with member
+  exact residueClassValue.real at N, a, n
+
+-- The terms χ(a)⁻¹ χ(n) Λ(n) of the expansion over the characters, as a
+-- function of χ, and the family χ ↦ χ(a)⁻¹ χ Λ of coefficient functions.
+defgraph residueCharacterTerms (N : Nat, a : Set, n : Nat) (χ ∈ dirichletCharacters(N)) :
+    complexCarrier :=
+  ℂ[complexInv(χ(a)) * χ(integerOfNat(n)) * complexOfReal(vonMangoldt(n))]
+requires integer : a ∈ ℤ
+proof
+  have character := dirichletCharacters.membership.forward with member
+  have values := DirichletCharacter.function with character
+  have nMember : n ∈ ℕ by typecheck
+  have index : integerOfNat(n) ∈ ℤ by typecheck
+  have atA := FunctionBetween.apply_closed with values, integer
+  have atN := FunctionBetween.apply_closed with values, index
+  have inverse := complexInv.member with atA
+  have weight := FunctionBetween.apply_closed with vonMangoldt.function, nMember
+  typecheck
+
+def residueCharacterFamily (N : Nat, a : Set) : Set :=
+  { (χ, coefficientScale(complexInv(χ(a)), twistedVonMangoldt(χ))) |
+    χ ∈ dirichletCharacters(N) }
+
+-- The values −L′(s, χ)/L(s, χ), χ(a)⁻¹-weighted, as a function of χ.
+defgraph residueLogDerivTerms (N : Nat, a s : Set) (χ ∈ dirichletCharacters(N)) :
+    complexCarrier :=
+  ℂ[complexInv(χ(a)) *
+    -logDeriv(LFunctionMap(N, χ), complexCarrier ∖ {ℂ[1]}, s)]
+requires integer : a ∈ ℤ
+proof
+  sorry
+
+-- n ↦ Λ_a(n)/n on the primes and 0 elsewhere (the series of Mathlib's
+-- not_summable_residueClass_prime_div).
+def primeResidueValue (N : Nat, a : Set, n : Nat) : Set :=
+  ⋃({ w ∈ ℝ | (Prime(n) ∧ w = R[residueClass(N, a)(n) / realNat(n)]) ∨
+    (¬Prime(n) ∧ w = realZero) })
+
+theorem primeResidueValue.real (N : Nat) (a : Set) (n : Nat)
+  shows primeResidueValue(N, a, n) ∈ ℝ
+proof
+  have index : n ∈ ℕ by typecheck
+  have function := residueClass.function at N, a
+  have value := FunctionBetween.apply_closed with function, index
+  have valueReal : Real(residueClass(N, a)(n)) by typecheck
+  have quotient : R[residueClass(N, a)(n) / realNat(n)] ∈ ℝ by typecheck
+  have zero : realZero ∈ ℝ by typecheck
+  by_cases prime : Prime(n)
+  . have same : primeResidueValue(N, a, n) = R[residueClass(N, a)(n) /
+        realNat(n)]
+      unfold primeResidueValue
+      apply union.of_unique
+      . refine ⟨quotient, ?_⟩
+        left
+        exact ⟨prime, rfl⟩
+      . intros y hy
+        obtain ⟨_, alternatives⟩ := hy
+        rcases alternatives with ⟨_, yValue⟩ | ⟨notPrime, _⟩
+        . exact yValue
+        . exfalso
+          exact notPrime with prime
+    rw same
+    exact quotient
+  . have same : primeResidueValue(N, a, n) = realZero
+      unfold primeResidueValue
+      apply union.of_unique
+      . refine ⟨zero, ?_⟩
+        right
+        exact ⟨prime, rfl⟩
+      . intros y hy
+        obtain ⟨_, alternatives⟩ := hy
+        rcases alternatives with ⟨isPrime, _⟩ | ⟨_, yValue⟩
+        . exfalso
+          exact prime with isPrime
+        . exact yValue
+    rw same
+    exact zero
+
+-- The value at a prime and elsewhere.
+theorem cldDprimeResidueValue.prime (N : Nat) (a : Set) (n : Nat)
+  requires prime : Prime(n)
+  shows primeResidueValue(N, a, n) = R[residueClass(N, a)(n) / realNat(n)]
+proof
+  have index : n ∈ ℕ by typecheck
+  have function := residueClass.function at N, a
+  have value := FunctionBetween.apply_closed with function, index
+  have valueReal : Real(residueClass(N, a)(n)) by typecheck
+  have quotient : R[residueClass(N, a)(n) / realNat(n)] ∈ ℝ by typecheck
+  unfold primeResidueValue
+  apply union.of_unique
+  . refine ⟨quotient, ?_⟩
+    left
+    exact ⟨prime, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨_, yValue⟩ | ⟨notPrime, _⟩
+    . exact yValue
+    . exfalso
+      exact notPrime with prime
+
+theorem cldDprimeResidueValue.not_prime (N : Nat) (a : Set) (n : Nat)
+  requires notPrime : ¬Prime(n)
+  shows primeResidueValue(N, a, n) = R[0]
+proof
+  have zero : realZero ∈ ℝ by typecheck
+  unfold primeResidueValue
+  apply union.of_unique
+  . refine ⟨zero, ?_⟩
+    right
+    exact ⟨notPrime, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨isPrime, _⟩ | ⟨_, yValue⟩
+    . exfalso
+      exact notPrime with isPrime
+    . exact yValue
+
+defgraph primeResidueTerms (N : Nat, a : Set) (n ∈ ℕ) : ℝ :=
+  primeResidueValue(N, a, n)
+proof
+  have nNat := nat.omega.backward with member
+  exact primeResidueValue.real at N, a, n
+
+-- The primes p ≡ a (mod N).
+def primesInClass (N : Nat, a : Set) : Set :=
+  { p ∈ ℕ | Prime(p) ∧ InResidueClass(N, p, a) }
+
+-- The closed half-plane re s ≥ 1.
+def closedRightHalfPlane (S : Real) : Set :=
+  { z ∈ complexCarrier | S ≤ complexRe(z) }
+
+-- The open set where an entire function does not vanish.
+def nonzeroSet (f : Set) : Set := { z ∈ complexCarrier | f(z) ≠ ℂ[0] }
+
+theorem nonzeroSet.open (f : Set)
+  requires holomorphic : HolomorphicOn(f, complexCarrier)
+  shows ComplexOpen(nonzeroSet(f))
+proof
+  apply ComplexOpen.of_disks
+  . unfold Subset
+    intros z hz
+    obtain ⟨zC, _⟩ := hz
+    exact zC
+  . intros a ha
+    obtain ⟨aC, nonzero⟩ := ha
+    obtain ⟨d, dReal, dPositive, near⟩ := HolomorphicOn.nonzero_near with
+      holomorphic, aC, nonzero
+    refine ⟨d, dReal, dPositive, ?_⟩
+    unfold Subset
+    intros w hw
+    have value := near with w, hw
+    obtain ⟨wC, _⟩ := hw
+    exact ⟨wC, value⟩
+
+-- Section: The von Mangoldt function
+theorem vonMangoldt.real (n : Nat)
+  shows vonMangoldt(n) ∈ ℝ
+proof
+  have index : n ∈ ℕ by typecheck
+  exact FunctionBetween.apply_closed with vonMangoldt.function, index
+
+-- Mathlib's vonMangoldt_apply_prime.
+theorem vonMangoldt.prime (p : Nat)
+  requires prime : Prime(p)
+  shows vonMangoldt(p) = realLog(realNat(p))
+proof
+  have oneIn : 1 ∈ ℕ by typecheck
+  have positive : 1 ≤ 1 by arith
+  have same : p = pow(p, 1)
+    rw pow.one_right
+  have power : PrimePowerOf(p, p)
+    exact ⟨prime, 1, oneIn, positive, same⟩
+  have index : p ∈ ℕ by typecheck
+  rw [(vonMangoldt.value with index), (vonMangoldtValue.prime_power with power)]
+
+-- Λ(p^k) = log p for k ≥ 1 (Mathlib's vonMangoldt_apply_pow with Λ(p)).
+theorem vonMangoldt.prime_pow (p k : Nat)
+  requires prime : Prime(p)
+  requires positive : 1 ≤ k
+  shows vonMangoldt(pow(p, k)) = realLog(realNat(p))
+proof
+  have index : pow(p, k) ∈ ℕ by typecheck
+  have kIn : k ∈ ℕ by typecheck
+  have power : PrimePowerOf(pow(p, k), p)
+    exact ⟨prime, k, kIn, positive, rfl⟩
+  rw [(vonMangoldt.value with index), (vonMangoldtValue.prime_power with power)]
+
+-- Λ(n^k) = Λ(n) for k ≥ 1 (Mathlib's vonMangoldt_apply_pow).
+theorem vonMangoldt.pow (n k : Nat)
+  requires positive : 1 ≤ k
+  shows vonMangoldt(pow(n, k)) = vonMangoldt(n)
+proof
+  sorry
+
+theorem vonMangoldt.not_prime_power (n : Nat)
+  requires notPower : ¬PrimePower(n)
+  shows vonMangoldt(n) = realZero
+proof
+  have index : n ∈ ℕ by typecheck
+  rw [(vonMangoldt.value with index), (vonMangoldtValue.not_prime_power with
+    notPower)]
+
+theorem vonMangoldt.one
+  shows vonMangoldt(1) = realZero
+proof
+  have notPower : ¬PrimePower(1)
+    intro power
+    obtain ⟨p, pIn, pPower⟩ := power
+    have pNat := nat.omega.backward with pIn
+    have divides := PrimePowerOf.divides with pPower
+    obtain ⟨prime, _⟩ := pPower
+    exact Prime.not_divides_one with prime, divides
+  exact vonMangoldt.not_prime_power with notPower
+
+-- Mathlib's vonMangoldt_nonneg.
+theorem vonMangoldt.nonneg (n : Nat)
+  shows realZero ≤ vonMangoldt(n)
+proof
+  have index : n ∈ ℕ by typecheck
+  rw (vonMangoldt.value with index)
+  by_cases power : PrimePower(n)
+  . obtain ⟨p, pIn, pPower⟩ := power
+    have pNat := nat.omega.backward with pIn
+    have pPowerCopy := pPower
+    obtain ⟨prime, _⟩ := pPowerCopy
+    have above := Prime.greater_than_one with prime
+    have atLeast : 1 ≤ p by arith
+    have real := realNat.one_le with atLeast
+    rw (vonMangoldtValue.prime_power with pPower)
+    exact realLog.nonnegative with real
+  . rw (vonMangoldtValue.not_prime_power with power)
+    linarith
+
+-- Mathlib's vonMangoldt_le_log.
+theorem vonMangoldt.le_log (n : Nat)
+  requires positive : 1 ≤ n
+  shows vonMangoldt(n) ≤ realLog(realNat(n))
+proof
+  have atLeast := realNat.one_le with positive
+  by_cases power : PrimePower(n)
+  . obtain ⟨p, pIn, pPower⟩ := power
+    have pNat := nat.omega.backward with pIn
+    have divides := PrimePowerOf.divides with pPower
+    have pPowerCopy := pPower
+    obtain ⟨prime, _⟩ := pPowerCopy
+    have above := Prime.greater_than_one with prime
+    have pAtLeast : 1 ≤ p by arith
+    have pReal := realNat.one_le with pAtLeast
+    have pPositive : R[0] < realNat(p) by linarith
+    have nonzero : n ≠ (0:N) by arith
+    have below := divides.le with divides, nonzero
+    have index : n ∈ ℕ by typecheck
+    rw [(vonMangoldt.value with index), (vonMangoldtValue.prime_power with pPower)]
+    by_cases strict : p < n
+    . have realStrict := realNat.lt_of_lt with strict
+      have increasing := realLog.strictly_increasing with pPositive, realStrict
+      exact realLess.implies_le with increasing
+    . have same : p = n by arith
+      rw same
+      have logReal : Real(realLog(realNat(n))) by typecheck
+      linarith
+  . rw (vonMangoldt.not_prime_power with power)
+    exact realLog.nonnegative with atLeast
+
+-- Σ_{d ∣ n} Λ(d) = log n for n ≥ 1 (Mathlib's vonMangoldt_sum).
+theorem vonMangoldt.sum_divisors (n : Nat)
+  requires positive : 1 ≤ n
+  shows complexFamilySum(vonMangoldtCoefficients, divisorSet(n)) =
+    complexOfReal(realLog(realNat(n)))
+proof
+  sorry
+
+theorem vonMangoldtCoefficients.function
+  shows FunctionBetween(vonMangoldtCoefficients, ℕ, complexCarrier)
+proof
+  unfold vonMangoldtCoefficients
+  apply realCoefficients.maps
+  intros n nIn
+  have nNat := nat.omega.backward with nIn
+  have real := vonMangoldt.real at n
+  typecheck
+
+theorem twistedVonMangoldt.function (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FunctionBetween(twistedVonMangoldt(χ), ℕ, complexCarrier)
+proof
+  have characterValues := characterCoefficients.function with character
+  have vonValues := vonMangoldtCoefficients.function
+  unfold twistedVonMangoldt
+  apply coefficientMul.maps
+  intros n nIn
+  have first := FunctionBetween.apply_closed with characterValues, nIn
+  have second := FunctionBetween.apply_closed with vonValues, nIn
+  typecheck
+
+-- Section: The logarithmic derivative
+-- log n ≤ E⁻¹ n^E for E > 0 and n ≥ 1, and the series of Λ converges
+-- absolutely on re s > 1.
+theorem realLog.nat_le_rpow (n : Nat) (E : Real)
+  requires positive : 1 ≤ n
+  requires ePositive : R[0] < E
+  shows realLog(realNat(n)) ≤ R[realInvValue(E) * realRpow(realNat(n), E)]
+proof
+  have atLeast := realNat.one_le with positive
+  have positiveReal : R[0] < realNat(n) by linarith
+  have power := realRpow.positive at realNat(n), E
+  have powerReal := realRpow.real at realNat(n), E
+  have bound := realLog.le_sub_one at realRpow(realNat(n), E) with power
+  rw (realRpow.log with positiveReal) at bound
+  have logReal : Real(realLog(realNat(n))) by typecheck
+  have scaled : R[E * realLog(realNat(n))] ≤ realRpow(realNat(n), E) by
+    linarith
+  have inversePositive := realInvValue.positive with ePositive
+  have inverseReal : Real(realInvValue(E)) by typecheck
+  have product := realLe.mul_left_of_nonnegative with scaled,
+    (realLess.implies_le with inversePositive)
+  have nonzero : E ≠ R[0]
+    intro zero
+    rw zero at ePositive
+    linarith
+  have cancel := realInvValue.mul_left with nonzero
+  have regroup : R[realInvValue(E) * (E * realLog(realNat(n)))] =
+      R[(realInvValue(E) * E) * realLog(realNat(n))] by ring
+  rw [regroup, cancel] at product
+  have unit : R[1 * realLog(realNat(n))] = realLog(realNat(n)) by ring
+  linarith
+
+theorem vonMangoldt.le_log_any (n : Nat)
+  requires positive : 1 ≤ n
+  shows vonMangoldt(n) ≤ realLog(realNat(n))
+proof
+  exact vonMangoldt.le_log with positive
+
+-- Mathlib's ArithmeticFunction.LSeriesSummable_vonMangoldt.
+theorem LSeriesSummable.vonMangoldt (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesSummable(vonMangoldtCoefficients, s)
+proof
+  have values := vonMangoldtCoefficients.function
+  have reS : Real(complexRe(s)) by typecheck
+  have gapPositive : R[0] < R[complexRe(s) - 1] by linarith
+  have ePositive := half.positive with gapPositive
+  have eSum := half.add_self at R[complexRe(s) - 1]
+  have eReal := half.real at R[complexRe(s) - 1]
+  have halfPlaneE : R[half(R[complexRe(s) - 1]) + 1] < complexRe(s) by linarith
+  have inverseReal : Real(realInvValue(half(R[complexRe(s) - 1]))) by typecheck
+  have bound : ∀ n ∈ ℕ, n ≠ (0:N) → complexAbs(vonMangoldtCoefficients(n)) ≤
+      R[realInvValue(half(R[complexRe(s) - 1])) * realRpow(realNat(n), half(R[complexRe(s) - 1]))]
+    intros n nIn nonzero
+    have nNat := nat.omega.backward with nIn
+    have atLeast : 1 ≤ n by arith
+    have nonneg := vonMangoldt.nonneg at n
+    have real := vonMangoldt.real at n
+    have logBound := vonMangoldt.le_log_any with atLeast
+    have rpowBound := realLog.nat_le_rpow with atLeast, ePositive
+    unfold vonMangoldtCoefficients
+    rw [(realCoefficients.eval with nIn), complexAbs.of_real,
+      (abs.of_nonnegative with nonneg)]
+    linarith
+  exact LSeriesSummable.of_le_rpow with values, hs, bound, halfPlaneE
+
+-- Mathlib's DirichletCharacter.LSeriesSummable_twist_vonMangoldt.
+theorem LSeriesSummable.twist_vonMangoldt (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesSummable(twistedVonMangoldt(χ), s)
+proof
+  have values := vonMangoldtCoefficients.function
+  have characterValues := characterCoefficients.function with character
+  have summable := LSeriesSummable.vonMangoldt with hs, halfPlane
+  have bound : ∀ n ∈ ℕ, complexAbs(characterCoefficients(χ)(n)) ≤ R[1]
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    exact characterCoefficients.abs_le_one with positive, character
+  unfold twistedVonMangoldt
+  exact LSeriesSummable.mul_bounded with values, characterValues, hs, bound,
+    summable
+
+-- Σ χ(n) Λ(n) n^(−s) = −L′(s, χ)/L(s, χ) for re s > 1, with the series of
+-- χ (Mathlib's DirichletCharacter.LSeries_twist_vonMangoldt_eq).
+theorem LSeries.twist_vonMangoldt_eq (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeries(twistedVonMangoldt(χ), s) =
+    ℂ[-logDeriv(LSeriesMap(characterCoefficients(χ)), rightHalfPlane(R[1]),
+      s)]
+proof
+  sorry
+
+-- and with layer 1's L(·, χ), holomorphic on ℂ ∖ {1}.
+theorem LSeriesHasSum.twist_vonMangoldt (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesHasSum(twistedVonMangoldt(χ), s,
+    ℂ[-logDeriv(LFunctionMap(N, χ), complexCarrier ∖ {ℂ[1]}, s)])
+proof
+  have summable := LSeriesSummable.twist_vonMangoldt with positive,
+    character, hs, halfPlane
+  have function := twistedVonMangoldt.function with character
+  have values := DirichletCharacter.function with character
+  have coefficients := characterCoefficients.function with character
+  have iff := LSeriesHasSum.iff at twistedVonMangoldt(χ), s,
+    ℂ[-logDeriv(LFunctionMap(N, χ), complexCarrier ∖ {ℂ[1]}, s)] with
+    function, hs
+  apply iff.backward
+  refine ⟨summable, ?_⟩
+  rw (LSeries.twist_vonMangoldt_eq with positive, character, hs, halfPlane)
+  unfold logDeriv
+  rw [(LFunction.deriv_eq_deriv_LSeries with positive, character, hs,
+      halfPlane), (LFunctionMap.apply with values, hs),
+    (LSeriesMap.apply with coefficients, hs),
+    (LFunction.eq_LSeries with positive, character, hs, halfPlane)]
+
+-- Σ Λ(n) n^(−s) = −ζ′(s)/ζ(s) for re s > 1 (Mathlib's
+-- ArithmeticFunction.LSeries_vonMangoldt_eq_deriv_riemannZeta_div).
+theorem LSeries.vonMangoldt_eq (s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeries(vonMangoldtCoefficients, s) =
+    ℂ[-logDeriv(riemannZetaMap, complexCarrier ∖ {ℂ[1]}, s)]
+proof
+  have character := principalCharacter.character at 1
+  have values := DirichletCharacter.function with character
+  have one : 1 ≤ 1 by arith
+  have has := LSeriesHasSum.twist_vonMangoldt at 1, principalCharacter(1), s
+    with one, character, hs, halfPlane
+  have twisted := twistedVonMangoldt.function with character
+  have plain := vonMangoldtCoefficients.function
+  have sameCoefficients : twistedVonMangoldt(principalCharacter(1)) =
+      vonMangoldtCoefficients
+    apply FunctionBetween.ext with twisted, plain
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have index : integerOfNat(n) ∈ ℤ by typecheck
+    have value := FunctionBetween.apply_closed with plain, nIn
+    unfold twistedVonMangoldt
+    rw [(coefficientMul.eval with nIn), characterCoefficients.apply,
+      (principalCharacter.modulus_one with index)]
+    ring
+  have lMap := LFunctionMap.function at 1, principalCharacter(1) with values
+  have zMap := riemannZetaMap.function
+  have sameMap : LFunctionMap(1, principalCharacter(1)) = riemannZetaMap
+    apply FunctionBetween.ext with lMap, zMap
+    intros z zIn
+    rw [(LFunctionMap.apply with values, zIn), (riemannZetaMap.apply with zIn)]
+    exact LFunction.principal_one with character, zIn
+  rw [sameCoefficients, sameMap] at has
+  have iff := LSeriesHasSum.iff at vonMangoldtCoefficients, s,
+    ℂ[-logDeriv(riemannZetaMap, complexCarrier ∖ {ℂ[1]}, s)] with plain, hs
+  obtain ⟨_, equal⟩ := iff.forward with has
+  exact equal
+
+-- For χ₀ through the entire (s − 1) L(s, χ₀): Σ χ₀(n) Λ(n) n^(−s) =
+-- 1/(s − 1) − ((s − 1) L(s, χ₀))′/((s − 1) L(s, χ₀)), re s > 1 (the
+-- principal case of the source's LSeriesHasSum_mul_vonMangoldt).
+theorem LSeriesHasSum.principal_vonMangoldt (N : Nat) (s : Set)
+  requires positive : 1 ≤ N
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesHasSum(twistedVonMangoldt(principalCharacter(N)), s,
+    ℂ[complexInv(ℂ[s - 1]) -
+      logDeriv(principalLFunctionOneMap(N), complexCarrier, s)])
+proof
+  have character := principalCharacter.character at N
+  have values := DirichletCharacter.function with character
+  have has := LSeriesHasSum.twist_vonMangoldt with positive, character, hs,
+    halfPlane
+  have notOne : s ≠ ℂ[1]
+    intro equal
+    rw [equal, complexRe.one] at halfPlane
+    linarith
+  have one := complexOne.member
+  have sU : s ∈ complexCarrier ∖ {ℂ[1]}
+    refine ⟨hs, ?_⟩
+    intro single
+    exact notOne with ((singleton.membership at s, ℂ[1]).forward with single)
+  have holomorphic := LFunction.holomorphic_off_one with positive, character
+  have derivative := complexDeriv.has_derivative with holomorphic, sU
+  obtain ⟨_, _, dMember, _, _⟩ := derivative
+  have lValue := LFunction.closed at N, principalCharacter(N), s with values,
+    hs
+  have lNonzero := LFunction.nonzero_re_gt_one with positive, character, hs,
+    halfPlane
+  have shifted : ℂ[s - 1] ∈ ℂ by typecheck
+  have shiftedNonzero : ℂ[s - 1] ≠ ℂ[0]
+    intro zero
+    apply notOne
+    have same : s = ℂ[(s - 1) + 1] by ring
+    rw [same, zero]
+    ring
+  have hu := complexInv.mul_cancel with shifted, shiftedNonzero
+  have hL := complexInv.mul_cancel with lValue, lNonzero
+  have iu := complexInv.member with shifted
+  have iL := complexInv.member with lValue
+  have value : ℂ[-logDeriv(LFunctionMap(N, principalCharacter(N)),
+      complexCarrier ∖ {ℂ[1]}, s)] = ℂ[complexInv(ℂ[s - 1]) -
+      logDeriv(principalLFunctionOneMap(N), complexCarrier, s)]
+    unfold logDeriv
+    rw [(principalLFunctionOneMap.deriv_of_ne_one with positive, hs, notOne),
+      (principalLFunctionOneMap.apply with hs),
+      (principalLFunctionOne.of_ne_one with hs, notOne),
+      (LFunctionMap.apply with values, hs)]
+    unfold complexDiv
+    rw (complexInv.mul with shifted, lValue)
+    linear_combination complexInv(ℂ[s - 1]) * hL +
+      complexDeriv(LFunctionMap(N, principalCharacter(N)),
+        complexCarrier ∖ {ℂ[1]})(s) *
+        complexInv(LFunction(N, principalCharacter(N), s)) * hu
+  rwa value at has
+
+-- −L′/L is holomorphic on a neighbourhood of re s ≥ 1 for χ ≠ χ₀, and
+-- −((s − 1)L(s, χ₀))′/((s − 1)L(s, χ₀)) for χ₀ (no zero on re s ≥ 1).
+theorem logDeriv.holomorphic_near_one_line (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows ∃ U, ComplexOpen(U) ∧ closedRightHalfPlane(R[1]) ⊆ U ∧
+    (∀ s ∈ U, LFunction(N, χ, s) ≠ ℂ[0])
+proof
+  have holomorphic := LFunction.holomorphic with positive, character,
+    nonPrincipal
+  have values := DirichletCharacter.function with character
+  have isOpen := nonzeroSet.open with holomorphic
+  witness nonzeroSet(LFunctionMap(N, χ))
+  refine ⟨isOpen, ?_, ?_⟩
+  . unfold Subset
+    intros z hz
+    obtain ⟨zC, halfPlane⟩ := hz
+    have pole : χ ≠ principalCharacter(N) ∨ z ≠ ℂ[1]
+      left
+      exact nonPrincipal
+    have nonzero := LFunction.nonzero_re_ge_one with positive, character, zC,
+      halfPlane, pole
+    refine ⟨zC, ?_⟩
+    rwa (LFunctionMap.value with values, zC)
+  . intros z hz
+    obtain ⟨zC, nonzero⟩ := hz
+    rwa (LFunctionMap.value with values, zC) at nonzero
+
+theorem logDeriv.principal_near_one_line (N : Nat)
+  requires positive : 1 ≤ N
+  shows ∃ U, ComplexOpen(U) ∧ closedRightHalfPlane(R[1]) ⊆ U ∧
+    (∀ s ∈ U, principalLFunctionOne(N, s) ≠ ℂ[0])
+proof
+  have holomorphic := principalLFunctionOneMap.holomorphic with positive
+  have isOpen := nonzeroSet.open with holomorphic
+  witness nonzeroSet(principalLFunctionOneMap(N))
+  refine ⟨isOpen, ?_, ?_⟩
+  . unfold Subset
+    intros z hz
+    obtain ⟨zC, halfPlane⟩ := hz
+    have nonzero := principalLFunctionOne.ne_zero_of_one_le_re with positive,
+      zC, halfPlane
+    refine ⟨zC, ?_⟩
+    rwa (principalLFunctionOneMap.value with zC)
+  . intros z hz
+    obtain ⟨zC, nonzero⟩ := hz
+    rwa (principalLFunctionOneMap.value with zC) at nonzero
+
+-- Section: Residue classes
+theorem residueClass.real (N : Nat) (a : Set) (n : Nat)
+  shows residueClass(N, a)(n) ∈ ℝ
+proof
+  have index : n ∈ ℕ by typecheck
+  have function := residueClass.function at N, a
+  exact FunctionBetween.apply_closed with function, index
+
+theorem residueClass.sequence (N : Nat) (a : Set)
+  shows RealSequence(residueClass(N, a))
+proof
+  exact residueClass.function at N, a
+
+theorem residueClass.apply_mem (N : Nat) (a : Set) (n : Nat)
+  requires inClass : InResidueClass(N, n, a)
+  shows residueClass(N, a)(n) = vonMangoldt(n)
+proof
+  have index : n ∈ ℕ by typecheck
+  rw [(residueClass.value at N, a, n with index),
+    (residueClassValue.in_class with inClass)]
+
+theorem residueClass.apply_not_mem (N : Nat) (a : Set) (n : Nat)
+  requires notInClass : ¬InResidueClass(N, n, a)
+  shows residueClass(N, a)(n) = realZero
+proof
+  have index : n ∈ ℕ by typecheck
+  rw [(residueClass.value at N, a, n with index),
+    (residueClassValue.not_in_class with notInClass)]
+
+-- Mathlib's vonMangoldt.residueClass_nonneg and residueClass_le.
+theorem residueClass.nonneg (N : Nat) (a : Set) (n : Nat)
+  shows realZero ≤ residueClass(N, a)(n)
+proof
+  by_cases inClass : InResidueClass(N, n, a)
+  . rw (residueClass.apply_mem with inClass)
+    exact vonMangoldt.nonneg at n
+  . rw (residueClass.apply_not_mem with inClass)
+    linarith
+
+theorem residueClass.le_vonMangoldt (N : Nat) (a : Set) (n : Nat)
+  shows residueClass(N, a)(n) ≤ vonMangoldt(n)
+proof
+  have nonneg := vonMangoldt.nonneg at n
+  have real := vonMangoldt.real at n
+  by_cases inClass : InResidueClass(N, n, a)
+  . rw (residueClass.apply_mem with inClass)
+    linarith
+  . rw (residueClass.apply_not_mem with inClass)
+    exact nonneg
+
+-- Orthogonality: for a coprime to N ≥ 1,
+-- Λ_a(n) = φ(N)⁻¹ Σ_χ χ(a)⁻¹ χ(n) Λ(n) (Mathlib's residueClass_apply).
+theorem residueClass.apply (N : Nat) (a : Set) (n : Nat)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows complexOfReal(residueClass(N, a)(n)) =
+    ℂ[complexInv(complexOfReal(realNat(totient(N)))) *
+      complexFamilySum(residueCharacterTerms(N, a, n),
+        dirichletCharacters(N))]
+proof
+  sorry
+
+-- The same as coefficient functions (Mathlib's residueClass_eq).
+theorem residueClass.eq (N : Nat) (a : Set)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows realCoefficients(residueClass(N, a)) =
+    coefficientScale(complexInv(complexOfReal(realNat(totient(N)))),
+      coefficientFamilySum(residueCharacterFamily(N, a),
+        dirichletCharacters(N)))
+proof
+  sorry
+
+-- Mathlib's vonMangoldt.LSeriesSummable_residueClass.
+theorem LSeriesSummable.residueClass (N : Nat) (a s : Set)
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesSummable(realCoefficients(residueClass(N, a)), s)
+proof
+  have values := vonMangoldtCoefficients.function
+  have sequence := residueClass.sequence at N, a
+  have classValues : FunctionBetween(realCoefficients(residueClass(N, a)), ℕ,
+      complexCarrier)
+    apply realCoefficients.maps
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have real := residueClass.real at N, a, n
+    typecheck
+  have summable := LSeriesSummable.vonMangoldt with hs, halfPlane
+  have dominated : ∀ n ∈ ℕ, complexAbs(realCoefficients(residueClass(N, a))(n))
+      ≤ complexAbs(vonMangoldtCoefficients(n))
+    intros n nIn
+    have nNat := nat.omega.backward with nIn
+    have classNonneg := residueClass.nonneg at N, a, n
+    have vonNonneg := vonMangoldt.nonneg at n
+    have below := residueClass.le_vonMangoldt at N, a, n
+    unfold vonMangoldtCoefficients
+    rw [(realCoefficients.eval with nIn), complexAbs.of_real, complexAbs.of_real,
+      (abs.of_nonnegative with classNonneg), (abs.of_nonnegative with vonNonneg)]
+    exact below
+  exact LSeriesSummable.of_abs_le with classValues, values, hs, dominated,
+    summable
+
+-- The series of Λ_a is φ(N)⁻¹ Σ_χ χ(a)⁻¹ (−L′(s, χ)/L(s, χ)) on re s > 1
+-- (Mathlib's vonMangoldt.LSeries_residueClass_eq).
+theorem LSeriesHasSum.residueClass (N : Nat) (a s : Set)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  requires hs : s ∈ ℂ
+  requires halfPlane : realOne < complexRe(s)
+  shows LSeriesHasSum(realCoefficients(residueClass(N, a)), s,
+    ℂ[complexInv(complexOfReal(realNat(totient(N)))) *
+      complexFamilySum(residueLogDerivTerms(N, a, s),
+        dirichletCharacters(N))])
+proof
+  sorry
+
+-- The series of Λ_a minus φ(N)⁻¹/(s − 1) extends continuously to
+-- re s ≥ 1 (Mathlib's vonMangoldt.continuousOn_LFunctionResidueClassAux).
+theorem LSeries.residueClass_regular (N : Nat) (a : Set)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows ∃ G, ComplexContinuousOn(G, closedRightHalfPlane(R[1])) ∧
+    (∀ s ∈ ℂ, realOne < complexRe(s) →
+      G(s) = ℂ[LSeries(realCoefficients(residueClass(N, a)), s) -
+        complexInv(complexOfReal(realNat(totient(N)))) *
+          complexInv(ℂ[s - 1])])
+proof
+  sorry
+
+-- Section: Dirichlet's theorem
+-- Σ_{p ≡ a} Λ(p)/p diverges (Mathlib's
+-- vonMangoldt.not_summable_residueClass_prime_div).
+theorem residueClass.not_summable_prime_div (N : Nat) (a : Set)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows ¬Summable(primeResidueTerms(N, a))
+proof
+  sorry
+
+-- Infinitely many primes in the class: above every n there is a prime
+-- p ≡ a (mod N) (Mathlib's Nat.forall_exists_prime_gt_and_eq_mod).
+theorem dirichlet.exists_prime_gt (N : Nat) (a : Set) (n : Nat)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows ∃ p ∈ ℕ, n < p ∧ Prime(p) ∧ InResidueClass(N, p, a)
+proof
+  by_contra none
+  apply residueClass.not_summable_prime_div with positive, integer, unit
+  have sequence := primeResidueTerms.function at N, a
+  have vanishing : ∀ m ∈ ℕ, succ(n) ≤ m → primeResidueTerms(N, a)(m) = R[0]
+    intros m mIn later
+    have mNat := nat.omega.backward with mIn
+    rw (primeResidueTerms.value at N, a, m with mIn)
+    by_cases prime : Prime(m)
+    . by_cases inClass : InResidueClass(N, m, a)
+      . exfalso
+        apply none
+        have above : n < m by arith
+        exact ⟨m, mIn, above, prime, inClass⟩
+      . have mPositive := Prime.greater_than_one with prime
+        have atLeast : 1 ≤ m by arith
+        have mReal := realNat.one_le with atLeast
+        have nonzero : realNat(m) ≠ R[0] by linarith
+        rw [(cldDprimeResidueValue.prime with prime),
+          (residueClass.apply_not_mem with inClass), realDiv.eq_mul_inv]
+        have inverse := realInvValue.real at realNat(m)
+        ring
+    . exact cldDprimeResidueValue.not_prime with prime
+  have sums := SumsTo.of_eventually_zero with sequence, vanishing
+  exact SumsTo.summable with sums
+
+-- Mathlib's Nat.infinite_setOf_prime_and_eq_mod.
+theorem dirichlet.primes_infinite (N : Nat) (a : Set)
+  requires positive : 1 ≤ N
+  requires integer : a ∈ ℤ
+  requires unit : IntegerCoprime(a, integerOfNat(N))
+  shows ¬Finite(primesInClass(N, a))
+proof
+  intro finite
+  have subset : primesInClass(N, a) ⊆ ℕ
+    intros p hp
+    obtain ⟨pIn, _⟩ := primesInClass.membership.forward with hp
+    exact pIn
+  obtain ⟨b, bNat, bounded⟩ := Finite.naturals_bounded with subset, finite
+  obtain ⟨p, pIn, above, prime, inClass⟩ := dirichlet.exists_prime_gt at N,
+    a, b with positive, integer, unit
+  have pNat := nat.omega.backward with pIn
+  have member := primesInClass.membership.backward with
+    ⟨pIn, prime, inClass⟩
+  have small := bounded with p, member
+  have less := Less.of_membership at p, succ(b) with small
+  arith
+
+end VonMangoldt

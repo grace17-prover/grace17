@@ -1,0 +1,378 @@
+-- The finite adelic unitary group G_f = U_n(𝔸_f) with its topology, the
+-- maximal compact K₀ = G_f ∩ GL_n(Ô) and the levels K ⊆ K₀; the standard
+-- form diag(s) on 𝔸ⁿ, framed hermitian spaces (J, x) with xᴴJx = diag(s),
+-- their rational points in G_f and rational vectors x⁻¹γ, the standard
+-- space I_n; the idempotent adeles; class sums over Γ\G/K with the
+-- weights 1/#(Γ ∩ gKg⁻¹), the class integral and the mass; and the Haar
+-- mean of a periodic function over a compact quotient.
+-- Source: grh-compact/src/Lib/Adelic/Unitary/SpaceDefs.lean (Gf, Kf,
+-- IsLevel, stdLevelIndex, stdForm, Space, Space.embFin, Space.Γf,
+-- Space.vecAtPoint, Space.baseLattice, stdSpace, mass, stdRatPoints),
+-- QuotientMeasure/PeriodicMean.lean (IsContPeriodic, quotMean),
+-- Adeles/AdeleIdempotent.lean (idem), Hecke/ClassMean.lean (rightStab,
+-- classIntegral, HasFiniteType); with Lib/General/LinearAlgebra/
+-- PartialDerivComm.lean (classAut, DoubleCosets, classSum), stated here
+-- until GRH.General.LinearAlgebra exists. The rest of the group
+-- (QuotientMeasure/Packing.lean, QuotientMeasure/Unimodular.lean, the
+-- volume of Ô in AdditiveCharDefs.lean) is not yet stated.
+-- Encoding. A matrix over 𝔸 = ℂ^Φ × 𝔸_f is a function on n × n with
+-- values pairs (infinite part, finite part); the signs s : n → ℤˣ of the
+-- source are the complex numbers ±1 (SignsOn). A space is the predicate
+-- AdelicSpace(E, Φ, n, s, J, x) on its data. The class sum, which the
+-- source reads at chosen representatives c.out of the double cosets, is
+-- the sum over double cosets of the value common to all representatives
+-- (it is one for f constant on double cosets, as in every use); the mean
+-- quotMean, read at q.out in the source, integrates the function induced
+-- on the quotient, which exists for periodic F.
+-- Part of the GRH blueprint (layer 4, Lib/Adelic, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Adelic.QuotientMeasure
+import GRH.Adelic.Adeles
+import GRH.Matrix.Groups
+
+section QuotientMeasure
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: The finite adelic unitary group
+-- SpaceDefs.lean, Gf E n = U(1) over 𝔸_f: the matrices g with gᴴg = 1
+-- (ᴴ through finStar), as a set and as a group.
+def gfMatrices (E n : Set) : Set :=
+  formUnitaryMatrices(finiteAdeleRing(E), finStar(E), n, matOne(finiteAdeleRing(E), n))
+
+def gfGroup (E n : Set) : Set :=
+  formUnitaryGroup(finiteAdeleRing(E), finStar(E), n, matOne(finiteAdeleRing(E), n))
+
+-- The topology of G_f: the subspace of the matrices 𝔸_f^{n×n} with the
+-- product topology.
+def finMatrixSpaces (E n : Set) : Set := { (q, finiteAdeleSpace(E)) | q ∈ n × n }
+
+def gfSpace (E n : Set) : Set :=
+  subspace(piSpace(n × n, finMatrixSpaces(E, n)), gfMatrices(E, n))
+
+-- SpaceDefs.lean, Kf E n: K₀ = G_f ∩ GL_n(Ô), the unitary matrices with
+-- integral entries (their inverses gᴴ are then integral too).
+def kfMatrices (E n : Set) : Set :=
+  { g ∈ gfMatrices(E, n) | ∀ q ∈ n × n, g(q) ∈ finInt(E) }
+
+-- SpaceDefs.lean, IsLevel K: K is an open subgroup of G_f inside K₀.
+predicate IsLevel (E n K : Set) :=
+  Subgroup(K, gfGroup(E, n)) ∧ K ⊆ kfMatrices(E, n) ∧
+  K ∈ TopologicalSpace.opens(gfSpace(E, n))
+
+-- SpaceDefs.lean, stdLevelIndex K = [K₀ : K ∩ K₀] (Subgroup.relIndex),
+-- the number of cosets of K ∩ K₀ in K₀.
+def kfGroup (E n : Set) : Set := subgroupGroup(gfGroup(E, n), kfMatrices(E, n))
+
+def stdLevelIndex (E n K : Set) : Set :=
+  cardinality(leftCosets(kfGroup(E, n), K ∩ kfMatrices(E, n)))
+
+-- Section: The standard form and framed spaces
+-- The signs s : n → {1, −1} (the source's s : n → ℤˣ, read in ℂ).
+def signValues : Set := {complexOne, ℂ[-1]}
+
+predicate SignsOn (n s : Set) := FunctionBetween(s, n, signValues)
+
+-- Complex conjugation on 𝔸: conjugate at the infinite places, finStar at
+-- the finite ones (the star of the source's 𝔸 E).
+def conjValues (Φ u : Set) : Set := { (σ, complexConj(u(σ))) | σ ∈ Φ }
+
+def cmAdeleStar (E Φ : Set) : Set :=
+  { (a, (conjValues(Φ, fst(a)), finStar(E)(snd(a)))) | a ∈ cmAdeles(E, Φ) }
+
+-- The map E → 𝔸, a ↦ toAdele(a).
+def cmToAdele (E Φ : Set) : Set :=
+  { (a, toCMAdele(E, Φ, a)) | a ∈ Ring.carrier(E) }
+
+-- SpaceDefs.lean, stdForm E s: the diagonal adelic matrix equal to diag(s)
+-- at every infinite place and to 1 at the finite places.
+def signInfinite (Φ s i : Set) : Set := { (σ, s(i)) | σ ∈ Φ }
+
+def signAdele (E Φ s i : Set) : Set := (signInfinite(Φ, s, i), finOne(E))
+
+def signAdeles (E Φ n s : Set) : Set := { (i, signAdele(E, Φ, s, i)) | i ∈ n }
+
+def stdForm (E Φ n s : Set) : Set :=
+  matDiagonal(cmAdeleRing(E, Φ), n, signAdeles(E, Φ, n, s))
+
+-- SpaceDefs.lean, Space E n s: a matrix J over E and x ∈ GLₙ(𝔸) with
+-- xᴴ J x = stdForm(s) (gram_point), for a CM type Φ of E.
+predicate AdelicSpace (E Φ n s J x : Set) :=
+  CMType(E, Φ) ∧ Finite(n) ∧ SignsOn(n, s) ∧
+  J ∈ matrixSpace(E, n, n) ∧
+  x ∈ invertibleMatrices(cmAdeleRing(E, Φ), n) ∧
+  gramMatrix(cmAdeleRing(E, Φ), cmAdeleStar(E, Φ), n, n, n,
+    matMap(cmAdeleRing(E, Φ), n, n, cmToAdele(E, Φ), J), x, x) =
+    stdForm(E, Φ, n, s)
+
+-- SpaceDefs.lean, Space.vecAtPoint: γ ∈ Eⁿ ↦ x⁻¹ toAdele(γ) ∈ 𝔸ⁿ.
+def adeleVectorOf (E Φ n γ : Set) : Set := { (i, cmToAdele(E, Φ)(γ(i))) | i ∈ n }
+
+def vecAtPoint (E Φ n x γ : Set) : Set :=
+  mulVec(cmAdeleRing(E, Φ), n, n, matInverse(cmAdeleRing(E, Φ), n, x),
+    adeleVectorOf(E, Φ, n, γ))
+
+-- SpaceDefs.lean, Space.baseLattice: the y ∈ Eⁿ with x⁻¹y integral at
+-- every finite place.
+def baseLattice (E Φ n x : Set) : Set :=
+  { y ∈ functionSpace(n, Ring.carrier(E)) |
+    ∀ i ∈ n, snd(vecAtPoint(E, Φ, n, x, y)(i)) ∈ finInt(E) }
+
+-- SpaceDefs.lean, Space.embFin and Space.Γf: γ ∈ U(J)(E) ↦ the finite
+-- part of x⁻¹γx, and its image Γ_f ⊆ G_f.
+def ratUnitaryMatrices (E n J : Set) : Set :=
+  formUnitaryMatrices(E, cmConjugation(E), n, J)
+
+def finPartMatrix (n M : Set) : Set := { (q, snd(M(q))) | q ∈ n × n }
+
+def embFin (E Φ n x γ : Set) : Set :=
+  finPartMatrix(n, matMul(cmAdeleRing(E, Φ), n, n, n,
+    matInverse(cmAdeleRing(E, Φ), n, x),
+    matMul(cmAdeleRing(E, Φ), n, n, n,
+      matMap(cmAdeleRing(E, Φ), n, n, cmToAdele(E, Φ), γ), x)))
+
+def ratPointsFin (E Φ n J x : Set) : Set :=
+  { embFin(E, Φ, n, x, γ) | γ ∈ ratUnitaryMatrices(E, n, J) }
+
+-- SpaceDefs.lean, stdSpace E n: J = 1, x = 1 and the signs 1; and
+-- stdRatPoints = (stdSpace E n).Γf, the image of U_n(E) in G_f.
+def unitSigns (n : Set) : Set := n × {complexOne}
+
+def stdSpaceGram (E n : Set) : Set := matOne(E, n)
+
+def stdSpaceFrame (E Φ n : Set) : Set := matOne(cmAdeleRing(E, Φ), n)
+
+def stdRatPoints (E Φ n : Set) : Set :=
+  ratPointsFin(E, Φ, n, stdSpaceGram(E, n), stdSpaceFrame(E, Φ, n))
+
+theorem stdSpace.space (E Φ n : Set)
+  requires cmType : CMType(E, Φ)
+  requires finite : Finite(n)
+  shows AdelicSpace(E, Φ, n, unitSigns(n), stdSpaceGram(E, n), stdSpaceFrame(E, Φ, n))
+proof
+  sorry
+
+-- SpaceDefs.lean, the group and topology instances of Gf, isOpen_Kf,
+-- isCompact_Kf and IsLevel.isCompact: G_f is a locally compact group, K₀
+-- is a compact open subgroup, and every level is compact.
+theorem gfGroup.locally_compact (E Φ n : Set)
+  requires cmType : CMType(E, Φ)
+  requires finite : Finite(n)
+  shows LocallyCompactGroup(gfGroup(E, n), gfSpace(E, n)) ∧
+    IsLevel(E, n, kfMatrices(E, n)) ∧ Compact(subspace(gfSpace(E, n), kfMatrices(E, n)))
+proof
+  sorry
+
+theorem IsLevel.compact (E Φ n K : Set)
+  requires cmType : CMType(E, Φ)
+  requires finite : Finite(n)
+  requires level : IsLevel(E, n, K)
+  shows Compact(subspace(gfSpace(E, n), K)) ∧ Finite(leftCosets(kfGroup(E, n), K))
+proof
+  sorry
+
+-- SpaceDefs.lean, Space.embFin is a homomorphism U(J)(E) → G_f, so Γ_f is
+-- a subgroup of G_f; it is discrete, and Γ_f\G_f/K₀ is finite.
+theorem ratPointsFin.subgroup (E Φ n s J x : Set)
+  requires space : AdelicSpace(E, Φ, n, s, J, x)
+  shows Subgroup(ratPointsFin(E, Φ, n, J, x), gfGroup(E, n)) ∧
+    (∀ γ ∈ ratUnitaryMatrices(E, n, J), ∀ δ ∈ ratUnitaryMatrices(E, n, J),
+      embFin(E, Φ, n, x, matMul(E, n, n, n, γ, δ)) =
+        matMul(finiteAdeleRing(E), n, n, n, embFin(E, Φ, n, x, γ), embFin(E, Φ, n, x, δ)))
+proof
+  sorry
+
+-- SpaceDefs.lean, Space.vecAtPoint is additive, and baseLattice is an
+-- additive subgroup of Eⁿ.
+theorem vecAtPoint.add (E Φ n s J x γ δ : Set)
+  requires space : AdelicSpace(E, Φ, n, s, J, x)
+  requires hγ : γ ∈ functionSpace(n, Ring.carrier(E))
+  requires hδ : δ ∈ functionSpace(n, Ring.carrier(E))
+  shows vecAtPoint(E, Φ, n, x, call2(Module.add(coordinateModule(E, n)), γ, δ)) =
+    call2(Module.add(coordinateModule(cmAdeleRing(E, Φ), n)),
+      vecAtPoint(E, Φ, n, x, γ), vecAtPoint(E, Φ, n, x, δ))
+proof
+  sorry
+
+-- Section: Idempotent adeles
+-- AdeleIdempotent.lean, idem S: the finite adele equal to 1 at the places
+-- in S and to 0 at the others.
+def idemValue (E S w : Set) : Set :=
+  ⋃({ z ∈ Ring.carrier(adicCompletionField(E, w)) |
+    (w ∈ S ∧ z = Ring.one(adicCompletionField(E, w))) ∨
+    (w ∉ S ∧ z = Ring.zero(adicCompletionField(E, w))) })
+
+def idemAdele (E S : Set) : Set := { (w, idemValue(E, S, w)) | w ∈ finPlaces(E) }
+
+-- AdeleIdempotent.lean: idem S is an integral idempotent adele, and
+-- idem S · idem T = idem (S ∩ T).
+theorem idemAdele.idempotent (E S T : Set)
+  requires numberField : NumberField(E)
+  shows idemAdele(E, S) ∈ finInt(E) ∧
+    finMul(E, idemAdele(E, S), idemAdele(E, T)) = idemAdele(E, S ∩ T)
+proof
+  sorry
+
+-- Section: Class sums
+-- PartialDerivComm.lean, classAut Γ K g = Γ ∩ gKg⁻¹, the stabiliser in Γ
+-- of gK, and DoubleCosets Γ K = Γ\G/K.
+def classAut (G Γ K g : Set) : Set := { γ ∈ Γ | Group.mul(G)(Group.mul(G)(Group.inv(G)(g), γ), g) ∈ K }
+
+def doubleCoset (G Γ K g : Set) : Set :=
+  { y ∈ Group.carrier(G) | ∃ γ ∈ Γ, ∃ k ∈ K, y = Group.mul(G)(Group.mul(G)(γ, g), k) }
+
+def doubleCosets (G Γ K : Set) : Set :=
+  { C ∈ 𝒫(Group.carrier(G)) | ∃ g ∈ Group.carrier(G), C = doubleCoset(G, Γ, K, g) }
+
+-- The weighted value f(g)/#(Γ ∩ gKg⁻¹), common to all g in the class C.
+def classTerm (G Γ K f C : Set) : Set :=
+  ⋃({ z ∈ complexCarrier | ∀ g ∈ C,
+    z = complexDiv(f(g), complexOfReal(realNat(cardinality(classAut(G, Γ, K, g))))) })
+
+def classTerms (G Γ K f : Set) : Set :=
+  { (C, classTerm(G, Γ, K, f, C)) | C ∈ doubleCosets(G, Γ, K) }
+
+-- PartialDerivComm.lean, classSum Γ K f = Σ_{c ∈ Γ\G/K} f(c)/#classAut(c),
+-- for complex-valued f.
+def classSum (G Γ K f : Set) : Set :=
+  groupFiniteSum(complexAdditiveGroup, doubleCosets(G, Γ, K), classTerms(G, Γ, K, f))
+
+-- ClassMean.lean, HasFiniteType Γ K: K is a compact open subgroup of the
+-- topological group (G, X), Γ\G/K is finite and every stabiliser
+-- Γ ∩ gKg⁻¹ is finite.
+predicate HasFiniteType (G X Γ K : Set) :=
+  TopologicalGroup(G, X) ∧ Subgroup(Γ, G) ∧ Subgroup(K, G) ∧
+  K ∈ TopologicalSpace.opens(X) ∧ Compact(subspace(X, K)) ∧
+  Finite(doubleCosets(G, Γ, K)) ∧ (∀ g ∈ Group.carrier(G), Finite(classAut(G, Γ, K, g)))
+
+-- ClassMean.lean, rightStab f: the k with f(gk) = f(g) for all g, and
+-- classIntegral Γ K f = [K : K′]⁻¹ classSum Γ K′ f for K′ = K ∩ rightStab f.
+def rightStab (G f : Set) : Set :=
+  { k ∈ Group.carrier(G) | ∀ g ∈ Group.carrier(G), f(Group.mul(G)(g, k)) = f(g) }
+
+def classIntegral (G Γ K f : Set) : Set :=
+  complexDiv(classSum(G, Γ, K ∩ rightStab(G, f), f),
+    complexOfReal(realNat(cardinality(leftCosets(subgroupGroup(G, K),
+      K ∩ rightStab(G, f))))))
+
+-- SpaceDefs.lean, mass l: the mass Σ 1/#Aut over Γ_f\G_f/K₀ for I_l.
+def constantOne (A : Set) : Set := A × {complexOne}
+
+def mass (E Φ : Set, l : Nat) : Set :=
+  classSum(gfGroup(E, l), stdRatPoints(E, Φ, l), kfMatrices(E, l),
+    constantOne(gfMatrices(E, l)))
+
+-- ClassMean.lean, HasFiniteType.of_le: finite type passes to open
+-- subgroups of K.
+theorem HasFiniteType.of_le (G X Γ K K2 : Set)
+  requires finiteType : HasFiniteType(G, X, Γ, K)
+  requires subgroup : Subgroup(K2, G)
+  requires sub : K2 ⊆ K
+  requires open : K2 ∈ TopologicalSpace.opens(X)
+  shows HasFiniteType(G, X, Γ, K2)
+proof
+  sorry
+
+-- SpaceDefs.lean with ClassMean.lean: Γ_f and every level K have finite
+-- type in G_f.
+theorem ratPointsFin.finite_type (E Φ n s J x K : Set)
+  requires space : AdelicSpace(E, Φ, n, s, J, x)
+  requires level : IsLevel(E, n, K)
+  shows HasFiniteType(gfGroup(E, n), gfSpace(E, n), ratPointsFin(E, Φ, n, J, x), K)
+proof
+  sorry
+
+-- ClassMean.lean, classIntegral_eq_of_le: for f left Γ-invariant and
+-- fixed on the right by an open K′ ⊆ K, the class integral at K equals
+-- [K : K′]⁻¹ times the class sum at K′.
+theorem classIntegral.eq_of_le (G X Γ K K2 f : Set)
+  requires finiteType : HasFiniteType(G, X, Γ, K)
+  requires values : FunctionBetween(f, Group.carrier(G), complexCarrier)
+  requires leftInvariant : ∀ γ ∈ Γ, ∀ g ∈ Group.carrier(G), f(Group.mul(G)(γ, g)) = f(g)
+  requires subgroup : Subgroup(K2, G)
+  requires sub : K2 ⊆ K ∩ rightStab(G, f)
+  requires open : K2 ∈ TopologicalSpace.opens(X)
+  shows classIntegral(G, Γ, K, f) =
+    complexDiv(classSum(G, Γ, K2, f),
+      complexOfReal(realNat(cardinality(leftCosets(subgroupGroup(G, K), K2)))))
+proof
+  sorry
+
+-- Section: Means of periodic functions
+-- PeriodicMean.lean, IsContPeriodic B₀ F: F is continuous on the abelian
+-- group (B, X) and F(γ + x) = F(x) for γ ∈ B₀.
+predicate IsContPeriodic (B X B0 F : Set) :=
+  FunctionBetween(F, Group.carrier(B), complexCarrier) ∧ F : X ⇒ complexSpace ∧
+  ∀ γ ∈ B0, ∀ x ∈ Group.carrier(B), F(Group.mul(B)(γ, x)) = F(x)
+
+-- PeriodicMean.lean, quotMean B₀ F: the mean of F over the compact
+-- quotient B/B₀ for its Haar probability measure; the source reads F at a
+-- chosen representative q.out, here at the value common to the class.
+def descendedValue (F q : Set) : Set := ⋃({ w ∈ complexCarrier | ∃ y ∈ q, w = F(y) })
+
+def descended (B B0 F : Set) : Set :=
+  { (q, descendedValue(F, q)) | q ∈ Group.carrier(quotientGroup(B, B0)) }
+
+def quotMean (B X B0 F : Set) : Set :=
+  complexMeasureIntegral(borelSpace(quotientGroupSpace(B, X, B0)),
+    haarMeasureNormalized(quotientGroup(B, B0), quotientGroupSpace(B, X, B0),
+      Group.carrier(quotientGroup(B, B0))),
+    descended(B, B0, F))
+
+-- The setting of a mean: B is an abelian topological group, B₀ a subgroup
+-- with B/B₀ compact.
+predicate CompactQuotient (B X B0 : Set) :=
+  AbelianGroup(B) ∧ TopologicalGroup(B, X) ∧ Subgroup(B0, B) ∧
+  Compact(quotientGroupSpace(B, X, B0))
+
+-- PeriodicMean.lean, quotMean_const and norm_quotMean_le.
+theorem quotMean.const (B X B0 c : Set)
+  requires setting : CompactQuotient(B, X, B0)
+  requires hc : c ∈ complexCarrier
+  shows quotMean(B, X, B0, Group.carrier(B) × {c}) = c
+proof
+  sorry
+
+theorem quotMean.abs_le (B X B0 F C : Set)
+  requires setting : CompactQuotient(B, X, B0)
+  requires periodic : IsContPeriodic(B, X, B0, F)
+  requires bound : ∀ x ∈ Group.carrier(B), complexAbs(F(x)) ≤ (C:R)
+  shows complexAbs(quotMean(B, X, B0, F)) ≤ (C:R)
+proof
+  sorry
+
+-- x ↦ F(x + a).
+def translateFn (B F a : Set) : Set := { (x, F(Group.mul(B)(x, a))) | x ∈ Group.carrier(B) }
+
+-- PeriodicMean.lean, quotMean_translate: the mean is translation invariant.
+theorem quotMean.translate (B X B0 F a : Set)
+  requires setting : CompactQuotient(B, X, B0)
+  requires periodic : IsContPeriodic(B, X, B0, F)
+  requires ha : a ∈ Group.carrier(B)
+  shows quotMean(B, X, B0, translateFn(B, F, a)) = quotMean(B, X, B0, F)
+proof
+  sorry
+
+-- a ↦ F(φ(a)).
+def pullbackFn (A φ F : Set) : Set := { (a, F(φ(a))) | a ∈ Group.carrier(A) }
+
+-- PeriodicMean.lean, quotMean_comp: for a continuous surjective
+-- homomorphism φ : A → B with φ(A₀) ⊆ B₀, the mean of F ∘ φ over A/A₀ is
+-- the mean of F over B/B₀.
+theorem quotMean.comp (A Y A0 B X B0 φ F : Set)
+  requires settingA : CompactQuotient(A, Y, A0)
+  requires settingB : CompactQuotient(B, X, B0)
+  requires hom : GroupHom(φ, A, B)
+  requires continuous : φ : Y ⇒ X
+  requires onto : ∀ b ∈ Group.carrier(B), ∃ a ∈ Group.carrier(A), φ(a) = b
+  requires lattice : ∀ a ∈ A0, φ(a) ∈ B0
+  requires periodic : IsContPeriodic(B, X, B0, F)
+  shows quotMean(A, Y, A0, pullbackFn(A, φ, F)) = quotMean(B, X, B0, F)
+proof
+  sorry
+
+end QuotientMeasure

@@ -1,0 +1,965 @@
+-- Completed L-functions in Mathlib's normalization, change of level and
+-- primitive characters, Mellin transforms, and the theta kernels: the
+-- archimedean factor Γ_ℝ(s) = π^(−s/2) Γ(s/2), its zeros and
+-- nonvanishing; the Gamma factor Γ_ℝ(s + κ) of a character of parity κ;
+-- the completed L-function Γ_ℝ(s + κ) L(s, χ), continued across the poles
+-- of Γ, its relation to layer 1's Λ(s, χ) = (N/π)^((s+κ)/2) Γ((s+κ)/2)
+-- L(s, χ), and its functional equation for primitive χ; the primitive
+-- character inducing χ, chosen by definite description; the Mellin
+-- transform ∫_0^∞ t^(s−1) f(t) dt, its convergence and holomorphy under
+-- exponential decay, its behaviour under t ↦ t^a f(t) and t ↦ f(t^a), and
+-- the Mellin transform of Σ aᵢ e^(−π rᵢ² t); the Hurwitz theta kernels
+-- Σ_{n∈ℤ} e^(−π(n+a)²x) and their relatives, with their functional
+-- equations under x ↦ 1/x.
+-- Part of the GRH blueprint (layer 2, track D: the L-series bridge).
+-- Source: Mathlib's Analysis/SpecialFunctions/Gamma/Deligne,
+-- NumberTheory/LSeries/{DirichletContinuation, RiemannZeta,
+-- MellinEqDirichlet, HurwitzZetaEven, HurwitzZetaOdd},
+-- Analysis/MellinTransform, NumberTheory/DirichletCharacter/Basic.
+-- Planned home: NumberTheory/LSeries/DirichletContinuation.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LSeries.Completed
+import GRH.LSeries.Dirichlet
+import GRH.FunctionalEquation
+
+section Completed
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- Γ_ℝ(s) = π^(−s/2) Γ(s/2) (Mathlib's Complex.Gammaℝ). At the poles
+-- s = 0, −2, −4, … of Γ(s/2) layer 1's Γ is 0, as Mathlib's is.
+def GammaReal (s : Set) : Set :=
+  ℂ[realCpow(realPi, ℂ[-(s * complexOfReal(R[1 / 2]))]) *
+    Gamma(ℂ[s * complexOfReal(R[1 / 2])])]
+
+-- Γ_ℝ(s) is a complex number, and the Γ-factor by the sign χ(−1).
+theorem GammaReal.member_of (s : Set)
+  requires hs : s ∈ ℂ
+  shows GammaReal(s) ∈ ℂ
+proof
+  have exponent : ℂ[-(s * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have power := realCpow.member at realPi, ℂ[-(s * complexOfReal(R[1 / 2]))]
+    with exponent
+  have gamma := Gamma.member at ℂ[s * complexOfReal(R[1 / 2])]
+  unfold GammaReal
+  typecheck
+
+defgraph GammaRealMap (s ∈ complexCarrier) : complexCarrier := GammaReal(s)
+proof
+  exact GammaReal.member_of with member
+
+-- The zeros 0, −2, −4, … of Γ_ℝ.
+def gammaRealPoles : Set :=
+  { z ∈ complexCarrier | ∃ n ∈ ℕ, z = ℂ[-(2 * complexOfReal(realNat(n)))] }
+
+-- The value χ(−1).
+def characterSign (χ : Set) : Set := χ(integerNegValue(integerOne))
+
+-- The Gamma factor of χ: Γ_ℝ(s) for χ even (χ(−1) = 1) and Γ_ℝ(s + 1)
+-- otherwise (Mathlib's DirichletCharacter.gammaFactor).
+def lGammaFactor (χ s : Set) : Set :=
+  ⋃({ w ∈ complexCarrier |
+    (characterSign(χ) = complexOne ∧ w = GammaReal(s)) ∨
+    (characterSign(χ) ≠ complexOne ∧ w = GammaReal(ℂ[s + 1])) })
+
+theorem lGammaFactor.of_even_sign (χ s : Set)
+  requires hs : s ∈ ℂ
+  requires even : characterSign(χ) = complexOne
+  shows lGammaFactor(χ, s) = GammaReal(s)
+proof
+  have value := GammaReal.member_of with hs
+  unfold lGammaFactor
+  apply union.of_unique
+  . refine ⟨value, ?_⟩
+    left
+    exact ⟨even, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨_, yValue⟩ | ⟨odd, _⟩
+    . exact yValue
+    . exfalso
+      exact odd with even
+
+theorem lGammaFactor.of_odd_sign (χ s : Set)
+  requires hs : s ∈ ℂ
+  requires odd : characterSign(χ) ≠ complexOne
+  shows lGammaFactor(χ, s) = GammaReal(ℂ[s + 1])
+proof
+  have shifted : ℂ[s + 1] ∈ ℂ by typecheck
+  have value := GammaReal.member_of with shifted
+  unfold lGammaFactor
+  apply union.of_unique
+  . refine ⟨value, ?_⟩
+    right
+    exact ⟨odd, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨even, _⟩ | ⟨_, yValue⟩
+    . exfalso
+      exact odd with even
+    . exact yValue
+
+theorem lGammaFactor.member (χ s : Set)
+  requires hs : s ∈ ℂ
+  shows lGammaFactor(χ, s) ∈ ℂ
+proof
+  by_cases even : characterSign(χ) = complexOne
+  . rw (lGammaFactor.of_even_sign with hs, even)
+    exact GammaReal.member_of with hs
+  . have shifted : ℂ[s + 1] ∈ ℂ by typecheck
+    rw (lGammaFactor.of_odd_sign with hs, even)
+    exact GammaReal.member_of with shifted
+
+-- Γ-factor times L, as a function on ℂ; at the poles of the Γ-factor its
+-- value is 0, the junk value of layer 1's Γ there.
+defgraph completedProductMap (N : Nat, χ : Set) (s ∈ complexCarrier) :
+    complexCarrier := ℂ[lGammaFactor(χ, s) * LFunction(N, χ, s)]
+requires character : DirichletCharacter(N, χ)
+proof
+  have values := DirichletCharacter.function with character
+  have factor := lGammaFactor.member at χ, s with member
+  have value := LFunction.closed at N, χ, s with values, member
+  typecheck
+
+-- F(z) → w as z → s, z ≠ s.
+predicate ComplexLimitAt (F s w : Set) :=
+  w ∈ complexCarrier ∧
+  (∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    (∀ z ∈ complexCarrier, z ≠ s → complexAbs(ℂ[z - s]) < d →
+      complexAbs(ℂ[F(z) - w]) < e))
+
+-- The completed L-function Γ_ℝ(s + κ) L(s, χ) as the limit of that
+-- product at s: its value off the poles of the Γ-factor and its
+-- continuation across them (Mathlib's DirichletCharacter.completedLFunction,
+-- which has no factor N^(s/2)). Where the limit does not exist (the poles
+-- at s = 0 and s = 1 for χ = 1 modulo 1, at s = 1 for χ principal) the
+-- value is ∅, not a complex number; no theorem reads it there.
+def completedLFunction (N : Nat, χ s : Set) : Set :=
+  ⋃({ w ∈ complexCarrier | ComplexLimitAt(completedProductMap(N, χ), s, w) })
+
+defgraph completedLFunctionMap (N : Nat, χ : Set) (s ∈ complexCarrier) :
+    complexCarrier := completedLFunction(N, χ, s)
+requires character : DirichletCharacter(N, χ)
+requires nonPrincipal : χ ≠ principalCharacter(N)
+proof
+  sorry
+
+-- The completed zeta function Γ_ℝ(s) ζ(s), continued across s = −2, −4, …
+-- (Mathlib's completedRiemannZeta).
+def completedRiemannZeta (s : Set) : Set :=
+  completedLFunction(1, principalCharacter(1), s)
+
+-- The primitive character inducing χ: the unique character modulo the
+-- conductor that agrees with χ on the integers coprime to N (Mathlib's
+-- DirichletCharacter.primitiveCharacter, made there by choice; here a
+-- definite description, the union of a set with one element).
+def primitiveCharacter (N : Nat, χ : Set) : Set :=
+  ⋃({ ψ ∈ dirichletCharacters(conductor(N, χ)) |
+    ∀ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) → χ(a) = ψ(a) })
+
+-- Section: Mellin transforms
+-- t ↦ t^(s−1) f(t) on ℝ (only t > 0 is read), and the Mellin transform
+-- ∫_{(0,∞)} t^(s−1) f(t) dt (Mathlib's mellin, 0 off the integrable s).
+def mellinIntegrand (f s : Set) : Set :=
+  { (X, ℂ[realCpow(X, ℂ[s - 1]) * f(X)]) | X ∈ ℝ }
+
+def mellin (f s : Set) : Set :=
+  complexSetIntegral(realMeasurableSpace, realVolume, mellinIntegrand(f, s),
+    realIoi(realZero))
+
+-- The Mellin integral converges absolutely at s (Mathlib's
+-- MellinConvergent).
+predicate MellinConvergent (f s : Set) :=
+  ComplexIntegrableOn(realMeasurableSpace, realVolume, mellinIntegrand(f, s),
+    realIoi(realZero))
+
+defgraph mellinMap (f : Set) (s ∈ complexCarrier) : complexCarrier :=
+    mellin(f, s)
+proof
+  unfold mellin
+  unfold complexSetIntegral
+  exact complexMeasureIntegral.member at realMeasurableSpace,
+    restrictMeasure(realMeasurableSpace, realVolume, realIoi(realZero)),
+    mellinIntegrand(f, s)
+
+-- t ↦ t^a f(t) and t ↦ f(t^a) for t > 0.
+def cpowMul (f a : Set) : Set := { (X, ℂ[realCpow(X, a) * f(X)]) | X ∈ ℝ }
+def rpowCompose (f : Set, A : Real) : Set :=
+  { (X, f(realRpow(X, A))) | X ∈ ℝ }
+
+-- f is integrable on every compact [c, d] ⊂ (0, ∞) (Mathlib's
+-- LocallyIntegrableOn f (Ioi 0)).
+predicate LocallyIntegrablePositive (f : Set) :=
+  ∀ c ∈ ℝ, ∀ d ∈ ℝ, R[0] < c → c ≤ d →
+    ComplexIntegrableOn(realMeasurableSpace, realVolume, f, realIcc(c, d))
+
+-- |f(t)| ≤ C e^(−a t) for large t, and |f(t)| ≤ C t^(−b) for small t > 0
+-- (Mathlib's f =O[atTop] exp(−a t) and f =O[𝓝[>] 0] t^(−b)).
+predicate ExpDecayAtTop (f : Set, A : Real) :=
+  ∃ C ∈ ℝ, ∃ T ∈ ℝ, ∀ X ∈ ℝ, T ≤ X →
+    complexAbs(f(X)) ≤ R[C * realExp(-(A * X))]
+predicate PowerBoundAtZero (f : Set, B : Real) :=
+  ∃ C ∈ ℝ, ∃ e ∈ ℝ, R[0] < e ∧ (∀ X ∈ ℝ, R[0] < X → X < e →
+    complexAbs(f(X)) ≤ R[C * realRpow(X, -B)])
+
+-- t ↦ Σ_{n≥0} a(n) e^(−π r(n)² t) for t > 0, the general theta series of
+-- Mathlib's hasSum_mellin_pi_mul_sq (indexed by ℕ here).
+defgraph gaussianSeriesTerms (a r : Set, X : Real) (n ∈ ℕ) : complexCarrier :=
+  ℂ[a(n) * complexOfReal(realExp(R[-(realPi * r(n) * r(n) * X)]))]
+requires aValues : FunctionBetween(a, ℕ, complexCarrier)
+requires rValues : RealSequence(r)
+proof
+  have nNat := nat.omega.backward with member
+  have rFunction : r : ℕ → ℝ by exact rValues
+  have value := FunctionBetween.apply_closed with aValues, member
+  have radius := FunctionBetween.apply_closed with rFunction, member
+  have radiusReal : Real(r(n)) by typecheck
+  typecheck
+
+defgraph mellinGaussianTerms (a r s : Set) (n ∈ ℕ) : complexCarrier :=
+  ℂ[GammaReal(s) * complexDiv(a(n), realCpow(r(n), s))]
+requires aValues : FunctionBetween(a, ℕ, complexCarrier)
+requires rValues : RealSequence(r)
+requires hs : s ∈ complexCarrier
+proof
+  have nNat := nat.omega.backward with member
+  have rFunction : r : ℕ → ℝ by exact rValues
+  have value := FunctionBetween.apply_closed with aValues, member
+  have radius := FunctionBetween.apply_closed with rFunction, member
+  have radiusReal : Real(r(n)) by typecheck
+  have gamma := GammaReal.member_of with hs
+  have power := realCpow.member at r(n), s with hs
+  have inverse := complexInv.member with power
+  unfold complexDiv
+  typecheck
+
+defgraph gaussianRatioTerms (a r : Set, S : Real) (n ∈ ℕ) : ℝ :=
+  R[complexAbs(a(n)) / realRpow(r(n), S)]
+requires aValues : FunctionBetween(a, ℕ, complexCarrier)
+requires rValues : RealSequence(r)
+proof
+  have nNat := nat.omega.backward with member
+  have rFunction : r : ℕ → ℝ by exact rValues
+  have value := FunctionBetween.apply_closed with aValues, member
+  have radius := FunctionBetween.apply_closed with rFunction, member
+  have radiusReal : Real(r(n)) by typecheck
+  have absReal := complexAbs.real with value
+  have power := realRpow.real at r(n), S
+  typecheck
+
+-- Section: Theta kernels
+-- The families over n ∈ ℤ of the Hurwitz theta kernels at a ∈ ℝ, x > 0
+-- (Mathlib's HurwitzZeta.evenKernel, cosKernel, oddKernel, sinKernel):
+-- e^(−π(n+a)²x), e^(−πn²x) cos(2πna), (n+a) e^(−π(n+a)²x),
+-- n e^(−πn²x) sin(2πna).
+def evenKernelTerms (A X : Real) : Set :=
+  { (n, realExp(R[-(realPi * (realInt(n) + A) * (realInt(n) + A) * X)])) |
+    n ∈ ℤ }
+def cosKernelTerms (A X : Real) : Set :=
+  { (n, R[realExp(-(realPi * realInt(n) * realInt(n) * X)) *
+      realCos(2 * realPi * realInt(n) * A)]) | n ∈ ℤ }
+def oddKernelTerms (A X : Real) : Set :=
+  { (n, R[(realInt(n) + A) *
+      realExp(-(realPi * (realInt(n) + A) * (realInt(n) + A) * X))]) |
+    n ∈ ℤ }
+def sinKernelTerms (A X : Real) : Set :=
+  { (n, R[realInt(n) * realExp(-(realPi * realInt(n) * realInt(n) * X)) *
+      realSin(2 * realPi * realInt(n) * A)]) | n ∈ ℤ }
+
+def evenKernel (A X : Real) : Set := realTsum(evenKernelTerms(A, X), ℤ)
+def cosKernel (A X : Real) : Set := realTsum(cosKernelTerms(A, X), ℤ)
+def oddKernel (A X : Real) : Set := realTsum(oddKernelTerms(A, X), ℤ)
+def sinKernel (A X : Real) : Set := realTsum(sinKernelTerms(A, X), ℤ)
+
+-- Section: Γ_ℝ
+theorem GammaReal.member (s : Set)
+  requires hs : s ∈ ℂ
+  shows GammaReal(s) ∈ ℂ
+proof
+  exact GammaReal.member_of with hs
+
+-- Mathlib's Complex.Gammaℝ_ne_zero_of_re_pos.
+theorem GammaReal.ne_zero_of_re_pos (s : Set)
+  requires hs : s ∈ ℂ
+  requires positive : realZero < complexRe(s)
+  shows GammaReal(s) ≠ ℂ[0]
+proof
+  have halfMember : complexOfReal(R[1 / 2]) ∈ ℂ by typecheck
+  have halved : ℂ[s * complexOfReal(R[1 / 2])] ∈ ℂ by typecheck
+  have exponent : ℂ[-(s * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have power := realCpow.member at realPi, ℂ[-(s * complexOfReal(R[1 / 2]))]
+    with exponent
+  have powerNonzero := realCpow.nonzero at realPi,
+    ℂ[-(s * complexOfReal(R[1 / 2]))] with exponent
+  have reS : Real(complexRe(s)) by typecheck
+  have imS : Real(complexIm(s)) by typecheck
+  have reHalf : complexRe(ℂ[s * complexOfReal(R[1 / 2])]) =
+      R[complexRe(s) * (1 / 2)]
+    rw [(complexRe.mul with hs, halfMember), complexOfReal.re, complexOfReal.im]
+    ring
+  have domain : ℂ[s * complexOfReal(R[1 / 2])] ∈ gammaDomain
+    unfold gammaDomain
+    apply difference.membership.backward
+    refine ⟨halved, ?_⟩
+    intro pole
+    obtain ⟨_, n, nIn, equal⟩ := pole
+    have nNat := nat.omega.backward with nIn
+    have reEqual : complexRe(ℂ[s * complexOfReal(R[1 / 2])]) =
+        complexRe(ℂ[-complexOfReal(realNat(n))])
+      rw equal
+    have castMember : complexOfReal(realNat(n)) ∈ ℂ by typecheck
+    rw [reHalf, (complexRe.neg with castMember), complexOfReal.re] at reEqual
+    have natNonneg := realNat.nonnegative at n
+    have halfPositive : R[0] < R[complexRe(s) * (1 / 2)]
+      have halfValue : R[0] < R[1 / 2] by linarith
+      exact realMulValue.positive with positive, halfValue
+    linarith
+  have gammaNonzero := Gamma.nonzero with domain
+  have gamma := Gamma.member at ℂ[s * complexOfReal(R[1 / 2])]
+  unfold GammaReal
+  intro product
+  have zero := complexMul.zero_factor with power, gamma, powerNonzero, product
+  exact gammaNonzero with zero
+
+-- Γ_ℝ(s) = 0 exactly at s = 0, −2, −4, …, where Γ(s/2) has its poles and
+-- layer 1's Γ is 0 (Mathlib's Complex.Gammaℝ_eq_zero_iff).
+theorem GammaReal.eq_zero_iff (s : Set)
+  requires hs : s ∈ ℂ
+  shows GammaReal(s) = ℂ[0] ↔ s ∈ gammaRealPoles
+proof
+  sorry
+
+-- Mathlib's Complex.Gammaℝ_one.
+theorem GammaReal.one
+  shows GammaReal(ℂ[1]) = ℂ[1]
+proof
+  have piPositive := realPi.positive
+  have halfMember : complexOfReal(R[1 / 2]) ∈ ℂ by typecheck
+  have negHalf : ℂ[-complexOfReal(R[1 / 2])] ∈ ℂ
+    exact FunctionBetween.apply_closed with complexNeg.function, halfMember
+  have half : ℂ[1 * complexOfReal(R[1 / 2])] = complexOfReal(R[1 / 2]) by ring
+  unfold GammaReal
+  rw [half, Gamma.half, (realCpow.sqrt with piPositive),
+    ← (realCpow.add at realPi, ℂ[-complexOfReal(R[1 / 2])],
+      complexOfReal(R[1 / 2]) with negHalf, halfMember)]
+  have zero : ℂ[-complexOfReal(R[1 / 2]) + complexOfReal(R[1 / 2])] = ℂ[0] by
+    ring
+  rw [zero, realCpow.zero]
+
+-- Γ_ℝ is holomorphic off its poles (Mathlib's
+-- Complex.differentiableAt_Gammaℝ_of_ne_zero pattern).
+theorem GammaRealMap.holomorphic
+  shows HolomorphicOn(GammaRealMap, complexCarrier ∖ gammaRealPoles)
+proof
+  sorry
+
+-- Mathlib's Complex.Gammaℝ_mul_Gammaℝ_add_one: Γ_ℝ(s) Γ_ℝ(s + 1) =
+-- 2 (2π)^(−s) Γ(s).
+theorem GammaReal.mul_add_one (s : Set)
+  requires hs : s ∈ gammaDomain
+  shows ℂ[GammaReal(s) * GammaReal(ℂ[s + 1])] =
+    ℂ[2 * realCpow(R[2 * realPi], ℂ[-s]) * Gamma(s)]
+proof
+  have copy := hs
+  unfold gammaDomain at copy
+  obtain ⟨member, _⟩ := copy
+  have h : complexOfReal(R[1 / 2]) ∈ ℂ by typecheck
+  have halfDouble := complexHalf.double
+  have t : ℂ[s * complexOfReal(R[1 / 2])] ∈ ℂ by typecheck
+  have twoT : ℂ[2 * (s * complexOfReal(R[1 / 2]))] = s by
+    linear_combination s * halfDouble
+  have doubled : ℂ[2 * (s * complexOfReal(R[1 / 2]))] ∈ gammaDomain
+    rw twoT
+    exact hs
+  have dup := Gamma.duplication_of_member at ℂ[s * complexOfReal(R[1 / 2])]
+    with t, doubled
+  have shifted : ℂ[s * complexOfReal(R[1 / 2]) + complexOfReal(R[1 / 2])] =
+      ℂ[(s + 1) * complexOfReal(R[1 / 2])] by ring
+  rw [shifted, twoT] at dup
+  have piPositive := realPi.positive
+  have twoPositive : R[0] < R[2] by linarith
+  have e1 : ℂ[-(s * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have e2 : ℂ[-((s + 1) * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have e12 : ℂ[-(s * complexOfReal(R[1 / 2])) +
+    -((s + 1) * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have negS : ℂ[-s] ∈ ℂ by typecheck
+  have one := complexOne.member
+  have factA := realCpow.add at realPi, ℂ[-(s * complexOfReal(R[1 / 2]))],
+    ℂ[-((s + 1) * complexOfReal(R[1 / 2]))] with e1, e2
+  have factB := realCpow.add at realPi, ℂ[-(s * complexOfReal(R[1 / 2])) +
+    -((s + 1) * complexOfReal(R[1 / 2]))], complexOfReal(R[1 / 2]) with e12, h
+  have exponent : ℂ[-(s * complexOfReal(R[1 / 2])) +
+      -((s + 1) * complexOfReal(R[1 / 2])) + complexOfReal(R[1 / 2])] =
+      ℂ[-s] by linear_combination (-s) * halfDouble
+  rw exponent at factB
+  have factF := realCpow.sqrt at realPi with piPositive
+  have factD : realCpow(R[2], ℂ[1 - s]) = ℂ[2 * realCpow(R[2], ℂ[-s])]
+    rw [(realCpow.add at R[2], ℂ[1], ℂ[-s] with one, negS),
+      (realCpow.one at R[2] with twoPositive), complexOfReal.two]
+  have factE := realCpow.mul_base at R[2], realPi, ℂ[-s] with twoPositive,
+    piPositive, negS
+  have p1 := realCpow.member at realPi, ℂ[-(s * complexOfReal(R[1 / 2]))]
+    with e1
+  have p2 := realCpow.member at realPi, ℂ[-((s + 1) *
+    complexOfReal(R[1 / 2]))] with e2
+  have p12 := realCpow.member at realPi, ℂ[-(s * complexOfReal(R[1 / 2])) +
+    -((s + 1) * complexOfReal(R[1 / 2]))] with e12
+  have pH := realCpow.member at realPi, complexOfReal(R[1 / 2]) with h
+  have pS := realCpow.member at realPi, ℂ[-s] with negS
+  have q2 := realCpow.member at R[2], ℂ[-s] with negS
+  have g1 := Gamma.member at ℂ[s * complexOfReal(R[1 / 2])]
+  have g2 := Gamma.member at ℂ[(s + 1) * complexOfReal(R[1 / 2])]
+  have g := Gamma.member at s
+  have sq : complexOfReal(realSqrt(realPi)) ∈ ℂ by typecheck
+  unfold GammaReal
+  symm at factA
+  symm at factB
+  symm at factE
+  linear_combination Gamma(ℂ[s * complexOfReal(R[1 / 2])]) *
+      Gamma(ℂ[(s + 1) * complexOfReal(R[1 / 2])]) * factA +
+    realCpow(realPi, ℂ[-(s * complexOfReal(R[1 / 2])) +
+      -((s + 1) * complexOfReal(R[1 / 2]))]) * dup +
+    realCpow(realPi, ℂ[-(s * complexOfReal(R[1 / 2])) +
+      -((s + 1) * complexOfReal(R[1 / 2]))]) *
+      complexOfReal(realSqrt(realPi)) * Gamma(s) * factD +
+    2 * realCpow(R[2], ℂ[-s]) * realCpow(realPi, ℂ[-(s *
+      complexOfReal(R[1 / 2])) + -((s + 1) * complexOfReal(R[1 / 2]))]) *
+      Gamma(s) * factF +
+    2 * realCpow(R[2], ℂ[-s]) * Gamma(s) * factB +
+    2 * Gamma(s) * factE
+
+-- Layer 1's completed zeta is Γ_ℝ(s) ζ(s).
+theorem completedZeta.eq_GammaReal (s : Set)
+  requires hs : s ∈ ℂ
+  shows completedZeta(s) = ℂ[GammaReal(s) * riemannZeta(s)]
+proof
+  have exponent : ℂ[-(s * complexOfReal(R[1 / 2]))] ∈ ℂ by typecheck
+  have power := realCpow.member at realPi, ℂ[-(s * complexOfReal(R[1 / 2]))]
+    with exponent
+  have gamma := Gamma.member at ℂ[s * complexOfReal(R[1 / 2])]
+  have zeta := riemannZeta.member with hs
+  unfold completedZeta
+  unfold GammaReal
+  ring
+
+-- Section: The Gamma factor of a character
+-- Mathlib's DirichletCharacter.Even.gammaFactor_def and
+-- Odd.gammaFactor_def.
+theorem lGammaFactor.even (N : Nat) (χ s : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires even : HasParity(χ, 0)
+  requires member : s ∈ ℂ
+  shows lGammaFactor(χ, s) = GammaReal(s)
+proof
+  rcases even with ⟨_, sign⟩ | ⟨zeroOne, _⟩
+  . have signOne : characterSign(χ) = complexOne
+      unfold characterSign
+      exact sign
+    exact lGammaFactor.of_even_sign with member, signOne
+  . exfalso
+    arith
+
+theorem lGammaFactor.odd (N : Nat) (χ s : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires odd : HasParity(χ, 1)
+  requires member : s ∈ ℂ
+  shows lGammaFactor(χ, s) = GammaReal(ℂ[s + 1])
+proof
+  rcases odd with ⟨oneZero, _⟩ | ⟨_, sign⟩
+  . exfalso
+    arith
+  . have notOne : characterSign(χ) ≠ complexOne
+      unfold characterSign
+      rw sign
+      intro equal
+      have one := complexOne.member
+      have parts : complexRe(ℂ[-1]) = complexRe(complexOne)
+        rw equal
+      rw [(complexRe.neg with one), complexRe.one] at parts
+      linarith
+    exact lGammaFactor.of_odd_sign with member, notOne
+
+-- Every character modulo N ≥ 1 is even or odd (Mathlib's
+-- DirichletCharacter.even_or_odd).
+theorem DirichletCharacter.even_or_odd (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows HasParity(χ, 0) ∨ HasParity(χ, 1)
+proof
+  have sign := DirichletCharacter.neg_one with character
+  rcases sign with even | odd
+  . left
+    left
+    exact ⟨rfl, even⟩
+  . right
+    right
+    exact ⟨rfl, odd⟩
+
+-- The Γ-factor in terms of the parity κ: Γ_ℝ(s + κ).
+theorem lGammaFactor.parity (N : Nat) (χ : Set) (κ : Nat) (s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires parity : HasParity(χ, κ)
+  requires hs : s ∈ ℂ
+  shows lGammaFactor(χ, s) = GammaReal(ℂ[s + complexOfReal(realNat(κ))])
+proof
+  rcases parity with ⟨zero, even⟩ | ⟨one, odd⟩
+  . have shift : ℂ[s + complexOfReal(realNat(κ))] = s
+      rw [zero, realNat.zero, complexOfReal.zero]
+      ring
+    have evenSign : characterSign(χ) = complexOne
+      unfold characterSign
+      exact even
+    rw [shift, (lGammaFactor.of_even_sign with hs, evenSign)]
+  . have shift : ℂ[s + complexOfReal(realNat(κ))] = ℂ[s + 1]
+      rw [one, realNat.one, complexOfReal.one]
+    have notEven : characterSign(χ) ≠ complexOne
+      unfold characterSign
+      rw odd
+      intro bad
+      have reBad : complexRe(ℂ[-1]) = complexRe(complexOne)
+        rw bad
+      have oneMember := complexOne.member
+      rw [(complexRe.neg with oneMember), complexRe.one] at reBad
+      linarith
+    rw [shift, (lGammaFactor.of_odd_sign with hs, notEven)]
+
+-- The Γ-factor does not vanish on re s > 0 (the step of New.zeros_on_line
+-- through Gammaℝ_ne_zero_of_re_pos).
+theorem lGammaFactor.ne_zero_of_re_pos (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires rePositive : realZero < complexRe(s)
+  shows lGammaFactor(χ, s) ≠ ℂ[0]
+proof
+  by_cases even : characterSign(χ) = complexOne
+  . rw (lGammaFactor.of_even_sign with hs, even)
+    exact GammaReal.ne_zero_of_re_pos with hs, rePositive
+  . have shifted : ℂ[s + 1] ∈ ℂ by typecheck
+    have one := complexOne.member
+    have reShift : realZero < complexRe(ℂ[s + 1])
+      rw [(complexRe.add with hs, one), complexRe.one]
+      linarith
+    rw (lGammaFactor.of_odd_sign with hs, even)
+    exact GammaReal.ne_zero_of_re_pos with shifted, reShift
+
+-- It vanishes exactly at s = −κ − 2n.
+theorem lGammaFactor.eq_zero_iff (N : Nat) (χ : Set) (κ : Nat) (s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires parity : HasParity(χ, κ)
+  requires hs : s ∈ ℂ
+  shows lGammaFactor(χ, s) = ℂ[0] ↔
+    (∃ n ∈ ℕ, s = ℂ[-(complexOfReal(realNat(κ)) +
+      2 * complexOfReal(realNat(n)))])
+proof
+  sorry
+
+-- Section: The completed L-function
+-- Off the zeros of the Γ-factor, and away from the pole of χ₀ at 1, the
+-- completed L-function is the product (Mathlib's
+-- DirichletCharacter.completedLFunction_def pattern).
+theorem completedLFunction.eq_mul (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires notZero : lGammaFactor(χ, s) ≠ ℂ[0]
+  requires notPole : χ ≠ principalCharacter(N) ∨ s ≠ ℂ[1]
+  shows completedLFunction(N, χ, s) =
+    ℂ[lGammaFactor(χ, s) * LFunction(N, χ, s)]
+proof
+  sorry
+
+-- L(s, χ) = Λ(s, χ)/Γ-factor, with layer 1's junk 0⁻¹ = 0 at the zeros
+-- of the Γ-factor, where L(s, χ) vanishes as well (Mathlib's
+-- DirichletCharacter.LFunction_eq_completed_div_gammaFactor; the pole of
+-- χ₀ at s = 1 is excluded here, Mathlib's junk values agreeing there).
+theorem LFunction.eq_completed_div_gammaFactor (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires levelOrNonzero : s ≠ ℂ[0] ∨ N ≠ (1:N)
+  requires notPole : χ ≠ principalCharacter(N) ∨ s ≠ ℂ[1]
+  shows LFunction(N, χ, s) =
+    complexDiv(completedLFunction(N, χ, s), lGammaFactor(χ, s))
+proof
+  sorry
+
+-- The completed L-function of χ ≠ χ₀ is entire (Mathlib's
+-- DirichletCharacter.differentiable_completedLFunction).
+theorem completedLFunctionMap.holomorphic (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows HolomorphicOn(completedLFunctionMap(N, χ), complexCarrier)
+proof
+  sorry
+
+-- Mathlib's normalization against layer 1's:
+-- (N/π)^((s+κ)/2) Γ((s+κ)/2) L(s, χ) = N^((s+κ)/2) Γ_ℝ(s + κ) L(s, χ).
+theorem completedL.eq_completedLFunction (N : Nat) (χ : Set) (κ : Nat)
+    (s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires parity : HasParity(χ, κ)
+  requires hs : s ∈ ℂ
+  requires domain : lGammaArgument(κ, s) ∈ gammaDomain
+  requires notPole : χ ≠ principalCharacter(N) ∨ s ≠ ℂ[1]
+  shows completedL(N, χ, κ, s) =
+    ℂ[realCpow(realNat(N), lGammaArgument(κ, s)) *
+      completedLFunction(N, χ, s)]
+proof
+  sorry
+
+-- The functional equation for χ primitive modulo N of parity κ, in
+-- Mathlib's form Λ(1 − s, χ) = N^(s − 1/2) ε(χ) Λ(s, χ̄), with χ⁻¹ = χ̄
+-- and ε(χ) = τ(χ)/(i^κ √N) layer 1's root number (Mathlib's
+-- DirichletCharacter.IsPrimitive.completedLFunction_one_sub). For N = 1
+-- the poles s ∈ {0, 1} of the completed ζ are excluded.
+theorem completedLFunction.one_sub (N : Nat) (χ : Set) (κ : Nat) (s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires primitive : PrimitiveCharacter(N, χ)
+  requires parity : HasParity(χ, κ)
+  requires hs : s ∈ ℂ
+  requires notPole : 2 ≤ N ∨ (s ≠ ℂ[0] ∧ s ≠ ℂ[1])
+  shows completedLFunction(N, χ, ℂ[1 - s]) =
+    ℂ[realCpow(realNat(N), ℂ[s - complexOfReal(R[1 / 2])]) *
+      rootNumber(N, χ, κ) * completedLFunction(N, conjCharacter(χ), s)]
+proof
+  sorry
+
+-- Section: The completed zeta function
+-- ζ(s) = Λ(s)/Γ_ℝ(s) for s ∉ {0, 1} (Mathlib's riemannZeta_def_of_ne_zero,
+-- whose junk values also cover s = 1).
+theorem riemannZeta.def_of_ne_zero (s : Set)
+  requires hs : s ∈ ℂ
+  requires notZero : s ≠ ℂ[0]
+  requires notOne : s ≠ ℂ[1]
+  shows riemannZeta(s) = complexDiv(completedRiemannZeta(s), GammaReal(s))
+proof
+  sorry
+
+-- Mathlib's completedRiemannZeta_one_sub, s ∉ {0, 1}.
+theorem completedRiemannZeta.one_sub (s : Set)
+  requires hs : s ∈ ℂ
+  requires notZero : s ≠ ℂ[0]
+  requires notOne : s ≠ ℂ[1]
+  shows completedRiemannZeta(ℂ[1 - s]) = completedRiemannZeta(s)
+proof
+  sorry
+
+-- The completed zeta function has no zero at s = −2(n + 1): there the
+-- pole of Γ_ℝ cancels the trivial zero of ζ.
+theorem completedRiemannZeta.trivial_ne_zero (n : Nat)
+  shows completedRiemannZeta(ℂ[-(2 * (complexOfReal(realNat(n)) + 1))]) ≠
+    ℂ[0]
+proof
+  sorry
+
+-- Section: Change of level and primitive characters
+-- Inducing in two steps is inducing once (Mathlib's
+-- DirichletCharacter.changeLevel_trans).
+theorem changeLevel.trans (N M d : Nat) (ψ : Set)
+  requires positive : 1 ≤ N
+  requires dDivides : d ∣ M
+  requires mDivides : M ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  shows changeLevel(N, changeLevel(M, ψ)) = changeLevel(N, ψ)
+proof
+  have dN := divides.transitive with dDivides, mDivides
+  have inner := changeLevel.character at M, d, ψ with dDivides, character
+  have left := changeLevel.character at N, M, changeLevel(M, ψ) with
+    mDivides, inner
+  have right := changeLevel.character at N, d, ψ with dN, character
+  have leftValues := DirichletCharacter.function with left
+  have rightValues := DirichletCharacter.function with right
+  have innerValues := DirichletCharacter.function with inner
+  have psiValues := DirichletCharacter.function with character
+  apply FunctionBetween.ext with leftValues, rightValues
+  intros a aIn
+  have value := FunctionBetween.apply_closed with psiValues, aIn
+  have innerValue := FunctionBetween.apply_closed with innerValues, aIn
+  by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+  . have mInt : integerOfNat(M) ∈ ℤ by typecheck
+    have nInt : integerOfNat(N) ∈ ℤ by typecheck
+    have mDividesInt := IntegerDivides.of_natural with mDivides
+    have coprimeM := IntegerCoprime.of_divides with aIn, nInt, mInt,
+      mDividesInt, coprime
+    rw [(changeLevel.coprime at N, changeLevel(M, ψ), a with aIn, coprime,
+        innerValue),
+      (changeLevel.coprime at M, ψ, a with aIn, coprimeM, value),
+      (changeLevel.coprime at N, ψ, a with aIn, coprime, value)]
+  . rw [(changeLevel.not_coprime at N, changeLevel(M, ψ), a with aIn,
+        coprime), (changeLevel.not_coprime at N, ψ, a with aIn, coprime)]
+
+-- The induced character agrees with ψ on the integers coprime to N
+-- (Mathlib's changeLevel_eq_cast_of_dvd, on units).
+theorem changeLevel.apply_coprime (N d : Nat) (ψ a : Set)
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows changeLevel(N, ψ)(a) = ψ(a)
+proof
+  have values := DirichletCharacter.function with character
+  have value := FunctionBetween.apply_closed with values, integer
+  exact changeLevel.coprime with integer, coprime, value
+
+-- Mathlib's DirichletCharacter.conductor_changeLevel.
+theorem conductor.changeLevel (N d : Nat) (ψ : Set)
+  requires positive : 1 ≤ N
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  shows conductor(N, changeLevel(N, ψ)) = conductor(d, ψ)
+proof
+  sorry
+
+-- Mathlib's DirichletCharacter.conductor_inv.
+theorem conductor.conj (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows conductor(N, conjCharacter(χ)) = conductor(N, χ)
+proof
+  have values := DirichletCharacter.function with character
+  have same : factorLevels(N, conjCharacter(χ)) = factorLevels(N, χ)
+    ext d
+    constructor
+    . intro hd
+      obtain ⟨dIn, divides, ψ, ψCharacter, agree⟩ :=
+        factorLevels.membership.forward with hd
+      have ψValues := DirichletCharacter.function with ψCharacter
+      have conjugate := conjCharacter.character with ψCharacter
+      apply factorLevels.membership.backward
+      refine ⟨dIn, divides, conjCharacter(ψ), conjugate, ?_⟩
+      intros a aIn coprime
+      have equal := agree with a, aIn, coprime
+      have χa := FunctionBetween.apply_closed with values, aIn
+      rw (conjCharacter.apply with values, aIn) at equal
+      rw [(conjCharacter.apply with ψValues, aIn), ← equal,
+        (complexConj.involutive with χa)]
+    . intro hd
+      obtain ⟨dIn, divides, ψ, ψCharacter, agree⟩ :=
+        factorLevels.membership.forward with hd
+      have ψValues := DirichletCharacter.function with ψCharacter
+      have conjugate := conjCharacter.character with ψCharacter
+      apply factorLevels.membership.backward
+      refine ⟨dIn, divides, conjCharacter(ψ), conjugate, ?_⟩
+      intros a aIn coprime
+      have equal := agree with a, aIn, coprime
+      rw [(conjCharacter.apply with values, aIn),
+        (conjCharacter.apply with ψValues, aIn), equal]
+  unfold conductor
+  rw same
+
+-- The conductor of χψ divides every common multiple of the conductors,
+-- that is lcm(f(χ), f(ψ)) (Mathlib's
+-- DirichletCharacter.conductor_mul_dvd_lcm_conductor).
+theorem conductor.mul_dvd (N : Nat) (χ ψ : Set) (m : Nat)
+  requires positive : 1 ≤ N
+  requires χCharacter : DirichletCharacter(N, χ)
+  requires ψCharacter : DirichletCharacter(N, ψ)
+  requires χDivides : conductor(N, χ) ∣ m
+  requires ψDivides : conductor(N, ψ) ∣ m
+  shows conductor(N, characterProduct(N, χ, ψ)) ∣ m
+proof
+  sorry
+
+-- Modulo 1 the only character is the principal one (Mathlib's
+-- DirichletCharacter.level_one).
+theorem DirichletCharacter.level_one (χ : Set)
+  requires character : DirichletCharacter(1, χ)
+  shows χ = principalCharacter(1)
+proof
+  have principal := principalCharacter.character at 1
+  have positive : 0 < 1 by arith
+  apply DirichletCharacter.ext with character, principal, positive
+  intros j jIn
+  have jNat := natural.member at 1 with jIn
+  have index : integerOfNat(j) ∈ ℤ by typecheck
+  rw [(DirichletCharacter.modulus_one with character, index),
+    (principalCharacter.modulus_one with index)]
+
+-- The primitive character is a character modulo the conductor, primitive,
+-- and induces χ (Mathlib's primitiveCharacter_isPrimitive and
+-- changeLevel_primitiveCharacter).
+theorem primitiveCharacter.character (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows DirichletCharacter(conductor(N, χ), primitiveCharacter(N, χ))
+proof
+  sorry
+
+theorem primitiveCharacter.primitive (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows PrimitiveCharacter(conductor(N, χ), primitiveCharacter(N, χ))
+proof
+  sorry
+
+theorem primitiveCharacter.changeLevel (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows changeLevel(N, primitiveCharacter(N, χ)) = χ
+proof
+  sorry
+
+-- The primitive character is the only primitive character inducing χ.
+theorem primitiveCharacter.unique (N d : Nat) (χ ψ : Set)
+  requires positive : 1 ≤ N
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(N, χ)
+  requires ψCharacter : DirichletCharacter(d, ψ)
+  requires primitive : PrimitiveCharacter(d, ψ)
+  requires induces : changeLevel(N, ψ) = χ
+  shows d = conductor(N, χ) ∧ ψ = primitiveCharacter(N, χ)
+proof
+  sorry
+
+-- Every character is induced by a primitive one (the source's
+-- exists_isPrimitive_changeLevel_eq).
+theorem DirichletCharacter.exists_primitive (N : Nat) (χ : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  shows ∃ d ∈ ℕ, 1 ≤ d ∧ d ∣ N ∧ ∃ ψ, DirichletCharacter(d, ψ) ∧
+    PrimitiveCharacter(d, ψ) ∧ changeLevel(N, ψ) = χ
+proof
+  sorry
+
+-- L(s, χ) = L(s, χ*) ∏_{p ∣ N} (1 − χ*(p) p^(−s)) with χ* primitive
+-- (Mathlib's LFunction_changeLevel at the primitive character).
+theorem LFunction.eq_primitive (N : Nat) (χ s : Set)
+  requires positive : 1 ≤ N
+  requires character : DirichletCharacter(N, χ)
+  requires hs : s ∈ ℂ
+  requires notPole : χ ≠ principalCharacter(N) ∨ s ≠ ℂ[1]
+  shows LFunction(N, χ, s) =
+    ℂ[LFunction(conductor(N, χ), primitiveCharacter(N, χ), s) *
+      levelProduct(N, primitiveCharacter(N, χ), s, succ(N))]
+proof
+  sorry
+
+-- Section: Mellin transforms
+-- Mathlib's mellin_cpow_smul: the transform of t^a f(t) at s is the
+-- transform of f at s + a.
+theorem mellin.cpow_mul (f a s : Set)
+  requires ha : a ∈ ℂ
+  requires hs : s ∈ ℂ
+  shows mellin(cpowMul(f, a), s) = mellin(f, ℂ[s + a])
+proof
+  sorry
+
+-- Mathlib's mellin_comp_rpow: for a ≠ 0 the transform of f(t^a) at s is
+-- |a|⁻¹ times the transform of f at s/a.
+theorem mellin.comp_rpow (f s : Set) (A : Real)
+  requires hs : s ∈ ℂ
+  requires nonzero : A ≠ R[0]
+  shows mellin(rpowCompose(f, A), s) =
+    ℂ[complexOfReal(realInvValue(abs(A))) *
+      mellin(f, complexDiv(s, complexOfReal(A)))]
+proof
+  sorry
+
+-- Exponential decay at ∞ and |f(t)| = O(t^(−b)) at 0 give absolute
+-- convergence on re s > b (Mathlib's mellinConvergent_of_isBigO_rpow_exp).
+theorem mellin.convergent_of_bounds (f s : Set) (A B : Real)
+  requires decayRate : R[0] < A
+  requires local : LocallyIntegrablePositive(f)
+  requires atTop : ExpDecayAtTop(f, A)
+  requires atZero : PowerBoundAtZero(f, B)
+  requires hs : s ∈ ℂ
+  requires halfPlane : B < complexRe(s)
+  shows MellinConvergent(f, s)
+proof
+  sorry
+
+-- and holomorphy there (Mathlib's mellin_differentiableAt_of_isBigO_rpow_exp).
+theorem mellinMap.holomorphic_of_bounds (f : Set) (A B : Real)
+  requires decayRate : R[0] < A
+  requires local : LocallyIntegrablePositive(f)
+  requires atTop : ExpDecayAtTop(f, A)
+  requires atZero : PowerBoundAtZero(f, B)
+  shows HolomorphicOn(mellinMap(f), rightHalfPlane(B))
+proof
+  sorry
+
+-- Euler's integral: the transform of e^(−t) is Γ (layer 1's
+-- Gamma.euler_integral as a Mellin transform).
+theorem mellin.exp_neg (s : Set)
+  requires hs : s ∈ ℂ
+  requires positive : realZero < complexRe(s)
+  shows mellin(complexOfRealOn(expNegFunction, ℝ), s) = Gamma(s)
+proof
+  sorry
+
+-- The Mellin transform of a theta series: if F(t) = Σ a(n) e^(−π r(n)² t)
+-- for t > 0 with r(n) > 0, and Σ |a(n)|/r(n)^(re s) converges, re s > 0,
+-- then Σ Γ_ℝ(s) a(n)/r(n)^s converges to the transform of F at s/2
+-- (Mathlib's hasSum_mellin_pi_mul_sq, for index ℕ and r > 0).
+theorem mellin.pi_mul_sq (a r F s : Set)
+  requires aValues : FunctionBetween(a, ℕ, complexCarrier)
+  requires rValues : RealSequence(r)
+  requires rPositive : ∀ n ∈ ℕ, R[0] < r(n)
+  requires hs : s ∈ ℂ
+  requires rePositive : realZero < complexRe(s)
+  requires series : ∀ X ∈ ℝ, R[0] < X →
+    ComplexSumsTo(gaussianSeriesTerms(a, r, X), F(X))
+  requires summable : Summable(gaussianRatioTerms(a, r, complexRe(s)))
+  shows ComplexSumsTo(mellinGaussianTerms(a, r, s),
+    mellin(F, ℂ[s * complexOfReal(R[1 / 2])]))
+proof
+  sorry
+
+-- Section: Theta kernels
+-- The kernels converge absolutely for x > 0 (Mathlib's
+-- HurwitzZeta.hasSum_int_evenKernel, hasSum_int_cosKernel,
+-- hasSum_int_oddKernel, hasSum_int_sinKernel).
+theorem evenKernel.hasSum (A X : Real)
+  requires positive : R[0] < X
+  shows RealHasSum(evenKernelTerms(A, X), ℤ, evenKernel(A, X))
+proof
+  sorry
+
+theorem cosKernel.hasSum (A X : Real)
+  requires positive : R[0] < X
+  shows RealHasSum(cosKernelTerms(A, X), ℤ, cosKernel(A, X))
+proof
+  sorry
+
+theorem oddKernel.hasSum (A X : Real)
+  requires positive : R[0] < X
+  shows RealHasSum(oddKernelTerms(A, X), ℤ, oddKernel(A, X))
+proof
+  sorry
+
+theorem sinKernel.hasSum (A X : Real)
+  requires positive : R[0] < X
+  shows RealHasSum(sinKernelTerms(A, X), ℤ, sinKernel(A, X))
+proof
+  sorry
+
+-- Poisson summation: evenKernel(a, x) = x^(−1/2) cosKernel(a, 1/x)
+-- (Mathlib's HurwitzZeta.evenKernel_functional_equation).
+theorem evenKernel.functional_equation (A X : Real)
+  requires positive : R[0] < X
+  shows evenKernel(A, X) =
+    R[realRpow(X, -(1 / 2)) * cosKernel(A, realInvValue(X))]
+proof
+  sorry
+
+-- oddKernel(a, x) = x^(−3/2) sinKernel(a, 1/x) (Mathlib's
+-- HurwitzZeta.oddKernel_functional_equation).
+theorem oddKernel.functional_equation (A X : Real)
+  requires positive : R[0] < X
+  shows oddKernel(A, X) =
+    R[realRpow(X, -(3 / 2)) * sinKernel(A, realInvValue(X))]
+proof
+  sorry
+
+end Completed

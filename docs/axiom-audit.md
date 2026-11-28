@@ -118,7 +118,8 @@ Sylow's theorems, the finite combinatorics, point-set topology with the
 bundled topological and metric spaces (all but the uncountability of perfect
 sets), and real analysis through
 derivatives, the intermediate value theorem, and induction along a closed
-interval are checked under ZF by `tests/zf-library.test.ts` and
+interval, and the compactness of products and of closed rectangles in the
+plane are checked under ZF by `tests/zf-library.test.ts` and
 `npm run compile:zf-library`. Uniquely determined values use `defunique`.
 The extreme value, Heine–Cantor, Rolle, mean value, and integration theorems
 on closed intervals use no choice axiom; the theorems about an arbitrary

@@ -1,0 +1,355 @@
+-- Schur (dual Weyl) modules of a product of general linear groups over
+-- any commutative ring R, as modules of polynomials on matrices: the row
+-- polynomial ring R[y_{(τ,a),i}], minors on the first h columns, fillings
+-- of column diagrams, the standard fillings (Weyl indices), the
+-- minor-product basis b_i, the determinant powers, Borel semi-invariants,
+-- row substitution, the Schur matrix S_κ(z), the Fock pairing and jets,
+-- the kernel f(yᵀx), the integer Gram matrix, the hook number, evaluation
+-- vectors, tableau weights, and the Schur jets and row charges layer 5
+-- uses.
+-- Source: grh-compact/src/Lib/General/Algebra/ZerosCostDegree.lean
+-- (borelMul, diagramWeight, MatrixPoly, Tableau, jet, fockPairing, minor,
+-- nabla, tableauPoly, IsStdTableauSet, StdTableau, rankAt, WeylIndexFam,
+-- WeylIndex, nablaFam, nablaBasis, highestPoly, detPow, hookNumber,
+-- schurDetExp, FitsRanks, rowSubst, permArray, schur, tableauWeight,
+-- weylKernel, weylGram, toPoly, weylEval), Lib/Weil/Construction/DataProduct.lean
+-- (schurJet), New/Curve/JetDivisibility.lean (norm_schurJet_le, the charge m),
+-- Lib/General/Algebra/ZerosCostDegree.lean (boxes).
+-- Encoding. The places Φ form a finite set; the rows at every place are
+-- one finite set n of natural numbers (layer 5's ranks are naturals), ordered
+-- by ∈, and |n| = N; the column multiplicities form κ : Φ × ℕ → ℕ. A filling
+-- (the source's Tableau and WeylIndexFam) is a function on the boxes
+-- (τ, (h, (j, s))) — place τ, height h < N, column j < κ(τ, h), entry s < h —
+-- with values in n. The source's StdTableau is a set of fillings chosen by
+-- Hilbert's ε among those satisfying IsStdTableauSet (a basis over every
+-- ring with the Weyl character identity); here it is the classical one,
+-- the semistandard fillings (columns strictly increasing, rows weakly
+-- increasing when the columns are ordered by decreasing height and then
+-- by j), whose minor products are the standard basis of De Concini,
+-- Eisenbud and Procesi; every statement about the basis is invariant
+-- under the choice. The row polynomial ring is polynomialRing(R, (Φ × n) × ℕ),
+-- the variable y_{(τ,a),i} being X((τ, a), i). A family of matrices z
+-- (z_τ of size n′ × n) is a function on Φ. The Schur matrix S_κ(z) is
+-- defined by its expansion (the source's invFun): row i′ is the unique
+-- coefficient family c with Σ_j c_j b_j(y) D(y) = b′_{i′}(zy), D the
+-- determinant powers of schurDetExp; the coefficients are unique because
+-- the b_j D are linearly independent over every ring
+-- (linearIndependent_nablaBasis_mul_detPow). The Gram matrix is defined
+-- the same way from the expansion of the kernel.
+-- Part of the GRH blueprint (layer 4, Lib/GLn, stage S2).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.GLn.Tableaux
+import GRH.Polynomial.PowerSeries
+import GRH.Adelic.CuspForms
+
+-- Section: Products and sums in a ring
+-- ∏_{v ∈ V} w(v) and Σ_{v ∈ V} w(v) in a commutative ring R.
+def ringProductOver (R V w : Set) : Set :=
+  finiteRingProduct(V, Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R),
+    Ring.one(R), w)
+
+def ringSumOver (R V w : Set) : Set := groupFiniteSum(Ring.additive(R), V, w)
+
+-- Section: The row polynomial ring and minors
+-- ZerosCostDegree.lean, MatrixPoly (Σ τ, n τ) R: polynomials in y_{(τ,a),i}.
+def rowVars (Φ n : Set) : Set := (Φ × n) × ℕ
+
+def rowPolyRing (R Φ n : Set) : Set := polynomialRing(R, rowVars(Φ, n))
+
+-- ZerosCostDegree.lean, minor R I: det(y_{(τ, I(a)), b})_{a,b<h} for an
+-- h-tuple I of rows at the place τ.
+def minorMatrix (R Φ n τ h I : Set) : Set :=
+  { (q, X(R, rowVars(Φ, n), ((τ, I(fst(q))), snd(q)))) | q ∈ h × h }
+
+def rowMinor (R Φ n τ h I : Set) : Set :=
+  matDet(rowPolyRing(R, Φ, n), h, minorMatrix(R, Φ, n, τ, h, I))
+
+-- Section: Fillings and Weyl indices
+-- The boxes (τ, (h, (j, s))) of the column diagrams with heights h < N
+-- and κ(τ, h) columns of height h, and the columns (τ, (h, j)).
+def weylBoxes (Φ N κ : Set) : Set :=
+  { b ∈ Φ × (N × (ℕ × ℕ)) |
+    fst(snd(snd(b))) ∈ κ((fst(b), fst(snd(b)))) ∧ snd(snd(snd(b))) ∈ fst(snd(b)) }
+
+def weylColumns (Φ N κ : Set) : Set :=
+  { c ∈ Φ × (N × ℕ) | snd(snd(c)) ∈ κ((fst(c), fst(snd(c)))) }
+
+-- The entries of column c = (τ, (h, j)) of a filling i, s ↦ i(τ, h, j, s).
+def fillingColumn (i c : Set) : Set :=
+  { (s, i((fst(c), (fst(snd(c)), (snd(snd(c)), s))))) | s ∈ fst(snd(c)) }
+
+-- Column (h, j) comes before column (h2, j2) at a place: h > h2, or h = h2
+-- and j < j2.
+predicate ColumnBefore (h j h2 j2 : Set) := h2 ∈ h ∨ (h = h2 ∧ j ∈ j2)
+
+-- The standard (semistandard) fillings: entries strictly increase down
+-- each column and weakly increase along each row.
+predicate StandardFilling (Φ n κ i : Set) :=
+  FunctionBetween(i, weylBoxes(Φ, cardinality(n), κ), n) ∧
+  (∀ b ∈ weylBoxes(Φ, cardinality(n), κ), ∀ s2 ∈ fst(snd(b)),
+    snd(snd(snd(b))) ∈ s2 →
+      i(b) ∈ i((fst(b), (fst(snd(b)), (fst(snd(snd(b))), s2))))) ∧
+  (∀ b ∈ weylBoxes(Φ, cardinality(n), κ), ∀ b2 ∈ weylBoxes(Φ, cardinality(n), κ),
+    fst(b) = fst(b2) → snd(snd(snd(b))) = snd(snd(snd(b2))) →
+    ColumnBefore(fst(snd(b)), fst(snd(snd(b))), fst(snd(b2)), fst(snd(snd(b2)))) →
+      i(b) ⊆ i(b2))
+
+-- ZerosCostDegree.lean, WeylIndex n κ (StdTableau of each κ_τ): the
+-- standard fillings of the diagrams of κ with entries in the rows n.
+def weylIndexSet (Φ n κ : Set) : Set :=
+  { i ∈ functionSpace(weylBoxes(Φ, cardinality(n), κ), n) | StandardFilling(Φ, n, κ, i) }
+
+-- Section: The basis and the determinant powers
+-- ZerosCostDegree.lean, nablaBasis R n κ i = ∏_τ tableauPoly (i τ): the
+-- product over the columns of i of the minors on their entries.
+def basisFactors (R Φ n κ i : Set) : Set :=
+  { (c, rowMinor(R, Φ, n, fst(c), fst(snd(c)), fillingColumn(i, c))) |
+    c ∈ weylColumns(Φ, cardinality(n), κ) }
+
+def nablaBasis (R Φ n κ i : Set) : Set :=
+  ringProductOver(rowPolyRing(R, Φ, n), weylColumns(Φ, cardinality(n), κ),
+    basisFactors(R, Φ, n, κ, i))
+
+-- ZerosCostDegree.lean, detPow R n e = ∏_τ det(y_{(τ,a),b})_{a,b ∈ n}^{e_τ}
+-- (the rows in their order, the first |n| columns).
+def fullMinorMatrix (R Φ n τ : Set) : Set :=
+  { (q, X(R, rowVars(Φ, n), ((τ, fst(q)), snd(q)))) | q ∈ n × n }
+
+def detPowFactors (R Φ n e : Set) : Set :=
+  { (τ, Ring.pow(rowPolyRing(R, Φ, n),
+      matDet(rowPolyRing(R, Φ, n), n, fullMinorMatrix(R, Φ, n, τ)), e(τ))) | τ ∈ Φ }
+
+def detPow (R Φ n e : Set) : Set :=
+  ringProductOver(rowPolyRing(R, Φ, n), Φ, detPowFactors(R, Φ, n, e))
+
+-- ZerosCostDegree.lean, highestPoly R κ N: ∏_τ ∏_{h<N} (leading h×h minor)^{κ(τ,h)}.
+def leadingRows (h : Set) : Set := { (s, s) | s ∈ h }
+
+def highestFactors (R Φ n κ : Set) : Set :=
+  { (c, rowMinor(R, Φ, n, fst(c), fst(snd(c)), leadingRows(fst(c)))) |
+    c ∈ weylColumns(Φ, cardinality(n), κ) }
+
+def highestPoly (R Φ n κ : Set) : Set :=
+  ringProductOver(rowPolyRing(R, Φ, n), weylColumns(Φ, cardinality(n), κ),
+    highestFactors(R, Φ, n, κ))
+
+-- ZerosCostDegree.lean, diagramWeight N κ: (τ, i) ↦ Σ_{i<h<N} κ(τ, h).
+def diagramHeights (N i : Set) : Set := { h ∈ N | i ∈ h }
+
+def diagramCounts (κ τ : Set) : Set := { (h, κ((τ, h))) | h ∈ ℕ }
+
+def diagramWeight (Φ N κ : Set) : Set :=
+  { (x, natSum(diagramHeights(N, snd(x)), diagramCounts(κ, fst(x)))) | x ∈ Φ × ℕ }
+
+-- ZerosCostDegree.lean, schurDetExp n n′ κ: τ ↦ κ(τ, |n|) if |n| < |n′|,
+-- else 0.
+def schurDetExpValue (n n2 κ τ : Set) : Set :=
+  ⋃({ k ∈ ℕ | (cardinality(n) ∈ cardinality(n2) ∧ k = κ((τ, cardinality(n)))) ∨
+    (cardinality(n) ∉ cardinality(n2) ∧ k = 0) })
+
+def schurDetExp (Φ n n2 κ : Set) : Set := { (τ, schurDetExpValue(n, n2, κ, τ)) | τ ∈ Φ }
+
+-- ZerosCostDegree.lean, FitsRanks n n′ κ (rows of the same size at every
+-- place): |n| ≤ |n′| and κ_τ(h) = 0 for |n| < h < |n′|.
+predicate FitsRanks (Φ n n2 κ : Set) :=
+  cardinality(n) ≤ cardinality(n2) ∧
+  ∀ τ ∈ Φ, ∀ h ∈ ℕ, cardinality(n) < h → h < cardinality(n2) → κ((τ, h)) = (0:N)
+
+-- Section: Borel semi-invariants
+-- ZerosCostDegree.lean, borelMul and nabla R fst l: the f with
+-- f(yβ) = ∏ β_{τ,ii}^{l(τ,i)} f(y) for upper triangular β_τ, over every
+-- commutative R-algebra A; (yβ)_{(τ,a),j} = Σ_{i≤j} y_{(τ,a),i} β_τ(i, j).
+def borelTerms (A y β v : Set) : Set :=
+  { (i, call2(Ring.mul(Algebra.ring(A)), y((fst(v), i)), β((fst(fst(v)), (i, snd(v)))))) |
+    i ∈ succ(snd(v)) }
+
+def borelProduct (A Φ n y β : Set) : Set :=
+  { (v, ringSumOver(Algebra.ring(A), succ(snd(v)), borelTerms(A, y, β, v))) | v ∈ rowVars(Φ, n) }
+
+def borelCharacterFactors (A Φ l β : Set) : Set :=
+  { (x, Ring.pow(Algebra.ring(A), β((fst(x), (snd(x), snd(x)))), l(x))) | x ∈ Φ × ℕ }
+
+predicate BorelSemiInvariant (R Φ n l f : Set) :=
+  f ∈ Ring.carrier(rowPolyRing(R, Φ, n)) ∧
+  ∀ A, Algebra(A) → Algebra.base(A) = R → CommRing(Algebra.ring(A)) →
+    ∀ y ∈ functionSpace(rowVars(Φ, n), algebraCarrier(A)),
+    ∀ β ∈ functionSpace(Φ × (ℕ × ℕ), algebraCarrier(A)),
+      mvAeval(A, rowVars(Φ, n), borelProduct(A, Φ, n, y, β))(f) =
+        call2(Ring.mul(Algebra.ring(A)),
+          ringProductOver(Algebra.ring(A), functionSupport(l, Φ × ℕ, 0),
+            borelCharacterFactors(A, Φ, l, β)),
+          mvAeval(A, rowVars(Φ, n), y)(f))
+
+-- ZerosCostDegree.lean, nablaFam R n κ: the semi-invariants of weight
+-- diagramWeight N κ.
+def nablaModuleSet (R Φ n κ : Set) : Set :=
+  { f ∈ Ring.carrier(rowPolyRing(R, Φ, n)) |
+    BorelSemiInvariant(R, Φ, n, diagramWeight(Φ, cardinality(n), κ), f) }
+
+-- Section: Row substitution and the Schur matrix
+-- ZerosCostDegree.lean, rowSubst z: y_{(τ,b),i} ↦ Σ_a z_τ(b, a) y_{(τ,a),i}
+-- for z_τ of size n′ × n.
+def rowSubstTerms (R Φ n z v : Set) : Set :=
+  { (a, call2(Ring.mul(rowPolyRing(R, Φ, n)),
+      mvC(R, rowVars(Φ, n), z(fst(fst(v)))((snd(fst(v)), a))),
+      X(R, rowVars(Φ, n), ((fst(fst(v)), a), snd(v))))) | a ∈ n }
+
+def rowSubstImages (R Φ n n2 z : Set) : Set :=
+  { (v, ringSumOver(rowPolyRing(R, Φ, n), n, rowSubstTerms(R, Φ, n, z, v))) |
+    v ∈ rowVars(Φ, n2) }
+
+def rowSubst (R Φ n n2 z : Set) : Set :=
+  mvBind(R, rowVars(Φ, n2), rowVars(Φ, n), rowSubstImages(R, Φ, n, n2, z))
+
+-- Σ_j c_j b_j D for a coefficient family c on the Weyl indices.
+def expansionTerms (R Φ n κ D c : Set) : Set :=
+  { (j, call2(Ring.mul(rowPolyRing(R, Φ, n)), mvC(R, rowVars(Φ, n), c(j)),
+      call2(Ring.mul(rowPolyRing(R, Φ, n)), nablaBasis(R, Φ, n, κ, j), D))) |
+    j ∈ weylIndexSet(Φ, n, κ) }
+
+def basisExpansion (R Φ n κ D c : Set) : Set :=
+  ringSumOver(rowPolyRing(R, Φ, n), weylIndexSet(Φ, n, κ), expansionTerms(R, Φ, n, κ, D, c))
+
+-- ZerosCostDegree.lean, schur κ z: row i′ of S_κ(z) is the unique
+-- coefficient family c with Σ_j c_j b_j(y) D(y) = b′_{i′}(zy),
+-- D = detPow(schurDetExp n n′ κ).
+def schurRow (R Φ n n2 κ z i2 : Set) : Set :=
+  ⋃({ c ∈ functionSpace(weylIndexSet(Φ, n, κ), Ring.carrier(R)) |
+    basisExpansion(R, Φ, n, κ, detPow(R, Φ, n, schurDetExp(Φ, n, n2, κ)), c) =
+      rowSubst(R, Φ, n, n2, z)(nablaBasis(R, Φ, n2, κ, i2)) })
+
+def schurMatrix (R Φ n n2 κ z : Set) : Set :=
+  { (q, schurRow(R, Φ, n, n2, κ, z, fst(q))(snd(q))) |
+    q ∈ weylIndexSet(Φ, n2, κ) × weylIndexSet(Φ, n, κ) }
+
+-- Section: The Fock pairing and jets
+-- ZerosCostDegree.lean, jet R P F = Σ_d d! P_d F_d for a polynomial P and a
+-- series F in the variables I, and fockPairing R P Q = jet R P Q.
+def schurFactorials (R I m : Set) : Set :=
+  { (i, ringNat(Ring.add(R), Ring.zero(R), Ring.one(R), m(i) !)) | i ∈ I }
+
+def schurMonomialFactorial (R I m : Set) : Set :=
+  ringProductOver(R, functionSupport(m, I, 0), schurFactorials(R, I, m))
+
+def fockJetTerms (R I P F : Set) : Set :=
+  { (m, call2(Ring.mul(R), schurMonomialFactorial(R, I, m), call2(Ring.mul(R), P(m), F(m)))) |
+    m ∈ mvSupport(R, I, P) }
+
+def fockJet (R I P F : Set) : Set := ringSumOver(R, mvSupport(R, I, P), fockJetTerms(R, I, P, F))
+
+def fockPairing (R I P Q : Set) : Set := fockJet(R, I, P, Q)
+
+-- The ring of matrix variables z_{τ,b,c} (τ ∈ Φ, b ∈ n′, c ∈ n) and the
+-- generic matrices Z_τ = (z_{τ,b,c}) over it.
+def matrixVars (Φ n n2 : Set) : Set := Φ × (n2 × n)
+
+def genericMatrix (R Φ n n2 τ : Set) : Set :=
+  { (q, X(R, matrixVars(Φ, n, n2), (τ, q))) | q ∈ n2 × n }
+
+def genericMatrices (R Φ n n2 : Set) : Set := { (τ, genericMatrix(R, Φ, n, n2, τ)) | τ ∈ Φ }
+
+-- DataProduct.lean, schurJet κ Θ i′ i: the jet of the series Θ in the
+-- matrix variables along the polynomial entry S_κ(Z)_{i′,i}.
+def schurJetEntry (R Φ n n2 κ Θ i2 i : Set) : Set :=
+  fockJet(R, matrixVars(Φ, n, n2),
+    schurMatrix(polynomialRing(R, matrixVars(Φ, n, n2)), Φ, n, n2, κ,
+      genericMatrices(R, Φ, n, n2))((i2, i)), Θ)
+
+-- JetDivisibility.lean, norm_schurJet_le, the charge
+-- m = Σ_τ Σ_{h<N} Σ_j Σ_s g((τ, h), i′(τ, h, j, s)) of the boxes of the row
+-- filling i′ (N = |n′|).
+def chargedBoxes (N i2 : Set) : Set := { b ∈ domain(i2) | fst(snd(b)) ∈ N }
+
+def chargeWeights (N g i2 : Set) : Set :=
+  { (b, g(((fst(b), fst(snd(b))), i2(b)))) | b ∈ chargedBoxes(N, i2) }
+
+def rowCharge (Φ N g i2 : Set) : Set := natSum(chargedBoxes(N, i2), chargeWeights(N, g, i2))
+
+-- Section: The kernel, the Gram matrix and evaluation vectors
+-- ZerosCostDegree.lean, weylEval R n κ y i = b_i(y) for an array y.
+def weylEval (R Φ n κ y : Set) : Set :=
+  { (i, evaluationAt(R, rowVars(Φ, n), y)(nablaBasis(R, Φ, n, κ, i))) |
+    i ∈ weylIndexSet(Φ, n, κ) }
+
+-- The doubled row variables (x and y, tagged 0 and 1) and the embeddings of
+-- the row ring as the x- and the y-polynomials.
+def doubledVars (Φ n : Set) : Set := 2 × rowVars(Φ, n)
+
+def taggedVariables (R Φ n t : Set) : Set :=
+  { (v, X(R, doubledVars(Φ, n), (t, v))) | v ∈ rowVars(Φ, n) }
+
+def tagPoly (R Φ n t P : Set) : Set :=
+  mvBind(R, rowVars(Φ, n), doubledVars(Φ, n), taggedVariables(R, Φ, n, t))(P)
+
+-- ZerosCostDegree.lean, weylKernel n κ y: K(x, y) = f(yᵀx), f = highestPoly,
+-- taken blockwise with the first N columns of y: f(w) with
+-- w_{(τ,c),k} = Σ_{a ∈ n} y_{(τ,a),c} x_{(τ,a),k} (c ∈ n read as a column).
+def kernelTerms (R Φ n v : Set) : Set :=
+  { (a, call2(Ring.mul(polynomialRing(R, doubledVars(Φ, n))),
+      X(R, doubledVars(Φ, n), (1, ((fst(fst(v)), a), snd(fst(v))))),
+      X(R, doubledVars(Φ, n), (0, ((fst(fst(v)), a), snd(v)))))) | a ∈ n }
+
+def kernelImages (R Φ n : Set) : Set :=
+  { (v, ringSumOver(polynomialRing(R, doubledVars(Φ, n)), n, kernelTerms(R, Φ, n, v))) |
+    v ∈ rowVars(Φ, n) }
+
+def weylKernel (R Φ n κ : Set) : Set :=
+  mvBind(R, rowVars(Φ, n), doubledVars(Φ, n), kernelImages(R, Φ, n))(highestPoly(R, Φ, n, κ))
+
+-- Σ_{i,j} G_{ij} b_i(x) b_j(y).
+def gramKernelTerms (Φ n κ G : Set) : Set :=
+  { (q, call2(Ring.mul(polynomialRing(integerRing, doubledVars(Φ, n))),
+      mvC(integerRing, doubledVars(Φ, n), G(q)),
+      call2(Ring.mul(polynomialRing(integerRing, doubledVars(Φ, n))),
+        tagPoly(integerRing, Φ, n, 0, nablaBasis(integerRing, Φ, n, κ, fst(q))),
+        tagPoly(integerRing, Φ, n, 1, nablaBasis(integerRing, Φ, n, κ, snd(q)))))) |
+    q ∈ weylIndexSet(Φ, n, κ) × weylIndexSet(Φ, n, κ) }
+
+-- ZerosCostDegree.lean, weylGram n κ: the unique integer matrix G with
+-- K(x, y) = Σ_{i,j} G_{ij} b_i(x) b_j(y).
+def weylGram (Φ n κ : Set) : Set :=
+  ⋃({ G ∈ matrixSpace(integerRing, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ)) |
+    ringSumOver(polynomialRing(integerRing, doubledVars(Φ, n)),
+      weylIndexSet(Φ, n, κ) × weylIndexSet(Φ, n, κ), gramKernelTerms(Φ, n, κ, G)) =
+      weylKernel(integerRing, Φ, n, κ) })
+
+-- ZerosCostDegree.lean, weylGramOver: G mapped into a ring R.
+def weylGramOver (R Φ n κ : Set) : Set :=
+  { (q, intCastMap(R)(weylGram(Φ, n, κ)(q))) |
+    q ∈ weylIndexSet(Φ, n, κ) × weylIndexSet(Φ, n, κ) }
+
+-- ZerosCostDegree.lean, toPoly ξ = Σ_i (Gξ)_i b_i.
+def toPolyTerms (R Φ n κ ξ : Set) : Set :=
+  { (i, call2(Ring.mul(rowPolyRing(R, Φ, n)),
+      mvC(R, rowVars(Φ, n),
+        mulVec(R, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ), weylGramOver(R, Φ, n, κ), ξ)(i)),
+      nablaBasis(R, Φ, n, κ, i))) | i ∈ weylIndexSet(Φ, n, κ) }
+
+def toPoly (R Φ n κ ξ : Set) : Set :=
+  ringSumOver(rowPolyRing(R, Φ, n), weylIndexSet(Φ, n, κ), toPolyTerms(R, Φ, n, κ, ξ))
+
+-- ZerosCostDegree.lean, hookNumber N κ = ⟨f, f⟩ for f = highestPoly, an
+-- integer.
+def hookNumber (Φ n κ : Set) : Set :=
+  fockPairing(integerRing, rowVars(Φ, n), highestPoly(integerRing, Φ, n, κ),
+    highestPoly(integerRing, Φ, n, κ))
+
+-- ZerosCostDegree.lean, tableauWeight i τ a: the number of entries of i at
+-- τ equal to a.
+def tableauWeight (i τ a : Set) : Set :=
+  cardinality({ b ∈ domain(i) | fst(b) = τ ∧ i(b) = a })
+
+-- ZerosCostDegree.lean, boxes κ N = Σ_τ Σ_{h<N} h κ(τ, h), the number of
+-- boxes below height N.
+def boxCount (Φ N κ : Set) : Set := cardinality(weylBoxes(Φ, N, κ))
+
+-- ZerosCostDegree.lean, permArray e: the array with entry 1 at row (τ, a),
+-- column i exactly when e_τ(a) = i.
+def permEntry (R e v : Set) : Set :=
+  ⋃({ c ∈ Ring.carrier(R) | (e(fst(fst(v)))(snd(fst(v))) = snd(v) ∧ c = Ring.one(R)) ∨
+    (e(fst(fst(v)))(snd(fst(v))) ≠ snd(v) ∧ c = Ring.zero(R)) })
+
+def permArray (R Φ n e : Set) : Set := { (v, permEntry(R, e, v)) | v ∈ rowVars(Φ, n) }

@@ -1,0 +1,1667 @@
+-- Topological groups, rings, and modules: groups, rings, and modules with
+-- a topology on their carrier under which the operations are continuous;
+-- translations as homeomorphisms; open and closed subgroups; the
+-- quotient topology and quotients of topological groups; continuity of
+-- homomorphisms; profinite groups and their open normal subgroups; and ℝ
+-- as a topological field.
+-- Part of the GRH blueprint.
+-- Planned home: Topology/Algebra/Group.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Topology.Groups
+import GRH.Topology.Compactness
+import Grace.Cumulus.Algebra.Group.Quotient
+import Grace.Cumulus.Algebra.Module.Basic
+import Grace.Cumulus.Algebra.Group.Restricted
+import Grace.Cumulus.Real.Field
+
+section TopologicalGroups
+
+-- Section: Definitions
+-- A topological group is a group G with a topological space X on its
+-- carrier under which multiplication X × X → X and inversion X → X are
+-- continuous (Mathlib's IsTopologicalGroup). The group is written
+-- multiplicatively; an additive group is the same structure with its
+-- addition in the mul slot, as Cumulus's AbelianGroup is.
+predicate TopologicalGroup (G X : Set) :=
+  Group(G) ∧ TopologicalSpace(X) ∧
+  TopologicalSpace.carrier(X) = Group.carrier(G) ∧
+  Group.mul(G) : productSpace(X, X) ⇒ X ∧
+  Group.inv(G) : X ⇒ X
+
+-- A topological ring: the additive group is a topological group and
+-- multiplication is continuous. A topological module over a topological
+-- ring: the additive group is a topological group and the action
+-- R × M → M is continuous (Mathlib's ContinuousSMul with
+-- IsTopologicalAddGroup).
+predicate TopologicalRing (R X : Set) :=
+  Ring(R) ∧ TopologicalGroup(Ring.additive(R), X) ∧
+  Ring.mul(R) : productSpace(X, X) ⇒ X
+predicate TopologicalModule (M R X Y : Set) :=
+  Module(M, R) ∧ TopologicalRing(R, X) ∧
+  TopologicalGroup(Module.additive(M), Y) ∧
+  Module.smul(M) : productSpace(X, Y) ⇒ Y
+
+-- The quotient topology of the space X by an equivalence relation r on
+-- its carrier: a set of classes is open when the union of its classes is
+-- open. The quotient space is its bundled form.
+def quotientTopology (X r : Set) : Set :=
+  { V ∈ 𝒫(TopologicalSpace.carrier(X) ⧸ r) |
+    functionPreimage(quotientProjection(TopologicalSpace.carrier(X), r),
+      TopologicalSpace.carrier(X), V) ∈ TopologicalSpace.opens(X) }
+def quotientSpace (X r : Set) : Set :=
+  TopologicalSpace.mk(TopologicalSpace.carrier(X) ⧸ r, quotientTopology(X, r))
+
+-- The quotient of a topological group by a normal subgroup, with the
+-- quotient topology.
+def quotientGroupSpace (G X N : Set) : Set := quotientSpace(X, cosetRelation(G, N))
+
+-- An open subgroup (Mathlib's OpenSubgroup), a closed subgroup, the
+-- closure of a subgroup.
+predicate OpenSubgroup (H G X : Set) :=
+  Subgroup(H, G) ∧ H ∈ TopologicalSpace.opens(X)
+predicate ClosedSubgroup (H G X : Set) := Subgroup(H, G) ∧ Closed(X, H)
+
+-- A profinite group: a topological group whose space is profinite.
+predicate ProfiniteGroup (G X : Set) := TopologicalGroup(G, X) ∧ Profinite(X)
+
+-- Application of a graph of pairs that is functional: r(x) = y when
+-- (x, y) ∈ r, read off with domain(r) and range(r).
+theorem pairGraph.domain_contains (x y r : Set)
+  requires hPair : (x, y) ∈ r
+  shows x ∈ domain(r)
+proof
+  apply domain.membership.backward
+  constructor
+  unfold coordinateBound
+  apply set.union.backward
+  witness {x, y}
+  constructor
+  apply set.union.backward
+  witness (x, y)
+  constructor
+  exact hPair
+  simp [orderedPair, pair.membership]
+  exact pair.left
+  witness y
+  exact hPair
+
+theorem pairGraph.apply (r x y : Set)
+  requires pairs : ∀ p ∈ r, ∃ a, ∃ b, p = (a, b)
+  requires functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ r → (a, c) ∈ r → b = c
+  requires edge : (x, y) ∈ r
+  shows r(x) = y
+proof
+  have fn : r : domain(r) → range(r)
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros p hp
+      obtain ⟨a, b, pEq⟩ := pairs with p, hp
+      rw pEq at hp
+      rw pEq
+      exact product.pair with (pairGraph.domain_contains with hp), (range.contains with hp)
+    . unfold Functional
+      intros a b hb c hc
+      exact functional with a, b, c, hb, hc
+    . intros a ha
+      obtain ⟨b, hb⟩ := (domain.membership.forward with ha).right
+      exact ⟨b, (range.contains with hb), hb⟩
+  exact FunctionBetween.apply_value with fn, (pairGraph.domain_contains with edge), edge
+
+-- Left multiplication by g, as a graph on the carrier.
+def leftMulMap (G g : Set) : Set := { (x, Group.mul(G)(g, x)) | x ∈ Group.carrier(G) }
+
+theorem leftMulMap.apply (G g x : Set)
+  requires member : x ∈ Group.carrier(G)
+  shows leftMulMap(G, g)(x) = Group.mul(G)(g, x)
+proof
+  have edge : (x, Group.mul(G)(g, x)) ∈ leftMulMap(G, g)
+    apply leftMulMap.membership.backward
+    exact ⟨x, member, rfl⟩
+  have pairs : ∀ p ∈ leftMulMap(G, g), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := leftMulMap.membership.forward with hp
+    rw ← pEq
+    exact ⟨k, Group.mul(G)(g, k), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ leftMulMap(G, g) → (a, c) ∈ leftMulMap(G, g) → b = c
+    intros a b c hb hc
+    obtain ⟨k, hk, bEq⟩ := leftMulMap.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := leftMulMap.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem leftMulMap.function (G g : Set)
+  requires group : Group(G)
+  requires member : g ∈ Group.carrier(G)
+  shows leftMulMap(G, g) : Group.carrier(G) → Group.carrier(G)
+proof
+  unfold FunctionBetween
+  refine ⟨?_, ?_, ?_⟩
+  . unfold RelationBetween
+    intros p hp
+    obtain ⟨k, hk, pEq⟩ := leftMulMap.membership.forward with hp
+    rw ← pEq
+    exact product.pair with hk, (Group.mul_mem at G, g, k with group, member, hk)
+  . unfold Functional
+    intros a b hb c hc
+    obtain ⟨k, hk, bEq⟩ := leftMulMap.membership.forward with hb
+    obtain ⟨m, hm, cEq⟩ := leftMulMap.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  . intros x hx
+    refine ⟨Group.mul(G)(g, x), (Group.mul_mem at G, g, x with group, member, hx), ?_⟩
+    apply leftMulMap.membership.backward
+    exact ⟨x, hx, rfl⟩
+
+-- Section: Topological groups
+theorem TopologicalGroup.carrier (G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  shows X.carrier = G.carrier
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  exact carrierEq
+
+-- Fixing the first argument of a continuous map X × X → X gives a
+-- continuous map X → X; likewise the second.
+theorem productSpace.left_slice_continuous (X m g h : Set)
+  requires continuous : m : productSpace(X, X) ⇒ X
+  requires member : g ∈ X.carrier
+  requires function : h : X.carrier → X.carrier
+  requires values : ∀ x ∈ X.carrier, h(x) = m(g, x)
+  shows h : X ⇒ X
+proof
+  have space := Continuous.target with continuous
+  have parts := TopologicalSpace.parts with space
+  apply Continuous.mk with space, space, function
+  intros V hV
+  have sub := functionPreimage.subset at h, X.carrier, V
+  apply (nhds.open_iff at X, functionPreimage(h, X.carrier, V) with space, sub).backward
+  intros x hx
+  have xIn := sub with x, hx
+  have hxV := (functionPreimage.membership.forward with hx).right
+  have Vo := Open.of_mem at X, V with space, hV
+  have W := Open.mem with (Continuous.preimage_open at m, productSpace(X, X), X, V with continuous, Vo)
+  rw [productSpace.opens, productSpace.carrier] at W
+  have Wp := (productTopology.membership.forward with W).right
+  apply nhds.membership.backward
+  refine ⟨(powerset.membership_iff.backward with sub), ?_⟩
+  have pIn : (g, x) ∈ functionPreimage(m, X.carrier × X.carrier, V)
+    apply functionPreimage.of_apply with (product.pair with member, xIn)
+    have e := values with x, xIn
+    rw e at hxV
+    have same : m((g, x)) = m(g, x)
+      unfold Algebra.call2
+      rfl
+    rw same
+    exact hxV
+  obtain ⟨U, hU, U2, hU2, pBox, boxW⟩ := Wp with (g, x), pIn
+  obtain ⟨a1, a2⟩ := (product.pair_membership at g, x, U, U2).forward with pBox
+  refine ⟨U2, hU2, a2, ?_⟩
+  intros y hy
+  have Usub := IsTopology.subset with parts, hU2
+  have yIn := Usub with y, hy
+  apply functionPreimage.of_apply with yIn
+  rw (values with y, yIn)
+  have inBox : (g, y) ∈ U × U2
+    exact product.pair with a1, hy
+  have q := boxW with (g, y), inBox
+  have r := (functionPreimage.membership.forward with q).right
+  have same2 : m((g, y)) = m(g, y)
+    unfold Algebra.call2
+    rfl
+  rw same2 at r
+  exact r
+
+
+theorem productSpace.right_slice_continuous (X m g h : Set)
+  requires continuous : m : productSpace(X, X) ⇒ X
+  requires member : g ∈ X.carrier
+  requires function : h : X.carrier → X.carrier
+  requires values : ∀ x ∈ X.carrier, h(x) = m(x, g)
+  shows h : X ⇒ X
+proof
+  have space := Continuous.target with continuous
+  have parts := TopologicalSpace.parts with space
+  apply Continuous.mk with space, space, function
+  intros V hV
+  have sub := functionPreimage.subset at h, X.carrier, V
+  apply (nhds.open_iff at X, functionPreimage(h, X.carrier, V) with space, sub).backward
+  intros x hx
+  have xIn := sub with x, hx
+  have hxV := (functionPreimage.membership.forward with hx).right
+  have Vo := Open.of_mem at X, V with space, hV
+  have W := Open.mem with (Continuous.preimage_open at m, productSpace(X, X), X, V with continuous, Vo)
+  rw [productSpace.opens, productSpace.carrier] at W
+  have Wp := (productTopology.membership.forward with W).right
+  apply nhds.membership.backward
+  refine ⟨(powerset.membership_iff.backward with sub), ?_⟩
+  have pIn : (x, g) ∈ functionPreimage(m, X.carrier × X.carrier, V)
+    apply functionPreimage.of_apply with (product.pair with xIn, member)
+    have e := values with x, xIn
+    rw e at hxV
+    have same : m((x, g)) = m(x, g)
+      unfold Algebra.call2
+      rfl
+    rw same
+    exact hxV
+  obtain ⟨U, hU, U2, hU2, pBox, boxW⟩ := Wp with (x, g), pIn
+  obtain ⟨a1, a2⟩ := (product.pair_membership at x, g, U, U2).forward with pBox
+  refine ⟨U, hU, a1, ?_⟩
+  intros y hy
+  have Usub := IsTopology.subset with parts, hU
+  have yIn := Usub with y, hy
+  apply functionPreimage.of_apply with yIn
+  rw (values with y, yIn)
+  have inBox : (y, g) ∈ U × U2
+    exact product.pair with hy, a2
+  have q := boxW with (y, g), inBox
+  have r := (functionPreimage.membership.forward with q).right
+  have same2 : m((y, g)) = m(y, g)
+    unfold Algebra.call2
+    rfl
+  rw same2 at r
+  exact r
+
+-- Left and right translations and inversion are homeomorphisms.
+theorem TopologicalGroup.left_translation (G X g h : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : g ∈ G.carrier
+  requires function : h : X.carrier → X.carrier
+  requires values : ∀ x ∈ X.carrier, h(x) = G.mul(g, x)
+  shows Homeomorphism(h, X, X)
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  have gX : g ∈ X.carrier
+    rw carrierEq
+    exact member
+  have ig := Group.inv_mem at G, g with group, member
+  have igX : G.inv(g) ∈ X.carrier
+    rw carrierEq
+    exact ig
+  have cont := productSpace.left_slice_continuous at X, G.mul, g, h with mulCont, gX, function, values
+  have bij : BijectiveBetween(h, X.carrier, X.carrier)
+    unfold BijectiveBetween
+    constructor
+    . unfold InjectiveBetween
+      refine ⟨function, ?_⟩
+      intros x hx y hy z hz rx ry
+      have ex := FunctionBetween.apply_value with function, hx, rx
+      have ey := FunctionBetween.apply_value with function, hy, ry
+      rw (values with x, hx) at ex
+      rw (values with y, hy) at ey
+      rw carrierEq at hx
+      rw carrierEq at hy
+      have cx := inv_mul_cancel_left at G, g, x with group, member, hx
+      have cy := inv_mul_cancel_left at G, g, y with group, member, hy
+      rw [ex, ← ey, cy] at cx
+      symm
+      exact cx
+    . unfold SurjectiveBetween
+      refine ⟨function, ?_⟩
+      intros y hy
+      have yG : y ∈ G.carrier
+        rw ← carrierEq
+        exact hy
+      have xG := Group.mul_mem at G, G.inv(g), y with group, ig, yG
+      have xX : G.mul(G.inv(g), y) ∈ X.carrier
+        rw carrierEq
+        exact xG
+      refine ⟨G.mul(G.inv(g), y), xX, ?_⟩
+      have r := FunctionBetween.relates_apply with function, xX
+      rw [(values with G.mul(G.inv(g), y), xX), (mul_inv_cancel_left at G, g, y with group, member, yG)] at r
+      exact r
+  have cfn := converse.function_of_bijective with bij
+  have cvals : ∀ y ∈ X.carrier, converse(h, X.carrier, X.carrier)(y) = G.mul(G.inv(g), y)
+    intros y hy
+    have back := Bijective.apply_inverse with bij, hy
+    have cy := FunctionBetween.apply_closed with cfn, hy
+    rw (values with converse(h, X.carrier, X.carrier)(y), cy) at back
+    have cyG : converse(h, X.carrier, X.carrier)(y) ∈ G.carrier
+      rw ← carrierEq
+      exact cy
+    have c := inv_mul_cancel_left at G, g, converse(h, X.carrier, X.carrier)(y) with group, member, cyG
+    rw back at c
+    symm
+    exact c
+  have ccont := productSpace.left_slice_continuous at X, G.mul, G.inv(g), converse(h, X.carrier, X.carrier) with mulCont, igX, cfn, cvals
+  unfold Homeomorphism
+  exact ⟨cont, bij, ccont⟩
+
+theorem TopologicalGroup.right_translation (G X g h : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : g ∈ G.carrier
+  requires function : h : X.carrier → X.carrier
+  requires values : ∀ x ∈ X.carrier, h(x) = G.mul(x, g)
+  shows Homeomorphism(h, X, X)
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  have gX : g ∈ X.carrier
+    rw carrierEq
+    exact member
+  have ig := Group.inv_mem at G, g with group, member
+  have igX : G.inv(g) ∈ X.carrier
+    rw carrierEq
+    exact ig
+  have cont := productSpace.right_slice_continuous at X, G.mul, g, h with mulCont, gX, function, values
+  have bij : BijectiveBetween(h, X.carrier, X.carrier)
+    unfold BijectiveBetween
+    constructor
+    . unfold InjectiveBetween
+      refine ⟨function, ?_⟩
+      intros x hx y hy z hz rx ry
+      have ex := FunctionBetween.apply_value with function, hx, rx
+      have ey := FunctionBetween.apply_value with function, hy, ry
+      rw (values with x, hx) at ex
+      rw (values with y, hy) at ey
+      rw carrierEq at hx
+      rw carrierEq at hy
+      have cx := mul_inv_cancel_right at G, x, g with group, hx, member
+      have cy := mul_inv_cancel_right at G, y, g with group, hy, member
+      rw [ex, ← ey, cy] at cx
+      symm
+      exact cx
+    . unfold SurjectiveBetween
+      refine ⟨function, ?_⟩
+      intros y hy
+      have yG : y ∈ G.carrier
+        rw ← carrierEq
+        exact hy
+      have xG := Group.mul_mem at G, y, G.inv(g) with group, yG, ig
+      have xX : G.mul(y, G.inv(g)) ∈ X.carrier
+        rw carrierEq
+        exact xG
+      refine ⟨G.mul(y, G.inv(g)), xX, ?_⟩
+      have r := FunctionBetween.relates_apply with function, xX
+      rw [(values with G.mul(y, G.inv(g)), xX), (inv_mul_cancel_right at G, y, g with group, yG, member)] at r
+      exact r
+  have cfn := converse.function_of_bijective with bij
+  have cvals : ∀ y ∈ X.carrier, converse(h, X.carrier, X.carrier)(y) = G.mul(y, G.inv(g))
+    intros y hy
+    have back := Bijective.apply_inverse with bij, hy
+    have cy := FunctionBetween.apply_closed with cfn, hy
+    rw (values with converse(h, X.carrier, X.carrier)(y), cy) at back
+    have cyG : converse(h, X.carrier, X.carrier)(y) ∈ G.carrier
+      rw ← carrierEq
+      exact cy
+    have c := mul_inv_cancel_right at G, converse(h, X.carrier, X.carrier)(y), g with group, cyG, member
+    rw back at c
+    symm
+    exact c
+  have ccont := productSpace.right_slice_continuous at X, G.mul, G.inv(g), converse(h, X.carrier, X.carrier) with mulCont, igX, cfn, cvals
+  unfold Homeomorphism
+  exact ⟨cont, bij, ccont⟩
+
+theorem TopologicalGroup.inversion (G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  shows Homeomorphism(G.inv, X, X)
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  have fn := Continuous.function_between at G.inv, X, X with invCont
+  have bij : BijectiveBetween(G.inv, X.carrier, X.carrier)
+    unfold BijectiveBetween
+    constructor
+    . unfold InjectiveBetween
+      refine ⟨fn, ?_⟩
+      intros x hx y hy z hz rx ry
+      have ex := FunctionBetween.apply_value with fn, hx, rx
+      have ey := FunctionBetween.apply_value with fn, hy, ry
+      rw carrierEq at hx
+      rw carrierEq at hy
+      have ix := Group.inv_involutive at G, x with group, hx
+      have iy := Group.inv_involutive at G, y with group, hy
+      rw [ex, ← ey, iy] at ix
+      symm
+      exact ix
+    . unfold SurjectiveBetween
+      refine ⟨fn, ?_⟩
+      intros y hy
+      have yG : y ∈ G.carrier
+        rw ← carrierEq
+        exact hy
+      have xG := Group.inv_mem at G, y with group, yG
+      have xX : G.inv(y) ∈ X.carrier
+        rw carrierEq
+        exact xG
+      refine ⟨G.inv(y), xX, ?_⟩
+      have r := FunctionBetween.relates_apply with fn, xX
+      rw (Group.inv_involutive at G, y with group, yG) at r
+      exact r
+  have cfn := converse.function_of_bijective with bij
+  have same : converse(G.inv, X.carrier, X.carrier) = G.inv
+    apply FunctionBetween.ext with cfn, fn
+    intros y hy
+    have back := Bijective.apply_inverse with bij, hy
+    have cy := FunctionBetween.apply_closed with cfn, hy
+    have cyG : converse(G.inv, X.carrier, X.carrier)(y) ∈ G.carrier
+      rw ← carrierEq
+      exact cy
+    have c := Group.inv_involutive at G, converse(G.inv, X.carrier, X.carrier)(y) with group, cyG
+    rw back at c
+    symm
+    exact c
+  unfold Homeomorphism
+  rw same
+  exact ⟨invCont, bij, invCont⟩
+
+-- Translates of open sets are open.
+theorem TopologicalGroup.open_translate (G X g U : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : g ∈ G.carrier
+  requires open : U ∈ X.opens
+  shows leftCoset(G, g, U) ∈ X.opens
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have ig := Group.inv_mem at G, g with group, member
+  have igX : G.inv(g) ∈ X.carrier
+    rw carrierEq
+    exact ig
+  have fn : leftMulMap(G, G.inv(g)) : X.carrier → X.carrier
+    rw carrierEq
+    exact leftMulMap.function with group, ig
+  have vals : ∀ x ∈ X.carrier, leftMulMap(G, G.inv(g))(x) = G.mul(G.inv(g), x)
+    intros x hx
+    rw carrierEq at hx
+    exact leftMulMap.apply with hx
+  have cont := productSpace.left_slice_continuous at X, G.mul, G.inv(g), leftMulMap(G, G.inv(g)) with mulCont, igX, fn, vals
+  have Uo := Open.of_mem at X, U with space, open
+  have pre := Open.mem with (Continuous.preimage_open at leftMulMap(G, G.inv(g)), X, X, U with cont, Uo)
+  have same : leftCoset(G, g, U) = functionPreimage(leftMulMap(G, G.inv(g)), X.carrier, U)
+    ext y
+    constructor
+    . intro hy
+      obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+      have yX : y ∈ X.carrier
+        rw carrierEq
+        exact yG
+      apply functionPreimage.of_apply with yX
+      rw [(vals with y, yX), yEq]
+      have uX := (IsTopology.subset with (TopologicalSpace.parts with space), open) with u, hu
+      have uG : u ∈ G.carrier
+        rw ← carrierEq
+        exact uX
+      rw (inv_mul_cancel_left at G, g, u with group, member, uG)
+      exact hu
+    . intro hy
+      obtain ⟨yX, inU⟩ := functionPreimage.membership.forward with hy
+      have yG : y ∈ G.carrier
+        rw ← carrierEq
+        exact yX
+      rw (vals with y, yX) at inU
+      apply leftCoset.membership.backward
+      refine ⟨yG, G.mul(G.inv(g), y), inU, ?_⟩
+      rw (mul_inv_cancel_left at G, g, y with group, member, yG)
+  rw same
+  exact pre
+
+-- The neighborhoods of g are the translates of the neighborhoods of 1.
+theorem TopologicalGroup.nhds_translate (G X g N : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : g ∈ G.carrier
+  shows N ∈ nhds(X, g) ↔
+    N ⊆ X.carrier ∧ (∃ M ∈ nhds(X, G.one), leftCoset(G, g, M) ⊆ N)
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have parts := TopologicalSpace.parts with space
+  obtain ⟨subsets, whole, unions, intersections⟩ := parts
+  have oneG := Group.one_mem at G with group
+  have ig := Group.inv_mem at G, g with group, member
+  constructor
+  . intro hN
+    obtain ⟨NP, U, hU, gU, UN⟩ := nhds.membership.forward with hN
+    have Nsub := powerset.membership_iff.forward with NP
+    refine ⟨Nsub, leftCoset(G, G.inv(g), N), ?_, ?_⟩
+    . have tr := TopologicalGroup.open_translate at G, X, G.inv(g), U with topological, ig, hU
+      have oneIn : G.one ∈ leftCoset(G, G.inv(g), U)
+        apply leftCoset.membership.backward
+        refine ⟨oneG, g, gU, ?_⟩
+        rw (Group.inv_mul at G, g with group, member)
+      have csub : leftCoset(G, G.inv(g), N) ⊆ X.carrier
+        intros y hy
+        rw carrierEq
+        exact (leftCoset.membership.forward with hy).left
+      apply nhds.membership.backward
+      refine ⟨(powerset.membership_iff.backward with csub), leftCoset(G, G.inv(g), U), tr, oneIn, ?_⟩
+      intros y hy
+      obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+      apply leftCoset.membership.backward
+      exact ⟨yG, u, (UN with u, hu), yEq⟩
+    . intros y hy
+      obtain ⟨yG, m, hm, yEq⟩ := leftCoset.membership.forward with hy
+      obtain ⟨mG, n, hn, mEq⟩ := leftCoset.membership.forward with hm
+      have nX := Nsub with n, hn
+      have nG : n ∈ G.carrier
+        rw ← carrierEq
+        exact nX
+      rw [yEq, mEq, (mul_inv_cancel_left at G, g, n with group, member, nG)]
+      exact hn
+  . intro hN
+    obtain ⟨Nsub, M, hM, MN⟩ := hN
+    obtain ⟨MP, U, hU, oneU, UM⟩ := nhds.membership.forward with hM
+    have tr := TopologicalGroup.open_translate at G, X, g, U with topological, member, hU
+    have gIn : g ∈ leftCoset(G, g, U)
+      apply leftCoset.membership.backward
+      refine ⟨member, G.one, oneU, ?_⟩
+      rw (mul_one at G, g with group, member)
+    apply nhds.membership.backward
+    refine ⟨(powerset.membership_iff.backward with Nsub), leftCoset(G, g, U), tr, gIn, ?_⟩
+    intros y hy
+    obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+    have yc : y ∈ leftCoset(G, g, M)
+      apply leftCoset.membership.backward
+      exact ⟨yG, u, (UM with u, hu), yEq⟩
+    exact MN with y, yc
+
+-- Right multiplication by g, as a graph on the carrier.
+defgraph tgRightMul (G g : Set) (x ∈ Group.carrier(G)) : Group.carrier(G) :=
+  Group.mul(G)(x, g)
+requires group : Group(G) ∧ g ∈ Group.carrier(G)
+proof
+  obtain ⟨grp, gIn⟩ := group
+  exact Group.mul_mem at G, x, g with grp, member, gIn
+
+-- f(x) → a exactly when f(x) a⁻¹ → 1 (Mathlib's tendsto_sub_nhds_zero_iff
+-- in multiplicative form).
+theorem TopologicalGroup.tendsto_div_one_iff (G X f Y F a h : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : a ∈ G.carrier
+  requires values : f : Y → G.carrier
+  requires quotient : ∀ y ∈ Y, h(y) = G.mul(f(y), G.inv(a))
+  shows Tendsto(f, Y, F, nhds(X, a)) ↔ Tendsto(h, Y, F, nhds(X, G.one))
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have oneG := Group.one_mem at G with group
+  have ia := Group.inv_mem at G, a with group, member
+  have aX : a ∈ X.carrier
+    rw carrierEq
+    exact member
+  have oneX : G.one ∈ X.carrier
+    rw carrierEq
+    exact oneG
+  have req1 : Group(G) ∧ G.inv(a) ∈ G.carrier by exact ⟨group, ia⟩
+  have req2 : Group(G) ∧ a ∈ G.carrier by exact ⟨group, member⟩
+  have fn1 := tgRightMul.function with req1
+  have fn2 := tgRightMul.function with req2
+  rw ← carrierEq at fn1
+  rw ← carrierEq at fn2
+  have vals1 : ∀ x ∈ X.carrier, tgRightMul(G, G.inv(a))(x) = G.mul(x, G.inv(a))
+    intros x hx
+    rw carrierEq at hx
+    exact tgRightMul.value with req1, hx
+  have vals2 : ∀ x ∈ X.carrier, tgRightMul(G, a)(x) = G.mul(x, a)
+    intros x hx
+    rw carrierEq at hx
+    exact tgRightMul.value with req2, hx
+  have h1 := TopologicalGroup.right_translation at G, X, G.inv(a), tgRightMul(G, G.inv(a)) with topological, ia, fn1, vals1
+  have h2 := TopologicalGroup.right_translation at G, X, a, tgRightMul(G, a) with topological, member, fn2, vals2
+  have c1 := Homeomorphism.continuous with h1
+  have c2 := Homeomorphism.continuous with h2
+  have t1 := Continuous.tendsto with c1, aX
+  have t2 := Continuous.tendsto with c2, oneX
+  rw [(vals1 with a, aX), (Group.mul_inv at G, a with group, member)] at t1
+  rw [(vals2 with G.one, oneX), (one_mul at G, a with group, member)] at t2
+  constructor
+  . intro lim
+    unfold Tendsto
+    intros N hN
+    have P := t1 with N, hN
+    have pre := lim with functionPreimage(tgRightMul(G, G.inv(a)), X.carrier, N), P
+    have same : functionPreimage(h, Y, N) = functionPreimage(f, Y, functionPreimage(tgRightMul(G, G.inv(a)), X.carrier, N))
+      ext y
+      constructor
+      . intro hy
+        obtain ⟨yY, hyN⟩ := functionPreimage.membership.forward with hy
+        have fy := FunctionBetween.apply_closed with values, yY
+        have fyX : f(y) ∈ X.carrier
+          rw carrierEq
+          exact fy
+        rw (quotient with y, yY) at hyN
+        rw ← (vals1 with f(y), fyX) at hyN
+        exact functionPreimage.of_apply with yY, (functionPreimage.of_apply with fyX, hyN)
+      . intro hy
+        obtain ⟨yY, inner⟩ := functionPreimage.membership.forward with hy
+        obtain ⟨fyX, rN⟩ := functionPreimage.membership.forward with inner
+        rw (vals1 with f(y), fyX) at rN
+        apply functionPreimage.of_apply with yY
+        rw (quotient with y, yY)
+        exact rN
+    rw same
+    exact pre
+  . intro lim
+    unfold Tendsto
+    intros N hN
+    have P := t2 with N, hN
+    have pre := lim with functionPreimage(tgRightMul(G, a), X.carrier, N), P
+    have same : functionPreimage(f, Y, N) = functionPreimage(h, Y, functionPreimage(tgRightMul(G, a), X.carrier, N))
+      ext y
+      constructor
+      . intro hy
+        obtain ⟨yY, fyN⟩ := functionPreimage.membership.forward with hy
+        have fy := FunctionBetween.apply_closed with values, yY
+        have hyG := Group.mul_mem at G, f(y), G.inv(a) with group, fy, ia
+        have hyX : h(y) ∈ X.carrier
+          rw [carrierEq, (quotient with y, yY)]
+          exact hyG
+        have back : tgRightMul(G, a)(h(y)) = f(y)
+          rw [(vals2 with h(y), hyX), (quotient with y, yY), (inv_mul_cancel_right at G, f(y), a with group, fy, member)]
+        rw ← back at fyN
+        exact functionPreimage.of_apply with yY, (functionPreimage.of_apply with hyX, fyN)
+      . intro hy
+        obtain ⟨yY, inner⟩ := functionPreimage.membership.forward with hy
+        obtain ⟨hyX, rN⟩ := functionPreimage.membership.forward with inner
+        have fy := FunctionBetween.apply_closed with values, yY
+        rw [(vals2 with h(y), hyX), (quotient with y, yY), (inv_mul_cancel_right at G, f(y), a with group, fy, member)] at rN
+        exact functionPreimage.of_apply with yY, rN
+    rw same
+    exact pre
+
+-- Products and inverses of limits are limits.
+-- Neighborhoods of a and b whose products lie in a given neighborhood of
+-- a b.
+theorem TopologicalGroup.mul_nhds_at (G X a b U : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires aIn : a ∈ G.carrier
+  requires bIn : b ∈ G.carrier
+  requires nbhd : U ∈ nhds(X, G.mul(a, b))
+  shows ∃ A ∈ nhds(X, a), ∃ B ∈ nhds(X, b), ∀ x ∈ A, ∀ y ∈ B, G.mul(x, y) ∈ U
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  have aX : a ∈ X.carrier
+    rw carrierEq
+    exact aIn
+  have bX : b ∈ X.carrier
+    rw carrierEq
+    exact bIn
+  have pt : (a, b) ∈ TopologicalSpace.carrier(productSpace(X, X))
+    rw productSpace.carrier
+    exact product.pair with aX, bX
+  have lim := Continuous.tendsto with mulCont, pt
+  have same : G.mul((a, b)) = G.mul(a, b)
+    unfold Algebra.call2
+    rfl
+  rw same at lim
+  have pre := lim with U, nbhd
+  have prodEq := nhds.product with space, space, aX, bX
+  rw prodEq at pre
+  rw productSpace.carrier at pre
+  have pre2 := filterProd.membership.forward with pre
+  obtain ⟨inPow, A, hA, B, hB, AB⟩ := pre2
+  refine ⟨A, hA, B, hB, ?_⟩
+  intros x hx y hy
+  have pair := product.pair with hx, hy
+  have inPre := AB with (x, y), pair
+  have inPre2 := functionPreimage.membership.forward with inPre
+  have same2 : G.mul((x, y)) = G.mul(x, y)
+    unfold Algebra.call2
+    rfl
+  rw ← same2
+  exact inPre2.right
+
+-- For every neighborhood U of 1 there is a neighborhood V of 1 with
+-- V V⁻¹ ⊆ U.
+theorem TopologicalGroup.exists_nhds_div (G X U : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires neighborhood : U ∈ nhds(X, G.one)
+  shows ∃ V ∈ nhds(X, G.one),
+    ∀ x ∈ V, ∀ y ∈ V, G.mul(x, G.inv(y)) ∈ U
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have oneG := Group.one_mem at G with group
+  have oneX : G.one ∈ X.carrier
+    rw carrierEq
+    exact oneG
+  have Un : U ∈ nhds(X, G.mul(G.one, G.one))
+    rw (one_mul at G, G.one with group, oneG)
+    exact neighborhood
+  obtain ⟨A, hA, B, hB, AB⟩ := TopologicalGroup.mul_nhds_at at G, X, G.one, G.one, U with topological, oneG, oneG, Un
+  have lim := Continuous.tendsto with invCont, oneX
+  rw (inv_one at G with group) at lim
+  have pre := lim with B, hB
+  have nf := nhds.is_filter at X, G.one with space, oneX
+  obtain ⟨filt, _⟩ := nf
+  obtain ⟨_, _, _, inter⟩ := filt
+  have V := inter with A, hA, functionPreimage(G.inv, X.carrier, B), pre
+  refine ⟨A ∩ functionPreimage(G.inv, X.carrier, B), V, ?_⟩
+  intros x hx y hy
+  obtain ⟨xA, _⟩ := intersection.membership.forward with hx
+  obtain ⟨_, yPre⟩ := intersection.membership.forward with hy
+  obtain ⟨_, iyB⟩ := functionPreimage.membership.forward with yPre
+  exact AB with x, xA, G.inv(y), iyB
+
+theorem TopologicalGroup.tendsto_mul (G X f g h Y F a b : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires memberA : a ∈ G.carrier
+  requires memberB : b ∈ G.carrier
+  requires valuesF : f : Y → G.carrier
+  requires valuesG : g : Y → G.carrier
+  requires product : ∀ y ∈ Y, h(y) = G.mul(f(y), g(y))
+  requires filter : IsFilter(Y, F)
+  requires limitF : Tendsto(f, Y, F, nhds(X, a))
+  requires limitG : Tendsto(g, Y, F, nhds(X, b))
+  shows Tendsto(h, Y, F, nhds(X, G.mul(a, b)))
+proof
+  have top2 := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := top2
+  unfold Tendsto
+  intros U hU
+  obtain ⟨A, hA, B, hB, AB⟩ := TopologicalGroup.mul_nhds_at with topological, memberA, memberB, hU
+  have preA := limitF with A, hA
+  have preB := limitG with B, hB
+  have both := IsFilter.inter with filter, preA, preB
+  have sub : functionPreimage(f, Y, A) ∩ functionPreimage(g, Y, B) ⊆ functionPreimage(h, Y, U)
+    intros y hy
+    have hy2 := intersection.membership.forward with hy
+    have a := functionPreimage.membership.forward with hy2.left
+    have b := functionPreimage.membership.forward with hy2.right
+    have e := product with y, a.left
+    apply functionPreimage.of_apply with a.left
+    rw e
+    exact AB with f(y), a.right, g(y), b.right
+  have within := functionPreimage.subset at h, Y, U
+  exact IsFilter.mono with filter, both, sub, within
+
+theorem TopologicalGroup.tendsto_inv (G X f h Y F a : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires member : a ∈ G.carrier
+  requires values : f : Y → G.carrier
+  requires inverse : ∀ y ∈ Y, h(y) = G.inv(f(y))
+  requires limit : Tendsto(f, Y, F, nhds(X, a))
+  shows Tendsto(h, Y, F, nhds(X, G.inv(a)))
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  have aX : a ∈ X.carrier
+    rw carrierEq
+    exact member
+  have lim := Continuous.tendsto with invCont, aX
+  unfold Tendsto
+  intros U hU
+  have pre := lim with U, hU
+  have preF := limit with functionPreimage(G.inv, X.carrier, U), pre
+  have eq : functionPreimage(h, Y, U) = functionPreimage(f, Y, functionPreimage(G.inv, X.carrier, U))
+    ext y
+    constructor
+    . intro hy
+      have hy2 := functionPreimage.membership.forward with hy
+      have fy := FunctionBetween.apply_closed with values, hy2.left
+      have e := inverse with y, hy2.left
+      have fyX : f(y) ∈ X.carrier
+        rw carrierEq
+        exact fy
+      have v := hy2.right
+      rw e at v
+      exact functionPreimage.of_apply with hy2.left, (functionPreimage.of_apply with fyX, v)
+    . intro hy
+      have hy2 := functionPreimage.membership.forward with hy
+      have hy3 := functionPreimage.membership.forward with hy2.right
+      have e := inverse with y, hy2.left
+      apply functionPreimage.of_apply with hy2.left
+      rw e
+      exact hy3.right
+  rw eq
+  exact preF
+
+-- A topological group is Hausdorff as soon as {1} is closed.
+theorem TopologicalGroup.hausdorff_iff (G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  shows Hausdorff(X) ↔ Closed(X, {G.one})
+proof
+  sorry
+
+-- A topological group is discrete as soon as {1} is open.
+theorem TopologicalGroup.discrete_iff (G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  shows DiscreteTopology(X) ↔ {G.one} ∈ X.opens
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have parts := TopologicalSpace.parts with space
+  obtain ⟨subsets, whole, unions, intersections⟩ := parts
+  have oneG := Group.one_mem at G with group
+  constructor
+  . intro disc
+    obtain ⟨_, opensEq⟩ := disc
+    rw opensEq
+    apply powerset.membership_iff.backward
+    intros y hy
+    simp at hy
+    rw [hy, carrierEq]
+    exact oneG
+  . intro oneOpen
+    have single : ∀ g ∈ X.carrier, {g} ∈ X.opens
+      intros g hg
+      have gG : g ∈ G.carrier
+        rw ← carrierEq
+        exact hg
+      have tr := TopologicalGroup.open_translate at G, X, g, {G.one} with topological, gG, oneOpen
+      have same : leftCoset(G, g, {G.one}) = {g}
+        ext y
+        constructor
+        . intro hy
+          obtain ⟨yG, h, hh, yEq⟩ := leftCoset.membership.forward with hy
+          simp at hh
+          rw [yEq, hh, (mul_one at G, g with group, gG)]
+          simp
+        . intro hy
+          simp at hy
+          apply leftCoset.membership.backward
+          have oneIn : G.one ∈ {G.one} by simp
+          have yG : y ∈ G.carrier
+            rw hy
+            exact gG
+          refine ⟨yG, G.one, oneIn, ?_⟩
+          rw (mul_one at G, g with group, gG)
+          exact hy
+      rw same at tr
+      exact tr
+    unfold DiscreteTopology
+    refine ⟨space, ?_⟩
+    apply Subset.antisymmetric
+    . intros U hU
+      exact subsets with U, hU
+    . intros U hU
+      have Usub := powerset.membership_iff.forward with hU
+      apply Open.of_local with space
+      intros x hx
+      have xx : x ∈ {x} by simp
+      have sub : {x} ⊆ U
+        intros y hy
+        simp at hy
+        rw hy
+        exact hx
+      exact ⟨{x}, (single with x, (Usub with x, hx)), xx, sub⟩
+
+theorem TopologicalGroup.discrete (G A : Set)
+  requires group : Group(G)
+  requires carrier : A = G.carrier
+  shows TopologicalGroup(G, discreteSpace(A))
+proof
+  have rfl0 : discreteSpace(A) = discreteSpace(A) by rfl
+  have dspace := discreteSpace.space at A, discreteSpace(A) with rfl0
+  have dd := discreteSpace.discrete at A, discreteSpace(A) with rfl0
+  obtain ⟨_, opensEq⟩ := dd
+  have cEq := discreteSpace.carrier at A
+  rw cEq at opensEq
+  have mulF := Group.operation_function at G with group
+  have invF := Group.inverse_function at G with group
+  rw ← carrier at mulF
+  rw ← carrier at invF
+  have pspace := productSpace.space at discreteSpace(A), discreteSpace(A) with dspace, dspace
+  unfold TopologicalGroup
+  refine ⟨group, dspace, ?_, ?_, ?_⟩
+  . rw [cEq, carrier]
+  . apply Continuous.mk with pspace, dspace
+    . rw [productSpace.carrier, cEq]
+      exact mulF
+    . intros V hV
+      rw [productSpace.carrier, productSpace.opens, cEq, opensEq]
+      apply productTopology.membership.backward
+      have sub : functionPreimage(G.mul, A × A, V) ⊆ A × A
+        intros p hp
+        exact (functionPreimage.membership.forward with hp).left
+      refine ⟨(powerset.membership_iff.backward with sub), ?_⟩
+      intros p hp
+      obtain ⟨pAA, pV⟩ := functionPreimage.membership.forward with hp
+      obtain ⟨_, a, ha, b, hb, pEq⟩ := product.membership.forward with pAA
+      have sa : {a} ⊆ A
+        intros y hy
+        simp at hy
+        rw hy
+        exact ha
+      have sb : {b} ⊆ A
+        intros y hy
+        simp at hy
+        rw hy
+        exact hb
+      have aa : a ∈ {a} by simp
+      have bb : b ∈ {b} by simp
+      refine ⟨{a}, (powerset.membership_iff.backward with sa), {b}, (powerset.membership_iff.backward with sb), ?_, ?_⟩
+      . rw pEq
+        exact product.pair with aa, bb
+      . intros q hq
+        obtain ⟨_, a2, ha2, b2, hb2, qEq⟩ := product.membership.forward with hq
+        simp at ha2
+        simp at hb2
+        rw [qEq, ha2, hb2, ← pEq]
+        exact hp
+  . apply Continuous.mk with dspace, dspace
+    . rw cEq
+      exact invF
+    . intros V hV
+      rw [cEq, opensEq]
+      apply powerset.membership_iff.backward
+      intros y hy
+      exact (functionPreimage.membership.forward with hy).left
+
+-- A subgroup with the subspace topology is a topological group.
+theorem TopologicalGroup.subgroup (G X H : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires subgroup : Subgroup(H, G)
+  shows TopologicalGroup(subgroupGroup(G, H), subspace(X, H))
+proof
+  sorry
+
+-- Section: Continuous homomorphisms
+-- A homomorphism of topological groups is continuous as soon as it is
+-- continuous at 1.
+theorem GroupHom.continuous_of_at_one (f G X H Y : Set)
+  requires topologicalG : TopologicalGroup(G, X)
+  requires topologicalH : TopologicalGroup(H, Y)
+  requires hom : f : G →* H
+  requires atOne : ContinuousAtPoint(f, X, Y, G.one)
+  shows f : X ⇒ Y
+proof
+  sorry
+
+-- The kernel of a continuous homomorphism into a Hausdorff group is a
+-- closed normal subgroup.
+theorem GroupHom.kernel_closed (f G X H Y : Set)
+  requires topologicalG : TopologicalGroup(G, X)
+  requires topologicalH : TopologicalGroup(H, Y)
+  requires hausdorff : Hausdorff(Y)
+  requires hom : f : G →* H
+  requires continuous : f : X ⇒ Y
+  shows ClosedSubgroup(kernel(f, G, H), G, X)
+proof
+  sorry
+
+-- Section: Open and closed subgroups
+theorem OpenSubgroup.closed (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires open : OpenSubgroup(H, G, X)
+  shows Closed(X, H)
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  obtain ⟨subH, Hopen⟩ := open
+  have Hsub := subH
+  obtain ⟨g2, HG, oneH, mulH, invH⟩ := Hsub
+  have HX : H ⊆ X.carrier
+    rw carrierEq
+    exact HG
+  unfold Closed
+  unfold IsClosed
+  refine ⟨HX, ?_⟩
+  have csub := complement.subset at X.carrier, H
+  apply (nhds.open_iff at X, complement(X.carrier, H) with space, csub).backward
+  intros x hx
+  obtain ⟨xX, xH⟩ := (complement.membership at x, X.carrier, H).forward with hx
+  have xG : x ∈ G.carrier
+    rw ← carrierEq
+    exact xX
+  have co := TopologicalGroup.open_translate at G, X, x, H with topological, xG, Hopen
+  have self := leftCoset.self at G, H, x with group, subH, xG
+  apply nhds.membership.backward
+  refine ⟨(powerset.membership_iff.backward with csub), leftCoset(G, x, H), co, self, ?_⟩
+  intros y hy
+  obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+  have yX : y ∈ X.carrier
+    rw carrierEq
+    exact yG
+  apply (complement.membership at y, X.carrier, H).backward
+  refine ⟨yX, ?_⟩
+  intro yH
+  apply xH
+  have iu := invH with u, hu
+  have m := mulH with y, yH, G.inv(u), iu
+  rw yEq at m
+  have uG := HG with u, hu
+  rw (mul_inv_cancel_right at G, x, u with group, xG, uG) at m
+  exact m
+
+-- Mathlib's Subgroup.isOpen_mono: a subgroup containing an open subgroup
+-- is open.
+theorem OpenSubgroup.mono (H K G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires open : OpenSubgroup(H, G, X)
+  requires subgroup : Subgroup(K, G)
+  requires inside : H ⊆ K
+  shows OpenSubgroup(K, G, X)
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  obtain ⟨subH, Hopen⟩ := open
+  have Ksub := subgroup
+  obtain ⟨g2, KG, oneK, mulK, invK⟩ := Ksub
+  have KX : K ⊆ X.carrier
+    rw carrierEq
+    exact KG
+  unfold OpenSubgroup
+  refine ⟨subgroup, ?_⟩
+  apply (nhds.open_iff at X, K with space, KX).backward
+  intros k hk
+  have kG := KG with k, hk
+  have co := TopologicalGroup.open_translate at G, X, k, H with topological, kG, Hopen
+  have self := leftCoset.self at G, H, k with group, subH, kG
+  apply nhds.membership.backward
+  refine ⟨(powerset.membership_iff.backward with KX), leftCoset(G, k, H), co, self, ?_⟩
+  intros y hy
+  obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+  rw yEq
+  exact mulK with k, hk, u, (inside with u, hu)
+
+-- A subgroup that is a neighborhood of 1 is open.
+theorem OpenSubgroup.of_nhds_one (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires subgroup : Subgroup(H, G)
+  requires neighborhood : H ∈ nhds(X, G.one)
+  shows OpenSubgroup(H, G, X)
+proof
+  have tg := topological
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  have Hsub := subgroup
+  obtain ⟨g2, HG, oneH, mulH, invH⟩ := Hsub
+  have HX : H ⊆ X.carrier
+    rw carrierEq
+    exact HG
+  obtain ⟨Hpow, U, Uopen, oneU, UH⟩ := nhds.membership.forward with neighborhood
+  unfold OpenSubgroup
+  refine ⟨subgroup, ?_⟩
+  apply (nhds.open_iff at X, H with space, HX).backward
+  intros h hh
+  have hG := HG with h, hh
+  have co := TopologicalGroup.open_translate at G, X, h, U with topological, hG, Uopen
+  have self : h ∈ leftCoset(G, h, U)
+    apply leftCoset.membership.backward
+    refine ⟨hG, G.one, oneU, ?_⟩
+    rw (mul_one at G, h with group, hG)
+  apply nhds.membership.backward
+  refine ⟨(powerset.membership_iff.backward with HX), leftCoset(G, h, U), co, self, ?_⟩
+  intros y hy
+  obtain ⟨yG, u, hu, yEq⟩ := leftCoset.membership.forward with hy
+  rw yEq
+  exact mulH with h, hh, u, (UH with u, hu)
+
+theorem OpenSubgroup.inter (H K G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires openH : OpenSubgroup(H, G, X)
+  requires openK : OpenSubgroup(K, G, X)
+  shows OpenSubgroup(H ∩ K, G, X)
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  obtain ⟨subsets, whole, unions, intersections⟩ := TopologicalSpace.parts with space
+  obtain ⟨subH, openHH⟩ := openH
+  obtain ⟨subK, openKK⟩ := openK
+  have sub := Subgroup.intersection at G, H, K with group, subH, subK
+  unfold OpenSubgroup
+  exact ⟨sub, (intersections with H, openHH, K, openKK)⟩
+
+theorem OpenSubgroup.whole (G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  shows OpenSubgroup(G.carrier, G, X)
+proof
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := topological
+  obtain ⟨subsets, whole, unions, intersections⟩ := TopologicalSpace.parts with space
+  have sub := Subgroup.whole at G with group
+  unfold OpenSubgroup
+  refine ⟨sub, ?_⟩
+  rw ← carrierEq
+  exact whole
+
+-- Preimages of open subgroups under continuous homomorphisms are open.
+theorem OpenSubgroup.preimage (f G X H Y K : Set)
+  requires topologicalG : TopologicalGroup(G, X)
+  requires topologicalH : TopologicalGroup(H, Y)
+  requires hom : f : G →* H
+  requires continuous : f : X ⇒ Y
+  requires open : OpenSubgroup(K, H, Y)
+  shows OpenSubgroup(functionPreimage(f, G.carrier, K), G, X)
+proof
+  have tg := topologicalG
+  obtain ⟨group, space, carrierEq, mulCont, invCont⟩ := tg
+  obtain ⟨sub, Kopen⟩ := open
+  have ps := GroupHom.preimage_subgroup at f, G, H, K with hom, sub
+  have Ko : Open(Y, K)
+    unfold Open
+    exact Kopen
+  have pre := Continuous.preimage_open at f, X, Y, K with continuous, Ko
+  unfold Open at pre
+  rw carrierEq at pre
+  unfold OpenSubgroup
+  exact ⟨ps, pre⟩
+
+-- An open subgroup of a compact group has finite index.
+theorem OpenSubgroup.finite_index (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires compact : Compact(X)
+  requires open : OpenSubgroup(H, G, X)
+  shows Finite(leftCosets(G, H))
+proof
+  sorry
+
+-- A closed subgroup of finite index is open.
+theorem ClosedSubgroup.open_of_finite_index (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires closed : ClosedSubgroup(H, G, X)
+  requires finite : Finite(leftCosets(G, H))
+  shows OpenSubgroup(H, G, X)
+proof
+  sorry
+
+-- The closure of a subgroup is a subgroup, normal if the subgroup is.
+theorem Subgroup.closure (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires subgroup : Subgroup(H, G)
+  shows ClosedSubgroup(closure(X, H), G, X)
+proof
+  sorry
+
+theorem NormalSubgroup.closure (N G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  shows NormalSubgroup(closure(X, N), G)
+proof
+  sorry
+
+-- An open subgroup contains an open normal subgroup when G is compact:
+-- the intersection of its finitely many conjugates.
+theorem OpenSubgroup.normal_core (H G X : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires compact : Compact(X)
+  requires open : OpenSubgroup(H, G, X)
+  shows ∃ N, NormalSubgroup(N, G) ∧ OpenSubgroup(N, G, X) ∧ N ⊆ H
+proof
+  sorry
+
+-- Section: The quotient topology
+theorem quotientTopology.is_topology (X r : Set)
+  requires space : TopologicalSpace(X)
+  requires equivalence : Equivalence(X.carrier, r)
+  shows TopologicalSpace(quotientSpace(X, r))
+proof
+  have parts := TopologicalSpace.parts with space
+  obtain ⟨subsets, whole, unions, intersections⟩ := parts
+  have pfn := quotientProjection.function at X.carrier, r with equivalence
+  unfold quotientSpace
+  apply TopologicalSpace.of_parts
+  unfold IsTopology
+  refine ⟨?_, ?_, ?_, ?_⟩
+  . intros V hV
+    exact (quotientTopology.membership.forward with hV).left
+  . apply quotientTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with (Subset.reflexive at X.carrier ⧸ r)), ?_⟩
+    apply Open.of_local with space
+    intros x hx
+    refine ⟨X.carrier, whole, (functionPreimage.membership.forward with hx).left, ?_⟩
+    intros y hy
+    exact functionPreimage.of_apply with hy, (FunctionBetween.apply_closed with pfn, hy)
+  . intros S hS
+    have sub : ⋃(S) ⊆ X.carrier ⧸ r
+      intros c hc
+      obtain ⟨V, hV, cV⟩ := union.membership.forward with hc
+      exact (powerset.membership_iff.forward with (quotientTopology.membership.forward with (hS with V, hV)).left) with c, cV
+    apply quotientTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with sub), ?_⟩
+    apply Open.of_local with space
+    intros x hx
+    obtain ⟨xX, pxU⟩ := functionPreimage.membership.forward with hx
+    obtain ⟨V, hV, pxV⟩ := union.membership.forward with pxU
+    have Vo := (quotientTopology.membership.forward with (hS with V, hV)).right
+    refine ⟨functionPreimage(quotientProjection(X.carrier, r), X.carrier, V), Vo, (functionPreimage.of_apply with xX, pxV), ?_⟩
+    intros y hy
+    obtain ⟨yX, pyV⟩ := functionPreimage.membership.forward with hy
+    exact functionPreimage.of_apply with yX, (union.membership.backward with ⟨V, hV, pyV⟩)
+  . intros V hV W hW
+    obtain ⟨VP, Vo⟩ := quotientTopology.membership.forward with hV
+    obtain ⟨WP, Wo⟩ := quotientTopology.membership.forward with hW
+    have sub : V ∩ W ⊆ X.carrier ⧸ r
+      intros c hc
+      exact (powerset.membership_iff.forward with VP) with c, (intersection.membership.forward with hc).left
+    apply quotientTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with sub), ?_⟩
+    apply Open.of_local with space
+    intros x hx
+    obtain ⟨xX, pxVW⟩ := functionPreimage.membership.forward with hx
+    obtain ⟨pxV, pxW⟩ := intersection.membership.forward with pxVW
+    have both := intersections with functionPreimage(quotientProjection(X.carrier, r), X.carrier, V), Vo, functionPreimage(quotientProjection(X.carrier, r), X.carrier, W), Wo
+    refine ⟨functionPreimage(quotientProjection(X.carrier, r), X.carrier, V) ∩ functionPreimage(quotientProjection(X.carrier, r), X.carrier, W), both, (intersection.membership.backward with (functionPreimage.of_apply with xX, pxV), (functionPreimage.of_apply with xX, pxW)), ?_⟩
+    intros y hy
+    obtain ⟨yV, yW⟩ := intersection.membership.forward with hy
+    obtain ⟨yX, pyV⟩ := functionPreimage.membership.forward with yV
+    obtain ⟨_, pyW⟩ := functionPreimage.membership.forward with yW
+    exact functionPreimage.of_apply with yX, (intersection.membership.backward with pyV, pyW)
+
+theorem quotientSpace.carrier (X r : Set)
+  shows TopologicalSpace.carrier(quotientSpace(X, r)) = X.carrier ⧸ r
+proof
+  unfold quotientSpace
+  simp [TopologicalSpace.mk.carrier]
+
+theorem quotientSpace.projection_continuous (X r : Set)
+  requires space : TopologicalSpace(X)
+  requires equivalence : Equivalence(X.carrier, r)
+  shows quotientProjection(X.carrier, r) : X ⇒ quotientSpace(X, r)
+proof
+  have qs := quotientTopology.is_topology at X, r with space, equivalence
+  have pfn := quotientProjection.function at X.carrier, r with equivalence
+  have cEq : TopologicalSpace.carrier(quotientSpace(X, r)) = X.carrier ⧸ r
+    unfold quotientSpace
+    topology_projections
+  have oEq : TopologicalSpace.opens(quotientSpace(X, r)) = quotientTopology(X, r)
+    unfold quotientSpace
+    topology_projections
+  apply Continuous.mk with space, qs
+  . rw cEq
+    exact pfn
+  . rw oEq
+    intros V hV
+    exact (quotientTopology.membership.forward with hV).right
+
+-- The universal property: a map out of the quotient is continuous exactly
+-- when its composite with the projection is.
+theorem quotientSpace.continuous_iff (X r f g Y : Set)
+  requires space : TopologicalSpace(X)
+  requires spaceY : TopologicalSpace(Y)
+  requires equivalence : Equivalence(X.carrier, r)
+  requires function : f : X.carrier ⧸ r → Y.carrier
+  requires composite : ∀ x ∈ X.carrier, g(x) = f(⟦x⟧[X.carrier, r])
+  requires functionG : g : X.carrier → Y.carrier
+  shows f : quotientSpace(X, r) ⇒ Y ↔ g : X ⇒ Y
+proof
+  have qs := quotientTopology.is_topology at X, r with space, equivalence
+  have cEq : TopologicalSpace.carrier(quotientSpace(X, r)) = X.carrier ⧸ r
+    unfold quotientSpace
+    topology_projections
+  have oEq : TopologicalSpace.opens(quotientSpace(X, r)) = quotientTopology(X, r)
+    unfold quotientSpace
+    topology_projections
+  have pfn := quotientProjection.function at X.carrier, r with equivalence
+  have pv : ∀ x ∈ X.carrier, quotientProjection(X.carrier, r)(x) = ⟦x⟧[X.carrier, r]
+    intros x hx
+    exact quotientProjection.value with equivalence, hx
+  have same : ∀ V, functionPreimage(g, X.carrier, V) = functionPreimage(quotientProjection(X.carrier, r), X.carrier, functionPreimage(f, X.carrier ⧸ r, V))
+    intro V
+    ext x
+    constructor
+    . intro hx
+      obtain ⟨xX, gxV⟩ := functionPreimage.membership.forward with hx
+      have px := FunctionBetween.apply_closed with pfn, xX
+      rw [(composite with x, xX), ← (pv with x, xX)] at gxV
+      exact functionPreimage.of_apply with xX, (functionPreimage.of_apply with px, gxV)
+    . intro hx
+      obtain ⟨xX, inner⟩ := functionPreimage.membership.forward with hx
+      obtain ⟨_, fpV⟩ := functionPreimage.membership.forward with inner
+      apply functionPreimage.of_apply with xX
+      rw [(composite with x, xX), ← (pv with x, xX)]
+      exact fpV
+  constructor
+  . intro fc
+    apply Continuous.mk with space, spaceY, functionG
+    intros V hV
+    rw (same at V)
+    have Vo : Open(Y, V)
+      unfold Open
+      exact hV
+    have pre := Continuous.preimage_open at f, quotientSpace(X, r), Y, V with fc, Vo
+    unfold Open at pre
+    rw [oEq, cEq] at pre
+    exact (quotientTopology.membership.forward with pre).right
+  . intro gc
+    apply Continuous.mk with qs, spaceY
+    . rw cEq
+      exact function
+    . intros V hV
+      rw [oEq, cEq]
+      have Vo : Open(Y, V)
+        unfold Open
+        exact hV
+      have pre := Continuous.preimage_open at g, X, Y, V with gc, Vo
+      unfold Open at pre
+      rw (same at V) at pre
+      have sub : functionPreimage(f, X.carrier ⧸ r, V) ⊆ X.carrier ⧸ r
+        intros c hc
+        exact (functionPreimage.membership.forward with hc).left
+      apply quotientTopology.membership.backward
+      exact ⟨(powerset.membership_iff.backward with sub), pre⟩
+
+theorem quotientSpace.compact (X r : Set)
+  requires space : TopologicalSpace(X)
+  requires equivalence : Equivalence(X.carrier, r)
+  requires compact : Compact(X)
+  shows Compact(quotientSpace(X, r))
+proof
+  have qs := quotientTopology.is_topology at X, r with space, equivalence
+  have pc := quotientSpace.projection_continuous at X, r with space, equivalence
+  have cm := Continuous.parts with pc
+  have cEq : TopologicalSpace.carrier(quotientSpace(X, r)) = X.carrier ⧸ r
+    unfold quotientSpace
+    topology_projections
+  have surj := quotientProjection.surjective at X.carrier, r with equivalence
+  rw ← cEq at surj
+  have cpt := Compact.space_parts with compact
+  have ic := IsCompact.of_surjection with cm, surj, cpt
+  exact Compact.of_space_parts with ic
+
+-- Section: Quotients of topological groups
+-- The projection onto G/N is open, and G/N is a topological group.
+theorem quotientGroupSpace.projection_open (G X N U : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  requires open : U ∈ X.opens
+  shows imageIn(quotientProjection(G.carrier, cosetRelation(G, N)), U,
+      G.carrier ⧸ cosetRelation(G, N)) ∈
+    TopologicalSpace.opens(quotientGroupSpace(G, X, N))
+proof
+  sorry
+
+theorem quotientGroupSpace.topological (G X N : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  shows TopologicalGroup(quotientGroup(G, N), quotientGroupSpace(G, X, N))
+proof
+  sorry
+
+theorem quotientGroupSpace.hausdorff_iff (G X N : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  shows Hausdorff(quotientGroupSpace(G, X, N)) ↔ Closed(X, N)
+proof
+  sorry
+
+theorem quotientGroupSpace.discrete_iff (G X N : Set)
+  requires topological : TopologicalGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  shows DiscreteTopology(quotientGroupSpace(G, X, N)) ↔ N ∈ X.opens
+proof
+  sorry
+
+-- A continuous homomorphism vanishing on N factors continuously through
+-- G/N.
+theorem quotientGroupSpace.lift_continuous (G X N f H Y g : Set)
+  requires topologicalG : TopologicalGroup(G, X)
+  requires topologicalH : TopologicalGroup(H, Y)
+  requires normal : NormalSubgroup(N, G)
+  requires hom : f : G →* H
+  requires continuous : f : X ⇒ Y
+  requires vanishes : N ⊆ kernel(f, G, H)
+  requires lift : g : quotientGroup(G, N) →* H
+  requires factors : ∀ x ∈ G.carrier, g(⟦x⟧[G.carrier, cosetRelation(G, N)]) = f(x)
+  shows g : quotientGroupSpace(G, X, N) ⇒ Y
+proof
+  sorry
+
+-- Section: Profinite groups
+-- The open normal subgroups of a profinite group form a basis of the
+-- neighborhoods of 1.
+theorem ProfiniteGroup.open_normal_basis (G X U : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires neighborhood : U ∈ nhds(X, G.one)
+  shows ∃ N, NormalSubgroup(N, G) ∧ OpenSubgroup(N, G, X) ∧ N ⊆ U
+proof
+  sorry
+
+-- The open subgroups of a profinite group have trivial intersection.
+theorem ProfiniteGroup.open_subgroups_separate (G X g : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires member : g ∈ G.carrier
+  requires nontrivial : g ≠ G.one
+  shows ∃ N, OpenSubgroup(N, G, X) ∧ g ∉ N
+proof
+  sorry
+
+-- A finite group with the discrete topology is profinite.
+theorem ProfiniteGroup.finite_discrete (G : Set)
+  requires group : Group(G)
+  requires finite : Finite(G.carrier)
+  shows ProfiniteGroup(G, discreteSpace(G.carrier))
+proof
+  sorry
+
+-- A closed subgroup of a profinite group is profinite.
+theorem ProfiniteGroup.closed_subgroup (G X H : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires closed : ClosedSubgroup(H, G, X)
+  shows ProfiniteGroup(subgroupGroup(G, H), subspace(X, H))
+proof
+  sorry
+
+-- The quotient by an open normal subgroup is finite and discrete.
+theorem ProfiniteGroup.quotient_open (G X N : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires normal : NormalSubgroup(N, G)
+  requires open : N ∈ X.opens
+  shows Finite(Group.carrier(quotientGroup(G, N))) ∧
+    DiscreteTopology(quotientGroupSpace(G, X, N))
+proof
+  sorry
+
+-- A locally constant map on a profinite group is constant on the cosets of
+-- some open normal subgroup.
+theorem ProfiniteGroup.locally_constant_cosets (G X f : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires locally : IsLocallyConstant(f, X)
+  shows ∃ N, NormalSubgroup(N, G) ∧ OpenSubgroup(N, G, X) ∧
+    (∀ g ∈ G.carrier, ∀ n ∈ N, f(G.mul(g, n)) = f(g))
+proof
+  sorry
+
+-- Section: Topological rings and modules
+theorem TopologicalRing.tendsto_mul (R X f g h Y F a b : Set)
+  requires topological : TopologicalRing(R, X)
+  requires memberA : a ∈ R.carrier
+  requires memberB : b ∈ R.carrier
+  requires valuesF : f : Y → R.carrier
+  requires valuesG : g : Y → R.carrier
+  requires product : ∀ y ∈ Y, h(y) = R.mul(f(y), g(y))
+  requires limitF : Tendsto(f, Y, F, nhds(X, a))
+  requires limitG : Tendsto(g, Y, F, nhds(X, b))
+  shows Tendsto(h, Y, F, nhds(X, R.mul(a, b)))
+proof
+  sorry
+
+-- Mathlib's continuous_const_mul: x ↦ c x is continuous.
+theorem TopologicalRing.continuous_const_mul (R X c h : Set)
+  requires topological : TopologicalRing(R, X)
+  requires member : c ∈ R.carrier
+  requires function : h : X.carrier → X.carrier
+  requires values : ∀ x ∈ X.carrier, h(x) = R.mul(c, x)
+  shows h : X ⇒ X
+proof
+  have tr := topological
+  obtain ⟨ring, tg, mulCont⟩ := tr
+  have tg2 := tg
+  obtain ⟨group, space, carrierEq, addCont, negCont⟩ := tg2
+  rw Ring.additive.carrier at carrierEq
+  have cX : c ∈ X.carrier
+    rw carrierEq
+    exact member
+  exact productSpace.left_slice_continuous at X, R.mul, c, h with mulCont, cX, function, values
+
+-- A ring is a topological module over itself.
+theorem TopologicalModule.self (R X : Set)
+  requires topological : TopologicalRing(R, X)
+  shows TopologicalModule(selfModule(R), R, X, X)
+proof
+  sorry
+
+theorem TopologicalModule.tendsto_smul (M R X Y f g h Z F a v : Set)
+  requires topological : TopologicalModule(M, R, X, Y)
+  requires memberA : a ∈ R.carrier
+  requires memberV : v ∈ M.carrier
+  requires valuesF : f : Z → R.carrier
+  requires valuesG : g : Z → M.carrier
+  requires action : ∀ z ∈ Z, h(z) = M.smul(f(z), g(z))
+  requires limitF : Tendsto(f, Z, F, nhds(X, a))
+  requires limitG : Tendsto(g, Z, F, nhds(Y, v))
+  shows Tendsto(h, Z, F, nhds(Y, M.smul(a, v)))
+proof
+  sorry
+
+-- Real addition is continuous on the product of the real line with
+-- itself, and real negation on the real line.
+theorem realLine.add_continuous
+  shows realAdd : productSpace(realLine, realLine) ⇒ realLine
+proof
+  have spR := realLine.space
+  have spP := productSpace.space with spR, spR
+  have topR := realTopology.topology
+  apply Continuous.mk with spP, spR
+  . rw [productSpace.carrier, realLine.carrier]
+    exact realAdd.function
+  . intros V hV
+    rw realLine.opens at hV
+    rw [productSpace.carrier, productSpace.opens, realLine.carrier, realLine.opens]
+    have preSub := functionPreimage.subset at realAdd, ℝ × ℝ, V
+    apply productTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with preSub), ?_⟩
+    intros p hp
+    have hp2 := functionPreimage.membership.forward with hp
+    obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with hp2.left
+    have xR : Real(x) by exact hx
+    have yR : Real(y) by exact hy
+    have value := hp2.right
+    rw pEq at value
+    have same : realAdd((x, y)) = (x:R) + (y:R)
+      unfold Algebra.call2
+      rfl
+    rw same at value
+    have hV2 := realTopology.membership.forward with hV
+    obtain ⟨E, hE, pos, ballV⟩ := hV2.right with (x:R) + (y:R), value
+    have ER : Real(E) by exact hE
+    have hpos := half.positive with pos
+    have hsum := half.add_self at E
+    have hR := half.real at E
+    have open1 := openBall.open at x, half(E)
+    have open2 := openBall.open at y, half(E)
+    have c1 := openBall.center at x, half(E) with hpos
+    have c2 := openBall.center at y, half(E) with hpos
+    refine ⟨openBall(x, half(E)), open1, openBall(y, half(E)), open2, ?_, ?_⟩
+    . rw pEq
+      exact product.pair with c1, c2
+    . intros q hq
+      obtain ⟨bound2, x2, hx2, y2, hy2, qEq⟩ := product.membership.forward with hq
+      have x2In := (openBall.membership.forward with hx2).left
+      have y2In := (openBall.membership.forward with hy2).left
+      have x2R : Real(x2) by exact x2In
+      have y2R : Real(y2) by exact y2In
+      have near := openBall.add at x2, y2, x, y, half(E), half(E) with hx2, hy2
+      rw hsum at near
+      have inV := ballV with (x2:R) + (y2:R), near
+      have qIn : q ∈ ℝ × ℝ
+        rw qEq
+        exact product.pair with x2In, y2In
+      apply functionPreimage.of_apply with qIn
+      rw qEq
+      have same2 : realAdd((x2, y2)) = (x2:R) + (y2:R)
+        unfold Algebra.call2
+        rfl
+      rw same2
+      exact inV
+
+theorem realLine.neg_continuous
+  shows realNeg : realLine ⇒ realLine
+proof
+  have iff := Continuous.iff_real_line at realNeg
+  exact iff.forward with realNeg.continuous
+
+-- Real multiplication is continuous on the product of the real line with
+-- itself.
+theorem realLine.mul_continuous
+  shows realMul : productSpace(realLine, realLine) ⇒ realLine
+proof
+  have spR := realLine.space
+  have spP := productSpace.space with spR, spR
+  have topR := realTopology.topology
+  apply Continuous.mk with spP, spR
+  . rw [productSpace.carrier, realLine.carrier]
+    exact realMul.function
+  . intros V hV
+    rw realLine.opens at hV
+    rw [productSpace.carrier, productSpace.opens, realLine.carrier, realLine.opens]
+    have preSub := functionPreimage.subset at realMul, ℝ × ℝ, V
+    apply productTopology.membership.backward
+    refine ⟨(powerset.membership_iff.backward with preSub), ?_⟩
+    intros p hp
+    have hp2 := functionPreimage.membership.forward with hp
+    obtain ⟨bound, x, hx, y, hy, pEq⟩ := product.membership.forward with hp2.left
+    have xR : Real(x) by exact hx
+    have yR : Real(y) by exact hy
+    have value := hp2.right
+    rw pEq at value
+    have same : realMul((x, y)) = (x:R) * (y:R)
+      unfold Algebra.call2
+      rfl
+    rw same at value
+    have hV2 := realTopology.membership.forward with hV
+    obtain ⟨E, hE, pos, ballV⟩ := hV2.right with (x:R) * (y:R), value
+    have ER : Real(E) by exact hE
+    have sR := limitScale.real at y
+    have sPos := limitScale.positive at y
+    have r1R := scaledRadius.real at E, limitScale(y)
+    have r1Pos := scaledRadius.positive at E, limitScale(y) with pos, sPos
+    have aR := abs.real at x
+    have aNn := abs.nonnegative at x
+    have bPos : (0:R) < scaledRadius(E, limitScale(y)) + abs(x) by linarith
+    have r2R := scaledRadius.real at E, scaledRadius(E, limitScale(y)) + abs(x)
+    have r2Pos := scaledRadius.positive at E, scaledRadius(E, limitScale(y)) + abs(x) with pos, bPos
+    have open1 := openBall.open at x, scaledRadius(E, limitScale(y))
+    have open2 := openBall.open at y, scaledRadius(E, scaledRadius(E, limitScale(y)) + abs(x))
+    have c1 := openBall.center at x, scaledRadius(E, limitScale(y)) with r1Pos
+    have c2 := openBall.center at y, scaledRadius(E, scaledRadius(E, limitScale(y)) + abs(x)) with r2Pos
+    refine ⟨openBall(x, scaledRadius(E, limitScale(y))), open1, openBall(y, scaledRadius(E, scaledRadius(E, limitScale(y)) + abs(x))), open2, ?_, ?_⟩
+    . rw pEq
+      exact product.pair with c1, c2
+    . intros q hq
+      obtain ⟨bound2, x2, hx2, y2, hy2, qEq⟩ := product.membership.forward with hq
+      have x2In := (openBall.membership.forward with hx2).left
+      have y2In := (openBall.membership.forward with hy2).left
+      have x2R : Real(x2) by exact x2In
+      have y2R : Real(y2) by exact y2In
+      have near := openBall.mul_control at x2, y2, x, y, E with pos, hx2, hy2
+      have inV := ballV with (x2:R) * (y2:R), near
+      have qIn : q ∈ ℝ × ℝ
+        rw qEq
+        exact product.pair with x2In, y2In
+      apply functionPreimage.of_apply with qIn
+      rw qEq
+      have same2 : realMul((x2, y2)) = (x2:R) * (y2:R)
+        unfold Algebra.call2
+        rfl
+      rw same2
+      exact inV
+
+-- ℝ with its usual topology is a topological ring, and its additive group
+-- a topological group.
+theorem TopologicalRing.real
+  shows TopologicalRing(realRing, realLine)
+proof
+  have comm := realRing.comm_ring
+  have ring := comm.left
+  have same : Ring.additive(realRing) = Group.mk(ℝ, realAdd, realZero, realNeg)
+    unfold Ring.additive
+    unfold realRing
+    simp [Ring.mk.carrier, Ring.mk.add, Ring.mk.zero, Ring.mk.neg]
+  have ab := AbelianGroup.of_parts with realAdd.abelian_group
+  rw ← same at ab
+  have group := AbelianGroup.to_group with ab
+  have spR := realLine.space
+  have mulEq : Ring.mul(realRing) = realMul
+    simp [realRing, Ring.mk.mul]
+  have addEq : Group.mul(Ring.additive(realRing)) = realAdd
+    rw Ring.additive.mul
+    simp [realRing, Ring.mk.add]
+  have invEq : Group.inv(Ring.additive(realRing)) = realNeg
+    rw Ring.additive.inv
+    simp [realRing, Ring.mk.neg]
+  have carrierEq : TopologicalSpace.carrier(realLine) = Group.carrier(Ring.additive(realRing))
+    rw [realLine.carrier, Ring.additive.carrier, realRing.carrierOf]
+  have addC := realLine.add_continuous
+  have negC := realLine.neg_continuous
+  have mulC := realLine.mul_continuous
+  have tg : TopologicalGroup(Ring.additive(realRing), realLine)
+    unfold TopologicalGroup
+    rw [addEq, invEq]
+    exact ⟨group, spR, carrierEq, addC, negC⟩
+  unfold TopologicalRing
+  rw mulEq
+  exact ⟨ring, tg, mulC⟩
+
+end TopologicalGroups

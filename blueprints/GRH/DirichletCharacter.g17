@@ -1,0 +1,4409 @@
+-- Dirichlet characters modulo N as N-periodic, completely multiplicative
+-- functions ℤ → ℂ with χ(1) = 1 that vanish on the integers not coprime to
+-- N; the principal character, change of level, the conductor and
+-- primitivity, the values on units as roots of unity, finiteness, the
+-- duality that separates the units and counts φ(N) characters, and the
+-- orthogonality relations.
+-- Part of the GRH blueprint.
+-- Planned home: NumberTheory/DirichletCharacter.
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.DirichletCharacter
+import Grace.Cumulus.Complex.Norm
+import Grace.Cumulus.NumberTheory.IntegerRemainder
+import Grace.Cumulus.NumberTheory.Euler
+import Grace.Cumulus.Algebra.Ring.FiniteSetSum
+import Grace.Cumulus.Combinatorics.Pigeonhole
+import Grace.Cumulus.Combinatorics.Functions
+import Grace.Cumulus.Geometry.Absorption.Roots
+import GRH.Trig
+
+-- A Dirichlet character modulo N is a function on all of ℤ. An N-periodic
+-- function on ℤ is a function on ℤ/Nℤ, and the conditions below say
+-- exactly that it is a multiplicative character of the monoid ℤ/Nℤ,
+-- vanishing off the units: the residues a with gcd(a, N) = 1. For N = 1
+-- every residue is a unit and the only character is the constant 1; for
+-- N = 0 the conditions describe the characters of ℤ itself. Values on
+-- every integer, negative ones included, are part of the data, so the
+-- function determines χ(n) for every n the L-series and the Hurwitz
+-- decomposition evaluate.
+predicate DirichletCharacter (N : Nat, χ : Set) :=
+  FunctionBetween(χ, ℤ, complexCarrier) ∧
+  (∀ a ∈ ℤ, χ(integerAddValue(a, integerOfNat(N))) = χ(a)) ∧
+  χ(integerOne) = complexOne ∧
+  (∀ a ∈ ℤ, ∀ b ∈ ℤ,
+    χ(integerMulValue(a, b)) = complexMul(χ(a), χ(b))) ∧
+  (∀ a ∈ ℤ, ¬IntegerCoprime(a, integerOfNat(N)) → χ(a) = complexZero)
+
+-- The set of Dirichlet characters modulo N.
+def dirichletCharacters (N : Nat) : Set :=
+  { χ ∈ functionSpace(ℤ, complexCarrier) | DirichletCharacter(N, χ) }
+
+-- The principal character modulo N: 1 on the integers coprime to N, 0 on
+-- the others.
+def principalCharacter (N : Nat) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ a ∈ ℤ,
+    (IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexOne)) ∨
+    (¬IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexZero)) }
+
+-- The character modulo N induced by a function ψ on ℤ (a character modulo
+-- a divisor d of N): ψ on the integers coprime to N, 0 on the others.
+-- Mathlib's DirichletCharacter.changeLevel.
+def changeLevel (N ψ : Set) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ a ∈ ℤ,
+    (IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, ψ(a))) ∨
+    (¬IntegerCoprime(a, integerOfNat(N)) ∧ p = (a, complexZero)) }
+
+-- χ modulo N factors through level d: d divides N and χ agrees, on the
+-- integers coprime to N, with a character modulo d; equivalently χ is
+-- changeLevel(N, ψ) for a character ψ modulo d.
+predicate FactorsThrough (N : Nat, χ : Set, d : Nat) :=
+  d ∣ N ∧ ∃ ψ, DirichletCharacter(d, ψ) ∧
+    (∀ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) → χ(a) = ψ(a))
+
+-- The levels through which χ factors.
+def factorLevels (N χ : Set) : Set := { d ∈ ℕ | FactorsThrough(N, χ, d) }
+
+-- The conductor: the least level through which χ factors. The level N
+-- itself qualifies (`FactorsThrough.self`), so the least exists; it divides
+-- N, and it is positive when N is.
+def conductor (N χ : Set) : Set := leastNatural(factorLevels(N, χ))
+
+-- χ is primitive when its conductor is its modulus.
+predicate PrimitiveCharacter (N : Nat, χ : Set) := conductor(N, χ) = N
+
+-- The character sum over the residues 0, 1, …, n − 1:
+-- χ(0) + χ(1) + ⋯ + χ(n − 1).
+def characterSum (χ : Set, n : Nat) → Set
+  | χ, zero => complexZero
+  | χ, succ(k) => complexAdd((characterSum(χ, k), χ(integerOfNat(k))))
+
+-- Basic facts about a character.
+
+theorem DirichletCharacter.function (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ : ℤ → complexCarrier
+proof
+  exact character.left
+
+theorem DirichletCharacter.value (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) ∈ complexCarrier
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact FunctionBetween.apply_closed at χ, ℤ, complexCarrier, a with *
+
+theorem DirichletCharacter.periodic (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(integerAddValue(a, integerOfNat(N))) = χ(a)
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact periodic with a, integer
+
+theorem DirichletCharacter.one (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ(integerOne) = complexOne
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact one
+
+theorem DirichletCharacter.mul (N : Nat) (χ a b : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  shows χ(integerMulValue(a, b)) = complexMul(χ(a), χ(b))
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact multiplicative with a, aInteger, b, bInteger
+
+theorem DirichletCharacter.not_coprime (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows χ(a) = complexZero
+proof
+  obtain ⟨function, periodic, one, multiplicative, vanishing⟩ := character
+  exact vanishing with a, integer, notCoprime
+
+-- Shifting by a natural multiple of N leaves a value unchanged.
+theorem DirichletCharacter.shift_natural (N : Nat) (χ : Set, n : Nat)
+  requires character : DirichletCharacter(N, χ)
+  shows ∀ x ∈ ℤ, χ(x + integerOfNat(N) * integerOfNat(n)) = χ(x)
+proof
+  induction n
+  | zero =>
+    intros x member
+    have shape : x + integerOfNat(N) * integerOfNat(0) = x
+      rw integerOfNat.zero
+      ring
+    rw shape
+  | k + 1 using ih =>
+    intros x member
+    have step := integerOfNat.add_one at k
+    have shape : x + integerOfNat(N) * integerOfNat(k + 1) =
+        integerAddValue(x + integerOfNat(N) * integerOfNat(k),
+          integerOfNat(N))
+      rw step
+      ring
+    have shifted : x + integerOfNat(N) * integerOfNat(k) ∈ ℤ by typecheck
+    have periodic := DirichletCharacter.periodic with character, shifted
+    have previous := ih with x, member
+    rw [shape, periodic, previous]
+
+-- Shifting by any integer multiple of N leaves a value unchanged.
+theorem DirichletCharacter.shift (N : Nat) (χ x q : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires xInteger : x ∈ ℤ
+  requires qInteger : q ∈ ℤ
+  shows χ(x + integerOfNat(N) * q) = χ(x)
+proof
+  obtain ⟨n, nNat, sign⟩ := Integer.signed_natural at q
+  cases sign with positive | negative
+  . rw positive
+    have shift := DirichletCharacter.shift_natural at N, χ, n with character
+    exact shift with x, xInteger
+  . -- x = (x − N n) + N n.
+    have shift := DirichletCharacter.shift_natural at N, χ, n with character
+    have lowered : x - integerOfNat(N) * integerOfNat(n) ∈ ℤ by typecheck
+    have back := shift with x - integerOfNat(N) * integerOfNat(n), lowered
+    have restore : x - integerOfNat(N) * integerOfNat(n) +
+        integerOfNat(N) * integerOfNat(n) = x by ring
+    rw restore at back
+    have negativeForm := integerOfNat.neg at n
+    have shape : x + integerOfNat(N) * q =
+        x - integerOfNat(N) * integerOfNat(n)
+      rw [negative, ← negativeForm]
+      ring
+    rw [shape, back]
+
+-- Two integers congruent modulo N have the same value.
+theorem DirichletCharacter.congruent (N : Nat) (χ a b : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), a, b)
+  shows χ(a) = χ(b)
+proof
+  obtain ⟨q, qInteger, equation⟩ := congruent
+  have shape : a = b + integerOfNat(N) * q
+    linear_combination -equation
+  have shift := DirichletCharacter.shift with character, bInteger, qInteger
+  rw [shape, shift]
+
+-- Coprimality to the modulus is a property of the residue class.
+theorem IntegerCoprime.of_congruent (m a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires congruent : IntegerCongruent(m, a, b)
+  requires coprime : IntegerCoprime(a, m)
+  shows IntegerCoprime(b, m)
+proof
+  obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+    with coprime
+  have reverse := IntegerCongruent.symmetric with congruent
+  have scaled := IntegerCongruent.mul_right at m, b, a, u with reverse
+  have chain := IntegerCongruent.transitive with scaled, inverse
+  exact IntegerCoprime.of_modular_inverse with chain
+
+-- Each value is the value at the least nonnegative residue.
+theorem DirichletCharacter.residue (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  requires positive : 0 < N
+  shows χ(a) = χ(integerOfNat(integerMod(a, N)))
+proof
+  have congruent := integerMod.congruent at a, N with positive
+  have natural := integerMod.natural at a, N with positive
+  have residue : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+  exact DirichletCharacter.congruent with character, integer, residue,
+    congruent
+
+section Inverses
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- An inverse modulo N gives an inverse value.
+theorem DirichletCharacter.inverse_value (N : Nat) (χ a u : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires aInteger : a ∈ ℤ
+  requires uInteger : u ∈ ℤ
+  requires inverse : IntegerCongruent(integerOfNat(N), integerMulValue(a, u),
+    integerOne)
+  shows ℂ[χ(a) * χ(u)] = complexOne
+proof
+  have product : integerMulValue(a, u) ∈ ℤ by typecheck
+  have one : integerOne ∈ ℤ by typecheck
+  have same := DirichletCharacter.congruent with character, product, one,
+    inverse
+  have multiplicative := DirichletCharacter.mul with character, aInteger,
+    uInteger
+  have unit := DirichletCharacter.one with character
+  rw [← multiplicative, same, unit]
+
+end Inverses
+
+-- The character vanishes exactly off the integers coprime to N.
+theorem DirichletCharacter.nonzero_iff (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) ≠ complexZero ↔ IntegerCoprime(a, integerOfNat(N))
+proof
+  constructor
+  . intro nonzero
+    by_contra notCoprime
+    have zero := DirichletCharacter.not_coprime with character, integer,
+      notCoprime
+    exact nonzero with zero
+  . intro coprime
+    intro zero
+    obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+      with coprime
+    have uMember : u ∈ ℤ by typecheck
+    have unit := DirichletCharacter.inverse_value with character, integer,
+      uMember, inverse
+    have uValue := DirichletCharacter.value with character, uMember
+    rw zero at unit
+    have field := complexes.is_field
+    have ring := IsField.comm_ring with field
+    have absorb : complexMul(complexZero, χ(u)) = complexZero by ring
+    rw absorb at unit
+    obtain ⟨zeroMember, oneMember, distinct⟩ := complexes.nontrivial
+    exact distinct with unit
+
+-- A character is determined by its values on 0, 1, …, N − 1.
+theorem DirichletCharacter.ext (N : Nat) (χ ψ : Set)
+  requires first : DirichletCharacter(N, χ)
+  requires second : DirichletCharacter(N, ψ)
+  requires positive : 0 < N
+  requires agree : ∀ j ∈ N, χ(integerOfNat(j)) = ψ(integerOfNat(j))
+  shows χ = ψ
+proof
+  have firstFunction := DirichletCharacter.function with first
+  have secondFunction := DirichletCharacter.function with second
+  apply FunctionBetween.ext at χ, ψ, ℤ, complexCarrier with firstFunction,
+    secondFunction
+  intros a integer
+  have firstResidue := DirichletCharacter.residue with first, integer,
+    positive
+  have secondResidue := DirichletCharacter.residue with second, integer,
+    positive
+  have below := integerMod.below at a, N with positive
+  have member := membership.of_Less at integerMod(a, N), N with below
+  have same := agree with integerMod(a, N), member
+  rw [firstResidue, secondResidue, same]
+
+-- A character modulo 1 is the constant 1.
+theorem DirichletCharacter.modulus_one (χ a : Set)
+  requires character : DirichletCharacter(1, χ)
+  requires integer : a ∈ ℤ
+  shows χ(a) = complexOne
+proof
+  have congruent : IntegerCongruent(integerOfNat(1), a, integerOne)
+    rw integerOfNat.one
+    exact IntegerCongruent.one_modulus at a, integerOne
+  have one : integerOne ∈ ℤ by typecheck
+  have same := DirichletCharacter.congruent with character, integer, one,
+    congruent
+  have unit := DirichletCharacter.one with character
+  rw [same, unit]
+
+theorem dirichletCharacters.membership (N : Nat) (χ : Set)
+  shows χ ∈ dirichletCharacters(N) ↔ DirichletCharacter(N, χ)
+proof
+  constructor
+  . intro member
+    unfold dirichletCharacters at member
+    exact member.right
+  . intro character
+    have function := DirichletCharacter.function with character
+    unfold dirichletCharacters
+    refine ⟨?_, character⟩
+    exact functionSpace.mem_iff.backward with function
+
+-- Euler's theorem for integers: a^φ(N) ≡ 1 modulo N when a is coprime to N.
+theorem IntegerCoprime.pow_totient (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows IntegerCongruent(integerOfNat(N), integerPow(a, totient(N)),
+    integerOne)
+proof
+  by_cases unit : N = 1
+  . rw [unit, integerOfNat.one]
+    exact IntegerCongruent.one_modulus at integerPow(a, totient(1)),
+      integerOne
+  . have aboveOne : 1 < N
+      by_contra notAbove
+      have equal : N = 1 by arith
+      exact unit with equal
+    -- Euler's theorem for the least residue r of a.
+    have residue := integerMod.congruent at a, N with positive
+    have natural := integerMod.natural at a, N with positive
+    have modulus : integerOfNat(N) ∈ ℤ by typecheck
+    have residueMember : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+    have residueCoprime := IntegerCoprime.of_congruent with integer,
+      residueMember, modulus, residue, coprime
+    unfold IntegerCoprime at residueCoprime
+    rw integerGCD.ofNat at residueCoprime
+    have euler := euler.theorem at integerMod(a, N), N with aboveOne,
+      residueCoprime
+    have oneMod := mod.of_less at N, 1 with aboveOne
+    have reduced : CongruentMod(integerMod(a, N) ^ totient(N), 1, N)
+      unfold CongruentMod
+      rw [euler, oneMod]
+    have lifted := IntegerCongruent.ofNat_iff.backward
+      at N, integerMod(a, N) ^ totient(N), 1 with reduced
+    rw [← integerPow.ofNat, integerOfNat.one] at lifted
+    have powers := IntegerCongruent.pow at integerOfNat(N), a,
+      integerOfNat(integerMod(a, N)), totient(N) with residue
+    exact IntegerCongruent.transitive with powers, lifted
+
+section Values
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- The value at a natural power is the power of the value.
+theorem DirichletCharacter.pow (N : Nat) (χ a : Set, k : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires integer : a ∈ ℤ
+  shows χ(integerPow(a, k)) = ℂ[χ(a) ^ k]
+proof
+  induction k
+  | zero =>
+    rw [integerPow.zero, monoidPow.zero]
+    exact DirichletCharacter.one with character
+  | succ(j) using ih =>
+    have powerInteger := integerPow.integer at a, j
+    have power : integerPow(a, j) ∈ ℤ by typecheck
+    have multiplicative := DirichletCharacter.mul with character, integer,
+      power
+    rw [integerPow.succ, multiplicative, ih, monoidPow.succ]
+
+-- On the integers coprime to N the values are φ(N)-th roots of unity.
+theorem DirichletCharacter.pow_totient (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows ℂ[χ(a) ^ totient(N)] = complexOne
+proof
+  have power := DirichletCharacter.pow at N, χ, a, totient(N)
+    with character, integer
+  have powerInteger := integerPow.integer at a, totient(N)
+  have powerMember : integerPow(a, totient(N)) ∈ ℤ by typecheck
+  have one : integerOne ∈ ℤ by typecheck
+  have congruent := IntegerCoprime.pow_totient with positive, integer, coprime
+  have same := DirichletCharacter.congruent with character, powerMember, one,
+    congruent
+  have unit := DirichletCharacter.one with character
+  rw [← power, same, unit]
+
+-- χ(−1) = ±1.
+theorem DirichletCharacter.neg_one (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ(integerNegValue(integerOne)) = complexOne ∨
+    χ(integerNegValue(integerOne)) = ℂ[-1]
+proof
+  have minus : integerNegValue(integerOne) ∈ ℤ by typecheck
+  have multiplicative := DirichletCharacter.mul with character, minus, minus
+  have square : integerMulValue(integerNegValue(integerOne),
+      integerNegValue(integerOne)) = integerOne by ring
+  have unit := DirichletCharacter.one with character
+  rw [square, unit] at multiplicative
+  have value := DirichletCharacter.value with character, minus
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have noZero := IsField.no_zero_divisors at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne with field
+  have factored : ℂ[(χ(integerNegValue(integerOne)) - 1) *
+      (χ(integerNegValue(integerOne)) + 1)] = complexZero
+    linear_combination -multiplicative
+  have left : ℂ[χ(integerNegValue(integerOne)) - 1] ∈ complexCarrier
+    by typecheck
+  have right : ℂ[χ(integerNegValue(integerOne)) + 1] ∈ complexCarrier
+    by typecheck
+  have zero := noZero with ℂ[χ(integerNegValue(integerOne)) - 1], left,
+    ℂ[χ(integerNegValue(integerOne)) + 1], right, factored
+  cases zero with first | second
+  . left
+    linear_combination first
+  . right
+    linear_combination second
+
+end Values
+
+-- φ(N) ≥ 1: N − 1 is coprime to N.
+theorem totient.positive (N : Nat)
+  requires positive : 0 < N
+  shows 0 < totient(N)
+proof
+  have alternatives := natural.zero_or_successor at N
+  cases alternatives with zero | successor
+  . rw zero at positive
+    exfalso
+    arith
+  obtain ⟨m, mNat, shape⟩ := successor
+  have identity : -integerOne * integerOfNat(m) +
+      integerOne * integerOfNat(succ(m)) = integerOne
+    rw [← add.right_one, integerOfNat.add_one]
+    ring
+  have integerCoprime := IntegerCoprime.of_bezout with identity
+  unfold IntegerCoprime at integerCoprime
+  have coprime : gcd(m, succ(m)) = 1
+    rw ← integerGCD.ofNat
+    exact integerCoprime
+  have unfolded := unitsBelow.succ_unit at succ(m), m with coprime
+  unfold totient
+  rw [shape, unfolded]
+  have list := unitsBelow.list at succ(m), m
+  have mMember : m ∈ ℕ by typecheck
+  rw length.cons at ℕ, m, unitsBelow(succ(m), m) with mMember
+  arith
+
+section Norms
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- The norm of a power, one factor at a time.
+theorem complexNormSquared.pow_succ (z : Set, k : Nat)
+  requires member : z ∈ ℂ
+  shows complexNormSquared(ℂ[z ^ succ(k)]) =
+    R[complexNormSquared(z) * complexNormSquared(ℂ[z ^ k])]
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  have power := monoidPow.closed at ℂ, complexMul, complexOne, z, k with *
+  rw monoidPow.succ
+  exact complexNormSquared.mul with member, power
+
+theorem complexNormSquared.pow_le_one (z : Set, k : Nat)
+  requires member : z ∈ ℂ
+  requires small : complexNormSquared(z) ≤ realOne
+  shows complexNormSquared(ℂ[z ^ k]) ≤ realOne
+proof
+  induction k
+  | zero =>
+    rw [monoidPow.zero, complexNormSquared.one]
+    exact realLe.reflexive at realOne
+  | succ(j) using ih =>
+    have ring := complexes.comm_ring
+    have ordinary := IsCommRing.ring with ring
+    have monoid := IsRing.multiplicative with ordinary
+    have power := monoidPow.closed at ℂ, complexMul, complexOne, z, j with *
+    have step := complexNormSquared.pow_succ at z, j with member
+    have nonnegative := complexNormSquared.nonnegative with member
+    have powerNonnegative := complexNormSquared.nonnegative with power
+    have zReal := complexNormSquared.real with member
+    have powerReal := complexNormSquared.real with power
+    have scaled := realLe.mul_left_of_nonnegative
+      at complexNormSquared(ℂ[z ^ j]), realOne, complexNormSquared(z)
+      with ih, nonnegative
+    have unit : R[complexNormSquared(z) * 1] = complexNormSquared(z) by ring
+    rw step
+    linarith
+
+theorem complexNormSquared.one_le_pow (z : Set, k : Nat)
+  requires member : z ∈ ℂ
+  requires large : realOne ≤ complexNormSquared(z)
+  shows realOne ≤ complexNormSquared(ℂ[z ^ k])
+proof
+  induction k
+  | zero =>
+    rw [monoidPow.zero, complexNormSquared.one]
+    exact realLe.reflexive at realOne
+  | succ(j) using ih =>
+    have ring := complexes.comm_ring
+    have ordinary := IsCommRing.ring with ring
+    have monoid := IsRing.multiplicative with ordinary
+    have power := monoidPow.closed at ℂ, complexMul, complexOne, z, j with *
+    have step := complexNormSquared.pow_succ at z, j with member
+    have powerNonnegative := complexNormSquared.nonnegative with power
+    have zReal := complexNormSquared.real with member
+    have powerReal := complexNormSquared.real with power
+    have scaled := realLe.mul_right_of_nonnegative
+      at realOne, complexNormSquared(z), complexNormSquared(ℂ[z ^ j])
+      with large, powerNonnegative
+    have unit : R[1 * complexNormSquared(ℂ[z ^ j])] =
+        complexNormSquared(ℂ[z ^ j]) by ring
+    rw step
+    linarith
+
+-- A root of unity has norm 1.
+theorem complexNormSquared.root_of_unity (z : Set, n : Nat)
+  requires member : z ∈ ℂ
+  requires positive : 0 < n
+  requires root : ℂ[z ^ n] = complexOne
+  shows complexNormSquared(z) = realOne
+proof
+  have alternatives := natural.zero_or_successor at n
+  cases alternatives with zero | successor
+  . rw zero at positive
+    exfalso
+    arith
+  obtain ⟨m, mNat, shape⟩ := successor
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  have power := monoidPow.closed at ℂ, complexMul, complexOne, z, m with *
+  have step := complexNormSquared.pow_succ at z, m with member
+  rw [← shape, root, complexNormSquared.one] at step
+  have nonnegative := complexNormSquared.nonnegative with member
+  have powerNonnegative := complexNormSquared.nonnegative with power
+  have zReal := complexNormSquared.real with member
+  have powerReal := complexNormSquared.real with power
+  by_cases small : complexNormSquared(z) ≤ realOne
+  . have powerSmall := complexNormSquared.pow_le_one at z, m with member,
+      small
+    have scaled := realLe.mul_left_of_nonnegative
+      at complexNormSquared(ℂ[z ^ m]), realOne, complexNormSquared(z)
+      with powerSmall, nonnegative
+    have unit : R[complexNormSquared(z) * 1] = complexNormSquared(z) by ring
+    linarith
+  . have large : realOne ≤ complexNormSquared(z) by linarith
+    have powerLarge := complexNormSquared.one_le_pow at z, m with member,
+      large
+    have scaled := realLe.mul_left_of_nonnegative
+      at realOne, complexNormSquared(ℂ[z ^ m]), complexNormSquared(z)
+      with powerLarge, nonnegative
+    have unit : R[complexNormSquared(z) * 1] = complexNormSquared(z) by ring
+    linarith
+
+end Norms
+
+-- On the integers coprime to N the values have absolute value 1.
+theorem DirichletCharacter.norm_coprime (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows complexNormSquared(χ(a)) = realOne
+proof
+  have root := DirichletCharacter.pow_totient with character, positive,
+    integer, coprime
+  have value := DirichletCharacter.value with character, integer
+  have totientPositive := totient.positive with positive
+  exact complexNormSquared.root_of_unity with value, totientPositive, root
+
+-- Every value has absolute value at most 1.
+theorem DirichletCharacter.norm_le_one (N : Nat) (χ a : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  shows complexNormSquared(χ(a)) ≤ realOne
+proof
+  by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+  . have unit := DirichletCharacter.norm_coprime with character, positive,
+      integer, coprime
+    rw unit
+    exact realLe.reflexive at realOne
+  . have zero := DirichletCharacter.not_coprime with character, integer,
+      coprime
+    rw [zero, complexNormSquared.zero]
+    exact realLess.implies_le with realZero.lt_one
+
+-- Products of integers coprime to m are coprime to m, and conversely.
+theorem IntegerCoprime.mul (m a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires first : IntegerCoprime(a, m)
+  requires second : IntegerCoprime(b, m)
+  shows IntegerCoprime(integerMulValue(a, b), m)
+proof
+  obtain ⟨u, uInteger, p, pInteger, left⟩ := IntegerCoprime.modular_inverse
+    with first
+  obtain ⟨v, vInteger, q, qInteger, right⟩ := IntegerCoprime.modular_inverse
+    with second
+  apply IntegerCoprime.of_modular_inverse at integerMulValue(a, b), m, u * v
+  witness m * p * q + p + q
+  linear_combination (b * v) * left + (m * p + 1) * right
+
+theorem IntegerCoprime.of_mul_left (m a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires product : IntegerCoprime(integerMulValue(a, b), m)
+  shows IntegerCoprime(a, m)
+proof
+  obtain ⟨w, wInteger, p, pInteger, inverse⟩ :=
+    IntegerCoprime.modular_inverse with product
+  apply IntegerCoprime.of_modular_inverse at a, m, b * w
+  witness p
+  linear_combination inverse
+
+theorem IntegerCoprime.of_mul_right (m a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires product : IntegerCoprime(integerMulValue(a, b), m)
+  shows IntegerCoprime(b, m)
+proof
+  obtain ⟨w, wInteger, p, pInteger, inverse⟩ :=
+    IntegerCoprime.modular_inverse with product
+  apply IntegerCoprime.of_modular_inverse at b, m, a * w
+  witness p
+  linear_combination inverse
+
+-- Coprime to m is coprime to every divisor of m.
+theorem IntegerCoprime.of_divides (m d a : Set)
+  requires aInteger : a ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires dInteger : d ∈ ℤ
+  requires divides : IntegerDivides(d, m)
+  requires coprime : IntegerCoprime(a, m)
+  shows IntegerCoprime(a, d)
+proof
+  obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+    with coprime
+  have reduced := IntegerCongruent.divides_modulus with divides, inverse
+  exact IntegerCoprime.of_modular_inverse with reduced
+
+theorem IntegerCoprime.one_left (m : Set)
+  requires mInteger : m ∈ ℤ
+  shows IntegerCoprime(integerOne, m)
+proof
+  apply IntegerCoprime.of_bezout at integerOne, m, integerOne, integerZero
+  ring
+
+section Arithmetic
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+theorem complexMul.one_one
+  shows complexMul(complexOne, complexOne) = complexOne
+proof
+  have ring := complexes.comm_ring
+  ring
+
+theorem complexMul.zero_left (z : Set)
+  requires member : z ∈ ℂ
+  shows complexMul(complexZero, z) = complexZero
+proof
+  have ring := complexes.comm_ring
+  ring
+
+theorem complexMul.zero_right (z : Set)
+  requires member : z ∈ ℂ
+  shows complexMul(z, complexZero) = complexZero
+proof
+  have ring := complexes.comm_ring
+  ring
+
+theorem complexAdd.member (x y : Set)
+  requires first : x ∈ ℂ
+  requires second : y ∈ ℂ
+  shows complexAdd((x, y)) ∈ complexCarrier
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have closed := IsRing.add_closed with ordinary, first, second
+  unfold call2 at closed
+  exact closed
+
+theorem complexAdd.zero_right (z : Set)
+  requires member : z ∈ ℂ
+  shows complexAdd((z, complexZero)) = z
+proof
+  have ring := complexes.comm_ring
+  have sum : ℂ[z + 0] = z by ring
+  unfold call2 at sum
+  exact sum
+
+theorem complexAdd.associative_pair (x y z : Set)
+  requires first : x ∈ ℂ
+  requires second : y ∈ ℂ
+  requires third : z ∈ ℂ
+  shows complexAdd((complexAdd((x, y)), z)) =
+    complexAdd((x, complexAdd((y, z))))
+proof
+  have ring := complexes.comm_ring
+  have sum : ℂ[(x + y) + z] = ℂ[x + (y + z)] by ring
+  unfold call2 at sum
+  exact sum
+
+theorem complexAdd.zero_left (z : Set)
+  requires member : z ∈ ℂ
+  shows complexAdd((complexZero, z)) = z
+proof
+  have ring := complexes.comm_ring
+  have sum : ℂ[0 + z] = z by ring
+  unfold call2 at sum
+  exact sum
+
+theorem complexMul.distribute_pair (c x y : Set)
+  requires scalar : c ∈ ℂ
+  requires first : x ∈ ℂ
+  requires second : y ∈ ℂ
+  shows complexAdd((complexMul((c, x)), complexMul((c, y)))) =
+    complexMul((c, complexAdd((x, y))))
+proof
+  have ring := complexes.comm_ring
+  have sum : ℂ[c * x + c * y] = ℂ[c * (x + y)] by ring
+  unfold call2 at sum
+  exact sum
+
+-- A value fixed by multiplication by c ≠ 1 is 0.
+theorem complexMul.fixed_zero (c z : Set)
+  requires scalar : c ∈ ℂ
+  requires member : z ∈ ℂ
+  requires different : c ≠ complexOne
+  requires fixed : complexMul((c, z)) = z
+  shows z = complexZero
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have noZero := IsField.no_zero_divisors at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne with field
+  have product : ℂ[c * z] = z
+    unfold call2
+    exact fixed
+  have factored : ℂ[(c - 1) * z] = complexZero
+    linear_combination product
+  have shifted : ℂ[c - 1] ∈ complexCarrier by typecheck
+  have zero := noZero with ℂ[c - 1], shifted, z, member, factored
+  cases zero with first | second
+  . exfalso
+    have same : c = complexOne
+      linear_combination first
+    exact different with same
+  . exact second
+
+theorem ringNat.complex (n : Nat)
+  shows ringNat(complexAdd, complexZero, complexOne, n) ∈ complexCarrier
+proof
+  induction n
+  | zero =>
+    rw ringNat.zero
+    exact complexZero.member
+  | succ(k) using ih =>
+    rw ringNat.succ
+    unfold call2
+    exact complexAdd.member with ih, complexOne.member
+
+end Arithmetic
+
+-- The points of A at which a graph f ⊆ A × B takes a value in B.
+def graphDomain (f A B : Set) : Set := { u ∈ A | ∃ v ∈ B, (u, v) ∈ f }
+
+-- A graph inside A × B that is functional takes the value it relates.
+theorem graph.apply (f A B x y : Set)
+  requires bounded : f ⊆ A × B
+  requires functional : Functional(f)
+  requires member : (x, y) ∈ f
+  shows f(x) = y
+proof
+  have function : FunctionBetween(f, graphDomain(f, A, B), B)
+    refine ⟨?_, functional, ?_⟩
+    . intros p pMember
+      have bound := bounded with p, pMember
+      obtain ⟨_, u, uMember, v, vMember, shape⟩ := product.membership.forward
+        with bound
+      rw shape at pMember
+      rw shape
+      have domain : u ∈ graphDomain(f, A, B)
+        unfold graphDomain
+        exact ⟨uMember, v, vMember, pMember⟩
+      exact product.pair with domain, vMember
+    . intros u uMember
+      unfold graphDomain at uMember
+      obtain ⟨_, v, vMember, related⟩ := uMember
+      exact ⟨v, vMember, related⟩
+  have pair := bounded with (x, y), member
+  have bounds := product.pair_membership.forward with pair
+  have domain : x ∈ graphDomain(f, A, B)
+    unfold graphDomain
+    exact ⟨bounds.left, y, bounds.right, member⟩
+  exact FunctionBetween.apply_value with function, domain, member
+
+-- The principal character.
+
+theorem principalCharacter.pair (N : Nat) (x y : Set)
+  requires member : (x, y) ∈ principalCharacter(N)
+  shows x ∈ ℤ ∧ ((IntegerCoprime(x, integerOfNat(N)) ∧ y = complexOne) ∨
+    (¬IntegerCoprime(x, integerOfNat(N)) ∧ y = complexZero))
+proof
+  unfold principalCharacter at member
+  obtain ⟨bound, a, aInteger, branches⟩ := member
+  cases branches with unit | other
+  . obtain ⟨coprime, shape⟩ := unit
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw [first, second]
+    refine ⟨aInteger, ?_⟩
+    left
+    exact ⟨coprime, rfl⟩
+  . obtain ⟨notCoprime, shape⟩ := other
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw [first, second]
+    refine ⟨aInteger, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+
+theorem principalCharacter.functional (N : Nat)
+  shows Functional(principalCharacter(N))
+proof
+  intros x y first z second
+  obtain ⟨_, firstBranches⟩ := principalCharacter.pair with first
+  obtain ⟨_, secondBranches⟩ := principalCharacter.pair with second
+  cases firstBranches with firstUnit | firstOther
+  . cases secondBranches with secondUnit | secondOther
+    . rw [firstUnit.right, secondUnit.right]
+    . exfalso
+      exact secondOther.left with firstUnit.left
+  . cases secondBranches with secondUnit | secondOther
+    . exfalso
+      exact firstOther.left with secondUnit.left
+    . rw [firstOther.right, secondOther.right]
+
+theorem principalCharacter.bounded (N : Nat)
+  shows principalCharacter(N) ⊆ ℤ × complexCarrier
+proof
+  intros p member
+  unfold principalCharacter at member
+  exact member.left
+
+theorem principalCharacter.coprime (N : Nat) (a : Set)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  shows principalCharacter(N)(a) = complexOne
+proof
+  have member : (a, complexOne) ∈ principalCharacter(N)
+    unfold principalCharacter
+    have pair := product.pair with integer, complexOne.member
+    refine ⟨pair, a, integer, ?_⟩
+    left
+    exact ⟨coprime, rfl⟩
+  exact graph.apply with (principalCharacter.bounded at N),
+    (principalCharacter.functional at N), member
+
+theorem principalCharacter.not_coprime (N : Nat) (a : Set)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows principalCharacter(N)(a) = complexZero
+proof
+  have member : (a, complexZero) ∈ principalCharacter(N)
+    unfold principalCharacter
+    have pair := product.pair with integer, complexZero.member
+    refine ⟨pair, a, integer, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+  exact graph.apply with (principalCharacter.bounded at N),
+    (principalCharacter.functional at N), member
+
+theorem principalCharacter.character (N : Nat)
+  shows DirichletCharacter(N, principalCharacter(N))
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have function : principalCharacter(N) : ℤ → complexCarrier
+    refine ⟨(principalCharacter.bounded at N),
+      (principalCharacter.functional at N), ?_⟩
+    intros a integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . refine ⟨complexOne, complexOne.member, ?_⟩
+      unfold relates
+      unfold principalCharacter
+      have pair := product.pair with integer, complexOne.member
+      refine ⟨pair, a, integer, ?_⟩
+      left
+      exact ⟨coprime, rfl⟩
+    . refine ⟨complexZero, complexZero.member, ?_⟩
+      unfold relates
+      unfold principalCharacter
+      have pair := product.pair with integer, complexZero.member
+      refine ⟨pair, a, integer, ?_⟩
+      right
+      exact ⟨coprime, rfl⟩
+  refine ⟨function, ?_, ?_, ?_, ?_⟩
+  . intros a integer
+    have shifted : integerAddValue(a, integerOfNat(N)) ∈ ℤ by typecheck
+    have congruent : IntegerCongruent(integerOfNat(N),
+        integerAddValue(a, integerOfNat(N)), a)
+      witness integerOne
+      ring
+    have reverse := IntegerCongruent.symmetric with congruent
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have shiftedCoprime := IntegerCoprime.of_congruent with integer,
+        shifted, modulus, reverse, coprime
+      have left := principalCharacter.coprime with shifted, shiftedCoprime
+      have right := principalCharacter.coprime with integer, coprime
+      rw [left, right]
+    . have shiftedOther : ¬IntegerCoprime(integerAddValue(a, integerOfNat(N)),
+          integerOfNat(N))
+        intro shiftedCoprime
+        have back := IntegerCoprime.of_congruent with shifted, integer,
+          modulus, congruent, shiftedCoprime
+        exact coprime with back
+      have left := principalCharacter.not_coprime with shifted, shiftedOther
+      have right := principalCharacter.not_coprime with integer, coprime
+      rw [left, right]
+  . have one : integerOne ∈ ℤ by typecheck
+    have coprime := IntegerCoprime.one_left with modulus
+    exact principalCharacter.coprime with one, coprime
+  . intros a aInteger b bInteger
+    have product : integerMulValue(a, b) ∈ ℤ by typecheck
+    have aValue := FunctionBetween.apply_closed with function, aInteger
+    have bValue := FunctionBetween.apply_closed with function, bInteger
+    by_cases aCoprime : IntegerCoprime(a, integerOfNat(N))
+    . by_cases bCoprime : IntegerCoprime(b, integerOfNat(N))
+      . have both := IntegerCoprime.mul with aInteger, bInteger, modulus,
+          aCoprime, bCoprime
+        have productValue := principalCharacter.coprime with product, both
+        have aOne := principalCharacter.coprime with aInteger, aCoprime
+        have bOne := principalCharacter.coprime with bInteger, bCoprime
+        rw [productValue, aOne, bOne, complexMul.one_one]
+      . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+          intro both
+          have right := IntegerCoprime.of_mul_right with aInteger, bInteger,
+            modulus, both
+          exact bCoprime with right
+        have productValue := principalCharacter.not_coprime with product,
+          notBoth
+        have bZero := principalCharacter.not_coprime with bInteger, bCoprime
+        have absorb := complexMul.zero_right with aValue
+        rw [productValue, bZero, absorb]
+    . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+        intro both
+        have left := IntegerCoprime.of_mul_left with aInteger, bInteger,
+          modulus, both
+        exact aCoprime with left
+      have productValue := principalCharacter.not_coprime with product,
+        notBoth
+      have aZero := principalCharacter.not_coprime with aInteger, aCoprime
+      have absorb := complexMul.zero_left with bValue
+      rw [productValue, aZero, absorb]
+  . intros a integer notCoprime
+    exact principalCharacter.not_coprime with integer, notCoprime
+
+-- A character is principal exactly when it is 1 on every integer coprime
+-- to N.
+theorem principalCharacter.eq_iff (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows χ = principalCharacter(N) ↔
+    (∀ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) → χ(a) = complexOne)
+proof
+  constructor
+  . intro same
+    intros a integer coprime
+    rw same
+    exact principalCharacter.coprime with integer, coprime
+  . intro unit
+    have principal := principalCharacter.character at N
+    have first := DirichletCharacter.function with character
+    have second := DirichletCharacter.function with principal
+    apply FunctionBetween.ext at χ, principalCharacter(N), ℤ, complexCarrier
+      with first, second
+    intros a integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have left := unit with a, integer, coprime
+      have right := principalCharacter.coprime with integer, coprime
+      rw [left, right]
+    . have left := DirichletCharacter.not_coprime with character, integer,
+        coprime
+      have right := principalCharacter.not_coprime with integer, coprime
+      rw [left, right]
+
+-- The principal character modulo 1 is the constant 1, the character of ζ.
+theorem principalCharacter.modulus_one (a : Set)
+  requires integer : a ∈ ℤ
+  shows principalCharacter(1)(a) = complexOne
+proof
+  have principal := principalCharacter.character at 1
+  exact DirichletCharacter.modulus_one with principal, integer
+
+-- Change of level.
+
+theorem changeLevel.pair (N ψ x y : Set)
+  requires member : (x, y) ∈ changeLevel(N, ψ)
+  shows x ∈ ℤ ∧ ((IntegerCoprime(x, integerOfNat(N)) ∧ y = ψ(x)) ∨
+    (¬IntegerCoprime(x, integerOfNat(N)) ∧ y = complexZero))
+proof
+  unfold changeLevel at member
+  obtain ⟨bound, a, aInteger, branches⟩ := member
+  cases branches with unit | other
+  . obtain ⟨coprime, shape⟩ := unit
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw [first, second]
+    refine ⟨aInteger, ?_⟩
+    left
+    exact ⟨coprime, rfl⟩
+  . obtain ⟨notCoprime, shape⟩ := other
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw [first, second]
+    refine ⟨aInteger, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+
+theorem changeLevel.functional (N ψ : Set)
+  shows Functional(changeLevel(N, ψ))
+proof
+  intros x y first z second
+  obtain ⟨_, firstBranches⟩ := changeLevel.pair with first
+  obtain ⟨_, secondBranches⟩ := changeLevel.pair with second
+  cases firstBranches with firstUnit | firstOther
+  . cases secondBranches with secondUnit | secondOther
+    . rw [firstUnit.right, secondUnit.right]
+    . exfalso
+      exact secondOther.left with firstUnit.left
+  . cases secondBranches with secondUnit | secondOther
+    . exfalso
+      exact firstOther.left with secondUnit.left
+    . rw [firstOther.right, secondOther.right]
+
+theorem changeLevel.bounded (N ψ : Set)
+  shows changeLevel(N, ψ) ⊆ ℤ × complexCarrier
+proof
+  intros p member
+  unfold changeLevel at member
+  exact member.left
+
+-- The value on an integer coprime to N, when ψ takes a complex value there.
+-- (Without that hypothesis changeLevel(N, ψ) has no value at a, and the
+-- application is unconstrained.)
+theorem changeLevel.coprime_of_value (N ψ a : Set)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  requires value : ψ(a) ∈ complexCarrier
+  shows changeLevel(N, ψ)(a) = ψ(a)
+proof
+  have member : (a, ψ(a)) ∈ changeLevel(N, ψ)
+    unfold changeLevel
+    have pair := product.pair with integer, value
+    refine ⟨pair, a, integer, ?_⟩
+    left
+    exact ⟨coprime, rfl⟩
+  exact graph.apply with (changeLevel.bounded at N, ψ),
+    (changeLevel.functional at N, ψ), member
+
+theorem changeLevel.coprime (N : Nat) (ψ a : Set)
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  requires value : ψ(a) ∈ complexCarrier
+  shows changeLevel(N, ψ)(a) = ψ(a)
+proof
+  exact changeLevel.coprime_of_value at N, ψ, a with integer, coprime, value
+
+theorem changeLevel.not_coprime (N : Nat) (ψ a : Set)
+  requires integer : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(N))
+  shows changeLevel(N, ψ)(a) = complexZero
+proof
+  have member : (a, complexZero) ∈ changeLevel(N, ψ)
+    unfold changeLevel
+    have pair := product.pair with integer, complexZero.member
+    refine ⟨pair, a, integer, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+  exact graph.apply with (changeLevel.bounded at N, ψ),
+    (changeLevel.functional at N, ψ), member
+
+-- A character modulo a divisor d of N induces a character modulo N.
+theorem changeLevel.character (N d : Nat) (ψ : Set)
+  requires divides : d ∣ N
+  requires character : DirichletCharacter(d, ψ)
+  shows DirichletCharacter(N, changeLevel(N, ψ))
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have levelDivides := IntegerDivides.of_natural with divides
+  have function : changeLevel(N, ψ) : ℤ → complexCarrier
+    refine ⟨(changeLevel.bounded at N, ψ), (changeLevel.functional at N, ψ),
+      ?_⟩
+    intros a integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have value := DirichletCharacter.value with character, integer
+      refine ⟨ψ(a), value, ?_⟩
+      unfold relates
+      unfold changeLevel
+      have pair := product.pair with integer, value
+      refine ⟨pair, a, integer, ?_⟩
+      left
+      exact ⟨coprime, rfl⟩
+    . refine ⟨complexZero, complexZero.member, ?_⟩
+      unfold relates
+      unfold changeLevel
+      have pair := product.pair with integer, complexZero.member
+      refine ⟨pair, a, integer, ?_⟩
+      right
+      exact ⟨coprime, rfl⟩
+  refine ⟨function, ?_, ?_, ?_, ?_⟩
+  . intros a integer
+    have shifted : integerAddValue(a, integerOfNat(N)) ∈ ℤ by typecheck
+    have congruent : IntegerCongruent(integerOfNat(N),
+        integerAddValue(a, integerOfNat(N)), a)
+      witness integerOne
+      ring
+    have reverse := IntegerCongruent.symmetric with congruent
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have shiftedCoprime := IntegerCoprime.of_congruent with integer,
+        shifted, modulus, reverse, coprime
+      have shiftedValue := DirichletCharacter.value with character, shifted
+      have aValue := DirichletCharacter.value with character, integer
+      have left := changeLevel.coprime_of_value with shifted, shiftedCoprime,
+        shiftedValue
+      have right := changeLevel.coprime_of_value with integer, coprime, aValue
+      have reduced := IntegerCongruent.divides_modulus with levelDivides,
+        congruent
+      have same := DirichletCharacter.congruent with character, shifted,
+        integer, reduced
+      rw [left, right, same]
+    . have shiftedOther : ¬IntegerCoprime(integerAddValue(a, integerOfNat(N)),
+          integerOfNat(N))
+        intro shiftedCoprime
+        have back := IntegerCoprime.of_congruent with shifted, integer,
+          modulus, congruent, shiftedCoprime
+        exact coprime with back
+      have left := changeLevel.not_coprime at N, ψ, integerAddValue(a, integerOfNat(N))
+        with shifted, shiftedOther
+      have right := changeLevel.not_coprime at N, ψ, a
+        with integer, coprime
+      rw [left, right]
+  . have one : integerOne ∈ ℤ by typecheck
+    have coprime := IntegerCoprime.one_left with modulus
+    have value := DirichletCharacter.value with character, one
+    have level := changeLevel.coprime_of_value with one, coprime, value
+    have unit := DirichletCharacter.one with character
+    rw [level, unit]
+  . intros a aInteger b bInteger
+    have product : integerMulValue(a, b) ∈ ℤ by typecheck
+    have aValue := FunctionBetween.apply_closed with function, aInteger
+    have bValue := FunctionBetween.apply_closed with function, bInteger
+    by_cases aCoprime : IntegerCoprime(a, integerOfNat(N))
+    . by_cases bCoprime : IntegerCoprime(b, integerOfNat(N))
+      . have both := IntegerCoprime.mul with aInteger, bInteger, modulus,
+          aCoprime, bCoprime
+        have productValue := DirichletCharacter.value with character, product
+        have aψ := DirichletCharacter.value with character, aInteger
+        have bψ := DirichletCharacter.value with character, bInteger
+        have productLevel := changeLevel.coprime_of_value with product, both,
+          productValue
+        have aLevel := changeLevel.coprime_of_value with aInteger, aCoprime,
+          aψ
+        have bLevel := changeLevel.coprime_of_value with bInteger, bCoprime,
+          bψ
+        have multiplicative := DirichletCharacter.mul with character,
+          aInteger, bInteger
+        rw [productLevel, aLevel, bLevel, multiplicative]
+      . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+          intro both
+          have right := IntegerCoprime.of_mul_right with aInteger, bInteger,
+            modulus, both
+          exact bCoprime with right
+        have productValue := changeLevel.not_coprime at N, ψ, integerMulValue(a, b)
+          with product, notBoth
+        have bZero := changeLevel.not_coprime at N, ψ, b
+          with bInteger, bCoprime
+        have absorb := complexMul.zero_right with aValue
+        rw [productValue, bZero, absorb]
+    . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+        intro both
+        have left := IntegerCoprime.of_mul_left with aInteger, bInteger,
+          modulus, both
+        exact aCoprime with left
+      have productValue := changeLevel.not_coprime at N, ψ, integerMulValue(a, b)
+        with product, notBoth
+      have aZero := changeLevel.not_coprime at N, ψ, a
+        with aInteger, aCoprime
+      have absorb := complexMul.zero_left with bValue
+      rw [productValue, aZero, absorb]
+  . intros a integer notCoprime
+    exact changeLevel.not_coprime at N, ψ, a
+      with integer, notCoprime
+
+-- Factoring through d is being induced from a character modulo d.
+theorem FactorsThrough.iff_changeLevel (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, d) ↔
+    d ∣ N ∧ (∃ ψ, DirichletCharacter(d, ψ) ∧ χ = changeLevel(N, ψ))
+proof
+  constructor
+  . intro factors
+    obtain ⟨divides, ψ, induced, agree⟩ := factors
+    refine ⟨divides, ψ, induced, ?_⟩
+    have level := changeLevel.character with divides, induced
+    have first := DirichletCharacter.function with character
+    have second := DirichletCharacter.function with level
+    apply FunctionBetween.ext at χ, changeLevel(N, ψ), ℤ, complexCarrier
+      with first, second
+    intros a integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have value := DirichletCharacter.value with induced, integer
+      have same := agree with a, integer, coprime
+      have right := changeLevel.coprime_of_value with integer, coprime, value
+      rw [same, right]
+    . have left := DirichletCharacter.not_coprime with character, integer,
+        coprime
+      have right := changeLevel.not_coprime at N, ψ, a
+        with integer, coprime
+      rw [left, right]
+  . intro induced
+    obtain ⟨divides, ψ, lower, same⟩ := induced
+    refine ⟨divides, ψ, lower, ?_⟩
+    intros a integer coprime
+    have value := DirichletCharacter.value with lower, integer
+    have right := changeLevel.coprime_of_value with integer, coprime, value
+    rw [same, right]
+
+theorem FactorsThrough.self (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, N)
+proof
+  have divides := divides.reflexive at N
+  refine ⟨divides, χ, character, ?_⟩
+  intros a member coprime
+  rfl
+
+theorem factorLevels.naturals (N χ : Set)
+  shows factorLevels(N, χ) ⊆ ℕ
+proof
+  intros d member
+  unfold factorLevels at member
+  exact member.left
+
+theorem factorLevels.inhabited (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows Nonempty(factorLevels(N, χ))
+proof
+  have factors := FactorsThrough.self with character
+  have natural : N ∈ ℕ by simp [Nat]
+  have level : N ∈ factorLevels(N, χ)
+    unfold factorLevels
+    exact ⟨natural, factors⟩
+  exact ⟨N, level⟩
+
+-- The conductor.
+
+theorem conductor.factors (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows FactorsThrough(N, χ, conductor(N, χ))
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have member := leastNatural.member with inhabited, naturals
+  unfold conductor
+  unfold factorLevels at member
+  exact member.right
+
+theorem conductor.least (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires factors : FactorsThrough(N, χ, d)
+  shows conductor(N, χ) ≤ d
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have natural : d ∈ ℕ by simp [Nat]
+  have level : d ∈ factorLevels(N, χ)
+    unfold factorLevels
+    exact ⟨natural, factors⟩
+  unfold conductor
+  exact leastNatural.least with inhabited, naturals, level
+
+theorem conductor.natural (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows Nat(conductor(N, χ))
+proof
+  have inhabited := factorLevels.inhabited with character
+  have naturals := factorLevels.naturals at N, χ
+  have member := leastNatural.member with inhabited, naturals
+  have natural := naturals with member
+  unfold conductor
+  exact nat.omega.backward with natural
+
+theorem conductor.dvd (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows conductor(N, χ) ∣ N
+proof
+  have factors := conductor.factors with character
+  exact factors.left
+
+theorem conductor.positive (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows 0 < conductor(N, χ)
+proof
+  have natural := conductor.natural with character
+  have divides := conductor.dvd with character
+  by_contra notPositive
+  have zero : conductor(N, χ) = 0 by arith
+  rw zero at divides
+  obtain ⟨k, kNat, product⟩ := divides
+  have vanishing : mul(0, k) = 0 by arith
+  rw vanishing at product
+  arith
+
+-- Coprime to two moduli is coprime to their product.
+theorem IntegerCoprime.mul_right (x m n : Set)
+  requires xInteger : x ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires nInteger : n ∈ ℤ
+  requires first : IntegerCoprime(x, m)
+  requires second : IntegerCoprime(x, n)
+  shows IntegerCoprime(x, integerMulValue(m, n))
+proof
+  obtain ⟨u, uInteger, p, pInteger, left⟩ := IntegerCoprime.modular_inverse
+    with first
+  obtain ⟨w, wInteger, q, qInteger, right⟩ := IntegerCoprime.modular_inverse
+    with second
+  apply IntegerCoprime.of_bezout at x, integerMulValue(m, n),
+    u * x * w - u * n * q - m * p * w, p * q
+  linear_combination (n * q - x * w) * left - right
+
+-- A residue a coprime to c lifts to an integer congruent to a modulo c and
+-- coprime to any given positive M: strip from M the common factors with c,
+-- which a avoids, and solve the remaining congruence by the Chinese
+-- remainder theorem.
+theorem IntegerCoprime.lift_bounded (c K : Nat) (a : Set)
+  requires aInteger : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(c))
+  shows ∀ M ∈ ℕ, 0 < M → M ≤ K → ∃ x ∈ ℤ,
+    IntegerCongruent(integerOfNat(c), x, a) ∧ IntegerCoprime(x, integerOfNat(M))
+proof
+  induction K
+  | zero =>
+    intros M member positive bound
+    have mNat := nat.omega.backward with member
+    exfalso
+    arith
+  | succ(k) using ih =>
+    intros M member positive bound
+    have mNat := nat.omega.backward with member
+    have modulus : integerOfNat(M) ∈ ℤ by typecheck
+    have level : integerOfNat(c) ∈ ℤ by typecheck
+    by_cases unit : gcd(c, M) = 1
+    . -- Chinese remainder: x = a + c u (1 − a) with c u ≡ 1 modulo M.
+      have integerUnit : IntegerCoprime(integerOfNat(c), integerOfNat(M))
+        unfold IntegerCoprime
+        rw integerGCD.ofNat
+        exact unit
+      obtain ⟨u, uInteger, v, vInteger, identity⟩ := IntegerCoprime.bezout
+        with integerUnit
+      have lifted : a + integerOfNat(c) * (u * (integerOne - a)) ∈ ℤ
+        by typecheck
+      refine ⟨a + integerOfNat(c) * (u * (integerOne - a)), lifted, ?_, ?_⟩
+      . witness u * (integerOne - a)
+        ring
+      . apply IntegerCoprime.of_modular_inverse
+          at a + integerOfNat(c) * (u * (integerOne - a)), integerOfNat(M),
+            integerOne
+        witness (a - integerOne) * v
+        linear_combination (a - integerOne) * identity
+    . have positiveGcd : gcd(c, M) ≠ 0
+        intro zero
+        have both := gcd.zero_iff.forward at c, M with zero
+        have mZero := both.right
+        arith
+      have divides := gcd.divides_right at c, M
+      obtain ⟨r, rNat, product⟩ := divides
+      have rPositive : 0 < r
+        by_contra notPositive
+        have rZero : r = 0 by arith
+        rw rZero at product
+        have vanishing : mul(gcd(c, M), 0) = 0 by arith
+        rw vanishing at product
+        arith
+      have atLeastTwo : 2 ≤ gcd(c, M) by arith
+      have doubled := LessEqual.mul_right at 2, gcd(c, M), r with atLeastTwo
+      have smaller : r ≤ k by arith
+      have rMember : r ∈ ℕ by typecheck
+      obtain ⟨x, xMember, congruent, partCoprime⟩ := ih with r, rMember,
+        rPositive, smaller
+      have xInteger : x ∈ ℤ by exact xMember
+      have reverse := IntegerCongruent.symmetric with congruent
+      have xCoprime := IntegerCoprime.of_congruent with aInteger, xInteger,
+        level, reverse, coprime
+      have commonDivides := gcd.divides_left at c, M
+      have commonInteger := IntegerDivides.of_natural with commonDivides
+      have common : integerOfNat(gcd(c, M)) ∈ ℤ by typecheck
+      have commonCoprime := IntegerCoprime.of_divides with xInteger, level,
+        common, commonInteger, xCoprime
+      have partInteger : integerOfNat(r) ∈ ℤ by typecheck
+      have whole := IntegerCoprime.mul_right with xInteger, common,
+        partInteger, commonCoprime, partCoprime
+      rw [← integerOfNat.mul, product] at whole
+      exact ⟨x, xMember, congruent, whole⟩
+
+theorem IntegerCoprime.lift (c M : Nat) (a : Set)
+  requires aInteger : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(c))
+  requires positive : 0 < M
+  shows ∃ x ∈ ℤ, IntegerCongruent(integerOfNat(c), x, a) ∧
+    IntegerCoprime(x, integerOfNat(M))
+proof
+  have all := IntegerCoprime.lift_bounded at c, M, a with aInteger, coprime
+  have member : M ∈ ℕ by typecheck
+  have bound : M ≤ M by arith
+  exact all with M, member, positive, bound
+
+-- If χ factors through c and through d, two units congruent modulo
+-- gcd(c, d) have the same value: move between them through a unit
+-- congruent to the first modulo c and to the second modulo d.
+theorem FactorsThrough.gcd_agree (N : Nat) (χ : Set) (c d : Nat) (x y : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires first : FactorsThrough(N, χ, c)
+  requires second : FactorsThrough(N, χ, d)
+  requires xInteger : x ∈ ℤ
+  requires yInteger : y ∈ ℤ
+  requires xCoprime : IntegerCoprime(x, integerOfNat(N))
+  requires yCoprime : IntegerCoprime(y, integerOfNat(N))
+  requires congruent : IntegerCongruent(integerOfNat(gcd(c, d)), x, y)
+  shows χ(x) = χ(y)
+proof
+  obtain ⟨cDivides, ψ, cCharacter, cAgree⟩ := first
+  obtain ⟨dDivides, ρ, dCharacter, dAgree⟩ := second
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have cInteger : integerOfNat(c) ∈ ℤ by typecheck
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  have cIntegerDivides := IntegerDivides.of_natural with cDivides
+  have dIntegerDivides := IntegerDivides.of_natural with dDivides
+  have xc := IntegerCoprime.of_divides with xInteger, modulus, cInteger,
+    cIntegerDivides, xCoprime
+  have yd := IntegerCoprime.of_divides with yInteger, modulus, dInteger,
+    dIntegerDivides, yCoprime
+  obtain ⟨u, uInteger, v, vInteger, identity⟩ := integerGCD.bezout
+    at integerOfNat(c), integerOfNat(d)
+  rw integerGCD.ofNat at identity
+  obtain ⟨t, tInteger, difference⟩ := congruent
+  -- w ≡ x modulo c and w ≡ y modulo d.
+  have wInteger : x - integerOfNat(c) * (u * t) ∈ ℤ by typecheck
+  have wx : IntegerCongruent(integerOfNat(c),
+      x - integerOfNat(c) * (u * t), x)
+    witness -(u * t)
+    ring
+  have wy : IntegerCongruent(integerOfNat(d),
+      x - integerOfNat(c) * (u * t), y)
+    witness v * t
+    linear_combination t * identity + difference
+  have xw := IntegerCongruent.symmetric with wx
+  have yw := IntegerCongruent.symmetric with wy
+  have wc := IntegerCoprime.of_congruent with xInteger, wInteger, cInteger,
+    xw, xc
+  have wd := IntegerCoprime.of_congruent with yInteger, wInteger, dInteger,
+    yw, yd
+  have wcd := IntegerCoprime.mul_right with wInteger, cInteger, dInteger, wc,
+    wd
+  rw ← integerOfNat.mul at wcd
+  obtain ⟨z, zMember, zw, zCoprime⟩ := IntegerCoprime.lift
+    at c * d, N, x - integerOfNat(c) * (u * t) with wInteger, wcd, positive
+  have zInteger : z ∈ ℤ by exact zMember
+  have productInteger : integerOfNat(c * d) ∈ ℤ by typecheck
+  have cProduct : IntegerDivides(integerOfNat(c), integerOfNat(c * d))
+    rw integerOfNat.mul
+    exact IntegerDivides.mul_left_self at integerOfNat(c), integerOfNat(d)
+  have dProduct : IntegerDivides(integerOfNat(d), integerOfNat(c * d))
+    rw integerOfNat.mul
+    exact IntegerDivides.mul_right_self at integerOfNat(d), integerOfNat(c)
+  have zwc := IntegerCongruent.divides_modulus with cProduct, zw
+  have zwd := IntegerCongruent.divides_modulus with dProduct, zw
+  have zx := IntegerCongruent.transitive with zwc, wx
+  have zy := IntegerCongruent.transitive with zwd, wy
+  have xValue := cAgree with x, xInteger, xCoprime
+  have yValue := dAgree with y, yInteger, yCoprime
+  have zcValue := cAgree with z, zInteger, zCoprime
+  have zdValue := dAgree with z, zInteger, zCoprime
+  have cSame := DirichletCharacter.congruent with cCharacter, zInteger,
+    xInteger, zx
+  have dSame := DirichletCharacter.congruent with dCharacter, zInteger,
+    yInteger, zy
+  rw [xValue, yValue, ← cSame, ← dSame, ← zcValue, ← zdValue]
+
+-- The character modulo g induced by χ through any unit lift: on a residue
+-- a coprime to g, the value of χ at an integer coprime to N congruent to a
+-- modulo g; 0 elsewhere.
+def liftedCharacter (N g : Nat, χ : Set) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ a ∈ ℤ,
+    (IntegerCoprime(a, integerOfNat(g)) ∧ (∃ x ∈ ℤ,
+      IntegerCongruent(integerOfNat(g), x, a) ∧
+      IntegerCoprime(x, integerOfNat(N)) ∧ p = (a, χ(x)))) ∨
+    (¬IntegerCoprime(a, integerOfNat(g)) ∧ p = (a, complexZero)) }
+
+theorem liftedCharacter.bounded (N g : Nat, χ : Set)
+  shows liftedCharacter(N, g, χ) ⊆ ℤ × complexCarrier
+proof
+  intros p member
+  unfold liftedCharacter at member
+  exact member.left
+
+theorem liftedCharacter.pair (N g : Nat, χ a z : Set)
+  requires member : (a, z) ∈ liftedCharacter(N, g, χ)
+  shows a ∈ ℤ ∧ ((IntegerCoprime(a, integerOfNat(g)) ∧ (∃ x ∈ ℤ,
+      IntegerCongruent(integerOfNat(g), x, a) ∧
+      IntegerCoprime(x, integerOfNat(N)) ∧ z = χ(x))) ∨
+    (¬IntegerCoprime(a, integerOfNat(g)) ∧ z = complexZero))
+proof
+  unfold liftedCharacter at member
+  obtain ⟨bound, b, bInteger, branches⟩ := member
+  cases branches with unit | other
+  . obtain ⟨coprime, x, xInteger, congruent, xCoprime, shape⟩ := unit
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    have aInteger : a ∈ ℤ
+      rw first
+      exact bInteger
+    have aCoprime : IntegerCoprime(a, integerOfNat(g))
+      rw first
+      exact coprime
+    have aCongruent : IntegerCongruent(integerOfNat(g), x, a)
+      rw first
+      exact congruent
+    refine ⟨aInteger, ?_⟩
+    left
+    exact ⟨aCoprime, x, xInteger, aCongruent, xCoprime, second⟩
+  . obtain ⟨notCoprime, shape⟩ := other
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw [first, second]
+    refine ⟨bInteger, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+
+section Lifted
+variable (N : Nat) (χ : Set) (c d : Nat)
+hypothesis character : DirichletCharacter(N, χ)
+hypothesis positive : 0 < N
+hypothesis first : FactorsThrough(N, χ, c)
+hypothesis second : FactorsThrough(N, χ, d)
+
+theorem liftedCharacter.functional
+  shows Functional(liftedCharacter(N, gcd(c, d), χ))
+proof
+  intros a y yMember z zMember
+  obtain ⟨aInteger, yBranches⟩ := liftedCharacter.pair with yMember
+  obtain ⟨_, zBranches⟩ := liftedCharacter.pair with zMember
+  cases yBranches with yUnit | yOther
+  . cases zBranches with zUnit | zOther
+    . obtain ⟨_, x, xInteger, xCongruent, xCoprime, yValue⟩ := yUnit
+      obtain ⟨_, w, wInteger, wCongruent, wCoprime, zValue⟩ := zUnit
+      have reverse := IntegerCongruent.symmetric with wCongruent
+      have between := IntegerCongruent.transitive with xCongruent, reverse
+      have same := FactorsThrough.gcd_agree with character, positive, first,
+        second, xInteger, wInteger, xCoprime, wCoprime, between
+      rw [yValue, zValue, same]
+    . exfalso
+      exact zOther.left with yUnit.left
+  . cases zBranches with zUnit | zOther
+    . exfalso
+      exact yOther.left with zUnit.left
+    . rw [yOther.right, zOther.right]
+
+theorem liftedCharacter.unit (a x : Set)
+  requires aInteger : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(gcd(c, d)))
+  requires xInteger : x ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(gcd(c, d)), x, a)
+  requires xCoprime : IntegerCoprime(x, integerOfNat(N))
+  shows liftedCharacter(N, gcd(c, d), χ)(a) = χ(x)
+proof
+  have value := DirichletCharacter.value with character, xInteger
+  have member : (a, χ(x)) ∈ liftedCharacter(N, gcd(c, d), χ)
+    unfold liftedCharacter
+    have pair := product.pair with aInteger, value
+    refine ⟨pair, a, aInteger, ?_⟩
+    left
+    exact ⟨coprime, x, xInteger, congruent, xCoprime, rfl⟩
+  have functional := liftedCharacter.functional with character, positive,
+    first, second
+  exact graph.apply with (liftedCharacter.bounded at N, gcd(c, d), χ), functional, member
+
+theorem liftedCharacter.other (a : Set)
+  requires aInteger : a ∈ ℤ
+  requires notCoprime : ¬IntegerCoprime(a, integerOfNat(gcd(c, d)))
+  shows liftedCharacter(N, gcd(c, d), χ)(a) =
+    complexZero
+proof
+  have member : (a, complexZero) ∈ liftedCharacter(N, gcd(c, d), χ)
+    unfold liftedCharacter
+    have pair := product.pair with aInteger, complexZero.member
+    refine ⟨pair, a, aInteger, ?_⟩
+    right
+    exact ⟨notCoprime, rfl⟩
+  have functional := liftedCharacter.functional with character, positive,
+    first, second
+  exact graph.apply with (liftedCharacter.bounded at N, gcd(c, d), χ), functional, member
+
+-- χ factors through gcd(c, d).
+theorem FactorsThrough.gcd
+  shows FactorsThrough(N, χ, gcd(c, d))
+proof
+  have functional := liftedCharacter.functional with character, positive,
+    first, second
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have level : integerOfNat(gcd(c, d)) ∈ ℤ by typecheck
+  have cDivides := first.left
+  have commonDivides := gcd.divides_left at c, d
+  have levelDivides := divides.transitive with commonDivides, cDivides
+  have levelIntegerDivides := IntegerDivides.of_natural with levelDivides
+  have function : liftedCharacter(N, gcd(c, d), χ) : ℤ → complexCarrier
+    refine ⟨(liftedCharacter.bounded at N, gcd(c, d), χ), functional, ?_⟩
+    intros a aInteger
+    by_cases coprime : IntegerCoprime(a, integerOfNat(gcd(c, d)))
+    . obtain ⟨x, xMember, congruent, xCoprime⟩ := IntegerCoprime.lift
+        at gcd(c, d), N, a with aInteger, coprime, positive
+      have xInteger : x ∈ ℤ by exact xMember
+      have value := DirichletCharacter.value with character, xInteger
+      refine ⟨χ(x), value, ?_⟩
+      unfold relates
+      unfold liftedCharacter
+      have pair := product.pair with aInteger, value
+      refine ⟨pair, a, aInteger, ?_⟩
+      left
+      exact ⟨coprime, x, xInteger, congruent, xCoprime, rfl⟩
+    . refine ⟨complexZero, complexZero.member, ?_⟩
+      unfold relates
+      unfold liftedCharacter
+      have pair := product.pair with aInteger, complexZero.member
+      refine ⟨pair, a, aInteger, ?_⟩
+      right
+      exact ⟨coprime, rfl⟩
+  have lowered : DirichletCharacter(gcd(c, d), liftedCharacter(N, gcd(c, d), χ))
+    refine ⟨function, ?_, ?_, ?_, ?_⟩
+    . intros a aInteger
+      have shifted : integerAddValue(a, integerOfNat(gcd(c, d))) ∈ ℤ
+        by typecheck
+      have congruent : IntegerCongruent(integerOfNat(gcd(c, d)),
+          integerAddValue(a, integerOfNat(gcd(c, d))), a)
+        witness integerOne
+        ring
+      have reverse := IntegerCongruent.symmetric with congruent
+      by_cases coprime : IntegerCoprime(a, integerOfNat(gcd(c, d)))
+      . obtain ⟨x, xMember, xCongruent, xCoprime⟩ := IntegerCoprime.lift
+          at gcd(c, d), N, a with aInteger, coprime, positive
+        have xInteger : x ∈ ℤ by exact xMember
+        have shiftedCoprime := IntegerCoprime.of_congruent with aInteger,
+          shifted, level, reverse, coprime
+        have shiftedCongruent := IntegerCongruent.transitive with xCongruent,
+          reverse
+        have left := liftedCharacter.unit with character, positive, first,
+          second, shifted, shiftedCoprime, xInteger, shiftedCongruent, xCoprime
+        have right := liftedCharacter.unit with character, positive, first,
+          second, aInteger, coprime, xInteger, xCongruent, xCoprime
+        rw [left, right]
+      . have shiftedOther : ¬IntegerCoprime(integerAddValue(a,
+            integerOfNat(gcd(c, d))), integerOfNat(gcd(c, d)))
+          intro shiftedCoprime
+          have back := IntegerCoprime.of_congruent with shifted, aInteger,
+            level, congruent, shiftedCoprime
+          exact coprime with back
+        have left := liftedCharacter.other with character, positive, first,
+          second, shifted, shiftedOther
+        have right := liftedCharacter.other with character, positive, first,
+          second, aInteger, coprime
+        rw [left, right]
+    . have one : integerOne ∈ ℤ by typecheck
+      have levelCoprime := IntegerCoprime.one_left with level
+      have unitCoprime := IntegerCoprime.one_left with modulus
+      have reflexive := IntegerCongruent.reflexive
+        at integerOfNat(gcd(c, d)), integerOne
+      have value := liftedCharacter.unit with character, positive, first,
+        second, one, levelCoprime, one, reflexive, unitCoprime
+      rw [value, DirichletCharacter.one with character]
+    . intros a aInteger b bInteger
+      have product : integerMulValue(a, b) ∈ ℤ by typecheck
+      have aValue := FunctionBetween.apply_closed with function, aInteger
+      have bValue := FunctionBetween.apply_closed with function, bInteger
+      by_cases aCoprime : IntegerCoprime(a, integerOfNat(gcd(c, d)))
+      . by_cases bCoprime : IntegerCoprime(b, integerOfNat(gcd(c, d)))
+        . obtain ⟨x, xMember, xCongruent, xCoprime⟩ := IntegerCoprime.lift
+            at gcd(c, d), N, a with aInteger, aCoprime, positive
+          obtain ⟨y, yMember, yCongruent, yCoprime⟩ := IntegerCoprime.lift
+            at gcd(c, d), N, b with bInteger, bCoprime, positive
+          have xInteger : x ∈ ℤ by exact xMember
+          have yInteger : y ∈ ℤ by exact yMember
+          have both := IntegerCoprime.mul with aInteger, bInteger, level,
+            aCoprime, bCoprime
+          have xyInteger : integerMulValue(x, y) ∈ ℤ by typecheck
+          have xyCoprime := IntegerCoprime.mul with xInteger, yInteger,
+            modulus, xCoprime, yCoprime
+          have xyCongruent := IntegerCongruent.mul with xCongruent, yCongruent
+          have productValue := liftedCharacter.unit with character, positive,
+            first, second, product, both, xyInteger, xyCongruent, xyCoprime
+          have aLifted := liftedCharacter.unit with character, positive, first,
+            second, aInteger, aCoprime, xInteger, xCongruent, xCoprime
+          have bLifted := liftedCharacter.unit with character, positive, first,
+            second, bInteger, bCoprime, yInteger, yCongruent, yCoprime
+          have multiplicative := DirichletCharacter.mul with character,
+            xInteger, yInteger
+          rw [productValue, aLifted, bLifted, multiplicative]
+        . have notBoth : ¬IntegerCoprime(integerMulValue(a, b),
+              integerOfNat(gcd(c, d)))
+            intro both
+            have right := IntegerCoprime.of_mul_right with aInteger, bInteger,
+              level, both
+            exact bCoprime with right
+          have productValue := liftedCharacter.other with character, positive,
+            first, second, product, notBoth
+          have bZero := liftedCharacter.other with character, positive, first,
+            second, bInteger, bCoprime
+          have absorb := complexMul.zero_right with aValue
+          rw [productValue, bZero, absorb]
+      . have notBoth : ¬IntegerCoprime(integerMulValue(a, b),
+            integerOfNat(gcd(c, d)))
+          intro both
+          have left := IntegerCoprime.of_mul_left with aInteger, bInteger,
+            level, both
+          exact aCoprime with left
+        have productValue := liftedCharacter.other with character, positive,
+          first, second, product, notBoth
+        have aZero := liftedCharacter.other with character, positive, first,
+          second, aInteger, aCoprime
+        have absorb := complexMul.zero_left with bValue
+        rw [productValue, aZero, absorb]
+    . intros a aInteger notCoprime
+      exact liftedCharacter.other with character, positive, first, second,
+        aInteger, notCoprime
+  refine ⟨levelDivides, liftedCharacter(N, gcd(c, d), χ), lowered, ?_⟩
+  intros a aInteger coprime
+  have levelCoprime := IntegerCoprime.of_divides with aInteger, modulus,
+    level, levelIntegerDivides, coprime
+  have reflexive := IntegerCongruent.reflexive at integerOfNat(gcd(c, d)), a
+  have value := liftedCharacter.unit with character, positive, first, second,
+    aInteger, levelCoprime, aInteger, reflexive, coprime
+  rw value
+
+end Lifted
+
+-- The levels through which χ factors are exactly the multiples of the
+-- conductor that divide N.
+theorem FactorsThrough.iff_conductor_dvd (N : Nat) (χ : Set) (d : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows FactorsThrough(N, χ, d) ↔ conductor(N, χ) ∣ d ∧ d ∣ N
+proof
+  have natural := conductor.natural with character
+  have conductorPositive := conductor.positive with character, positive
+  have factors := conductor.factors with character
+  constructor
+  . intro through
+    have dDivides := through.left
+    have common := FactorsThrough.gcd at N, χ, conductor(N, χ), d
+      with character, positive, factors, through
+    have least := conductor.least with character, common
+    have commonDivides := gcd.divides_left at conductor(N, χ), d
+    have nonzero : conductor(N, χ) ≠ 0 by arith
+    have atMost := divides.le with commonDivides, nonzero
+    have same : gcd(conductor(N, χ), d) = conductor(N, χ) by arith
+    have divides := gcd.divides_right at conductor(N, χ), d
+    rw same at divides
+    exact ⟨divides, dDivides⟩
+  . intro both
+    obtain ⟨conductorDivides, dDivides⟩ := both
+    obtain ⟨_, ψ, lower, agree⟩ := factors
+    have level := changeLevel.character with conductorDivides, lower
+    refine ⟨dDivides, changeLevel(d, ψ), level, ?_⟩
+    intros a aInteger coprime
+    have modulus : integerOfNat(N) ∈ ℤ by typecheck
+    have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+    have dIntegerDivides := IntegerDivides.of_natural with dDivides
+    have dCoprime := IntegerCoprime.of_divides with aInteger, modulus,
+      dInteger, dIntegerDivides, coprime
+    have value := DirichletCharacter.value with lower, aInteger
+    have induced := changeLevel.coprime_of_value with aInteger, dCoprime,
+      value
+    have same := agree with a, aInteger, coprime
+    rw [induced, same]
+
+-- Conductor 1 means principal.
+theorem conductor.eq_one_iff (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows conductor(N, χ) = 1 ↔ χ = principalCharacter(N)
+proof
+  have natural := conductor.natural with character
+  constructor
+  . intro unit
+    have factors := conductor.factors with character
+    rw unit at factors
+    obtain ⟨divides, ψ, lower, agree⟩ := factors
+    apply principalCharacter.eq_iff.backward with character
+    intros a integer coprime
+    have same := agree with a, integer, coprime
+    have trivial := DirichletCharacter.modulus_one with lower, integer
+    rw [same, trivial]
+  . intro principal
+    have lower := principalCharacter.character at 1
+    have divides := one.divides at N
+    have factors : FactorsThrough(N, χ, 1)
+      refine ⟨divides, principalCharacter(1), lower, ?_⟩
+      intros a integer coprime
+      have left := principalCharacter.coprime with integer, coprime
+      have right := principalCharacter.modulus_one with integer
+      rw [principal, left, right]
+    have least := conductor.least with character, factors
+    have conductorPositive := conductor.positive with character, positive
+    arith
+
+-- Every character modulo N ≥ 1 is induced by a primitive character modulo
+-- its conductor, and that primitive character is unique.
+theorem DirichletCharacter.primitive_induced (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows ∃ ψ, DirichletCharacter(conductor(N, χ), ψ) ∧
+    PrimitiveCharacter(conductor(N, χ), ψ) ∧ χ = changeLevel(N, ψ)
+proof
+  have natural := conductor.natural with character
+  have factors := conductor.factors with character
+  have induced := FactorsThrough.iff_changeLevel.forward with character,
+    factors
+  obtain ⟨divides, ψ, lower, same⟩ := induced
+  refine ⟨ψ, lower, ?_, same⟩
+  -- ψ factors through its own conductor e, hence so does χ, so e is at
+  -- least the conductor of χ; and e is at most the level of ψ.
+  have lowerNatural := conductor.natural with lower
+  have lowerFactors := conductor.factors with lower
+  obtain ⟨lowerDivides, ρ, lowest, agree⟩ := lowerFactors
+  have chained := divides.transitive with lowerDivides, divides
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have levelInteger : integerOfNat(conductor(N, χ)) ∈ ℤ by typecheck
+  have levelDivides := IntegerDivides.of_natural with divides
+  have through : FactorsThrough(N, χ, conductor(conductor(N, χ), ψ))
+    refine ⟨chained, ρ, lowest, ?_⟩
+    intros a integer coprime
+    have levelCoprime := IntegerCoprime.of_divides with integer, modulus,
+      levelInteger, levelDivides, coprime
+    have value := DirichletCharacter.value with lower, integer
+    have level := changeLevel.coprime_of_value with integer, coprime, value
+    have lowerValue := agree with a, integer, levelCoprime
+    rw [same, level, lowerValue]
+  have atLeast := conductor.least with character, through
+  have self := FactorsThrough.self with lower
+  have atMost := conductor.least with lower, self
+  unfold PrimitiveCharacter
+  arith
+
+theorem DirichletCharacter.primitive_induced_unique (N : Nat) (χ ψ ρ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires first : DirichletCharacter(conductor(N, χ), ψ)
+  requires firstInduces : χ = changeLevel(N, ψ)
+  requires second : DirichletCharacter(conductor(N, χ), ρ)
+  requires secondInduces : χ = changeLevel(N, ρ)
+  shows ψ = ρ
+proof
+  have natural := conductor.natural with character
+  have firstFunction := DirichletCharacter.function with first
+  have secondFunction := DirichletCharacter.function with second
+  apply FunctionBetween.ext at ψ, ρ, ℤ, complexCarrier with firstFunction, secondFunction
+  intros a integer
+  by_cases coprime : IntegerCoprime(a, integerOfNat(conductor(N, χ)))
+  . obtain ⟨x, xMember, congruent, xCoprime⟩ := IntegerCoprime.lift
+      at conductor(N, χ), N, a with integer, coprime, positive
+    have xInteger : x ∈ ℤ by exact xMember
+    have firstSame := DirichletCharacter.congruent with first, xInteger,
+      integer, congruent
+    have secondSame := DirichletCharacter.congruent with second, xInteger,
+      integer, congruent
+    have firstValue := DirichletCharacter.value with first, xInteger
+    have secondValue := DirichletCharacter.value with second, xInteger
+    have firstLevel := changeLevel.coprime_of_value with xInteger, xCoprime,
+      firstValue
+    have secondLevel := changeLevel.coprime_of_value with xInteger, xCoprime,
+      secondValue
+    rw [← firstSame, ← secondSame, ← firstLevel, ← secondLevel,
+      ← firstInduces, ← secondInduces]
+  . have firstZero := DirichletCharacter.not_coprime with first, integer,
+      coprime
+    have secondZero := DirichletCharacter.not_coprime with second, integer,
+      coprime
+    rw [firstZero, secondZero]
+
+-- The only primitive character modulo 1 is the principal one; no principal
+-- character modulo N > 1 is primitive.
+theorem PrimitiveCharacter.principal_iff (N : Nat)
+  requires positive : 0 < N
+  shows PrimitiveCharacter(N, principalCharacter(N)) ↔ N = 1
+proof
+  have principal := principalCharacter.character at N
+  have characterization := conductor.eq_one_iff with principal, positive
+  have unit := characterization.backward with rfl
+  unfold PrimitiveCharacter
+  rw unit
+  constructor
+  . intro same
+    obtain ⟨_, equal⟩ := same
+    symm at equal
+    exact equal
+  . intro same
+    symm at same
+    refine ⟨?_, same⟩
+    typecheck
+
+-- Character sums.
+
+theorem characterSum.zero (χ : Set)
+  shows characterSum(χ, 0) = complexZero
+proof
+  rw characterSum
+
+theorem characterSum.succ (χ : Set, n : Nat)
+  shows characterSum(χ, succ(n)) =
+    complexAdd((characterSum(χ, n), χ(integerOfNat(n))))
+proof
+  rw characterSum
+
+theorem characterSum.closed (N : Nat) (χ : Set, n : Nat)
+  requires character : DirichletCharacter(N, χ)
+  shows characterSum(χ, n) ∈ complexCarrier
+proof
+  induction n
+  | zero =>
+    rw characterSum.zero
+    exact complexZero.member
+  | succ(k) using ih =>
+    have integer : integerOfNat(k) ∈ ℤ by typecheck
+    have value := DirichletCharacter.value with character, integer
+    rw characterSum.succ
+    exact complexAdd.member with ih, value
+
+-- The sum of the principal character over 0, 1, …, m − 1 counts the
+-- residues below m coprime to N.
+theorem characterSum.principal_below (N m : Nat)
+  shows characterSum(principalCharacter(N), m) =
+    ringNat(complexAdd, complexZero, complexOne,
+      length{ℕ}(unitsBelow(N, m)))
+proof
+  induction m
+  | zero =>
+    rw [characterSum.zero, unitsBelow.zero, length.nil, ringNat.zero]
+  | succ(k) using ih =>
+    have integer : integerOfNat(k) ∈ ℤ by typecheck
+    have list := unitsBelow.list at N, k
+    rw [characterSum.succ, ih]
+    by_cases coprime : gcd(k, N) = 1
+    . have unit := unitsBelow.succ_unit at N, k with coprime
+      have integerCoprime : IntegerCoprime(integerOfNat(k), integerOfNat(N))
+        unfold IntegerCoprime
+        rw integerGCD.ofNat
+        exact coprime
+      have value := principalCharacter.coprime with integer, integerCoprime
+      have kMember : k ∈ ℕ by typecheck
+      have longer := length.cons at ℕ, k, unitsBelow(N, k) with kMember
+      rw [unit, value, longer, ringNat.succ]
+      unfold call2
+      rfl
+    . have other := unitsBelow.succ_other at N, k with coprime
+      have notCoprime : ¬IntegerCoprime(integerOfNat(k), integerOfNat(N))
+        intro integerCoprime
+        unfold IntegerCoprime at integerCoprime
+        rw integerGCD.ofNat at integerCoprime
+        exact coprime with integerCoprime
+      have value := principalCharacter.not_coprime with integer, notCoprime
+      have numeral := ringNat.complex at length{ℕ}(unitsBelow(N, k))
+      rw [other, value]
+      exact complexAdd.zero_right with numeral
+
+-- The values χ(0), …, χ(N − 1) as a function on the residues N.
+defgraph residueValues (N : Nat, χ : Set) (j ∈ N) : complexCarrier :=
+  χ(integerOfNat(j))
+requires character : DirichletCharacter(N, χ)
+proof
+  have naturals := natural.member at N
+  have jNat := naturals with j, member
+  have integer : integerOfNat(j) ∈ ℤ by typecheck
+  exact DirichletCharacter.value with character, integer
+
+-- Multiplication by t on the residues modulo N.
+defgraph residueScale (N t : Nat) (j ∈ N) : N := (t * j) % N
+requires positive : 0 < N
+proof
+  have nonzero : N ≠ 0 by arith
+  have naturals := natural.member at N
+  have jNat := naturals with j, member
+  have below := mod.less at t * j, N with nonzero
+  exact membership.of_Less at (t * j) % N, N with below
+
+-- For t coprime to N, multiplication by t permutes the residues.
+theorem residueScale.bijective (N t : Nat)
+  requires positive : 0 < N
+  requires coprime : gcd(t, N) = 1
+  shows BijectiveBetween(residueScale(N, t), N, N)
+proof
+  have function := residueScale.function at N, t with positive
+  have nonzero : N ≠ 0 by arith
+  have naturals := natural.member at N
+  have integerCoprime : IntegerCoprime(integerOfNat(t), integerOfNat(N))
+    unfold IntegerCoprime
+    rw integerGCD.ofNat
+    exact coprime
+  have levelCoprime := IntegerCoprime.symmetric with integerCoprime
+  have injective : ∀ x ∈ N, ∀ y ∈ N, ∀ z ∈ N,
+      relates(residueScale(N, t), x, z) → relates(residueScale(N, t), y, z) →
+      x = y
+    intros x xMember y yMember z zMember xz yz
+    have xNat := naturals with x, xMember
+    have yNat := naturals with y, yMember
+    have xValue := FunctionBetween.apply_value with function, xMember, xz
+    have yValue := FunctionBetween.apply_value with function, yMember, yz
+    have xFormula := residueScale.value at N, t, x with positive, xMember
+    have yFormula := residueScale.value at N, t, y with positive, yMember
+    have same : CongruentMod(t * x, t * y, N)
+      unfold CongruentMod
+      rw [← xFormula, ← yFormula, xValue, yValue]
+    have lifted := IntegerCongruent.ofNat_iff.backward at N, t * x, t * y
+      with same
+    rw [integerOfNat.mul, integerOfNat.mul] at lifted
+    have cancelled := IntegerCongruent.cancel_coprime with levelCoprime,
+      lifted
+    have back := IntegerCongruent.ofNat_iff.forward at N, x, y
+      with cancelled
+    unfold CongruentMod at back
+    have xBelow := Less.of_membership at x, N with xMember
+    have yBelow := Less.of_membership at y, N with yMember
+    have xReduced := mod.of_less at N, x with xBelow
+    have yReduced := mod.of_less at N, y with yBelow
+    rw [xReduced, yReduced] at back
+    exact back
+  have surjective : ∀ y ∈ N, ∃ x ∈ N, relates(residueScale(N, t), x, y)
+    intros k kMember
+    have kNat := naturals with k, kMember
+    obtain ⟨u, uInteger, inverse⟩ := IntegerCoprime.modular_inverse
+      with integerCoprime
+    have vNat := integerMod.natural at u, N with positive
+    have uReduced := integerMod.congruent at u, N with positive
+    have jBelow := mod.less at integerMod(u, N) * k, N with nonzero
+    have jMember := membership.of_Less at (integerMod(u, N) * k) % N, N
+      with jBelow
+    refine ⟨(integerMod(u, N) * k) % N, jMember, ?_⟩
+    have related := residueScale.relates at N, t,
+      (integerMod(u, N) * k) % N with positive, jMember
+    have image : (t * ((integerMod(u, N) * k) % N)) % N = k
+      have reduction := CongruentMod.mod_right at integerMod(u, N) * k, N
+      have reductionLifted := IntegerCongruent.ofNat_iff.backward
+        at N, integerMod(u, N) * k, (integerMod(u, N) * k) % N
+        with reduction
+      obtain ⟨p, pInteger, first⟩ := reductionLifted
+      obtain ⟨q, qInteger, second⟩ := uReduced
+      obtain ⟨r, rInteger, third⟩ := inverse
+      have congruent : IntegerCongruent(integerOfNat(N),
+          integerOfNat(t * ((integerMod(u, N) * k) % N)), integerOfNat(k))
+        rw [integerOfNat.mul]
+        rw integerOfNat.mul at first
+        witness r * integerOfNat(k) - integerOfNat(t) * integerOfNat(k) * q -
+          integerOfNat(t) * p
+        linear_combination integerOfNat(k) * third -
+          integerOfNat(t) * integerOfNat(k) * second - integerOfNat(t) * first
+      have natural := IntegerCongruent.ofNat_iff.forward with congruent
+      unfold CongruentMod at natural
+      have kBelow := Less.of_membership at k, N with kMember
+      have kReduced := mod.of_less at N, k with kBelow
+      rw kReduced at natural
+      exact natural
+    rw image at related
+    exact related
+  exact ⟨⟨function, injective⟩, ⟨function, surjective⟩⟩
+
+-- Summing the residue values in their natural order gives the character
+-- sum.
+theorem residueValues.sum_identity (N : Nat) (χ : Set, m : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires bound : m ≤ N
+  shows indexedRingSum(residueValues(N, χ), identity(N), complexAdd,
+    complexZero, m) = characterSum(χ, m)
+proof
+  induction m
+  | zero =>
+    intro bound
+    rw [indexedRingSum, characterSum.zero]
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ N by arith
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    have previous := ih with smaller
+    have position := identity.apply at k, N with kMember
+    have value := residueValues.value at N, χ, k with character, kMember
+    rw [indexedRingSum, previous, position, value, characterSum.succ]
+    unfold call2
+    rfl
+
+-- Summing them in the order permuted by t gives χ(t) times the sum.
+theorem residueValues.sum_scaled (N t : Nat) (χ : Set, m : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires bound : m ≤ N
+  shows indexedRingSum(residueValues(N, χ), residueScale(N, t), complexAdd,
+    complexZero, m) = complexMul((χ(integerOfNat(t)), characterSum(χ, m)))
+proof
+  induction m
+  | zero =>
+    intro bound
+    have scalar : integerOfNat(t) ∈ ℤ by typecheck
+    have value := DirichletCharacter.value with character, scalar
+    rw [indexedRingSum, characterSum.zero]
+    have absorb := complexMul.zero_right with value
+    unfold call2 at absorb
+    rw absorb
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ N by arith
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    have previous := ih with smaller
+    have nonzero : N ≠ 0 by arith
+    have imageBelow := mod.less at t * k, N with nonzero
+    have imageMember := membership.of_Less at (t * k) % N, N with imageBelow
+    have position := residueScale.value at N, t, k with positive, kMember
+    have value := residueValues.value at N, χ, (t * k) % N with character,
+      imageMember
+    -- χ((t k) mod N) = χ(t) χ(k).
+    have reduction := CongruentMod.mod_right at t * k, N
+    have lifted := IntegerCongruent.ofNat_iff.backward at N, t * k,
+      (t * k) % N with reduction
+    have productInteger : integerOfNat(t * k) ∈ ℤ by typecheck
+    have reducedInteger : integerOfNat((t * k) % N) ∈ ℤ by typecheck
+    have same := DirichletCharacter.congruent with character, productInteger,
+      reducedInteger, lifted
+    have scalar : integerOfNat(t) ∈ ℤ by typecheck
+    have kInteger : integerOfNat(k) ∈ ℤ by typecheck
+    have multiplicative := DirichletCharacter.mul with character, scalar,
+      kInteger
+    rw ← integerOfNat.mul at multiplicative
+    unfold call2 at multiplicative
+    have scalarValue := DirichletCharacter.value with character, scalar
+    have kValue := DirichletCharacter.value with character, kInteger
+    have sum := characterSum.closed at N, χ, k with character
+    have distribute := complexMul.distribute_pair with scalarValue, sum,
+      kValue
+    rw [indexedRingSum, previous, position, value, ← same, multiplicative,
+      characterSum.succ]
+    unfold call2
+    exact distribute
+
+-- Orthogonality over the residues: the sum of χ over a full period is 0
+-- unless χ is principal, when it is φ(N).
+theorem characterSum.non_principal (N : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows characterSum(χ, N) = complexZero
+proof
+  -- Some unit a has χ(a) ≠ 1.
+  have exists : ∃ a ∈ ℤ, IntegerCoprime(a, integerOfNat(N)) ∧
+      χ(a) ≠ complexOne
+    by_contra none
+    apply nonPrincipal
+    apply principalCharacter.eq_iff.backward with character
+    intros a integer coprime
+    by_contra different
+    apply none
+    exact ⟨a, integer, coprime, different⟩
+  obtain ⟨a, integer, coprime, different⟩ := exists
+  have tNat := integerMod.natural at a, N with positive
+  have residue := DirichletCharacter.residue with character, integer,
+    positive
+  rw residue at different
+  have congruent := integerMod.congruent at a, N with positive
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have tInteger : integerOfNat(integerMod(a, N)) ∈ ℤ by typecheck
+  have tCoprime := IntegerCoprime.of_congruent with integer, tInteger,
+    modulus, congruent, coprime
+  unfold IntegerCoprime at tCoprime
+  rw integerGCD.ofNat at tCoprime
+  -- Reindex the sum by multiplication by t = a mod N.
+  have permutation := residueScale.bijective at N, integerMod(a, N)
+    with positive, tCoprime
+  have order := identity.bijective at N
+  have weights := residueValues.function at N, χ with character
+  have ring := complexes.comm_ring
+  have reindexed := indexedRingSum.reindex at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne, residueValues(N, χ), N,
+    identity(N), residueScale(N, integerMod(a, N)), N, N
+    with ring, weights, order, permutation
+  have full : N ≤ N by arith
+  have identitySum := residueValues.sum_identity at N, χ, N with character,
+    full
+  have scaledSum := residueValues.sum_scaled at N, integerMod(a, N), χ, N
+    with character, positive, full
+  rw [identitySum, scaledSum] at reindexed
+  symm at reindexed
+  have scalar := DirichletCharacter.value with character, tInteger
+  have sum := characterSum.closed at N, χ, N with character
+  exact complexMul.fixed_zero with scalar, sum, different, reindexed
+
+theorem characterSum.principal (N : Nat)
+  requires positive : 0 < N
+  shows characterSum(principalCharacter(N), N) = ringNat(complexAdd, complexZero, complexOne,
+    totient(N))
+proof
+  unfold totient
+  exact characterSum.principal_below at N, N
+
+-- A sum past a multiple of the period starts over.
+theorem characterSum.add_multiple (N q k : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  shows characterSum(χ, mul(q, N) + k) =
+    complexAdd((characterSum(χ, mul(q, N)), characterSum(χ, k)))
+proof
+  induction k
+  | zero =>
+    have shape : mul(q, N) + 0 = mul(q, N) by arith
+    have sum := characterSum.closed at N, χ, mul(q, N) with character
+    rw [shape, characterSum.zero, complexAdd.zero_right with sum]
+  | succ(j) using ih =>
+    have shape : mul(q, N) + succ(j) = succ(mul(q, N) + j) by arith
+    have jInteger : integerOfNat(j) ∈ ℤ by typecheck
+    have qInteger : integerOfNat(q) ∈ ℤ by typecheck
+    have shift := DirichletCharacter.shift with character, jInteger,
+      qInteger
+    have embedded : integerOfNat(mul(q, N) + j) =
+        integerOfNat(j) + integerOfNat(N) * integerOfNat(q)
+      rw [integerOfNat.add, integerOfNat.mul]
+      ring
+    have before := characterSum.closed at N, χ, mul(q, N) with character
+    have after := characterSum.closed at N, χ, j with character
+    have value := DirichletCharacter.value with character, jInteger
+    have regroup := complexAdd.associative_pair with before, after, value
+    rw [shape, characterSum.succ, ih, embedded, shift, regroup,
+      characterSum.succ]
+
+-- The sum over any N consecutive residues starting at 0 repeats: the sum up
+-- to qN is q times the sum up to N, so a non-principal character has
+-- bounded partial sums.
+theorem characterSum.non_principal_multiple (N q : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows characterSum(χ, mul(q, N)) = complexZero
+proof
+  induction q
+  | zero =>
+    have shape : mul(0, N) = 0 by arith
+    rw [shape, characterSum.zero]
+  | succ(j) using ih =>
+    have shape : mul(succ(j), N) = mul(j, N) + N by ring
+    have period := characterSum.non_principal with character, positive,
+      nonPrincipal
+    have split := characterSum.add_multiple at N, j, N, χ with character
+    rw [shape, split, ih, period, complexAdd.zero_right with complexZero.member]
+
+-- Adding a value of norm at most 1 to a value of norm at most k gives a
+-- value of norm at most k + 1 (in squared norms).
+theorem complexNormSquared.add_unit_bound (z w : Set) (k : Real)
+  requires first : z ∈ complexCarrier
+  requires second : w ∈ complexCarrier
+  requires nonnegative : (0:R) ≤ k
+  requires zBound : complexNormSquared(z) ≤ k * k
+  requires wBound : complexNormSquared(w) ≤ (1:R)
+  shows complexNormSquared(complexAdd((z, w))) ≤ (k + 1) * (k + 1)
+proof
+  obtain ⟨a, aReal, b, bReal, zPair⟩ := complexCarrier.cases with first
+  obtain ⟨c, cReal, d, dReal, wPair⟩ := complexCarrier.cases with second
+  have sum := complexAdd.pair at a, b, c, d
+  unfold call2 at sum
+  rw [zPair, complexNormSquared.pair] at zBound
+  rw [wPair, complexNormSquared.pair] at wBound
+  rw [zPair, wPair, sum, complexNormSquared.pair]
+  -- Cauchy–Schwarz: ac + bd ≤ k.
+  have zNonnegative : (0:R) ≤ a * a + b * b
+    have square := complexNormSquared.nonnegative with first
+    rw [zPair, complexNormSquared.pair] at square
+    exact square
+  have wNonnegative : (0:R) ≤ c * c + d * d
+    have square := complexNormSquared.nonnegative with second
+    rw [wPair, complexNormSquared.pair] at square
+    exact square
+  have lagrange : (a * a + b * b) * (c * c + d * d) =
+      (a * c + b * d) * (a * c + b * d) + (a * d - b * c) * (a * d - b * c)
+    by ring
+  have cross : (0:R) ≤ (a * d - b * c) * (a * d - b * c)
+    exact realMulValue.square_nonnegative at a * d - b * c
+  have firstScaled := realLe.mul_right_of_nonnegative
+    at a * a + b * b, k * k, c * c + d * d with zBound, wNonnegative
+  have kSquare : (0:R) ≤ k * k
+    exact realMulValue.square_nonnegative at k
+  have secondScaled := realLe.mul_left_of_nonnegative
+    at c * c + d * d, (1:R), k * k with wBound, kSquare
+  have unit : k * k * (1:R) = k * k by ring
+  have inner : a * c + b * d ≤ k
+    by_cases sign : (0:R) ≤ a * c + b * d
+    . have squares : (a * c + b * d) * (a * c + b * d) ≤ k * k by linarith
+      exact realMulValue.le_of_square_le with sign, nonnegative, squares
+    . linarith
+  have expansion : (a + c) * (a + c) + (b + d) * (b + d) =
+      (a * a + b * b) + (c * c + d * d) + (2:R) * (a * c + b * d) by ring
+  have target : (k + 1) * (k + 1) = k * k + (2:R) * k + (1:R) by ring
+  have horizontal : realAdd((a, c)) = a + c
+    unfold call2
+    rfl
+  have vertical : realAdd((b, d)) = b + d
+    unfold call2
+    rfl
+  rw [horizontal, vertical]
+  linarith
+
+-- The partial sums of a character are at most m in norm after m terms.
+theorem characterSum.norm_bound (N : Nat) (χ : Set, m : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows complexNormSquared(characterSum(χ, m)) ≤
+    (realNat(m):R) * (realNat(m):R)
+proof
+  induction m
+  | zero =>
+    rw [characterSum.zero, complexNormSquared.zero, realNat.zero]
+    have zero : (0:R) * (0:R) = (0:R) by ring
+    rw zero
+    exact realLe.reflexive at realZero
+  | succ(k) using ih =>
+    have integer : integerOfNat(k) ∈ ℤ by typecheck
+    have value := DirichletCharacter.value with character, integer
+    have sum := characterSum.closed at N, χ, k with character
+    have valueBound := DirichletCharacter.norm_le_one with character,
+      positive, integer
+    have nonnegative := realNat.zero_le at k
+    have kReal := realNat.real at k
+    have bound := complexNormSquared.add_unit_bound
+      at characterSum(χ, k), χ(integerOfNat(k)), realNat(k)
+      with sum, value, nonnegative, ih, valueBound
+    rw [characterSum.succ, realNat.succ_add]
+    exact bound
+
+theorem characterSum.non_principal_bounded (N n : Nat) (χ : Set)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  requires nonPrincipal : χ ≠ principalCharacter(N)
+  shows complexNormSquared(characterSum(χ, n)) ≤ realNat(mul(N, N))
+proof
+  have nonzero : N ≠ 0 by arith
+  obtain ⟨decomposition, below⟩ := mod.division at N, n with nonzero
+  obtain ⟨q, qNat, shape⟩ := decomposition
+  have commuted : N * q = mul(q, N) by ring
+  rw commuted at shape
+  have split := characterSum.add_multiple at N, q, n % N, χ with character
+  have multiple := characterSum.non_principal_multiple at N, q, χ
+    with character, positive, nonPrincipal
+  have rest := characterSum.closed at N, χ, n % N with character
+  rw [multiple, complexAdd.zero_left with rest, ← shape] at split
+  have bound := characterSum.norm_bound at N, χ, n % N with character,
+    positive
+  have atMost : n % N ≤ N by arith
+  have monotone := realNat.le_of_natural_le with atMost
+  have remainderNonnegative := realNat.zero_le at n % N
+  have first := realLe.mul_right_of_nonnegative
+    at realNat(n % N), realNat(N), realNat(n % N) with monotone,
+    remainderNonnegative
+  have levelNonnegative := realNat.zero_le at N
+  have second := realLe.mul_left_of_nonnegative
+    at realNat(n % N), realNat(N), realNat(N) with monotone, levelNonnegative
+  rw [split, realNat.mul]
+  linarith
+
+-- The evaluation of the characters at a: a ↦ χ(a) on the set of
+-- characters, the weight of the second orthogonality relation.
+defgraph characterEvaluation (N : Nat, a : Set)
+    (χ ∈ dirichletCharacters(N)) : complexCarrier := χ(a)
+requires integer : a ∈ ℤ
+proof
+  have character := dirichletCharacters.membership.forward with member
+  exact DirichletCharacter.value with character, integer
+
+-- Summing ones along an enumeration counts the terms.
+theorem indexedRingSum.complex_ones (w f : Set, m : Nat, n : Nat)
+  requires ones : ∀ i ∈ n, w(f(i)) = complexOne
+  requires bound : m ≤ n
+  shows indexedRingSum(w, f, complexAdd, complexZero, m) =
+    ringNat(complexAdd, complexZero, complexOne, m)
+proof
+  induction m
+  | zero =>
+    intro bound
+    rw [indexedRingSum, ringNat.zero]
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ n by arith
+    have below : k < n by arith
+    have kMember := membership.of_Less at k, n with below
+    have previous := ih with smaller
+    have one := ones with k, kMember
+    rw [indexedRingSum, previous, one, ringNat.succ]
+
+-- Duality for the units modulo N, without the structure theorem. A
+-- character of a subgroup H of (ℤ/Nℤ)ˣ extends to the subgroup generated by
+-- H and a unit g, taking at g any k-th root of its value at gᵏ, k the order
+-- of g modulo H (roots of unity from e^(iθ)). Adding the units one at a
+-- time from ⟨a⟩ gives, for each unit a ≢ 1, a character with χ(a) ≠ 1, so
+-- Σ_χ χ(a) = 0. Summing χ(j) over characters and residues in both orders
+-- then counts the characters: there are φ(N).
+
+section Roots
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- (e^(iθ))^k = e^(ikθ).
+theorem complexExp.i_mul_pow (θ : Real, k : Nat)
+  shows ℂ[complexExp(complexImaginaryUnit * complexOfReal(θ)) ^ k] =
+    complexExp(ℂ[complexImaginaryUnit *
+      complexOfReal(R[realNat(k) * θ])])
+proof
+  have iMember := complexImaginaryUnit.member
+  have angle : ℂ[complexImaginaryUnit * complexOfReal(θ)] ∈ ℂ by typecheck
+  have power := complexExp.nat_mul at
+    ℂ[complexImaginaryUnit * complexOfReal(θ)], k with angle
+  have ring := complexes.comm_ring
+  have regroup : ℂ[complexImaginaryUnit * complexOfReal(R[realNat(k) * θ])] =
+      ℂ[complexOfReal(realNat(k)) *
+        (complexImaginaryUnit * complexOfReal(θ))]
+    rw complexOfReal.mul
+    ring
+  rw [regroup, power]
+
+-- Every complex number of norm 1 has a k-th root for k ≥ 1.
+theorem complexNormSquared.unit_root (w : Set, k : Nat)
+  requires member : w ∈ ℂ
+  requires unit : complexNormSquared(w) = R[1]
+  requires positive : (0:N) < k
+  shows ∃ ζ ∈ ℂ, ℂ[ζ ^ k] = w
+proof
+  obtain ⟨a, aReal, b, bReal, shape⟩ := complexCarrier.cases with member
+  rw [shape, complexNormSquared.pair] at unit
+  obtain ⟨θ, θReal, lower, upper, cosine, sine⟩ := realCos.unit_circle
+    with unit
+  have nonzero : k ≠ (0:N) by arith
+  have kNonzero := realNat.ne_zero with nonzero
+  have inverse := realInvValue.mul_right with kNonzero
+  have root : complexExp(ℂ[complexImaginaryUnit *
+      complexOfReal(R[θ * realInvValue(realNat(k))])]) ∈ ℂ by typecheck
+  refine ⟨complexExp(ℂ[complexImaginaryUnit *
+      complexOfReal(R[θ * realInvValue(realNat(k))])]), root, ?_⟩
+  have scaled : R[realNat(k) * (θ * realInvValue(realNat(k)))] = θ
+    linear_combination θ * inverse
+  rw [complexExp.i_mul_pow, scaled, complexExp.euler, cosine, sine, shape]
+
+-- For k ≥ 2 there is a k-th root of unity other than 1: e^(2πi/k).
+theorem complexOne.nontrivial_root (k : Nat)
+  requires two : (2:N) ≤ k
+  shows ∃ ζ ∈ ℂ, ℂ[ζ ^ k] = complexOne ∧ ζ ≠ complexOne
+proof
+  have nonzero : k ≠ (0:N) by arith
+  have kPositive := realNat.positive with nonzero
+  have kNonzero := realNat.ne_zero with nonzero
+  have inverse := realInvValue.mul_right with kNonzero
+  have inversePositive := realInvValue.positive with kPositive
+  have piPositive := realPi.positive
+  have root : complexExp(ℂ[complexImaginaryUnit *
+      complexOfReal(R[2 * realPi * realInvValue(realNat(k))])]) ∈ ℂ
+    by typecheck
+  refine ⟨complexExp(ℂ[complexImaginaryUnit *
+      complexOfReal(R[2 * realPi * realInvValue(realNat(k))])]), root, ?_,
+    ?_⟩
+  . have scaled : R[realNat(k) * (2 * realPi * realInvValue(realNat(k)))] =
+        R[2 * realPi]
+      linear_combination (2 * realPi) * inverse
+    rw [complexExp.i_mul_pow, scaled, complexExp.euler, realCos.two_pi,
+      realSin.two_pi]
+    unfold complexOne
+    rfl
+  . intro same
+    rw complexExp.euler at same
+    unfold complexOne at same
+    obtain ⟨cosine, sine⟩ := orderedPair.injective with same
+    -- 0 < 2π/k ≤ π, where the cosine is injective.
+    have kTwo : R[2] ≤ realNat(k)
+      have cast := realNat.le_of_natural_le at 2, k with two
+      rw realNat.two at cast
+      exact cast
+    have halved := realLe.mul_right_of_nonnegative at R[2], realNat(k),
+      realInvValue(realNat(k)) with kTwo, (realLess.implies_le with
+      inversePositive)
+    have unitProduct : R[realNat(k) * realInvValue(realNat(k))] = R[1] by
+      exact inverse
+    have twoPi : R[0] < R[2 * realPi] by linarith
+    have angle := realMulValue.positive at R[2 * realPi],
+      realInvValue(realNat(k)) with twoPi, inversePositive
+    have atMostOne : R[2 * realInvValue(realNat(k))] ≤ R[1] by linarith
+    have scaledPi := realLe.mul_left_of_nonnegative at
+      R[2 * realInvValue(realNat(k))], R[1], realPi with atMostOne,
+      (realLess.implies_le with piPositive)
+    have zeroCos := realCos.zero
+    rw ← zeroCos at cosine
+    have lowerAngle : R[0] ≤ R[2 * realPi * realInvValue(realNat(k))]
+      by linarith
+    have upperAngle : R[2 * realPi * realInvValue(realNat(k))] ≤ realPi
+      have shape : R[2 * realPi * realInvValue(realNat(k))] =
+          R[realPi * (2 * realInvValue(realNat(k)))] by ring
+      have one : R[realPi * 1] = realPi by ring
+      rw shape
+      rw one at scaledPi
+      exact scaledPi
+    have lowerZero : R[0] ≤ R[0] by linarith
+    have upperZero : R[0] ≤ realPi by linarith
+    have equal := realCos.injective_upto_pi with lowerAngle, upperAngle,
+      lowerZero, upperZero, cosine
+    rw equal at angle
+    linarith
+
+end Roots
+
+-- Subgroups of the units modulo N and their characters, by elementary
+-- duality: a character of a subgroup H extends to the subgroup generated by
+-- H and one more unit g.
+
+-- A subgroup of the units modulo N, as the union of its residue classes: a
+-- set of integers coprime to N that contains 1 and is closed under products
+-- and under congruence modulo N.
+predicate UnitSubgroup (N : Nat, H : Set) :=
+  H ⊆ ℤ ∧ integerOne ∈ H ∧
+  (∀ x ∈ H, ∀ y ∈ H, integerMulValue(x, y) ∈ H) ∧
+  (∀ x ∈ H, IntegerCoprime(x, integerOfNat(N))) ∧
+  (∀ x ∈ H, ∀ y ∈ ℤ, IntegerCongruent(integerOfNat(N), x, y) → y ∈ H)
+
+-- A character of such a subgroup: a function on ℤ, 1 at 1, multiplicative
+-- on H and constant on the residue classes of H. Its values off H play no
+-- part.
+predicate SubgroupCharacter (N : Nat, H ψ : Set) :=
+  FunctionBetween(ψ, ℤ, complexCarrier) ∧ ψ(integerOne) = complexOne ∧
+  (∀ x ∈ H, ∀ y ∈ H,
+    ψ(integerMulValue(x, y)) = complexMul(ψ(x), ψ(y))) ∧
+  (∀ x ∈ H, ∀ y ∈ ℤ,
+    IntegerCongruent(integerOfNat(N), x, y) → ψ(y) = ψ(x))
+
+theorem UnitSubgroup.integer (N : Nat) (H x : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires member : x ∈ H
+  shows x ∈ ℤ
+proof
+  obtain ⟨integers, one, products, coprime, classes⟩ := subgroup
+  exact integers with x, member
+
+theorem UnitSubgroup.one (N : Nat) (H : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  shows integerOne ∈ H
+proof
+  obtain ⟨integers, one, products, coprime, classes⟩ := subgroup
+  exact one
+
+theorem UnitSubgroup.mul (N : Nat) (H x y : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires first : x ∈ H
+  requires second : y ∈ H
+  shows integerMulValue(x, y) ∈ H
+proof
+  obtain ⟨integers, one, products, coprime, classes⟩ := subgroup
+  exact products with x, first, y, second
+
+theorem UnitSubgroup.coprime (N : Nat) (H x : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires member : x ∈ H
+  shows IntegerCoprime(x, integerOfNat(N))
+proof
+  obtain ⟨integers, one, products, coprime, classes⟩ := subgroup
+  exact coprime with x, member
+
+theorem UnitSubgroup.congruent (N : Nat) (H x y : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires member : x ∈ H
+  requires integer : y ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), x, y)
+  shows y ∈ H
+proof
+  obtain ⟨integers, one, products, coprime, classes⟩ := subgroup
+  exact classes with x, member, y, integer, congruent
+
+theorem UnitSubgroup.pow (N : Nat) (H x : Set, n : Nat)
+  requires subgroup : UnitSubgroup(N, H)
+  requires member : x ∈ H
+  shows integerPow(x, n) ∈ H
+proof
+  induction n
+  | zero =>
+    have integer := UnitSubgroup.integer with subgroup, member
+    rw integerPow.zero
+    exact UnitSubgroup.one with subgroup
+  | succ(k) using ih =>
+    have integer := UnitSubgroup.integer with subgroup, member
+    rw integerPow.succ
+    exact UnitSubgroup.mul with subgroup, member, ih
+
+-- Each member of H has an inverse modulo N in H: x^(φ(N) − 1).
+theorem UnitSubgroup.inverse (N : Nat) (H x : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires positive : 0 < N
+  requires member : x ∈ H
+  shows ∃ u ∈ H, IntegerCongruent(integerOfNat(N), integerMulValue(x, u),
+    integerOne)
+proof
+  have integer := UnitSubgroup.integer with subgroup, member
+  have coprime := UnitSubgroup.coprime with subgroup, member
+  have euler := IntegerCoprime.pow_totient with positive, integer, coprime
+  have totientPositive := totient.positive with positive
+  have alternatives := natural.zero_or_successor at totient(N)
+  cases alternatives with zero | successor
+  . exfalso
+    rw zero at totientPositive
+    arith
+  obtain ⟨m, mNat, shape⟩ := successor
+  have power := UnitSubgroup.pow at N, H, x, m with subgroup, member
+  refine ⟨integerPow(x, m), power, ?_⟩
+  rw [shape, integerPow.succ] at euler
+  exact euler
+
+theorem SubgroupCharacter.function (N : Nat) (H ψ : Set)
+  requires character : SubgroupCharacter(N, H, ψ)
+  shows ψ : ℤ → complexCarrier
+proof
+  exact character.left
+
+theorem SubgroupCharacter.value (N : Nat) (H ψ x : Set)
+  requires character : SubgroupCharacter(N, H, ψ)
+  requires integer : x ∈ ℤ
+  shows ψ(x) ∈ complexCarrier
+proof
+  obtain ⟨function, one, multiplicative, classes⟩ := character
+  exact FunctionBetween.apply_closed at ψ, ℤ, complexCarrier, x with *
+
+theorem SubgroupCharacter.one (N : Nat) (H ψ : Set)
+  requires character : SubgroupCharacter(N, H, ψ)
+  shows ψ(integerOne) = complexOne
+proof
+  obtain ⟨function, one, multiplicative, classes⟩ := character
+  exact one
+
+theorem SubgroupCharacter.mul (N : Nat) (H ψ x y : Set)
+  requires character : SubgroupCharacter(N, H, ψ)
+  requires first : x ∈ H
+  requires second : y ∈ H
+  shows ψ(integerMulValue(x, y)) = complexMul(ψ(x), ψ(y))
+proof
+  obtain ⟨function, one, multiplicative, classes⟩ := character
+  exact multiplicative with x, first, y, second
+
+theorem SubgroupCharacter.congruent (N : Nat) (H ψ x y : Set)
+  requires character : SubgroupCharacter(N, H, ψ)
+  requires member : x ∈ H
+  requires integer : y ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), x, y)
+  shows ψ(y) = ψ(x)
+proof
+  obtain ⟨function, one, multiplicative, classes⟩ := character
+  exact classes with x, member, y, integer, congruent
+
+section SubgroupValues
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+theorem SubgroupCharacter.pow (N : Nat) (H ψ x : Set, n : Nat)
+  requires subgroup : UnitSubgroup(N, H)
+  requires character : SubgroupCharacter(N, H, ψ)
+  requires member : x ∈ H
+  shows ψ(integerPow(x, n)) = ℂ[ψ(x) ^ n]
+proof
+  induction n
+  | zero =>
+    have integer := UnitSubgroup.integer with subgroup, member
+    rw [integerPow.zero, monoidPow.zero]
+    exact SubgroupCharacter.one with character
+  | succ(k) using ih =>
+    have integer := UnitSubgroup.integer with subgroup, member
+    have power := UnitSubgroup.pow at N, H, x, k with subgroup, member
+    have multiplicative := SubgroupCharacter.mul with character, member,
+      power
+    rw [integerPow.succ, multiplicative, ih, monoidPow.succ]
+
+-- The values on H lie on the unit circle.
+theorem SubgroupCharacter.unit (N : Nat) (H ψ x : Set)
+  requires subgroup : UnitSubgroup(N, H)
+  requires character : SubgroupCharacter(N, H, ψ)
+  requires positive : 0 < N
+  requires member : x ∈ H
+  shows complexNormSquared(ψ(x)) = realOne
+proof
+  have integer := UnitSubgroup.integer with subgroup, member
+  have coprime := UnitSubgroup.coprime with subgroup, member
+  have euler := IntegerCoprime.pow_totient with positive, integer, coprime
+  have one := UnitSubgroup.one with subgroup
+  have powerInteger := integerPow.integer at x, totient(N)
+  have powerMember : integerPow(x, totient(N)) ∈ ℤ by typecheck
+  have reverse := IntegerCongruent.symmetric with euler
+  have same := SubgroupCharacter.congruent with character, one, powerMember,
+    reverse
+  have power := SubgroupCharacter.pow at N, H, ψ, x, totient(N) with
+    subgroup, character, member
+  have unit := SubgroupCharacter.one with character
+  rw [power, unit] at same
+  have value := SubgroupCharacter.value with character, integer
+  have totientPositive := totient.positive with positive
+  exact complexNormSquared.root_of_unity with value, totientPositive, same
+
+end SubgroupValues
+
+theorem IntegerCoprime.pow (m a : Set, n : Nat)
+  requires aInteger : a ∈ ℤ
+  requires mInteger : m ∈ ℤ
+  requires coprime : IntegerCoprime(a, m)
+  shows IntegerCoprime(integerPow(a, n), m)
+proof
+  induction n
+  | zero =>
+    rw integerPow.zero
+    exact IntegerCoprime.one_left with mInteger
+  | succ(k) using ih =>
+    have power := integerPow.integer at a, k
+    have powerMember : integerPow(a, k) ∈ ℤ by typecheck
+    rw integerPow.succ
+    exact IntegerCoprime.mul with aInteger, powerMember, mInteger, coprime,
+      ih
+
+-- The subgroup generated by H and g: the integers congruent to h gʲ.
+def unitExtension (N : Nat, H g : Set) : Set :=
+  { x ∈ ℤ | ∃ h ∈ H, ∃ j ∈ ℕ, IntegerCongruent(integerOfNat(N), x,
+    integerMulValue(h, integerPow(g, j))) }
+
+-- The extension of ψ taking the value ζ at g: ψ(h) ζʲ at h gʲ, 0 off the
+-- extended subgroup.
+def characterExtension (N : Nat, H ψ g ζ : Set) : Set :=
+  { p ∈ ℤ × complexCarrier | ∃ x ∈ ℤ,
+    (∃ h ∈ H, ∃ j ∈ ℕ, IntegerCongruent(integerOfNat(N), x,
+      integerMulValue(h, integerPow(g, j))) ∧
+      p = (x, complexMul(ψ(h), monoidPow(complexMul, complexOne, ζ, j)))) ∨
+    (¬(x ∈ unitExtension(N, H, g)) ∧ p = (x, complexZero)) }
+
+-- ζ is a value at g compatible with ψ: ψ(gᵈ) = ζᵈ whenever gᵈ ∈ H.
+predicate CompatibleRoot (N : Nat, H ψ g ζ : Set) :=
+  ζ ∈ complexCarrier ∧ (∀ d ∈ ℕ, integerPow(g, d) ∈ H →
+    ψ(integerPow(g, d)) = monoidPow(complexMul, complexOne, ζ, d))
+
+theorem unitExtension.membership (N : Nat) (H g x : Set)
+  shows x ∈ unitExtension(N, H, g) ↔ x ∈ ℤ ∧ ∃ h ∈ H, ∃ j ∈ ℕ,
+    IntegerCongruent(integerOfNat(N), x, integerMulValue(h, integerPow(g, j)))
+proof
+  constructor
+  . intro member
+    unfold unitExtension at member
+    exact member
+  . intro member
+    unfold unitExtension
+    exact member
+
+theorem characterExtension.pair (N : Nat) (H ψ g ζ x y : Set)
+  requires member : (x, y) ∈ characterExtension(N, H, ψ, g, ζ)
+  shows x ∈ ℤ ∧ ((∃ h ∈ H, ∃ j ∈ ℕ, IntegerCongruent(integerOfNat(N), x,
+      integerMulValue(h, integerPow(g, j))) ∧
+      y = complexMul(ψ(h), monoidPow(complexMul, complexOne, ζ, j))) ∨
+    (¬(x ∈ unitExtension(N, H, g)) ∧ y = complexZero))
+proof
+  unfold characterExtension at member
+  obtain ⟨bound, a, aInteger, branches⟩ := member
+  cases branches with inside | outside
+  . obtain ⟨h, hMember, j, jNatural, congruent, shape⟩ := inside
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw ← first at aInteger
+    rw ← first at congruent
+    refine ⟨aInteger, ?_⟩
+    left
+    exact ⟨h, hMember, j, jNatural, congruent, second⟩
+  . obtain ⟨notMember, shape⟩ := outside
+    obtain ⟨first, second⟩ := orderedPair.injective with shape
+    rw ← first at aInteger
+    rw ← first at notMember
+    refine ⟨aInteger, ?_⟩
+    right
+    exact ⟨notMember, second⟩
+
+theorem characterExtension.bounded (N : Nat) (H ψ g ζ : Set)
+  shows characterExtension(N, H, ψ, g, ζ) ⊆ ℤ × complexCarrier
+proof
+  intros p member
+  unfold characterExtension at member
+  exact member.left
+
+-- Off the extended subgroup the extension is 0.
+theorem characterExtension.outside (N : Nat) (H ψ g ζ x : Set)
+  requires integer : x ∈ ℤ
+  requires outside : ¬(x ∈ unitExtension(N, H, g))
+  shows (x, complexZero) ∈ characterExtension(N, H, ψ, g, ζ)
+proof
+  unfold characterExtension
+  have pair := product.pair with integer, complexZero.member
+  refine ⟨pair, x, integer, ?_⟩
+  right
+  exact ⟨outside, rfl⟩
+
+-- The exponents k > 0 with gᵏ ∈ H; the least is the order of g modulo H.
+def powerExponents (N : Nat, H g : Set) : Set :=
+  { k ∈ ℕ | 0 < k ∧ integerPow(g, k) ∈ H }
+
+section Generated
+variable (N : Nat) (H g : Set)
+hypothesis subgroup : UnitSubgroup(N, H)
+hypothesis gInteger : g ∈ ℤ
+hypothesis gCoprime : IntegerCoprime(g, integerOfNat(N))
+
+theorem unitExtension.contains (x : Set)
+  requires member : x ∈ H
+  shows x ∈ unitExtension(N, H, g)
+proof
+  have integer := UnitSubgroup.integer with subgroup, member
+  have trivial : x = integerMulValue(x, integerPow(g, 0))
+    rw integerPow.zero
+    ring
+  have congruent := IntegerCongruent.of_eq at integerOfNat(N), x,
+    integerMulValue(x, integerPow(g, 0)) with trivial
+  have zeroNatural : 0 ∈ ℕ by typecheck
+  exact unitExtension.membership.backward with
+    ⟨integer, x, member, 0, zeroNatural, congruent⟩
+
+theorem unitExtension.generator
+  shows g ∈ unitExtension(N, H, g)
+proof
+  have one := UnitSubgroup.one with subgroup
+  have trivial : g = integerMulValue(integerOne, integerPow(g, 1))
+    rw integerPow.one_right
+    ring
+  have congruent := IntegerCongruent.of_eq at integerOfNat(N), g,
+    integerMulValue(integerOne, integerPow(g, 1)) with trivial
+  have oneNatural : 1 ∈ ℕ by typecheck
+  exact unitExtension.membership.backward with
+    ⟨gInteger, integerOne, one, 1, oneNatural, congruent⟩
+
+theorem unitExtension.subgroup
+  shows UnitSubgroup(N, unitExtension(N, H, g))
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  . intros x member
+    have parts := unitExtension.membership.forward with member
+    exact parts.left
+  . have one := UnitSubgroup.one with subgroup
+    exact unitExtension.contains at N, H, g, integerOne with subgroup,
+      gInteger, gCoprime, one
+  . intros x xMember y yMember
+    obtain ⟨xInteger, h, hMember, i, iNatural, xCongruent⟩ :=
+      unitExtension.membership.forward with xMember
+    obtain ⟨yInteger, k, kMember, j, jNatural, yCongruent⟩ :=
+      unitExtension.membership.forward with yMember
+    have hInteger := UnitSubgroup.integer with subgroup, hMember
+    have kInteger := UnitSubgroup.integer with subgroup, kMember
+    have iPower := integerPow.integer at g, i
+    have jPower := integerPow.integer at g, j
+    have product := IntegerCongruent.mul with xCongruent, yCongruent
+    have regroup : integerMulValue(integerMulValue(h, integerPow(g, i)),
+        integerMulValue(k, integerPow(g, j))) =
+        integerMulValue(integerMulValue(h, k), integerPow(g, i + j))
+      rw integerPow.add
+      ring
+    rw regroup at product
+    have hk := UnitSubgroup.mul with subgroup, hMember, kMember
+    have sumNatural : i + j ∈ ℕ by typecheck
+    have productInteger : integerMulValue(x, y) ∈ ℤ by typecheck
+    exact unitExtension.membership.backward with
+      ⟨productInteger, integerMulValue(h, k), hk, i + j, sumNatural, product⟩
+  . intros x member
+    obtain ⟨xInteger, h, hMember, i, iNatural, congruent⟩ :=
+      unitExtension.membership.forward with member
+    have hInteger := UnitSubgroup.integer with subgroup, hMember
+    have hCoprime := UnitSubgroup.coprime with subgroup, hMember
+    have iPower := integerPow.integer at g, i
+    have powerMember : integerPow(g, i) ∈ ℤ by typecheck
+    have powerCoprime := IntegerCoprime.pow at integerOfNat(N), g, i
+      with gInteger, modulus, gCoprime
+    have productCoprime := IntegerCoprime.mul with hInteger, powerMember,
+      modulus, hCoprime, powerCoprime
+    have productInteger : integerMulValue(h, integerPow(g, i)) ∈ ℤ
+      by typecheck
+    have reverse := IntegerCongruent.symmetric with congruent
+    exact IntegerCoprime.of_congruent with productInteger, xInteger, modulus,
+      reverse, productCoprime
+  . intros x member y yInteger congruent
+    obtain ⟨xInteger, h, hMember, i, iNatural, xCongruent⟩ :=
+      unitExtension.membership.forward with member
+    have hInteger := UnitSubgroup.integer with subgroup, hMember
+    have iPower := integerPow.integer at g, i
+    have reverse := IntegerCongruent.symmetric with congruent
+    have chain := IntegerCongruent.transitive with reverse, xCongruent
+    exact unitExtension.membership.backward with
+      ⟨yInteger, h, hMember, i, iNatural, chain⟩
+
+-- The exponents k > 0 with gᵏ ∈ H.
+theorem unitExtension.least_power
+  requires positive : 0 < N
+  shows ∃ k, Nat(k) ∧ 0 < k ∧ integerPow(g, k) ∈ H ∧
+    (∀ r, Nat(r) → 0 < r → r < k → ¬(integerPow(g, r) ∈ H))
+proof
+  have naturals : powerExponents(N, H, g) ⊆ ℕ
+    intros k member
+    unfold powerExponents at member
+    exact member.left
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have euler := IntegerCoprime.pow_totient with positive, gInteger, gCoprime
+  have totientPositive := totient.positive with positive
+  have one := UnitSubgroup.one with subgroup
+  have powerInteger := integerPow.integer at g, totient(N)
+  have powerMember : integerPow(g, totient(N)) ∈ ℤ by typecheck
+  have reverse := IntegerCongruent.symmetric with euler
+  have inside := UnitSubgroup.congruent with subgroup, one, powerMember,
+    reverse
+  have totientNatural : totient(N) ∈ ℕ by typecheck
+  have exponent : totient(N) ∈ powerExponents(N, H, g)
+    unfold powerExponents
+    exact ⟨totientNatural, totientPositive, inside⟩
+  have inhabited : Nonempty(powerExponents(N, H, g))
+    exact ⟨totient(N), exponent⟩
+  have member := leastNatural.member with inhabited, naturals
+  have natural := naturals with member
+  have kNat := nat.omega.backward with natural
+  unfold powerExponents at member
+  obtain ⟨_, kPositive, kInside⟩ := member
+  refine ⟨leastNatural(powerExponents(N, H, g)), kNat, kPositive, kInside,
+    ?_⟩
+  intros r rNat rPositive below rInside
+  have rNatural : r ∈ ℕ by typecheck
+  have rMember : r ∈ powerExponents(N, H, g)
+    unfold powerExponents
+    exact ⟨rNatural, rPositive, rInside⟩
+  have least := leastNatural.least with inhabited, naturals, rMember
+  arith
+
+end Generated
+
+section Extension
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (N : Nat) (H ψ g ζ : Set)
+hypothesis subgroup : UnitSubgroup(N, H)
+hypothesis character : SubgroupCharacter(N, H, ψ)
+hypothesis positive : 0 < N
+hypothesis gInteger : g ∈ ℤ
+hypothesis gCoprime : IntegerCoprime(g, integerOfNat(N))
+hypothesis compatible : CompatibleRoot(N, H, ψ, g, ζ)
+
+theorem characterExtension.shift (h k : Set, i d : Nat)
+  requires hMember : h ∈ H
+  requires kMember : k ∈ H
+  requires congruent : IntegerCongruent(integerOfNat(N),
+    integerMulValue(h, integerPow(g, i)),
+    integerMulValue(k, integerPow(g, i + d)))
+  shows ψ(h) = ℂ[ψ(k) * ζ ^ d]
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have hInteger := UnitSubgroup.integer with subgroup, hMember
+  have kInteger := UnitSubgroup.integer with subgroup, kMember
+  have iPower := integerPow.integer at g, i
+  have dPower := integerPow.integer at g, d
+  have iMember : integerPow(g, i) ∈ ℤ by typecheck
+  have dMember : integerPow(g, d) ∈ ℤ by typecheck
+  have split : integerMulValue(k, integerPow(g, i + d)) =
+      integerMulValue(integerPow(g, i), integerMulValue(k, integerPow(g, d)))
+    rw integerPow.add
+    ring
+  have left : integerMulValue(h, integerPow(g, i)) =
+      integerMulValue(integerPow(g, i), h) by ring
+  rw [left, split] at congruent
+  have powerCoprime := IntegerCoprime.pow at integerOfNat(N), g, i
+    with gInteger, modulus, gCoprime
+  have levelCoprime := IntegerCoprime.symmetric with powerCoprime
+  have cancelled := IntegerCongruent.cancel_coprime with levelCoprime,
+    congruent
+  -- gᵈ ≡ h u for an inverse u of k, so gᵈ ∈ H.
+  obtain ⟨u, uMember, inverse⟩ := UnitSubgroup.inverse with subgroup,
+    positive, kMember
+  have uInteger := UnitSubgroup.integer with subgroup, uMember
+  have scaled := IntegerCongruent.mul_right at integerOfNat(N), h,
+    integerMulValue(k, integerPow(g, d)), u with cancelled
+  have unit := IntegerCongruent.mul_left at integerOfNat(N),
+    integerMulValue(k, u), integerOne, integerPow(g, d) with inverse
+  have rearranged : integerMulValue(integerMulValue(k, integerPow(g, d)), u) =
+      integerMulValue(integerPow(g, d), integerMulValue(k, u)) by ring
+  have trivial : integerMulValue(integerPow(g, d), integerOne) =
+      integerPow(g, d) by ring
+  rw [rearranged] at scaled
+  rw [trivial] at unit
+  have chain := IntegerCongruent.transitive with scaled, unit
+  have productMember := UnitSubgroup.mul with subgroup, hMember, uMember
+  have powerMember := UnitSubgroup.congruent with subgroup, productMember,
+    dMember, chain
+  obtain ⟨ζMember, values⟩ := compatible
+  have dNatural : d ∈ ℕ by typecheck
+  have root := values with d, dNatural, powerMember
+  have productInteger : integerMulValue(k, integerPow(g, d)) ∈ ℤ by typecheck
+  have same := SubgroupCharacter.congruent with character, hMember,
+    productInteger, cancelled
+  have multiplicative := SubgroupCharacter.mul with character, kMember,
+    powerMember
+  rw [← same, multiplicative, root]
+
+-- Two representations h gⁱ ≡ k gʲ give the same value ψ(h) ζⁱ = ψ(k) ζʲ.
+theorem characterExtension.consistent (h k : Set, i j : Nat)
+  requires hMember : h ∈ H
+  requires kMember : k ∈ H
+  requires congruent : IntegerCongruent(integerOfNat(N),
+    integerMulValue(h, integerPow(g, i)), integerMulValue(k, integerPow(g, j)))
+  shows ℂ[ψ(h) * ζ ^ i] = ℂ[ψ(k) * ζ ^ j]
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  obtain ⟨ζMember, values⟩ := compatible
+  have hInteger := UnitSubgroup.integer with subgroup, hMember
+  have kInteger := UnitSubgroup.integer with subgroup, kMember
+  have hValue := SubgroupCharacter.value with character, hInteger
+  have kValue := SubgroupCharacter.value with character, kInteger
+  have iPower := monoidPow.closed at complexCarrier, complexMul, complexOne,
+    ζ, i with monoid, ζMember
+  have jPower := monoidPow.closed at complexCarrier, complexMul, complexOne,
+    ζ, j with monoid, ζMember
+  by_cases order : i ≤ j
+  . obtain ⟨d, dNat, shape⟩ := LessEqual.exists_add with order
+    rw shape at congruent
+    have shift := characterExtension.shift at N, H, ψ, g, ζ, h, k, i, d
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      hMember, kMember, congruent
+    have dPower := monoidPow.closed at complexCarrier, complexMul,
+      complexOne, ζ, d with monoid, ζMember
+    have sum := monoidPow.add at complexCarrier, complexMul, complexOne, ζ,
+      i, d with monoid, ζMember
+    rw [shape, sum, shift]
+    ring
+  . have reverse : j ≤ i by arith
+    obtain ⟨d, dNat, shape⟩ := LessEqual.exists_add with reverse
+    rw shape at congruent
+    have symmetric := IntegerCongruent.symmetric with congruent
+    have shift := characterExtension.shift at N, H, ψ, g, ζ, k, h, j, d
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      kMember, hMember, symmetric
+    have dPower := monoidPow.closed at complexCarrier, complexMul,
+      complexOne, ζ, d with monoid, ζMember
+    have sum := monoidPow.add at complexCarrier, complexMul, complexOne, ζ,
+      j, d with monoid, ζMember
+    rw [shape, sum, shift]
+    ring
+
+theorem characterExtension.functional
+  shows Functional(characterExtension(N, H, ψ, g, ζ))
+proof
+  intros x y first z second
+  obtain ⟨xInteger, firstBranches⟩ := characterExtension.pair with first
+  obtain ⟨_, secondBranches⟩ := characterExtension.pair with second
+  cases firstBranches with firstInside | firstOutside
+  . obtain ⟨h, hMember, i, iNatural, hCongruent, yValue⟩ := firstInside
+    cases secondBranches with secondInside | secondOutside
+    . obtain ⟨k, kMember, j, jNatural, kCongruent, zValue⟩ := secondInside
+      have hInteger := UnitSubgroup.integer with subgroup, hMember
+      have kInteger := UnitSubgroup.integer with subgroup, kMember
+      have iPower := integerPow.integer at g, i
+      have jPower := integerPow.integer at g, j
+      have reverse := IntegerCongruent.symmetric with hCongruent
+      have chain := IntegerCongruent.transitive with reverse, kCongruent
+      have same := characterExtension.consistent at N, H, ψ, g, ζ, h, k, i, j
+        with subgroup, character, positive, gInteger, gCoprime, compatible,
+        hMember, kMember, chain
+      rw [yValue, zValue]
+      exact same
+    . exfalso
+      obtain ⟨notMember, _⟩ := secondOutside
+      apply notMember
+      exact unitExtension.membership.backward with
+        ⟨xInteger, h, hMember, i, iNatural, hCongruent⟩
+  . cases secondBranches with secondInside | secondOutside
+    . exfalso
+      obtain ⟨k, kMember, j, jNatural, kCongruent, zValue⟩ := secondInside
+      obtain ⟨notMember, _⟩ := firstOutside
+      apply notMember
+      exact unitExtension.membership.backward with
+        ⟨xInteger, k, kMember, j, jNatural, kCongruent⟩
+    . rw [firstOutside.right, secondOutside.right]
+
+-- The pair (x, ψ(h) ζʲ) for x ≡ h gʲ.
+theorem characterExtension.inside (x h : Set, j : Nat)
+  requires integer : x ∈ ℤ
+  requires hMember : h ∈ H
+  requires congruent : IntegerCongruent(integerOfNat(N), x,
+    integerMulValue(h, integerPow(g, j)))
+  shows (x, ℂ[ψ(h) * ζ ^ j]) ∈ characterExtension(N, H, ψ, g, ζ)
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  obtain ⟨ζMember, values⟩ := compatible
+  have hInteger := UnitSubgroup.integer with subgroup, hMember
+  have hValue := SubgroupCharacter.value with character, hInteger
+  have power := monoidPow.closed at complexCarrier, complexMul, complexOne,
+    ζ, j with monoid, ζMember
+  have productValue : ℂ[ψ(h) * ζ ^ j] ∈ complexCarrier by typecheck
+  unfold characterExtension
+  have pair := product.pair with integer, productValue
+  refine ⟨pair, x, integer, ?_⟩
+  left
+  have jNatural : j ∈ ℕ by typecheck
+  exact ⟨h, hMember, j, jNatural, congruent, rfl⟩
+
+theorem characterExtension.value (x h : Set, j : Nat)
+  requires integer : x ∈ ℤ
+  requires hMember : h ∈ H
+  requires congruent : IntegerCongruent(integerOfNat(N), x,
+    integerMulValue(h, integerPow(g, j)))
+  shows characterExtension(N, H, ψ, g, ζ)(x) = ℂ[ψ(h) * ζ ^ j]
+proof
+  have member := characterExtension.inside at N, H, ψ, g, ζ, x, h, j
+    with subgroup, character, positive, gInteger, gCoprime, compatible,
+    integer, hMember, congruent
+  have functional := characterExtension.functional at N, H, ψ, g, ζ
+    with subgroup, character, positive, gInteger, gCoprime, compatible
+  exact graph.apply with (characterExtension.bounded at N, H, ψ, g, ζ),
+    functional, member
+
+theorem characterExtension.function
+  shows characterExtension(N, H, ψ, g, ζ) : ℤ → complexCarrier
+proof
+  have functional := characterExtension.functional at N, H, ψ, g, ζ
+    with subgroup, character, positive, gInteger, gCoprime, compatible
+  refine ⟨(characterExtension.bounded at N, H, ψ, g, ζ), functional, ?_⟩
+  intros a integer
+  by_cases inside : a ∈ unitExtension(N, H, g)
+  . obtain ⟨_, h, hMember, j, jNatural, congruent⟩ :=
+      unitExtension.membership.forward with inside
+    have member := characterExtension.inside at N, H, ψ, g, ζ, a, h, j
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      integer, hMember, congruent
+    have bounds := characterExtension.bounded at N, H, ψ, g, ζ
+    have pair := bounds with (a, ℂ[ψ(h) * ζ ^ j]), member
+    have value := product.pair_membership.forward with pair
+    refine ⟨ℂ[ψ(h) * ζ ^ j], value.right, ?_⟩
+    unfold relates
+    exact member
+  . have member := characterExtension.outside at N, H, ψ, g, ζ, a
+      with integer, inside
+    refine ⟨complexZero, complexZero.member, ?_⟩
+    unfold relates
+    exact member
+
+theorem characterExtension.extends (x : Set)
+  requires member : x ∈ H
+  shows characterExtension(N, H, ψ, g, ζ)(x) = ψ(x)
+proof
+  have ring := complexes.comm_ring
+  have integer := UnitSubgroup.integer with subgroup, member
+  have trivial : x = integerMulValue(x, integerPow(g, 0))
+    rw integerPow.zero
+    ring
+  have congruent := IntegerCongruent.of_eq at integerOfNat(N), x,
+    integerMulValue(x, integerPow(g, 0)) with trivial
+  have value := characterExtension.value at N, H, ψ, g, ζ, x, x, (0:N)
+    with subgroup, character, positive, gInteger, gCoprime, compatible,
+    integer, member, congruent
+  have xValue := SubgroupCharacter.value with character, integer
+  rw [value, monoidPow.zero]
+  ring
+
+theorem characterExtension.generator
+  shows characterExtension(N, H, ψ, g, ζ)(g) = ζ
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  obtain ⟨ζMember, values⟩ := compatible
+  have one := UnitSubgroup.one with subgroup
+  have trivial : g = integerMulValue(integerOne, integerPow(g, 1))
+    rw integerPow.one_right
+    ring
+  have congruent := IntegerCongruent.of_eq at integerOfNat(N), g,
+    integerMulValue(integerOne, integerPow(g, 1)) with trivial
+  have value := characterExtension.value at N, H, ψ, g, ζ, g, integerOne, (1:N)
+    with subgroup, character, positive, gInteger, gCoprime, compatible,
+    gInteger, one, congruent
+  have unit := SubgroupCharacter.one with character
+  have first := monoidPow.one at complexCarrier, complexMul, complexOne, ζ
+    with monoid, ζMember
+  rw [value, unit, first]
+  ring
+
+theorem characterExtension.character
+  shows SubgroupCharacter(N, unitExtension(N, H, g),
+    characterExtension(N, H, ψ, g, ζ))
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  have function := characterExtension.function at N, H, ψ, g, ζ
+    with subgroup, character, positive, gInteger, gCoprime, compatible
+  have one := UnitSubgroup.one with subgroup
+  have unit := characterExtension.extends at N, H, ψ, g, ζ, integerOne
+    with subgroup, character, positive, gInteger, gCoprime, compatible, one
+  have unitValue := SubgroupCharacter.one with character
+  refine ⟨function, ?_, ?_, ?_⟩
+  . rw [unit, unitValue]
+  . intros x xMember y yMember
+    obtain ⟨xInteger, h, hMember, i, iNatural, xCongruent⟩ :=
+      unitExtension.membership.forward with xMember
+    obtain ⟨yInteger, k, kMember, j, jNatural, yCongruent⟩ :=
+      unitExtension.membership.forward with yMember
+    have hInteger := UnitSubgroup.integer with subgroup, hMember
+    have kInteger := UnitSubgroup.integer with subgroup, kMember
+    have iPower := integerPow.integer at g, i
+    have jPower := integerPow.integer at g, j
+    have product := IntegerCongruent.mul with xCongruent, yCongruent
+    have regroup : integerMulValue(integerMulValue(h, integerPow(g, i)),
+        integerMulValue(k, integerPow(g, j))) =
+        integerMulValue(integerMulValue(h, k), integerPow(g, i + j))
+      rw integerPow.add
+      ring
+    rw regroup at product
+    have hk := UnitSubgroup.mul with subgroup, hMember, kMember
+    have productInteger : integerMulValue(x, y) ∈ ℤ by typecheck
+    have productValue := characterExtension.value at N, H, ψ, g, ζ,
+      integerMulValue(x, y), integerMulValue(h, k), i + j
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      productInteger, hk, product
+    have xValue := characterExtension.value at N, H, ψ, g, ζ, x, h, i
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      xInteger, hMember, xCongruent
+    have yValue := characterExtension.value at N, H, ψ, g, ζ, y, k, j
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      yInteger, kMember, yCongruent
+    obtain ⟨ζMember, values⟩ := compatible
+    have sum := monoidPow.add at complexCarrier, complexMul, complexOne, ζ,
+      i, j with monoid, ζMember
+    have multiplicative := SubgroupCharacter.mul with character, hMember,
+      kMember
+    have hValue := SubgroupCharacter.value with character, hInteger
+    have kValue := SubgroupCharacter.value with character, kInteger
+    have iPowerValue := monoidPow.closed at complexCarrier, complexMul,
+      complexOne, ζ, i with monoid, ζMember
+    have jPowerValue := monoidPow.closed at complexCarrier, complexMul,
+      complexOne, ζ, j with monoid, ζMember
+    rw [productValue, xValue, yValue, sum, multiplicative]
+    ring
+  . intros x member y yInteger congruent
+    obtain ⟨xInteger, h, hMember, i, iNatural, xCongruent⟩ :=
+      unitExtension.membership.forward with member
+    have hInteger := UnitSubgroup.integer with subgroup, hMember
+    have iPower := integerPow.integer at g, i
+    have reverse := IntegerCongruent.symmetric with congruent
+    have chain := IntegerCongruent.transitive with reverse, xCongruent
+    have xValue := characterExtension.value at N, H, ψ, g, ζ, x, h, i
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      xInteger, hMember, xCongruent
+    have yValue := characterExtension.value at N, H, ψ, g, ζ, y, h, i
+      with subgroup, character, positive, gInteger, gCoprime, compatible,
+      yInteger, hMember, chain
+    rw [xValue, yValue]
+
+end Extension
+
+section Compatible
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (N : Nat) (H ψ g : Set)
+hypothesis subgroup : UnitSubgroup(N, H)
+hypothesis character : SubgroupCharacter(N, H, ψ)
+hypothesis positive : 0 < N
+hypothesis gInteger : g ∈ ℤ
+hypothesis gCoprime : IntegerCoprime(g, integerOfNat(N))
+
+-- A k-th root of ψ(gᵏ), for k the order of g modulo H, is compatible.
+theorem CompatibleRoot.of_least (ζ : Set, k : Nat)
+  requires kPositive : 0 < k
+  requires kInside : integerPow(g, k) ∈ H
+  requires least : ∀ r, Nat(r) → 0 < r → r < k → ¬(integerPow(g, r) ∈ H)
+  requires ζMember : ζ ∈ complexCarrier
+  requires root : ℂ[ζ ^ k] = ψ(integerPow(g, k))
+  shows CompatibleRoot(N, H, ψ, g, ζ)
+proof
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  have kPower := integerPow.integer at g, k
+  have kInteger : integerPow(g, k) ∈ ℤ by typecheck
+  have kValue := SubgroupCharacter.value with character, kInteger
+  refine ⟨ζMember, ?_⟩
+  intros d dNatural dInside
+  have nonzero := Less.ne_zero_of_positive with kPositive
+  obtain ⟨decomposition, below⟩ := mod.division at k, d with nonzero
+  obtain ⟨q, qNat, shape⟩ := decomposition
+  have multipleShape : integerPow(g, k * q) =
+      integerPow(integerPow(g, k), q)
+    rw integerPow.mul_exponent
+  have multiple := UnitSubgroup.pow at N, H, integerPow(g, k), q
+    with subgroup, kInside
+  rw ← multipleShape at multiple
+  obtain ⟨u, uMember, inverse⟩ := UnitSubgroup.inverse with subgroup,
+    positive, multiple
+  have uInteger := UnitSubgroup.integer with subgroup, uMember
+  have multiplePower := integerPow.integer at g, k * q
+  have restPower := integerPow.integer at g, d % k
+  have split : integerMulValue(integerPow(g, d), u) =
+      integerMulValue(integerPow(g, d % k),
+        integerMulValue(integerPow(g, k * q), u))
+    have sum := integerPow.add at g, k * q, d % k
+    rw ← shape at sum
+    rw sum
+    ring
+  have scaled := IntegerCongruent.mul_left at integerOfNat(N),
+    integerMulValue(integerPow(g, k * q), u), integerOne,
+    integerPow(g, d % k) with inverse
+  have trivial : integerMulValue(integerPow(g, d % k), integerOne) =
+      integerPow(g, d % k) by ring
+  rw [← split, trivial] at scaled
+  have product := UnitSubgroup.mul with subgroup, dInside, uMember
+  have restMember : integerPow(g, d % k) ∈ ℤ by typecheck
+  have restInside := UnitSubgroup.congruent with subgroup, product,
+    restMember, scaled
+  by_cases zero : d % k = 0
+  . have exact : d = k * q
+      rw zero at shape
+      arith
+    have power := SubgroupCharacter.pow at N, H, ψ, integerPow(g, k), q
+      with subgroup, character, kInside
+    have exponents := monoidPow.mul at complexCarrier, complexMul,
+      complexOne, ζ, k, q with monoid, ζMember
+    rw [exact, ← integerPow.mul_exponent, power, ← root]
+    symm
+    exact exponents
+  . exfalso
+    have restNat := mod.natural at k, d
+    have restPositive := Less.positive_of_ne_zero with zero
+    exact least with d % k, restNat, restPositive, below, restInside
+
+-- Every character of H has a value at g compatible with it.
+theorem CompatibleRoot.exists
+  shows ∃ ζ, CompatibleRoot(N, H, ψ, g, ζ)
+proof
+  obtain ⟨k, kNat, kPositive, kInside, least⟩ := unitExtension.least_power
+    at N, H, g with subgroup, gInteger, gCoprime, positive
+  have norm := SubgroupCharacter.unit with subgroup, character, positive,
+    kInside
+  have powerInteger := integerPow.integer at g, k
+  have powerMember : integerPow(g, k) ∈ ℤ by typecheck
+  have value := SubgroupCharacter.value with character, powerMember
+  obtain ⟨ζ, ζMember, root⟩ := complexNormSquared.unit_root with value, norm,
+    kPositive
+  have compatible := CompatibleRoot.of_least at N, H, ψ, g, ζ, k
+    with subgroup, character, positive, gInteger, gCoprime, kPositive,
+    kInside, least, ζMember, root
+  exact ⟨ζ, compatible⟩
+
+-- When ψ is trivial on H and g ∉ H, a compatible value other than 1.
+theorem CompatibleRoot.exists_nontrivial
+  requires trivial : ∀ x ∈ H, ψ(x) = complexOne
+  requires outside : ¬(g ∈ H)
+  shows ∃ ζ, CompatibleRoot(N, H, ψ, g, ζ) ∧ ζ ≠ complexOne
+proof
+  obtain ⟨k, kNat, kPositive, kInside, least⟩ := unitExtension.least_power
+    at N, H, g with subgroup, gInteger, gCoprime, positive
+  have two : (2:N) ≤ k
+    by_contra small
+    have unit : k = (1:N) by arith
+    rw [unit, integerPow.one_right] at kInside
+    exact outside with kInside
+  obtain ⟨ζ, ζMember, root, different⟩ := complexOne.nontrivial_root with two
+  have value := trivial with integerPow(g, k), kInside
+  have rootValue : ℂ[ζ ^ k] = ψ(integerPow(g, k))
+    rw value
+    exact root
+  have compatible := CompatibleRoot.of_least at N, H, ψ, g, ζ, k
+    with subgroup, character, positive, gInteger, gCoprime, kPositive,
+    kInside, least, ζMember, rootValue
+  exact ⟨ζ, compatible, different⟩
+
+end Compatible
+
+-- The trivial subgroup: the integers congruent to 1.
+def unitClass (N : Nat) : Set :=
+  { x ∈ ℤ | IntegerCongruent(integerOfNat(N), x, integerOne) }
+
+-- The integers coprime to N: the whole unit group.
+def unitIntegers (N : Nat) : Set :=
+  { x ∈ ℤ | IntegerCoprime(x, integerOfNat(N)) }
+
+theorem unitClass.subgroup (N : Nat)
+  shows UnitSubgroup(N, unitClass(N))
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have one : integerOne ∈ ℤ by typecheck
+  have oneCoprime := IntegerCoprime.one_left with modulus
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  . intros x member
+    unfold unitClass at member
+    exact member.left
+  . unfold unitClass
+    exact ⟨one, (IntegerCongruent.reflexive at integerOfNat(N), integerOne)⟩
+  . intros x xMember y yMember
+    unfold unitClass at xMember
+    unfold unitClass at yMember
+    obtain ⟨xInteger, xCongruent⟩ := xMember
+    obtain ⟨yInteger, yCongruent⟩ := yMember
+    have product := IntegerCongruent.mul with xCongruent, yCongruent
+    have trivial : integerMulValue(integerOne, integerOne) = integerOne
+      by ring
+    rw trivial at product
+    have productInteger : integerMulValue(x, y) ∈ ℤ by typecheck
+    unfold unitClass
+    exact ⟨productInteger, product⟩
+  . intros x member
+    unfold unitClass at member
+    obtain ⟨xInteger, congruent⟩ := member
+    have reverse := IntegerCongruent.symmetric with congruent
+    exact IntegerCoprime.of_congruent with one, xInteger, modulus, reverse,
+      oneCoprime
+  . intros x member y yInteger congruent
+    unfold unitClass at member
+    obtain ⟨xInteger, xCongruent⟩ := member
+    have reverse := IntegerCongruent.symmetric with congruent
+    have chain := IntegerCongruent.transitive with reverse, xCongruent
+    unfold unitClass
+    exact ⟨yInteger, chain⟩
+
+-- The principal character is a character of the trivial subgroup, equal to
+-- 1 there.
+theorem unitClass.principal (N : Nat)
+  shows SubgroupCharacter(N, unitClass(N), principalCharacter(N)) ∧
+    ∀ x ∈ unitClass(N), principalCharacter(N)(x) = complexOne
+proof
+  have subgroup := unitClass.subgroup at N
+  have principal := principalCharacter.character at N
+  have function := DirichletCharacter.function with principal
+  have unit := DirichletCharacter.one with principal
+  have values : ∀ x ∈ unitClass(N), principalCharacter(N)(x) = complexOne
+    intros x member
+    have integer := UnitSubgroup.integer with subgroup, member
+    have coprime := UnitSubgroup.coprime with subgroup, member
+    exact principalCharacter.coprime with integer, coprime
+  refine ⟨⟨function, unit, ?_, ?_⟩, values⟩
+  . intros x xMember y yMember
+    have product := UnitSubgroup.mul with subgroup, xMember, yMember
+    have productValue := values with integerMulValue(x, y), product
+    have xValue := values with x, xMember
+    have yValue := values with y, yMember
+    rw [productValue, xValue, yValue, complexMul.one_one]
+  . intros x member y yInteger congruent
+    have yMember := UnitSubgroup.congruent with subgroup, member, yInteger,
+      congruent
+    have xValue := values with x, member
+    have yValue := values with y, yMember
+    rw [xValue, yValue]
+
+-- A character of a subgroup containing a with value other than 1 at a,
+-- defined on a subgroup containing every unit residue below m.
+theorem unitExtension.stage (N : Nat) (a : Set, m : Nat)
+  requires positive : 0 < N
+  requires aInteger : a ∈ ℤ
+  requires aCoprime : IntegerCoprime(a, integerOfNat(N))
+  requires incongruent : ¬IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows ∃ H, ∃ ψ, UnitSubgroup(N, H) ∧ SubgroupCharacter(N, H, ψ) ∧
+    a ∈ H ∧ ψ(a) ≠ complexOne ∧
+    (∀ j ∈ m, IntegerCoprime(integerOfNat(j), integerOfNat(N)) →
+      integerOfNat(j) ∈ H)
+proof
+  induction m
+  | zero =>
+    have subgroup := unitClass.subgroup at N
+    obtain ⟨character, trivial⟩ := unitClass.principal at N
+    have outside : ¬(a ∈ unitClass(N))
+      intro member
+      unfold unitClass at member
+      exact incongruent with member.right
+    obtain ⟨ζ, compatible, different⟩ := CompatibleRoot.exists_nontrivial
+      at N, unitClass(N), principalCharacter(N), a
+      with subgroup, character, positive, aInteger, aCoprime, trivial,
+      outside
+    have extended := unitExtension.subgroup at N, unitClass(N), a
+      with subgroup, aInteger, aCoprime
+    have extendedCharacter := characterExtension.character
+      at N, unitClass(N), principalCharacter(N), a, ζ
+      with subgroup, character, positive, aInteger, aCoprime, compatible
+    have generator := unitExtension.generator at N, unitClass(N), a
+      with subgroup, aInteger, aCoprime
+    have value := characterExtension.generator
+      at N, unitClass(N), principalCharacter(N), a, ζ
+      with subgroup, character, positive, aInteger, aCoprime, compatible
+    refine ⟨unitExtension(N, unitClass(N), a),
+      characterExtension(N, unitClass(N), principalCharacter(N), a, ζ),
+      extended, extendedCharacter, generator, ?_, ?_⟩
+    . rw value
+      exact different
+    . intros j member coprime
+      have naturals := natural.member at 0
+      have jNat := naturals with j, member
+      have below := Less.of_membership at j, 0 with member
+      exfalso
+      arith
+  | succ(k) using ih =>
+    obtain ⟨H, ψ, subgroup, character, aMember, different, covers⟩ := ih
+    have naturals := natural.member at succ(k)
+    have gInteger : integerOfNat(k) ∈ ℤ by typecheck
+    by_cases kCoprime : IntegerCoprime(integerOfNat(k), integerOfNat(N))
+    . obtain ⟨ζ, compatible⟩ := CompatibleRoot.exists
+        at N, H, ψ, integerOfNat(k)
+        with subgroup, character, positive, gInteger, kCoprime
+      have extended := unitExtension.subgroup at N, H, integerOfNat(k)
+        with subgroup, gInteger, kCoprime
+      have extendedCharacter := characterExtension.character
+        at N, H, ψ, integerOfNat(k), ζ
+        with subgroup, character, positive, gInteger, kCoprime, compatible
+      have contains := unitExtension.contains at N, H, integerOfNat(k), a
+        with subgroup, gInteger, kCoprime, aMember
+      have same := characterExtension.extends
+        at N, H, ψ, integerOfNat(k), ζ, a
+        with subgroup, character, positive, gInteger, kCoprime, compatible,
+        aMember
+      refine ⟨unitExtension(N, H, integerOfNat(k)),
+        characterExtension(N, H, ψ, integerOfNat(k), ζ),
+        extended, extendedCharacter, contains, ?_, ?_⟩
+      . rw same
+        exact different
+      . intros j member coprime
+        have jNat := naturals with j, member
+        have below := Less.of_membership at j, succ(k) with member
+        by_cases last : j = k
+        . rw last
+          exact unitExtension.generator at N, H, integerOfNat(k)
+            with subgroup, gInteger, kCoprime
+        . have before : j < k by arith
+          have earlier := membership.of_Less at j, k with before
+          have old := covers with j, earlier, coprime
+          exact unitExtension.contains at N, H, integerOfNat(k),
+            integerOfNat(j) with subgroup, gInteger, kCoprime, old
+    . refine ⟨H, ψ, subgroup, character, aMember, different, ?_⟩
+      intros j member coprime
+      have jNat := naturals with j, member
+      have below := Less.of_membership at j, succ(k) with member
+      by_cases last : j = k
+      . exfalso
+        rw last at coprime
+        exact kCoprime with coprime
+      . have before : j < k by arith
+        have earlier := membership.of_Less at j, k with before
+        exact covers with j, earlier, coprime
+
+-- For a unit a ≢ 1 modulo N, a character of the whole unit group with
+-- value other than 1 at a.
+theorem unitIntegers.separating (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires aInteger : a ∈ ℤ
+  requires aCoprime : IntegerCoprime(a, integerOfNat(N))
+  requires incongruent : ¬IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows ∃ ψ, SubgroupCharacter(N, unitIntegers(N), ψ) ∧ ψ(a) ≠ complexOne
+proof
+  obtain ⟨H, ψ, subgroup, character, aMember, different, covers⟩ :=
+    unitExtension.stage at N, a, N with positive, aInteger, aCoprime,
+    incongruent
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have inside : ∀ x ∈ unitIntegers(N), x ∈ H
+    intros x member
+    unfold unitIntegers at member
+    obtain ⟨xInteger, xCoprime⟩ := member
+    have congruent := integerMod.congruent at x, N with positive
+    have natural := integerMod.natural at x, N with positive
+    have residueInteger : integerOfNat(integerMod(x, N)) ∈ ℤ by typecheck
+    have residueCoprime := IntegerCoprime.of_congruent with xInteger,
+      residueInteger, modulus, congruent, xCoprime
+    have below := integerMod.below at x, N with positive
+    have residueMember := membership.of_Less at integerMod(x, N), N
+      with below
+    have residueInside := covers with integerMod(x, N), residueMember,
+      residueCoprime
+    have reverse := IntegerCongruent.symmetric with congruent
+    exact UnitSubgroup.congruent with subgroup, residueInside, xInteger,
+      reverse
+  obtain ⟨function, one, multiplicative, classes⟩ := character
+  refine ⟨ψ, ⟨function, one, ?_, ?_⟩, different⟩
+  . intros x xMember y yMember
+    exact multiplicative with x, (inside with x, xMember), y,
+      (inside with y, yMember)
+  . intros x member y yInteger congruent
+    exact classes with x, (inside with x, member), y, yInteger, congruent
+
+theorem unitIntegers.membership (N : Nat) (x : Set)
+  shows x ∈ unitIntegers(N) ↔ x ∈ ℤ ∧ IntegerCoprime(x, integerOfNat(N))
+proof
+  constructor
+  . intro member
+    unfold unitIntegers at member
+    exact member
+  . intro member
+    unfold unitIntegers
+    exact member
+
+-- A character of the unit group, extended by 0, is a Dirichlet character.
+theorem changeLevel.unit_character (N : Nat) (ψ : Set)
+  requires character : SubgroupCharacter(N, unitIntegers(N), ψ)
+  shows DirichletCharacter(N, changeLevel(N, ψ))
+proof
+  have modulus : integerOfNat(N) ∈ ℤ by typecheck
+  have function : changeLevel(N, ψ) : ℤ → complexCarrier
+    refine ⟨(changeLevel.bounded at N, ψ), (changeLevel.functional at N, ψ),
+      ?_⟩
+    intros a integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have value := SubgroupCharacter.value with character, integer
+      refine ⟨ψ(a), value, ?_⟩
+      unfold relates
+      unfold changeLevel
+      have pair := product.pair with integer, value
+      refine ⟨pair, a, integer, ?_⟩
+      left
+      exact ⟨coprime, rfl⟩
+    . refine ⟨complexZero, complexZero.member, ?_⟩
+      unfold relates
+      unfold changeLevel
+      have pair := product.pair with integer, complexZero.member
+      refine ⟨pair, a, integer, ?_⟩
+      right
+      exact ⟨coprime, rfl⟩
+  refine ⟨function, ?_, ?_, ?_, ?_⟩
+  . intros a integer
+    have shifted : integerAddValue(a, integerOfNat(N)) ∈ ℤ by typecheck
+    have congruent : IntegerCongruent(integerOfNat(N),
+        integerAddValue(a, integerOfNat(N)), a)
+      witness integerOne
+      ring
+    have reverse := IntegerCongruent.symmetric with congruent
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have shiftedCoprime := IntegerCoprime.of_congruent with integer,
+        shifted, modulus, reverse, coprime
+      have shiftedValue := SubgroupCharacter.value with character, shifted
+      have aValue := SubgroupCharacter.value with character, integer
+      have left := changeLevel.coprime_of_value with shifted, shiftedCoprime,
+        shiftedValue
+      have right := changeLevel.coprime_of_value with integer, coprime, aValue
+      have unit := unitIntegers.membership.backward at N, a with
+        ⟨integer, coprime⟩
+      have same := SubgroupCharacter.congruent with character, unit, shifted,
+        reverse
+      rw [left, right, same]
+    . have shiftedOther : ¬IntegerCoprime(integerAddValue(a, integerOfNat(N)),
+          integerOfNat(N))
+        intro shiftedCoprime
+        have back := IntegerCoprime.of_congruent with shifted, integer,
+          modulus, congruent, shiftedCoprime
+        exact coprime with back
+      have left := changeLevel.not_coprime at N, ψ,
+        integerAddValue(a, integerOfNat(N)) with shifted, shiftedOther
+      have right := changeLevel.not_coprime at N, ψ, a
+        with integer, coprime
+      rw [left, right]
+  . have one : integerOne ∈ ℤ by typecheck
+    have coprime := IntegerCoprime.one_left with modulus
+    have value := SubgroupCharacter.value with character, one
+    have level := changeLevel.coprime_of_value with one, coprime, value
+    have unit := SubgroupCharacter.one with character
+    rw [level, unit]
+  . intros a aInteger b bInteger
+    have product : integerMulValue(a, b) ∈ ℤ by typecheck
+    have aValue := FunctionBetween.apply_closed with function, aInteger
+    have bValue := FunctionBetween.apply_closed with function, bInteger
+    by_cases aCoprime : IntegerCoprime(a, integerOfNat(N))
+    . by_cases bCoprime : IntegerCoprime(b, integerOfNat(N))
+      . have both := IntegerCoprime.mul with aInteger, bInteger, modulus,
+          aCoprime, bCoprime
+        have productValue := SubgroupCharacter.value with character, product
+        have aψ := SubgroupCharacter.value with character, aInteger
+        have bψ := SubgroupCharacter.value with character, bInteger
+        have productLevel := changeLevel.coprime_of_value with product, both,
+          productValue
+        have aLevel := changeLevel.coprime_of_value with aInteger, aCoprime,
+          aψ
+        have bLevel := changeLevel.coprime_of_value with bInteger, bCoprime,
+          bψ
+        have aUnit := unitIntegers.membership.backward at N, a with
+          ⟨aInteger, aCoprime⟩
+        have bUnit := unitIntegers.membership.backward at N, b with
+          ⟨bInteger, bCoprime⟩
+        have multiplicative := SubgroupCharacter.mul with character, aUnit,
+          bUnit
+        rw [productLevel, aLevel, bLevel, multiplicative]
+      . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+          intro both
+          have right := IntegerCoprime.of_mul_right with aInteger, bInteger,
+            modulus, both
+          exact bCoprime with right
+        have productValue := changeLevel.not_coprime at N, ψ,
+          integerMulValue(a, b) with product, notBoth
+        have bZero := changeLevel.not_coprime at N, ψ, b
+          with bInteger, bCoprime
+        have absorb := complexMul.zero_right with aValue
+        rw [productValue, bZero, absorb]
+    . have notBoth : ¬IntegerCoprime(integerMulValue(a, b), integerOfNat(N))
+        intro both
+        have left := IntegerCoprime.of_mul_left with aInteger, bInteger,
+          modulus, both
+        exact aCoprime with left
+      have productValue := changeLevel.not_coprime at N, ψ,
+        integerMulValue(a, b) with product, notBoth
+      have aZero := changeLevel.not_coprime at N, ψ, a
+        with aInteger, aCoprime
+      have absorb := complexMul.zero_left with bValue
+      rw [productValue, aZero, absorb]
+  . intros a integer notCoprime
+    exact changeLevel.not_coprime at N, ψ, a
+      with integer, notCoprime
+
+-- Characters separate the units: for a unit a ≢ 1 modulo N some character
+-- has χ(a) ≠ 1.
+theorem DirichletCharacter.separating (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires coprime : IntegerCoprime(a, integerOfNat(N))
+  requires incongruent : ¬IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows ∃ χ, DirichletCharacter(N, χ) ∧ χ(a) ≠ complexOne
+proof
+  obtain ⟨ψ, character, different⟩ := unitIntegers.separating with positive,
+    integer, coprime, incongruent
+  have dirichlet := changeLevel.unit_character with character
+  have value := SubgroupCharacter.value with character, integer
+  have level := changeLevel.coprime_of_value with integer, coprime, value
+  refine ⟨changeLevel(N, ψ), dirichlet, ?_⟩
+  rw level
+  exact different
+
+-- The pointwise product of two characters.
+defgraph characterProduct (N : Nat, χ ψ : Set) (x ∈ ℤ) : complexCarrier :=
+  complexMul(χ(x), ψ(x))
+requires χCharacter : DirichletCharacter(N, χ)
+requires ψCharacter : DirichletCharacter(N, ψ)
+proof
+  have χValue := DirichletCharacter.value with χCharacter, member
+  have ψValue := DirichletCharacter.value with ψCharacter, member
+  typecheck
+
+section Products
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+theorem characterProduct.character (N : Nat) (χ ψ : Set)
+  requires χCharacter : DirichletCharacter(N, χ)
+  requires ψCharacter : DirichletCharacter(N, ψ)
+  shows DirichletCharacter(N, characterProduct(N, χ, ψ))
+proof
+  have ring := complexes.comm_ring
+  have function := characterProduct.function at N, χ, ψ with χCharacter, ψCharacter
+  refine ⟨function, ?_, ?_, ?_, ?_⟩
+  . intros a integer
+    have shifted : integerAddValue(a, integerOfNat(N)) ∈ ℤ by typecheck
+    have left := characterProduct.value at N, χ, ψ,
+      integerAddValue(a, integerOfNat(N)) with χCharacter, ψCharacter, shifted
+    have right := characterProduct.value at N, χ, ψ, a with χCharacter, ψCharacter,
+      integer
+    have χPeriodic := DirichletCharacter.periodic with χCharacter, integer
+    have ψPeriodic := DirichletCharacter.periodic with ψCharacter, integer
+    rw [left, right, χPeriodic, ψPeriodic]
+  . have one : integerOne ∈ ℤ by typecheck
+    have value := characterProduct.value at N, χ, ψ, integerOne with χCharacter,
+      ψCharacter, one
+    have χOne := DirichletCharacter.one with χCharacter
+    have ψOne := DirichletCharacter.one with ψCharacter
+    rw [value, χOne, ψOne, complexMul.one_one]
+  . intros a aInteger b bInteger
+    have product : integerMulValue(a, b) ∈ ℤ by typecheck
+    have productValue := characterProduct.value at N, χ, ψ,
+      integerMulValue(a, b) with χCharacter, ψCharacter, product
+    have aValue := characterProduct.value at N, χ, ψ, a with χCharacter, ψCharacter,
+      aInteger
+    have bValue := characterProduct.value at N, χ, ψ, b with χCharacter, ψCharacter,
+      bInteger
+    have χMul := DirichletCharacter.mul with χCharacter, aInteger, bInteger
+    have ψMul := DirichletCharacter.mul with ψCharacter, aInteger, bInteger
+    have χa := DirichletCharacter.value with χCharacter, aInteger
+    have χb := DirichletCharacter.value with χCharacter, bInteger
+    have ψa := DirichletCharacter.value with ψCharacter, aInteger
+    have ψb := DirichletCharacter.value with ψCharacter, bInteger
+    rw [productValue, aValue, bValue, χMul, ψMul]
+    ring
+  . intros a integer notCoprime
+    have value := characterProduct.value at N, χ, ψ, a with χCharacter, ψCharacter,
+      integer
+    have zero := DirichletCharacter.not_coprime with χCharacter, integer,
+      notCoprime
+    have ψa := DirichletCharacter.value with ψCharacter, integer
+    rw [value, zero, complexMul.zero_left with ψa]
+
+end Products
+
+-- The values a character modulo N can take: 0 and the φ(N)-th roots of
+-- unity.
+def characterValues (N : Nat) : Set :=
+  { z ∈ complexCarrier | z = complexZero ∨
+    monoidPow(complexMul, complexOne, z, totient(N)) = complexOne }
+
+theorem characterValues.finite (N : Nat)
+  requires positive : 0 < N
+  shows Finite(characterValues(N))
+proof
+  have totientPositive := totient.positive with positive
+  have alternatives := natural.zero_or_successor at totient(N)
+  cases alternatives with zero | successor
+  . exfalso
+    rw zero at totientPositive
+    arith
+  obtain ⟨m, mNat, shape⟩ := successor
+  have subset : characterValues(N) ⊆
+      insert(complexZero, complexUnityRoots(m))
+    intros z member
+    unfold characterValues at member
+    obtain ⟨zMember, values⟩ := member
+    cases values with vanishing | root
+    . rw vanishing
+      exact insert.self at complexZero, complexUnityRoots(m)
+    . rw shape at root
+      have unity := complexUnityRoots.contains with zMember, root
+      exact insert.contains with unity
+  have roots := complexUnityRoots.finite at m
+  have bigger := Finite.insert at complexUnityRoots(m), complexZero
+    with roots
+  exact Finite.subset with bigger, subset
+
+theorem DirichletCharacter.values (N : Nat) (χ : Set, j : Nat)
+  requires character : DirichletCharacter(N, χ)
+  requires positive : 0 < N
+  shows χ(integerOfNat(j)) ∈ characterValues(N)
+proof
+  have integer : integerOfNat(j) ∈ ℤ by typecheck
+  have value := DirichletCharacter.value with character, integer
+  unfold characterValues
+  refine ⟨value, ?_⟩
+  by_cases coprime : IntegerCoprime(integerOfNat(j), integerOfNat(N))
+  . right
+    exact DirichletCharacter.pow_totient with character, positive, integer,
+      coprime
+  . left
+    exact DirichletCharacter.not_coprime with character, integer, coprime
+
+-- A character restricted to the residues 0, 1, …, N − 1.
+defgraph characterRestriction (N : Nat) (χ ∈ dirichletCharacters(N)) :
+    functionSpace(N, characterValues(N)) := residueValues(N, χ)
+requires positive : 0 < N
+proof
+  have character := dirichletCharacters.membership.forward with member
+  have function := residueValues.function at N, χ with character
+  have naturals := natural.member at N
+  have values : ∀ j ∈ N, residueValues(N, χ)(j) ∈ characterValues(N)
+    intros j jMember
+    have jNat := naturals with j, jMember
+    have residue := residueValues.value at N, χ, j with character, jMember
+    rw residue
+    exact DirichletCharacter.values with character, positive
+  have narrowed := FunctionBetween.codomain_of_values with function, values
+  exact functionSpace.mem_iff.backward with narrowed
+
+-- Finitely many characters: a character is determined by its values at
+-- 0, 1, …, N − 1, each 0 or a φ(N)-th root of unity.
+theorem dirichletCharacters.finite (N : Nat)
+  requires positive : 0 < N
+  shows Finite(dirichletCharacters(N))
+proof
+  have function := characterRestriction.function at N with positive
+  have naturals := natural.member at N
+  have injective : InjectiveBetween(characterRestriction(N),
+      dirichletCharacters(N), functionSpace(N, characterValues(N)))
+    refine ⟨function, ?_⟩
+    intros χ χMember ψ ψMember f fMember χRelates ψRelates
+    have χValue := FunctionBetween.apply_value with function, χMember,
+      χRelates
+    have ψValue := FunctionBetween.apply_value with function, ψMember,
+      ψRelates
+    have χRestriction := characterRestriction.value at N, χ with positive,
+      χMember
+    have ψRestriction := characterRestriction.value at N, ψ with positive,
+      ψMember
+    have χCharacter := dirichletCharacters.membership.forward with χMember
+    have ψCharacter := dirichletCharacters.membership.forward with ψMember
+    apply DirichletCharacter.ext with χCharacter, ψCharacter, positive
+    intros j jMember
+    have jNat := naturals with j, jMember
+    have χResidue := residueValues.value at N, χ, j with χCharacter, jMember
+    have ψResidue := residueValues.value at N, ψ, j with ψCharacter, jMember
+    have same : residueValues(N, χ) = residueValues(N, ψ)
+      rw [← χRestriction, ← ψRestriction, χValue, ψValue]
+    rw [← χResidue, ← ψResidue, same]
+  have values := characterValues.finite with positive
+  have space := functionSpace.finite with (Finite.natural at N), values
+  exact Injective.finite_domain with injective, space
+
+section Cancel
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+theorem complexMul.cancel_left (c x y : Set)
+  requires scalar : c ∈ ℂ
+  requires first : x ∈ ℂ
+  requires second : y ∈ ℂ
+  requires nonzero : c ≠ complexZero
+  requires same : complexMul(c, x) = complexMul(c, y)
+  shows x = y
+proof
+  have field := complexes.is_field
+  have ring := IsField.comm_ring with field
+  have noZero := IsField.no_zero_divisors at complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne with field
+  have factored : ℂ[c * (x - y)] = complexZero
+    linear_combination same
+  have difference : ℂ[x - y] ∈ complexCarrier by typecheck
+  have zero := noZero with c, scalar, ℂ[x - y], difference, factored
+  cases zero with vanishing | equal
+  . exfalso
+    exact nonzero with vanishing
+  . linear_combination equal
+
+end Cancel
+
+-- Multiplication by a fixed character χ₀, on the set of characters.
+defgraph characterShift (N : Nat, χ₀ : Set) (χ ∈ dirichletCharacters(N)) :
+    dirichletCharacters(N) := characterProduct(N, χ₀, χ)
+requires base : DirichletCharacter(N, χ₀)
+proof
+  have character := dirichletCharacters.membership.forward with member
+  have product := characterProduct.character with base, character
+  exact dirichletCharacters.membership.backward with product
+
+-- It permutes the characters.
+theorem characterShift.bijective (N : Nat) (χ₀ : Set)
+  requires base : DirichletCharacter(N, χ₀)
+  requires positive : 0 < N
+  shows BijectiveBetween(characterShift(N, χ₀), dirichletCharacters(N),
+    dirichletCharacters(N))
+proof
+  have function := characterShift.function at N, χ₀ with base
+  have finite := dirichletCharacters.finite with positive
+  have injective : InjectiveBetween(characterShift(N, χ₀),
+      dirichletCharacters(N), dirichletCharacters(N))
+    refine ⟨function, ?_⟩
+    intros χ χMember ψ ψMember ρ ρMember χRelates ψRelates
+    have χValue := FunctionBetween.apply_value with function, χMember,
+      χRelates
+    have ψValue := FunctionBetween.apply_value with function, ψMember,
+      ψRelates
+    have χShift := characterShift.value at N, χ₀, χ with base, χMember
+    have ψShift := characterShift.value at N, χ₀, ψ with base, ψMember
+    have χCharacter := dirichletCharacters.membership.forward with χMember
+    have ψCharacter := dirichletCharacters.membership.forward with ψMember
+    have same : characterProduct(N, χ₀, χ) = characterProduct(N, χ₀, ψ)
+      rw [← χShift, ← ψShift, χValue, ψValue]
+    have χFunction := DirichletCharacter.function with χCharacter
+    have ψFunction := DirichletCharacter.function with ψCharacter
+    apply FunctionBetween.ext at χ, ψ, ℤ, complexCarrier with χFunction,
+      ψFunction
+    intros a integer
+    have χProduct := characterProduct.value at N, χ₀, χ, a with base,
+      χCharacter, integer
+    have ψProduct := characterProduct.value at N, χ₀, ψ, a with base,
+      ψCharacter, integer
+    by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+    . have nonzero := (DirichletCharacter.nonzero_iff with base,
+        integer).backward with coprime
+      have scalar := DirichletCharacter.value with base, integer
+      have χa := DirichletCharacter.value with χCharacter, integer
+      have ψa := DirichletCharacter.value with ψCharacter, integer
+      have products : complexMul(χ₀(a), χ(a)) = complexMul(χ₀(a), ψ(a))
+        rw [← χProduct, ← ψProduct, same]
+      exact complexMul.cancel_left with scalar, χa, ψa, nonzero, products
+    . have χZero := DirichletCharacter.not_coprime with χCharacter, integer,
+        coprime
+      have ψZero := DirichletCharacter.not_coprime with ψCharacter, integer,
+        coprime
+      rw [χZero, ψZero]
+  exact Finite.self_injective_bijective with injective, finite
+
+-- Orthogonality over the characters, for a ≢ 1 modulo N: Σ_χ χ(a) = 0.
+theorem dirichletCharacters.sum_other (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires incongruent : ¬IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, a)) = complexZero
+proof
+  have finite := dirichletCharacters.finite with positive
+  have weights := characterEvaluation.function at N, a with integer
+  have ring := complexes.comm_ring
+  by_cases coprime : IntegerCoprime(a, integerOfNat(N))
+  . -- Multiplying by a character χ₀ with χ₀(a) ≠ 1 permutes the terms
+    -- and scales the sum by χ₀(a).
+    obtain ⟨χ₀, base, different⟩ := DirichletCharacter.separating
+      with positive, integer, coprime, incongruent
+    have scalar := DirichletCharacter.value with base, integer
+    obtain ⟨n, natural, equipotent⟩ := finite
+    obtain ⟨g, bijective⟩ := equipotent
+    have enumeration := converse.bijective with bijective
+    have enumerationFunction := converse.function_of_bijective with bijective
+    have shift := characterShift.bijective with base, positive
+    have shiftFunction := characterShift.function at N, χ₀ with base
+    have composed := compose.bijective with enumeration, shift
+    have shifted := finiteRingSum.enumeration with ring, weights, composed
+    have scaledWeights := coefficientScale.function at
+      dirichletCharacters(N), complexCarrier, complexAdd, complexZero,
+      complexNeg, complexMul, complexOne, χ₀(a), characterEvaluation(N, a)
+      with ring, scalar, weights
+    have scaledSum := finiteRingSum.enumeration with ring, scaledWeights,
+      enumeration
+    have finiteAgain : Finite(dirichletCharacters(N))
+      exact ⟨n, natural, g, bijective⟩
+    have scaleLaw := finiteRingSum.scale at dirichletCharacters(N),
+      complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+      complexOne, characterEvaluation(N, a), χ₀(a)
+      with ring, finiteAgain, weights, scalar
+    have terms : ∀ i ∈ n,
+        characterEvaluation(N, a)(compose(characterShift(N, χ₀),
+          converse(g, dirichletCharacters(N), n), n, dirichletCharacters(N),
+          dirichletCharacters(N))(i)) =
+        coefficientScale(dirichletCharacters(N), complexCarrier, complexAdd,
+          complexZero, complexNeg, complexMul, complexOne, χ₀(a),
+          characterEvaluation(N, a))(converse(g, dirichletCharacters(N),
+          n)(i))
+      intros i member
+      have image := FunctionBetween.apply_closed with enumerationFunction,
+        member
+      have character := dirichletCharacters.membership.forward with image
+      have position := compose.apply with enumerationFunction, shiftFunction,
+        member
+      have shiftValue := characterShift.value at N, χ₀,
+        converse(g, dirichletCharacters(N), n)(i) with base, image
+      have product := characterShift.closed at N, χ₀,
+        converse(g, dirichletCharacters(N), n)(i) with base, image
+      have productValue := characterEvaluation.value with integer, product
+      have imageValue := characterEvaluation.value with integer, image
+      have scaledValue := coefficientScale.value at dirichletCharacters(N),
+        complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+        complexOne, χ₀(a), characterEvaluation(N, a),
+        converse(g, dirichletCharacters(N), n)(i)
+        with ring, scalar, weights, image
+      have pointwise := characterProduct.value at N, χ₀,
+        converse(g, dirichletCharacters(N), n)(i), a
+        with base, character, integer
+      rw [position, shiftValue, productValue, pointwise, scaledValue,
+        imageValue]
+      unfold call2
+      rfl
+    have congruent := indexedRingSum.congr at characterEvaluation(N, a),
+      coefficientScale(dirichletCharacters(N), complexCarrier, complexAdd,
+        complexZero, complexNeg, complexMul, complexOne, χ₀(a),
+        characterEvaluation(N, a)),
+      compose(characterShift(N, χ₀), converse(g, dirichletCharacters(N), n),
+        n, dirichletCharacters(N), dirichletCharacters(N)),
+      converse(g, dirichletCharacters(N), n), complexAdd, complexZero, n
+    have reindexed := congruent with terms
+    rw [← shifted, ← scaledSum, scaleLaw] at reindexed
+    symm at reindexed
+    unfold call2 at reindexed
+    have sum := finiteRingSum.closed with ring, finiteAgain, weights
+    exact complexMul.fixed_zero with scalar, sum, different, reindexed
+  . have values : ∀ χ ∈ dirichletCharacters(N),
+        characterEvaluation(N, a)(χ) = complexZero
+      intros χ member
+      have character := dirichletCharacters.membership.forward with member
+      have value := characterEvaluation.value with integer, member
+      rw value
+      exact DirichletCharacter.not_coprime with character, integer, coprime
+    exact finiteRingSum.zero with ring, finite, weights, values
+
+-- A sum whose terms vanish except at one index i₀ is its term at i₀.
+theorem indexedRingSum.complex_single_prefix (w f : Set, n i₀ m : Nat)
+  requires below : i₀ < n
+  requires value : w(f(i₀)) ∈ complexCarrier
+  requires others : ∀ i ∈ n, i ≠ i₀ → w(f(i)) = complexZero
+  shows m ≤ n →
+    (i₀ < m → indexedRingSum(w, f, complexAdd, complexZero, m) = w(f(i₀))) ∧
+    (m ≤ i₀ → indexedRingSum(w, f, complexAdd, complexZero, m) =
+      complexZero)
+proof
+  induction m
+  | zero =>
+    intro bound
+    constructor
+    . intro inside
+      exfalso
+      arith
+    . intro before
+      rw indexedRingSum
+  | succ(k) using ih =>
+    intro bound
+    have smaller : k ≤ n by arith
+    obtain ⟨after, before⟩ := ih with smaller
+    have kBelow : k < n by arith
+    have kMember := membership.of_Less at k, n with kBelow
+    constructor
+    . intro inside
+      by_cases same : k = i₀
+      . have atMost : k ≤ i₀ by arith
+        have prefix := before with atMost
+        rw [indexedRingSum, prefix, same]
+        unfold call2
+        exact complexAdd.zero_left with value
+      . have earlier : i₀ < k by arith
+        have prefix := after with earlier
+        have term := others with k, kMember, same
+        rw [indexedRingSum, prefix, term]
+        unfold call2
+        exact complexAdd.zero_right with value
+    . intro atMost
+      have different : k ≠ i₀ by arith
+      have earlier : k ≤ i₀ by arith
+      have prefix := before with earlier
+      have term := others with k, kMember, different
+      rw [indexedRingSum, prefix, term]
+      unfold call2
+      exact complexAdd.zero_left with complexZero.member
+
+theorem indexedRingSum.complex_single (w f : Set, n i₀ : Nat)
+  requires below : i₀ < n
+  requires value : w(f(i₀)) ∈ complexCarrier
+  requires others : ∀ i ∈ n, i ≠ i₀ → w(f(i)) = complexZero
+  shows indexedRingSum(w, f, complexAdd, complexZero, n) = w(f(i₀))
+proof
+  have whole : n ≤ n by arith
+  have prefix := indexedRingSum.complex_single_prefix at w, f, n, i₀, n
+    with below, value, others
+  obtain ⟨after, _⟩ := prefix with whole
+  exact after with below
+
+-- The same over a finite set.
+theorem finiteRingSum.complex_single (V w p : Set)
+  requires finite : Finite(V)
+  requires weights : w : V → complexCarrier
+  requires member : p ∈ V
+  requires others : ∀ x ∈ V, x ≠ p → w(x) = complexZero
+  shows finiteRingSum(V, complexCarrier, complexAdd, complexZero, complexNeg,
+    complexMul, complexOne, w) = w(p)
+proof
+  have ring := complexes.comm_ring
+  obtain ⟨n, natural, g, bijective⟩ := finite
+  have enumeration := converse.bijective with bijective
+  have injective := Bijective.injective with bijective
+  have function := Injective.function with injective
+  have sum := finiteRingSum.enumeration with ring, weights, enumeration
+  have index := FunctionBetween.apply_closed with function, member
+  have naturals := natural.member at n
+  have indexNat := naturals with g(p), index
+  have below := Less.of_membership at g(p), n with index
+  have recovered := Bijective.inverse_apply with bijective, member
+  have value := FunctionBetween.apply_closed with weights, member
+  rw ← recovered at value
+  have vanishing : ∀ i ∈ n, i ≠ g(p) →
+      w(converse(g, V, n)(i)) = complexZero
+    intros i iMember different
+    have inverse := converse.function_of_bijective with bijective
+    have image := FunctionBetween.apply_closed with inverse, iMember
+    have back := Bijective.apply_inverse with bijective, iMember
+    apply others with converse(g, V, n)(i), image
+    intro same
+    rw same at back
+    symm at back
+    exact different with back
+  have single := indexedRingSum.complex_single at w, converse(g, V, n), n,
+    g(p) with below, value, vanishing
+  rw [sum, single, recovered]
+
+-- Σ_χ χ(a) = n for a ≡ 1 modulo N, when there are n characters.
+theorem dirichletCharacters.sum_congruent_one (N n : Nat) (a : Set)
+  requires cardinality : HasCardinality(dirichletCharacters(N), n)
+  requires integer : a ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, a)) = ringNat(complexAdd, complexZero, complexOne,
+    n)
+proof
+  obtain ⟨natural, equipotent⟩ := cardinality
+  obtain ⟨g, bijective⟩ := equipotent
+  have enumeration := converse.bijective with bijective
+  have enumerationFunction := converse.function_of_bijective with bijective
+  have weights := characterEvaluation.function at N, a with integer
+  have ring := complexes.comm_ring
+  have sum := finiteRingSum.enumeration at dirichletCharacters(N),
+    complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+    complexOne, characterEvaluation(N, a),
+    converse(g, dirichletCharacters(N), n), n
+    with ring, weights, enumeration
+  have one : integerOne ∈ ℤ by typecheck
+  have ones : ∀ i ∈ n,
+      characterEvaluation(N, a)(converse(g, dirichletCharacters(N),
+        n)(i)) = complexOne
+    intros i member
+    have image := FunctionBetween.apply_closed with enumerationFunction,
+      member
+    have character := dirichletCharacters.membership.forward with image
+    have value := characterEvaluation.value with integer, image
+    have same := DirichletCharacter.congruent with character, integer, one,
+      congruent
+    have unit := DirichletCharacter.one with character
+    rw [value, same, unit]
+  have all : n ≤ n by arith
+  have counted := indexedRingSum.complex_ones with ones, all
+  rw [sum, counted]
+
+-- The character sums up to m, as a function on the characters.
+defgraph partialSums (N m : Nat) (χ ∈ dirichletCharacters(N)) :
+    complexCarrier := characterSum(χ, m)
+proof
+  have character := dirichletCharacters.membership.forward with member
+  exact characterSum.closed with character
+
+-- The sums Σ_χ χ(j) over the characters, as a function on the residues.
+defgraph evaluationSums (N : Nat) (j ∈ N) : complexCarrier :=
+  finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, integerOfNat(j)))
+requires positive : 0 < N
+proof
+  have ring := complexes.comm_ring
+  have finite := dirichletCharacters.finite with positive
+  have naturals := natural.member at N
+  have jNat := naturals with j, member
+  have integer : integerOfNat(j) ∈ ℤ by typecheck
+  have weights := characterEvaluation.function at N, integerOfNat(j)
+    with integer
+  exact finiteRingSum.closed with ring, finite, weights
+
+-- Exchanging the two sums: Σ_χ Σ_{j<m} χ(j) = Σ_{j<m} Σ_χ χ(j).
+theorem partialSums.exchange (N m : Nat)
+  requires positive : 0 < N
+  shows m ≤ N →
+    finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+      complexZero, complexNeg, complexMul, complexOne, partialSums(N, m)) =
+    indexedRingSum(evaluationSums(N), identity(N), complexAdd, complexZero,
+      m)
+proof
+  induction m
+  | zero =>
+    intro bound
+    have ring := complexes.comm_ring
+    have finite := dirichletCharacters.finite with positive
+    have weights := partialSums.function at N, 0
+    have values : ∀ χ ∈ dirichletCharacters(N),
+        partialSums(N, 0)(χ) = complexZero
+      intros χ member
+      have value := partialSums.value at N, 0, χ with member
+      rw [value, characterSum.zero]
+    have zero := finiteRingSum.zero with ring, finite, weights, values
+    rw [zero, indexedRingSum]
+  | succ(k) using ih =>
+    intro bound
+    have ring := complexes.comm_ring
+    have finite := dirichletCharacters.finite with positive
+    have smaller : k ≤ N by arith
+    have previous := ih with smaller
+    have below : k < N by arith
+    have kMember := membership.of_Less at k, N with below
+    have integer : integerOfNat(k) ∈ ℤ by typecheck
+    have before := partialSums.function at N, k
+    have after := partialSums.function at N, succ(k)
+    have evaluation := characterEvaluation.function at N, integerOfNat(k)
+      with integer
+    have combined := coefficientAdd.function at dirichletCharacters(N),
+      complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+      complexOne, partialSums(N, k), characterEvaluation(N, integerOfNat(k))
+      with ring, before, evaluation
+    have pointwise : ∀ χ ∈ dirichletCharacters(N),
+        partialSums(N, succ(k))(χ) =
+        coefficientAdd(dirichletCharacters(N), complexCarrier, complexAdd,
+          complexZero, complexNeg, complexMul, complexOne, partialSums(N, k),
+          characterEvaluation(N, integerOfNat(k)))(χ)
+      intros χ member
+      have sumValue := coefficientAdd.value at dirichletCharacters(N),
+        complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+        complexOne, partialSums(N, k),
+        characterEvaluation(N, integerOfNat(k)), χ
+        with ring, before, evaluation, member
+      have afterValue := partialSums.value at N, succ(k), χ with member
+      have beforeValue := partialSums.value at N, k, χ with member
+      have evaluationValue := characterEvaluation.value at N,
+        integerOfNat(k), χ with integer, member
+      rw [sumValue, afterValue, beforeValue, evaluationValue,
+        characterSum.succ]
+      unfold call2
+      rfl
+    have same := finiteRingSum.congr with ring, finite, after, combined,
+      pointwise
+    have split := finiteRingSum.add at dirichletCharacters(N),
+      complexCarrier, complexAdd, complexZero, complexNeg, complexMul,
+      complexOne, partialSums(N, k), characterEvaluation(N, integerOfNat(k))
+      with ring, finite, before, evaluation
+    have position := identity.apply at k, N with kMember
+    have term := evaluationSums.value at N, k with positive, kMember
+    rw [same, split, previous, indexedRingSum, position, term]
+
+-- There are φ(N) characters modulo N ≥ 1: summing χ(j) over the characters
+-- and the residues j < N in either order counts φ(N) (orthogonality over
+-- the residues) and the number of characters (orthogonality over the
+-- characters).
+theorem dirichletCharacters.cardinality (N : Nat)
+  requires positive : 0 < N
+  shows HasCardinality(dirichletCharacters(N), totient(N))
+proof
+  have finite := dirichletCharacters.finite with positive
+  obtain ⟨n, cardinality⟩ := finite
+  have finiteAgain := Finite.from_cardinality with cardinality
+  have nNat := cardinality.left
+  have whole : N ≤ N by arith
+  have exchange := partialSums.exchange at N, N with positive
+  have exchanged := exchange with whole
+  -- Over the characters only the principal one contributes, φ(N).
+  have principal := principalCharacter.character at N
+  have principalMember := dirichletCharacters.membership.backward
+    with principal
+  have weights := partialSums.function at N, N
+  have nonPrincipal : ∀ χ ∈ dirichletCharacters(N),
+      χ ≠ principalCharacter(N) → partialSums(N, N)(χ) = complexZero
+    intros χ member different
+    have character := dirichletCharacters.membership.forward with member
+    have value := partialSums.value at N, N, χ with member
+    rw value
+    exact characterSum.non_principal with character, positive, different
+  have byCharacters := finiteRingSum.complex_single with finiteAgain,
+    weights, principalMember, nonPrincipal
+  have principalValue := partialSums.value at N, N, principalCharacter(N)
+    with principalMember
+  have principalSum := characterSum.principal with positive
+  rw [byCharacters, principalValue, principalSum] at exchanged
+  -- Over the residues only j ≡ 1 contributes, n.
+  have nonzero : N ≠ 0 by arith
+  have oneBelow := mod.less at 1, N with nonzero
+  have oneNat := mod.natural at N, 1
+  have oneMember := membership.of_Less at 1 % N, N with oneBelow
+  have naturals := natural.member at N
+  have reduction := CongruentMod.mod_right at 1, N
+  have lifted := IntegerCongruent.ofNat_iff.backward at N, 1, 1 % N
+    with reduction
+  have oneCongruent := IntegerCongruent.symmetric with lifted
+  rw integerOfNat.one at oneCongruent
+  have oneInteger : integerOfNat(1 % N) ∈ ℤ by typecheck
+  have identityValue := identity.apply at 1 % N, N with oneMember
+  have oneValue := evaluationSums.value at N, 1 % N with positive, oneMember
+  have counted := dirichletCharacters.sum_congruent_one at N, n,
+    integerOfNat(1 % N) with cardinality, oneInteger, oneCongruent
+  have sums := evaluationSums.function at N with positive
+  have position : 1 % N ∈ N by exact oneMember
+  rw ← identityValue at position
+  have oneTerm := FunctionBetween.apply_closed with sums, position
+  have otherTerms : ∀ j ∈ N, j ≠ 1 % N →
+      evaluationSums(N)(identity(N)(j)) = complexZero
+    intros j jMember different
+    have jNat := naturals with j, jMember
+    have jPosition := identity.apply at j, N with jMember
+    have jValue := evaluationSums.value at N, j with positive, jMember
+    have jInteger : integerOfNat(j) ∈ ℤ by typecheck
+    have incongruent : ¬IntegerCongruent(integerOfNat(N), integerOfNat(j),
+        integerOne)
+      intro congruent
+      rw ← integerOfNat.one at congruent
+      have reduced := IntegerCongruent.ofNat_iff.forward with congruent
+      unfold CongruentMod at reduced
+      have jBelow := Less.of_membership at j, N with jMember
+      have jReduced := mod.of_less at N, j with jBelow
+      rw jReduced at reduced
+      exact different with reduced
+    rw [jPosition, jValue]
+    exact dirichletCharacters.sum_other with positive, jInteger,
+      incongruent
+  have byResidues := indexedRingSum.complex_single at evaluationSums(N),
+    identity(N), N, 1 % N with oneBelow, oneTerm, otherTerms
+  rw [byResidues, identityValue, oneValue, counted] at exchanged
+  rw [← complexOfReal.nat, ← complexOfReal.nat] at exchanged
+  have reals := complexOfReal.injective with exchanged
+  have equal := realNat.injective with reals
+  rw equal
+  exact cardinality
+
+-- Orthogonality over the characters, for a ≡ 1 modulo N: Σ_χ χ(a) = φ(N).
+theorem dirichletCharacters.sum_one (N : Nat) (a : Set)
+  requires positive : 0 < N
+  requires integer : a ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(N), a, integerOne)
+  shows finiteRingSum(dirichletCharacters(N), complexCarrier, complexAdd,
+    complexZero, complexNeg, complexMul, complexOne,
+    characterEvaluation(N, a)) = ringNat(complexAdd, complexZero, complexOne,
+    totient(N))
+proof
+  have cardinality := dirichletCharacters.cardinality with positive
+  exact dirichletCharacters.sum_congruent_one with cardinality, integer,
+    congruent
