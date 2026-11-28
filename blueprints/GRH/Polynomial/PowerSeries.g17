@@ -268,10 +268,417 @@ def seriesToMvMap (R : Set) : Set :=
   { u ∈ powerSeriesCarrier(R) × mvSeriesCarrier(R, {0}) |
     ∃ f ∈ powerSeriesCarrier(R), u = (f, seriesToMv(R, f)) }
 
+-- Helpers: the antidiagonal {(i, j) | i + j = k} is finite.
+theorem tkJ.antidiagonal_pair (k i j : Nat)
+  shows (i, j) ∈ antidiagonal(k) ↔ i + j = k
+proof
+  have iN : i ∈ ℕ by typecheck
+  have jN : j ∈ ℕ by typecheck
+  constructor
+  . intro h
+    obtain ⟨_, a, aIn, b, bIn, e, s⟩ := antidiagonal.membership.forward with h
+    obtain ⟨ia, jb⟩ := orderedPair.injective with e
+    rw [ia, jb]
+    exact s
+  . intro h
+    apply antidiagonal.membership.backward
+    refine ⟨(product.pair with iN, jN), i, iN, j, jN, rfl, h⟩
+
+theorem tkJ.antidiagonal_finite (k : Nat)
+  shows Finite(antidiagonal(k))
+proof
+  have sub : antidiagonal(k) ⊆ succ(k) × succ(k)
+    intros t ht
+    obtain ⟨_, i, iN, j, jN, e, s⟩ := antidiagonal.membership.forward with ht
+    have iNat := nat.omega.backward with iN
+    have jNat := nat.omega.backward with jN
+    have il : i ≤ k by arith
+    have jl : j ≤ k by arith
+    have im := membership.successor_of_LessEqual at i, k with il
+    have jm := membership.successor_of_LessEqual at j, k with jl
+    rw e
+    exact product.pair with im, jm
+  have fk := Finite.natural at succ(k)
+  have fp := Finite.product with fk, fk
+  exact Finite.subset with fp, sub
+
+-- Helper: a relation inside A × B, single-valued and total, is a function.
+theorem tkJ.graph_function (G A B : Set)
+  requires bounded : ∀ u ∈ G, u ∈ A × B
+  requires single : ∀ x, ∀ y, ∀ z, (x, y) ∈ G → (x, z) ∈ G → y = z
+  requires total : ∀ x ∈ A, ∃ y ∈ B, (x, y) ∈ G
+  shows G : A → B
+proof
+  constructor
+    intros q mem
+    exact bounded with q, mem
+  . constructor
+      intros x y hy z hz
+      unfold relates at hy
+      unfold relates at hz
+      exact single with x, y, z, hy, hz
+    . intros x hx
+      obtain ⟨y, yIn, rel⟩ := total with x, hx
+      refine ⟨y, yIn, ?_⟩
+      unfold relates
+      exact rel
+
 -- Section: Laws of power series in one variable
 section Series
 variable (R : Set)
 hypothesis comm : CommRing(R)
+
+-- Helpers: the coefficientwise operations give series, with the expected
+-- coefficients.
+theorem tkJ.series_function (f : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows f : ℕ → R.carrier
+proof
+  unfold powerSeriesCarrier at series
+  exact functionSpace.mem_iff.forward with series
+
+theorem tkJ.series_coeff_mem (f : Set) (n : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows f(n) ∈ R.carrier
+proof
+  have fF := tkJ.series_function at R, f with comm, series
+  have nN : n ∈ ℕ by typecheck
+  exact FunctionBetween.apply_closed with fF, nN
+
+theorem tkJ.series_of_function (f : Set)
+  requires map : f : ℕ → R.carrier
+  shows f ∈ powerSeriesCarrier(R)
+proof
+  unfold powerSeriesCarrier
+  exact functionSpace.mem_iff.backward with map
+
+theorem tkJ.series_sum (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows seriesSum(R, f, g) ∈ powerSeriesCarrier(R) ∧
+    (∀ n ∈ ℕ, seriesSum(R, f, g)(n) = call2(R.add, f(n), g(n)))
+proof
+  have rel : ∀ n ∈ ℕ, (n, call2(R.add, f(n), g(n))) ∈ seriesSum(R, f, g) ∧ call2(R.add, f(n), g(n)) ∈ R.carrier
+    intros n hn
+    have nNat := nat.omega.backward with hn
+    have fn := tkJ.series_coeff_mem at R, f, n with comm, first
+    have gn := tkJ.series_coeff_mem at R, g, n with comm, second
+    have v : call2(R.add, f(n), g(n)) ∈ R.carrier by typecheck
+    have m : (n, call2(R.add, f(n), g(n))) ∈ seriesSum(R, f, g)
+      apply seriesSum.membership.backward
+      refine ⟨(product.pair with hn, v), n, hn, rfl⟩
+    exact ⟨m, v⟩
+  have fn : seriesSum(R, f, g) : ℕ → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesSum.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, ea⟩ := seriesSum.membership.forward with hy
+      obtain ⟨_, b, bIn, eb⟩ := seriesSum.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      rw [ya, yb, ← xa, ← xb]
+    . intros x hx
+      obtain ⟨m, v⟩ := rel with x, hx
+      exact ⟨call2(R.add, f(x), g(x)), v, m⟩
+  have mem := tkJ.series_of_function at R, seriesSum(R, f, g) with comm, fn
+  refine ⟨mem, ?_⟩
+  intros n hn
+  obtain ⟨m, v⟩ := rel with n, hn
+  exact FunctionBetween.apply_value with fn, hn, m
+
+theorem tkJ.series_neg (f : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  shows seriesNeg(R, f) ∈ powerSeriesCarrier(R) ∧
+    (∀ n ∈ ℕ, seriesNeg(R, f)(n) = apply(R.neg, f(n)))
+proof
+  have rel : ∀ n ∈ ℕ, (n, apply(R.neg, f(n))) ∈ seriesNeg(R, f) ∧ apply(R.neg, f(n)) ∈ R.carrier
+    intros n hn
+    have nNat := nat.omega.backward with hn
+    have fn := tkJ.series_coeff_mem at R, f, n with comm, series
+    have v : apply(R.neg, f(n)) ∈ R.carrier by typecheck
+    have m : (n, apply(R.neg, f(n))) ∈ seriesNeg(R, f)
+      apply seriesNeg.membership.backward
+      refine ⟨(product.pair with hn, v), n, hn, rfl⟩
+    exact ⟨m, v⟩
+  have fn : seriesNeg(R, f) : ℕ → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesNeg.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, ea⟩ := seriesNeg.membership.forward with hy
+      obtain ⟨_, b, bIn, eb⟩ := seriesNeg.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      rw [ya, yb, ← xa, ← xb]
+    . intros x hx
+      obtain ⟨m, v⟩ := rel with x, hx
+      exact ⟨apply(R.neg, f(x)), v, m⟩
+  have mem := tkJ.series_of_function at R, seriesNeg(R, f) with comm, fn
+  refine ⟨mem, ?_⟩
+  intros n hn
+  obtain ⟨m, v⟩ := rel with n, hn
+  exact FunctionBetween.apply_value with fn, hn, m
+
+theorem tkJ.series_add_apply (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows call2(Ring.add(powerSeriesRing(R)), f, g) = seriesSum(R, f, g)
+proof
+  have opEq : Ring.add(powerSeriesRing(R)) = seriesAdd(R)
+    unfold powerSeriesRing
+    ring_projections
+  obtain ⟨sumIn, _⟩ := tkJ.series_sum at R, f, g with comm, first, second
+  have fn : seriesAdd(R) : powerSeriesCarrier(R) × powerSeriesCarrier(R) → powerSeriesCarrier(R)
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesAdd.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, b, bIn, ea⟩ := seriesAdd.membership.forward with hy
+      obtain ⟨_, c, cIn, d, dIn, eb⟩ := seriesAdd.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      have same : (a, b) = (c, d) by cc
+      obtain ⟨ac, bd⟩ := orderedPair.injective with same
+      rw [ya, yb, ac, bd]
+    . intros x hx
+      obtain ⟨_, a, aIn, b, bIn, shape⟩ := product.membership.forward with hx
+      obtain ⟨s, _⟩ := tkJ.series_sum at R, a, b with comm, aIn, bIn
+      have pair := product.pair with aIn, bIn
+      refine ⟨seriesSum(R, a, b), s, ?_⟩
+      rw shape
+      apply seriesAdd.membership.backward
+      refine ⟨(product.pair with pair, s), a, aIn, b, bIn, rfl⟩
+  have pairIn := product.pair with first, second
+  have m : ((f, g), seriesSum(R, f, g)) ∈ seriesAdd(R)
+    apply seriesAdd.membership.backward
+    refine ⟨(product.pair with pairIn, sumIn), f, first, g, second, rfl⟩
+  rw opEq
+  unfold call2
+  exact FunctionBetween.apply_value with fn, pairIn, m
+
+theorem tkJ.series_constant (a : Set)
+  requires scalar : a ∈ R.carrier
+  shows seriesConstant(R, a) ∈ powerSeriesCarrier(R) ∧
+    seriesConstant(R, a)(0) = a ∧
+    (∀ n ∈ ℕ, n ≠ 0 → seriesConstant(R, a)(n) = R.zero)
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have zN : (0:Nat) ∈ ℕ by typecheck
+  have relZero : (0, a) ∈ seriesConstant(R, a)
+    apply seriesConstant.membership.backward
+    refine ⟨(product.pair with zN, scalar), 0, zN, ?_⟩
+    left
+    exact ⟨rfl, rfl⟩
+  have relOther : ∀ n ∈ ℕ, n ≠ 0 → (n, R.zero) ∈ seriesConstant(R, a)
+    intros n hn ne
+    apply seriesConstant.membership.backward
+    refine ⟨(product.pair with hn, zeroIn), n, hn, ?_⟩
+    right
+    exact ⟨ne, rfl⟩
+  have fn : seriesConstant(R, a) : ℕ → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesConstant.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, k, kIn, ck⟩ := seriesConstant.membership.forward with hy
+      obtain ⟨_, l, lIn, cl⟩ := seriesConstant.membership.forward with hz
+      rcases ck with ⟨k0, ek⟩ | ⟨k0, ek⟩
+      . obtain ⟨xk, yk⟩ := orderedPair.injective with ek
+        rcases cl with ⟨l0, el⟩ | ⟨l0, el⟩
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          rw [yk, yl]
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          exfalso
+          apply l0
+          cc
+      . obtain ⟨xk, yk⟩ := orderedPair.injective with ek
+        rcases cl with ⟨l0, el⟩ | ⟨l0, el⟩
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          exfalso
+          apply k0
+          cc
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          rw [yk, yl]
+    . intros x hx
+      by_cases e : x = 0
+      . rw e
+        exact ⟨a, scalar, relZero⟩
+      . exact ⟨R.zero, zeroIn, (relOther with x, hx, e)⟩
+  have mem := tkJ.series_of_function at R, seriesConstant(R, a) with comm, fn
+  have v0 := FunctionBetween.apply_value with fn, zN, relZero
+  refine ⟨mem, v0, ?_⟩
+  intros n hn ne
+  exact FunctionBetween.apply_value with fn, hn, (relOther with n, hn, ne)
+
+theorem tkJ.series_X
+  shows seriesX(R) ∈ powerSeriesCarrier(R) ∧
+    seriesX(R)(1) = R.one ∧
+    (∀ n ∈ ℕ, n ≠ 1 → seriesX(R)(n) = R.zero)
+proof
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have oN : (1:Nat) ∈ ℕ by typecheck
+  have relOne : (1, R.one) ∈ seriesX(R)
+    apply seriesX.membership.backward
+    refine ⟨(product.pair with oN, oneIn), 1, oN, ?_⟩
+    left
+    exact ⟨rfl, rfl⟩
+  have relOther : ∀ n ∈ ℕ, n ≠ 1 → (n, R.zero) ∈ seriesX(R)
+    intros n hn ne
+    apply seriesX.membership.backward
+    refine ⟨(product.pair with hn, zeroIn), n, hn, ?_⟩
+    right
+    exact ⟨ne, rfl⟩
+  have fn : seriesX(R) : ℕ → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesX.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, k, kIn, ck⟩ := seriesX.membership.forward with hy
+      obtain ⟨_, l, lIn, cl⟩ := seriesX.membership.forward with hz
+      rcases ck with ⟨k0, ek⟩ | ⟨k0, ek⟩
+      . obtain ⟨xk, yk⟩ := orderedPair.injective with ek
+        rcases cl with ⟨l0, el⟩ | ⟨l0, el⟩
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          rw [yk, yl]
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          exfalso
+          apply l0
+          cc
+      . obtain ⟨xk, yk⟩ := orderedPair.injective with ek
+        rcases cl with ⟨l0, el⟩ | ⟨l0, el⟩
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          exfalso
+          apply k0
+          cc
+        . obtain ⟨xl, yl⟩ := orderedPair.injective with el
+          rw [yk, yl]
+    . intros x hx
+      by_cases e : x = 1
+      . rw e
+        exact ⟨R.one, oneIn, relOne⟩
+      . exact ⟨R.zero, zeroIn, (relOther with x, hx, e)⟩
+  have mem := tkJ.series_of_function at R, seriesX(R) with comm, fn
+  have v1 := FunctionBetween.apply_value with fn, oN, relOne
+  refine ⟨mem, v1, ?_⟩
+  intros n hn ne
+  exact FunctionBetween.apply_value with fn, hn, (relOther with n, hn, ne)
+
+theorem tkJ.cauchy_terms (f g : Set) (n : Nat)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows (ringCauchyTerms(R, f, g, n) : antidiagonal(n) → R.carrier) ∧
+    (∀ i ∈ ℕ, ∀ j ∈ ℕ, i + j = n →
+      ringCauchyTerms(R, f, g, n)((i, j)) = call2(R.mul, f(i), g(j)))
+proof
+  have rel : ∀ i ∈ ℕ, ∀ j ∈ ℕ, i + j = n → ((i, j), call2(R.mul, f(i), g(j))) ∈ ringCauchyTerms(R, f, g, n) ∧ (i, j) ∈ antidiagonal(n) ∧ call2(R.mul, f(i), g(j)) ∈ R.carrier
+    intros i iN j jN s
+    have iNat := nat.omega.backward with iN
+    have jNat := nat.omega.backward with jN
+    have fi := tkJ.series_coeff_mem at R, f, i with comm, first
+    have gj := tkJ.series_coeff_mem at R, g, j with comm, second
+    have v : call2(R.mul, f(i), g(j)) ∈ R.carrier by typecheck
+    have ad := (tkJ.antidiagonal_pair at n, i, j).backward with s
+    have m : ((i, j), call2(R.mul, f(i), g(j))) ∈ ringCauchyTerms(R, f, g, n)
+      apply ringCauchyTerms.membership.backward
+      refine ⟨(product.pair with ad, v), i, iN, j, jN, rfl⟩
+    exact ⟨m, ad, v⟩
+  have fn : ringCauchyTerms(R, f, g, n) : antidiagonal(n) → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (ringCauchyTerms.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, b, bIn, ea⟩ := ringCauchyTerms.membership.forward with hy
+      obtain ⟨_, c, cIn, d, dIn, eb⟩ := ringCauchyTerms.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      have same : (a, b) = (c, d) by cc
+      obtain ⟨ac, bd⟩ := orderedPair.injective with same
+      rw [ya, yb, ac, bd]
+    . intros x hx
+      obtain ⟨_, i, iN, j, jN, e, s⟩ := antidiagonal.membership.forward with hx
+      obtain ⟨m, ad, v⟩ := rel with i, iN, j, jN, s
+      rw e
+      exact ⟨call2(R.mul, f(i), g(j)), v, m⟩
+  refine ⟨fn, ?_⟩
+  intros i iN j jN s
+  obtain ⟨m, ad, v⟩ := rel with i, iN, j, jN, s
+  exact FunctionBetween.apply_value with fn, ad, m
+
+theorem tkJ.cauchy_product (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows ringCauchyProduct(R, f, g) ∈ powerSeriesCarrier(R) ∧
+    (∀ n ∈ ℕ, ringCauchyProduct(R, f, g)(n) = finiteRingSum(antidiagonal(n),
+      R.carrier, R.add, R.zero, R.neg, R.mul, R.one, ringCauchyTerms(R, f, g, n)))
+proof
+  have rel : ∀ n ∈ ℕ, (n, finiteRingSum(antidiagonal(n), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, ringCauchyTerms(R, f, g, n))) ∈ ringCauchyProduct(R, f, g) ∧ finiteRingSum(antidiagonal(n), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, ringCauchyTerms(R, f, g, n)) ∈ R.carrier
+    intros n hn
+    have nNat := nat.omega.backward with hn
+    obtain ⟨terms, _⟩ := tkJ.cauchy_terms at R, f, g, n with comm, first, second
+    have fin := tkJ.antidiagonal_finite at n
+    have parts := CommRing.parts with comm
+    have v := finiteRingSum.closed with parts, fin, terms
+    have m : (n, finiteRingSum(antidiagonal(n), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, ringCauchyTerms(R, f, g, n))) ∈ ringCauchyProduct(R, f, g)
+      apply ringCauchyProduct.membership.backward
+      refine ⟨(product.pair with hn, v), n, hn, rfl⟩
+    exact ⟨m, v⟩
+  have fn : ringCauchyProduct(R, f, g) : ℕ → R.carrier
+    apply tkJ.graph_function
+    . intros u hu
+      exact (ringCauchyProduct.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, ea⟩ := ringCauchyProduct.membership.forward with hy
+      obtain ⟨_, b, bIn, eb⟩ := ringCauchyProduct.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      rw [ya, yb, ← xa, ← xb]
+    . intros x hx
+      obtain ⟨m, v⟩ := rel with x, hx
+      exact ⟨finiteRingSum(antidiagonal(x), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, ringCauchyTerms(R, f, g, x)), v, m⟩
+  have mem := tkJ.series_of_function at R, ringCauchyProduct(R, f, g) with comm, fn
+  refine ⟨mem, ?_⟩
+  intros n hn
+  obtain ⟨m, v⟩ := rel with n, hn
+  exact FunctionBetween.apply_value with fn, hn, m
+
+theorem tkJ.series_mul_apply (f g : Set)
+  requires first : f ∈ powerSeriesCarrier(R)
+  requires second : g ∈ powerSeriesCarrier(R)
+  shows call2(Ring.mul(powerSeriesRing(R)), f, g) = ringCauchyProduct(R, f, g)
+proof
+  have opEq : Ring.mul(powerSeriesRing(R)) = seriesMul(R)
+    unfold powerSeriesRing
+    ring_projections
+  obtain ⟨prodIn, _⟩ := tkJ.cauchy_product at R, f, g with comm, first, second
+  have fn : seriesMul(R) : powerSeriesCarrier(R) × powerSeriesCarrier(R) → powerSeriesCarrier(R)
+    apply tkJ.graph_function
+    . intros u hu
+      exact (seriesMul.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, b, bIn, ea⟩ := seriesMul.membership.forward with hy
+      obtain ⟨_, c, cIn, d, dIn, eb⟩ := seriesMul.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      have same : (a, b) = (c, d) by cc
+      obtain ⟨ac, bd⟩ := orderedPair.injective with same
+      rw [ya, yb, ac, bd]
+    . intros x hx
+      obtain ⟨_, a, aIn, b, bIn, shape⟩ := product.membership.forward with hx
+      obtain ⟨s, _⟩ := tkJ.cauchy_product at R, a, b with comm, aIn, bIn
+      have pair := product.pair with aIn, bIn
+      refine ⟨ringCauchyProduct(R, a, b), s, ?_⟩
+      rw shape
+      apply seriesMul.membership.backward
+      refine ⟨(product.pair with pair, s), a, aIn, b, bIn, rfl⟩
+  have pairIn := product.pair with first, second
+  have m : ((f, g), ringCauchyProduct(R, f, g)) ∈ seriesMul(R)
+    apply seriesMul.membership.backward
+    refine ⟨(product.pair with pairIn, prodIn), f, first, g, second, rfl⟩
+  rw opEq
+  unfold call2
+  exact FunctionBetween.apply_value with fn, pairIn, m
 
 theorem powerSeriesRing.comm_ring
   shows CommRing(powerSeriesRing(R))
@@ -288,7 +695,9 @@ theorem powerSeries.ext (f g : Set)
   requires agree : ∀ n ∈ ℕ, f(n) = g(n)
   shows f = g
 proof
-  sorry
+  have fF := tkJ.series_function at R, f with comm, first
+  have gF := tkJ.series_function at R, g with comm, second
+  exact FunctionBetween.ext with fF, gF, agree
 
 theorem seriesCoeff.add (f g : Set) (n : Nat)
   requires first : f ∈ powerSeriesCarrier(R)
@@ -296,7 +705,11 @@ theorem seriesCoeff.add (f g : Set) (n : Nat)
   shows seriesCoeff(call2(Ring.add(powerSeriesRing(R)), f, g), n) =
     call2(R.add, seriesCoeff(f, n), seriesCoeff(g, n))
 proof
-  sorry
+  have nN : n ∈ ℕ by typecheck
+  obtain ⟨_, values⟩ := tkJ.series_sum at R, f, g with comm, first, second
+  rw (tkJ.series_add_apply at R, f, g with comm, first, second)
+  unfold seriesCoeff
+  exact values with n, nN
 
 theorem seriesCoeff.mul (f g : Set) (n : Nat)
   requires first : f ∈ powerSeriesCarrier(R)
@@ -305,13 +718,26 @@ theorem seriesCoeff.mul (f g : Set) (n : Nat)
     finiteRingSum(antidiagonal(n), R.carrier, R.add, R.zero, R.neg, R.mul,
       R.one, ringCauchyTerms(R, f, g, n))
 proof
-  sorry
+  have nN : n ∈ ℕ by typecheck
+  obtain ⟨_, values⟩ := tkJ.cauchy_product at R, f, g with comm, first, second
+  rw (tkJ.series_mul_apply at R, f, g with comm, first, second)
+  unfold seriesCoeff
+  exact values with n, nN
 
 theorem seriesCoeff.C (a : R) (n : Nat)
   shows (n = 0 → seriesCoeff(seriesConstant(R, a), n) = a) ∧
     (n ≠ 0 → seriesCoeff(seriesConstant(R, a), n) = R[0])
 proof
-  sorry
+  have aIn : a ∈ R.carrier by typecheck
+  have nN : n ∈ ℕ by typecheck
+  obtain ⟨_, v0, vn⟩ := tkJ.series_constant at R, a with comm, aIn
+  unfold seriesCoeff
+  constructor
+  . intro e
+    rw e
+    exact v0
+  . intro ne
+    exact vn with n, nN, ne
 
 theorem seriesCoeff.X_pow (k n : Nat)
   shows (n = k → seriesCoeff(Ring.pow(powerSeriesRing(R), seriesX(R), k), n) = R[1]) ∧
