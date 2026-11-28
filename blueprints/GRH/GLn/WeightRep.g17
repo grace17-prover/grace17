@@ -1,0 +1,276 @@
+-- The rational representation of weight (κ, e) of a product of general
+-- linear groups on Weyl's lattice, g ↦ ∏_τ det(g_τ)^{e_τ} S_κ(g); its
+-- restriction to the rational unitary group U_n(E) of a CM field through
+-- the embeddings x ↦ τ(x̄); the invariant Gram form; extremal vectors and
+-- Harish-Chandra parameters; the p-adic gauge; and the weight datum of
+-- (κ, e) in the sense of GRH.Adelic.CuspForms, with the facts its users
+-- assume (IsWeightDatum).
+-- Source: grh-compact/src/Lib/GLn/SchurModule/RationalRep.lean (weylRep),
+-- WeightRepBasic.lean (conjWeylMatrix, conjWeylRep, decrPosition,
+-- highestVector, hcParameter, IsHCParam, gramForm, Space.weightRep,
+-- AlgForm, weylGauge, weylRep_map, weylRep_entry_mem,
+-- stdSpace_weightRep_apply, gramForm_conjWeylRep, gramForm_map_weightRep,
+-- schur_eq_one), SchurOrthogonality.lean (star_highestVector,
+-- gramForm_highestVector_self); the weight datum schurWeightDatum that layer
+-- 5 names (GRH.Proof.Forward.Characters until now).
+-- Not stated: SchurOrthogonality.lean's integrals over the compact group
+-- (exists_intertwining_mean, schur_orthogonality,
+-- weylRep_coeff_eq_prod_weightMinors, algFormCoeff, ofAlgForm), which need
+-- the Haar measure of Π_τ U(n) as a compact group record.
+-- Encoding. The rank n is a natural number and the rows are 0, …, n − 1;
+-- Φ is the CM type (a set of embeddings E → ℂ), κ : Φ × ℕ → ℕ and
+-- e : Φ → ℤ. Integer powers in a ring use the inverse b with ab = 1. The
+-- weight datum ω = schurWeightDatum(E, Φ, n, κ, e) is the record of
+-- (1) the index set WeylIndex n κ = weylIndexSet(Φ, n, κ);
+-- (2) the representation γ ↦ weylRep_ℂ(κ, e)(τ ↦ τ(γ̄)) of the rational
+-- unitary matrices (Space.weightRep, stdSpace_weightRep_apply);
+-- (3) the Gram matrix weylGramOver ℂ;
+-- (4) the gauge (ι, (g, ξ)) ↦ max_i |(weylRep_{ℂ_p}(κ, e)(g′) · ιₚ(ξ))_i|,
+-- g′_τ the matrix g⁻¹ read in ℂ_p through the continuous extension, to
+-- the completion at the place w_τ = {x : |ιₚ τ(x̄)| < 1}, of the embedding
+-- x ↦ ιₚ(τ(x̄)) (weylGauge, weightEmbedding, adeleExtension); the prime p of
+-- ι is the unique one with ι ∈ padicPlaces(p).
+-- Part of the GRH blueprint (layer 4, Lib/GLn, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.GLn.WeightRep
+import GRH.GLn.SchurModule
+
+section WeightRep
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- Section: The rational representation
+-- The inverse b of a unit a (ab = 1), and a^k for k ∈ ℤ.
+def ringInvOf (R a : Set) : Set :=
+  ⋃({ b ∈ Ring.carrier(R) | call2(Ring.mul(R), a, b) = Ring.one(R) })
+
+def ringIntPow (R a k : Set) : Set :=
+  ⋃({ c ∈ Ring.carrier(R) | ∃ m ∈ ℕ,
+    (k = integerOfNat(m) ∧ c = Ring.pow(R, a, m)) ∨
+    (k = integerNegValue(integerOfNat(m)) ∧ c = Ring.pow(R, ringInvOf(R, a), m)) })
+
+def detIntPowFactors (R Φ n g e : Set) : Set :=
+  { (τ, ringIntPow(R, matDet(R, n, g(τ)), e(τ))) | τ ∈ Φ }
+
+-- RationalRep.lean, weylRep κ e g = (∏_τ det(g_τ)^{e_τ}) S_κ(g).
+def weylRep (R Φ n κ e g : Set) : Set :=
+  matSmul(R, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ),
+    ringProductOver(R, Φ, detIntPowFactors(R, Φ, n, g, e)), schurMatrix(R, Φ, n, n, κ, g))
+
+-- Families of invertible n × n matrices over R, one per place.
+def invertibleFamilies (R Φ n : Set) : Set := functionSpace(Φ, invertibleMatrices(R, n))
+
+-- WeightRepBasic.lean, conjWeylMatrix: the compact group Π_τ U(n) acting
+-- through weylRep at the entrywise conjugate.
+def conjFamily (Φ n x : Set) : Set := familyMatMap(complexRing, Φ, n, n, complexConjMap, x)
+
+def conjWeylMatrix (Φ n κ e x : Set) : Set := weylRep(complexRing, Φ, n, κ, e, conjFamily(Φ, n, x))
+
+def compactUnitaryFamilies (Φ n : Set) : Set :=
+  functionSpace(Φ, unitaryMatrices(complexRing, complexConjMap, n))
+
+-- WeightRepBasic.lean, stdSpace_weightRep_apply: γ ∈ U_n(E) acts by
+-- weylRep at the family τ ↦ τ(γ̄).
+def embedConj (E τ : Set) : Set := { (x, τ(cmConjugation(E)(x))) | x ∈ Ring.carrier(E) }
+
+def rationalFamily (E Φ n γ : Set) : Set :=
+  { (τ, matMap(complexRing, n, n, embedConj(E, τ), γ)) | τ ∈ Φ }
+
+def weightRepMap (E Φ n κ e : Set) : Set :=
+  { (γ, weylRep(complexRing, Φ, n, κ, e, rationalFamily(E, Φ, n, γ))) |
+    γ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)) }
+
+-- Section: Extremal vectors and Harish-Chandra parameters
+-- WeightRepBasic.lean, decrPosition l i = #{j | l_j > l_i}.
+def decrPosition (n l i : Set) : Set := cardinality({ j ∈ n | RealLess(realInt(l(i)), realInt(l(j))) })
+
+-- WeightRepBasic.lean, highestVector κ l: the evaluation vector at the
+-- array with entry 1 at row a of block w in column decrPosition(l_w, a).
+def decrNumberingAt (n lw : Set) : Set := { (a, decrPosition(n, lw, a)) | a ∈ n }
+
+def decrNumbering (Φ n l : Set) : Set := { (w, decrNumberingAt(n, l(w))) | w ∈ Φ }
+
+def highestVector (Φ n κ l : Set) : Set :=
+  weylEval(complexRing, Φ, n, κ, permArray(complexRing, Φ, n, decrNumbering(Φ, n, l)))
+
+-- WeightRepBasic.lean, hcParameter κ e N w p = 2(e_w + λ(w, p)) + N − 1 − 2p,
+-- λ(w, p) = Σ_{p<h<N} κ(w, h).
+def hcParameter (Φ κ e N w q : Set) : Set :=
+  integerAddValue(integerAddValue(integerMulValue(integerOfNat(2),
+      integerAddValue(e(w), integerOfNat(diagramWeight(Φ, N, κ)((w, q))))),
+    integerOfNat(sub(N, 1))), integerNegValue(integerOfNat(mul(2, q))))
+
+-- WeightRepBasic.lean, IsHCParam κ e l: each l_w is injective and equals
+-- twice the Harish-Chandra parameter at its position.
+predicate IsHCParam (Φ n κ e l : Set) :=
+  (l : Φ → functionSpace(n, ℤ)) ∧
+  ∀ w ∈ Φ, (∀ i ∈ n, ∀ j ∈ n, l(w)(i) = l(w)(j) → i = j) ∧
+    ∀ i ∈ n, ∃ q ∈ cardinality(n), l(w)(i) = hcParameter(Φ, κ, e, cardinality(n), w, q)
+
+-- Section: The p-adic gauge
+-- The prime of a p-adic place.
+def placePrime (ι : Set) : Set := ⋃({ p ∈ ℕ | Prime(p) ∧ ι ∈ padicPlaces(p) })
+
+def naturalPrimes : Set := { q ∈ ℕ | Prime(q) }
+
+def padicPlaceSets : Set := { padicPlaces(p) | p ∈ naturalPrimes }
+
+def allPadicPlaces : Set := ⋃(padicPlaceSets)
+
+-- WeightRepBasic.lean, weightEmbedding ιₚ τ: x ↦ ιₚ(τ(x̄)), E → ℂ_p, and
+-- the place w_τ it induces.
+def weightEmbedding (E ι τ : Set) : Set :=
+  { (x, placeHom(ι)(τ(cmConjugation(E)(x)))) | x ∈ Ring.carrier(E) }
+
+def weightPlace (E ι τ : Set) : Set :=
+  inducedPlace(E, placePrime(ι), ι, embedConj(E, τ))
+
+-- ψ : E_w → ℂ_p is the continuous ring homomorphism extending φ : E → ℂ_p.
+predicate CompletionExtension (E w p ι φ ψ : Set) :=
+  RingHom(ψ, adicCompletionField(E, w), placeCp(p, ι)) ∧
+  Continuous(ψ, adicCompletionSpace(E, w), cpSpace(p, placeClosure(ι))) ∧
+  ∀ a ∈ Ring.carrier(E), ψ(adicCompletionEmbedding(E, w)(a)) = φ(a)
+
+-- WeightRepBasic.lean, adeleExtension: the w-component of a finite adele
+-- x read in ℂ_p through that extension.
+def adeleExtension (E ι τ x : Set) : Set :=
+  ⋃({ y ∈ Ring.carrier(placeCp(placePrime(ι), ι)) | ∃ ψ,
+    CompletionExtension(E, weightPlace(E, ι, τ), placePrime(ι), ι, weightEmbedding(E, ι, τ), ψ) ∧
+    y = ψ(x(weightPlace(E, ι, τ))) })
+
+-- The family τ ↦ g⁻¹ read in ℂ_p at τ.
+def gaugeMatrix (E n ι τ g : Set) : Set :=
+  { (q, adeleExtension(E, ι, τ, matInverse(finiteAdeleRing(E), n, g)(q))) | q ∈ n × n }
+
+def gaugeFamily (E Φ n ι g : Set) : Set := { (τ, gaugeMatrix(E, n, ι, τ, g)) | τ ∈ Φ }
+
+-- The vector ρ(g⁻¹) ιₚ(ξ) in ℂ_p.
+def placeVector (ι W ξ : Set) : Set := { (i, placeHom(ι)(ξ(i))) | i ∈ W }
+
+def gaugeVector (E Φ n κ e ι g ξ : Set) : Set :=
+  mulVec(placeCp(placePrime(ι), ι), weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ),
+    weylRep(placeCp(placePrime(ι), ι), Φ, n, κ, e, gaugeFamily(E, Φ, n, ι, g)),
+    placeVector(ι, weylIndexSet(Φ, n, κ), ξ))
+
+-- WeightRepBasic.lean, weylGauge g ξ: the largest norm of a coordinate.
+def supNormCp (p ι W v : Set) : Set :=
+  ⋃({ r ∈ ℝ | (∃ i ∈ W, r = placeCpNorm(p, ι)(v(i))) ∧
+    ∀ i ∈ W, RealLe(placeCpNorm(p, ι)(v(i)), r) })
+
+def weylGauge (E Φ n κ e ι g ξ : Set) : Set :=
+  supNormCp(placePrime(ι), ι, weylIndexSet(Φ, n, κ), gaugeVector(E, Φ, n, κ, e, ι, g, ξ))
+
+def weylGaugeMap (E Φ n κ e : Set) : Set :=
+  { (x, weylGauge(E, Φ, n, κ, e, fst(x), fst(snd(x)), snd(snd(x)))) |
+    x ∈ allPadicPlaces × (gfMatrices(E, n) ×
+      functionSpace(weylIndexSet(Φ, n, κ), complexCarrier)) }
+
+-- Section: The weight datum
+-- WeightRepBasic.lean (WeylIndex n κ, weightRep κ e, weylGramOver,
+-- weylGauge): the weight datum of the weight (κ, e) of U_n over E.
+def schurWeightDatum (E Φ n κ e : Set) : Set :=
+  WeightDatum.mk(weylIndexSet(Φ, n, κ), weightRepMap(E, Φ, n, κ, e),
+    weylGramOver(complexRing, Φ, n, κ), weylGaugeMap(E, Φ, n, κ, e))
+
+-- Section: Facts
+-- RationalRep.lean, weylRep (a monoid homomorphism), weylRep_map and
+-- weylRep_entry_mem: ρ(gh) = ρ(g)ρ(h) and ρ(1) = 1 on invertible families;
+-- ρ commutes with ring homomorphisms; if every g_τ and g_τ⁻¹ has entries in
+-- a subring A, so has ρ(g).
+theorem weylRep.facts (R S Φ n κ e g h φ A : Set)
+  requires ring : CommRing(R)
+  requires ring2 : CommRing(S)
+  requires hom : RingHom(φ, R, S)
+  requires finiteΦ : Finite(Φ)
+  requires natural : n ∈ ℕ
+  requires counts : (κ : Φ × ℕ → ℕ)
+  requires exps : (e : Φ → ℤ)
+  requires hg : g ∈ invertibleFamilies(R, Φ, n)
+  requires hh : h ∈ invertibleFamilies(R, Φ, n)
+  requires subring : Subring(R, A)
+  shows weylRep(R, Φ, n, κ, e, familyMatMul(R, Φ, n, n, n, g, h)) =
+      matMul(R, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ),
+        weylRep(R, Φ, n, κ, e, g), weylRep(R, Φ, n, κ, e, h)) ∧
+    weylRep(R, Φ, n, κ, e, familyOne(R, Φ, n)) = matOne(R, weylIndexSet(Φ, n, κ)) ∧
+    weylRep(S, Φ, n, κ, e, familyMatMap(S, Φ, n, n, φ, g)) =
+      matMap(S, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ), φ, weylRep(R, Φ, n, κ, e, g)) ∧
+    ((∀ τ ∈ Φ, ∀ q ∈ n × n, g(τ)(q) ∈ A ∧ matInverse(R, n, g(τ))(q) ∈ A) →
+      ∀ q ∈ weylIndexSet(Φ, n, κ) × weylIndexSet(Φ, n, κ), weylRep(R, Φ, n, κ, e, g)(q) ∈ A)
+proof
+  sorry
+
+-- WeightRepBasic.lean, gramForm_conjWeylRep: the Gram form is invariant
+-- under Π_τ U(n) acting in weight (κ, e).
+theorem gramForm.compact_invariant (E Φ n κ e x u v : Set)
+  requires finiteΦ : Finite(Φ)
+  requires natural : n ∈ ℕ
+  requires counts : (κ : Φ × ℕ → ℕ)
+  requires exps : (e : Φ → ℤ)
+  requires hx : x ∈ compactUnitaryFamilies(Φ, n)
+  requires hu : u ∈ functionSpace(weylIndexSet(Φ, n, κ), complexCarrier)
+  requires hv : v ∈ functionSpace(weylIndexSet(Φ, n, κ), complexCarrier)
+  shows gramForm(schurWeightDatum(E, Φ, n, κ, e),
+      mulVec(complexRing, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ),
+        conjWeylMatrix(Φ, n, κ, e, x), u),
+      mulVec(complexRing, weylIndexSet(Φ, n, κ), weylIndexSet(Φ, n, κ),
+        conjWeylMatrix(Φ, n, κ, e, x), v)) =
+    gramForm(schurWeightDatum(E, Φ, n, κ, e), u, v)
+proof
+  sorry
+
+-- WeightRepBasic.lean (weightRep a representation of U(J)(E),
+-- gramForm_map_weightRep, the Gram matrix positive definite by
+-- weylGram_posDef, the gauge laws and weylGauge_le_one_iff): the weight
+-- datum of (κ, e) satisfies IsWeightDatum.
+theorem schurWeightDatum.weight_datum (E Φ n κ e : Set)
+  requires cm : CMType(E, Φ)
+  requires natural : n ∈ ℕ
+  requires counts : (κ : Φ × ℕ → ℕ)
+  requires exps : (e : Φ → ℤ)
+  shows IsWeightDatum(E, Φ, n, schurWeightDatum(E, Φ, n, κ, e))
+proof
+  sorry
+
+-- The parts of the datum, as one reads them.
+theorem schurWeightDatum.parts (E Φ n κ e : Set)
+  shows WeightDatum.index(schurWeightDatum(E, Φ, n, κ, e)) = weylIndexSet(Φ, n, κ) ∧
+    WeightDatum.rep(schurWeightDatum(E, Φ, n, κ, e)) = weightRepMap(E, Φ, n, κ, e) ∧
+    WeightDatum.gram(schurWeightDatum(E, Φ, n, κ, e)) = weylGramOver(complexRing, Φ, n, κ) ∧
+    WeightDatum.gauge(schurWeightDatum(E, Φ, n, κ, e)) = weylGaugeMap(E, Φ, n, κ, e)
+proof
+  sorry
+
+-- SchurOrthogonality.lean, star_highestVector and gramForm_highestVector_self:
+-- v⁺ has real (conjugation-fixed) entries, and if each l_w is injective it
+-- is a unit vector for the Gram form.
+theorem highestVector.unit (E Φ n κ e l : Set)
+  requires finiteΦ : Finite(Φ)
+  requires natural : n ∈ ℕ
+  requires counts : (κ : Φ × ℕ → ℕ)
+  requires exps : (e : Φ → ℤ)
+  requires hl : (l : Φ → functionSpace(n, ℤ))
+  requires injective : ∀ w ∈ Φ, ∀ i ∈ n, ∀ j ∈ n, l(w)(i) = l(w)(j) → i = j
+  shows (∀ i ∈ weylIndexSet(Φ, n, κ),
+      complexConj(highestVector(Φ, n, κ, l)(i)) = highestVector(Φ, n, κ, l)(i)) ∧
+    gramForm(schurWeightDatum(E, Φ, n, κ, e), highestVector(Φ, n, κ, l),
+      highestVector(Φ, n, κ, l)) = complexOne
+proof
+  sorry
+
+-- WeightRepBasic.lean, schur_eq_one: if κ_τ(k) = 0 for k ≠ n then
+-- S_κ(z) = 1 (only full columns, which detPow carries).
+theorem schurMatrix.eq_one_of_full (R Φ n κ z : Set)
+  requires ring : CommRing(R)
+  requires finiteΦ : Finite(Φ)
+  requires natural : n ∈ ℕ
+  requires counts : (κ : Φ × ℕ → ℕ)
+  requires full : ∀ τ ∈ Φ, ∀ k ∈ ℕ, k ≠ n → κ((τ, k)) = (0:N)
+  requires hz : z ∈ matrixFamilies(R, Φ, n, n)
+  shows schurMatrix(R, Φ, n, n, κ, z) = matOne(R, weylIndexSet(Φ, n, κ))
+proof
+  sorry
+
+end WeightRep
