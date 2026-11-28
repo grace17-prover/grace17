@@ -1464,6 +1464,88 @@ proof
       have xK := all with k, kIn
       exact (intersection.membership at idealFamilyIntersection(R, k, I), I(k), x).backward with ⟨xA, xK⟩
 
+-- Helper: congruences modulo the first m of a pairwise coprime family
+-- have a common solution (the induction behind
+-- Ideal.exists_forall_sub_mem_ideal).
+theorem cldECrt.solution (I x : Set) (m : Nat)
+  shows (∀ k ∈ m, Ideal(R, I(k))) →
+    (∀ j k ∈ m, j ≠ k → idealSum(R, I(j), I(k)) = R.carrier) →
+    (∀ k ∈ m, x(k) ∈ R.carrier) →
+    ∃ y ∈ R.carrier, ∀ k ∈ m, call2(R.add, y, apply(R.neg, x(k))) ∈ I(k)
+proof
+  induction m
+  | zero =>
+    intros ideals cop xs
+    have zeroIn : R[0] ∈ R.carrier by typecheck
+    have all : ∀ k ∈ 0, call2(R.add, R[0], apply(R.neg, x(k))) ∈ I(k)
+      intros k hk
+      exfalso
+      have kNat := natural.member at 0 with hk
+      have lt := Less.of_membership at k, 0
+      have l := lt with hk
+      arith
+    exact ⟨R[0], zeroIn, all⟩
+  | succ(k) using ih =>
+    intros ideals cop xs
+    have sub : k ⊆ succ(k)
+      intros y hy
+      exact membership.into_successor at y, k with hy
+    have kIn := membership.self_successor at k
+    have kIdeals : ∀ j ∈ k, Ideal(R, I(j))
+      intros j hj
+      exact ideals with j, (sub with j, hj)
+    have kCop : ∀ i j ∈ k, i ≠ j → idealSum(R, I(i), I(j)) = R.carrier
+      intros i hi j hj ne
+      exact cop with i, (sub with i, hi), j, (sub with j, hj), ne
+    have kxs : ∀ j ∈ k, x(j) ∈ R.carrier
+      intros j hj
+      exact xs with j, (sub with j, hj)
+    obtain ⟨y, yIn, hy⟩ := ih with kIdeals, kCop, kxs
+    have idealK := ideals with k, kIn
+    have toK : ∀ j ∈ k, idealSum(R, I(j), I(k)) = R.carrier
+      intros j hj
+      have ne : j ≠ k
+        intro jk
+        rw jk at hj
+        exact (membership.irreflexive at k) with hj
+      exact cop with j, (sub with j, hj), k, kIn, ne
+    have c := rmEFamilyProduct.coprime at R, I, I(k), k with comm, idealK, kIdeals, toK
+    have oneIn : R[1] ∈ R.carrier by typecheck
+    have o : R[1] ∈ idealSum(R, idealFamilyProduct(R, I, k), I(k))
+      rw c
+      exact oneIn
+    obtain ⟨_, a, aJ, b, bK, e⟩ := idealSum.membership.forward with o
+    have eqI := rmEFamilyProduct.eq_intersection at R, I, k with comm, kIdeals, kCop
+    rw eqI at aJ
+    obtain ⟨aIn, aAll⟩ := idealFamilyIntersection.membership.forward with aJ
+    obtain ⟨boundK, _, sumsK, _, prodsK⟩ := idealK
+    have bIn := boundK with bK
+    have xk := xs with k, kIn
+    have cIn : y + a * (x(k) + -y) ∈ R.carrier by typecheck
+    have all : ∀ j ∈ succ(k), call2(R.add, y + a * (x(k) + -y), apply(R.neg, x(j))) ∈ I(j)
+      intros j hj
+      have jNat := natural.member at succ(k) with hj
+      rcases (membership.successor at j, k).forward with hj with jk | je
+      . have xj := kxs with j, jk
+        obtain ⟨_, _, sumsJ, _, prodsJ⟩ := kIdeals with j, jk
+        have yj := hy with j, jk
+        have aj := aAll with j, jk
+        have d : x(k) + -y ∈ R.carrier by typecheck
+        have m := (prodsJ with (x(k) + -y), d, a, aj).right
+        have s := sumsJ with (y + -x(j)), yj, (a * (x(k) + -y)), m
+        have eq : y + a * (x(k) + -y) + -x(j) = y + -x(j) + a * (x(k) + -y) by ring
+        rw eq
+        exact s
+      . rw je
+        have d : y + -x(k) ∈ R.carrier by typecheck
+        have m := (prodsK with (y + -x(k)), d, b, bK).right
+        have e3 : y + a * (x(k) + -y) + -x(k) = (R[1] + -a) * (y + -x(k)) by ring
+        rw e at e3
+        have e4 : (a + b + -a) * (y + -x(k)) = b * (y + -x(k)) by ring
+        rw [e3, e4]
+        exact m
+    exact ⟨y + a * (x(k) + -y), cIn, all⟩
+
 theorem idealFamilyProduct.prod_mem (I x : Set) (n : Nat)
   requires ideals : ∀ k ∈ n, Ideal(R, I(k))
   requires family : x : n → R.carrier
@@ -4824,32 +4906,379 @@ variable (R I : Set) (n : Nat)
 hypothesis comm : CommRing(R)
 hypothesis ideals : ∀ k ∈ n, Ideal(R, I(k))
 
+-- Helpers: the family of quotients and of quotient maps, read at an
+-- index; the intersection of the family is an ideal also when n = 0;
+-- the homomorphism R → Πₖ R ⧸ I(k) and its kernel.
+theorem cldEQuotientFamily.apply (k : Set)
+  requires index : k ∈ n
+  shows quotientFamily(R, n, I)(k) = quotientRing(R, I(k)) ∧
+    quotientFamilyMaps(R, n, I)(k) = quotientMk(R, I(k))
+proof
+  have fn1 : quotientFamily(R, n, I) : n → quotientRings(R, n, I)
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros q hq
+      exact (quotientFamily.membership.forward with hq).left
+    . unfold Functional
+      intros x y hxy z hxz
+      unfold relates at hxy
+      unfold relates at hxz
+      obtain ⟨_, a, aIn, e1⟩ := quotientFamily.membership.forward with hxy
+      obtain ⟨_, c, cIn, e2⟩ := quotientFamily.membership.forward with hxz
+      obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+      obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+      have ac : a = c
+        rw [← x1, ← x2]
+      rw [y1, z2, ac]
+    . intros j jIn
+      have out := quotientRings.membership.backward at R, n, I, quotientRing(R, I(j)) with ⟨j, jIn, rfl⟩
+      have pq := product.pair with jIn, out
+      have m := quotientFamily.membership.backward at R, n, I, (j, quotientRing(R, I(j))) with ⟨pq, j, jIn, rfl⟩
+      witness quotientRing(R, I(j))
+      unfold relates
+      exact ⟨out, m⟩
+  have fn2 : quotientFamilyMaps(R, n, I) : n → quotientMks(R, n, I)
+    unfold FunctionBetween
+    refine ⟨?_, ?_, ?_⟩
+    . unfold RelationBetween
+      intros q hq
+      exact (quotientFamilyMaps.membership.forward with hq).left
+    . unfold Functional
+      intros x y hxy z hxz
+      unfold relates at hxy
+      unfold relates at hxz
+      obtain ⟨_, a, aIn, e1⟩ := quotientFamilyMaps.membership.forward with hxy
+      obtain ⟨_, c, cIn, e2⟩ := quotientFamilyMaps.membership.forward with hxz
+      obtain ⟨x1, y1⟩ := orderedPair.injective with e1
+      obtain ⟨x2, z2⟩ := orderedPair.injective with e2
+      have ac : a = c
+        rw [← x1, ← x2]
+      rw [y1, z2, ac]
+    . intros j jIn
+      have out := quotientMks.membership.backward at R, n, I, quotientMk(R, I(j)) with ⟨j, jIn, rfl⟩
+      have pq := product.pair with jIn, out
+      have m := quotientFamilyMaps.membership.backward at R, n, I, (j, quotientMk(R, I(j))) with ⟨pq, j, jIn, rfl⟩
+      witness quotientMk(R, I(j))
+      unfold relates
+      exact ⟨out, m⟩
+  have out1 := quotientRings.membership.backward at R, n, I, quotientRing(R, I(k)) with ⟨k, index, rfl⟩
+  have pq1 := product.pair with index, out1
+  have r1 : relates(quotientFamily(R, n, I), k, quotientRing(R, I(k)))
+    unfold relates
+    exact quotientFamily.membership.backward at R, n, I, (k, quotientRing(R, I(k))) with ⟨pq1, k, index, rfl⟩
+  have out2 := quotientMks.membership.backward at R, n, I, quotientMk(R, I(k)) with ⟨k, index, rfl⟩
+  have pq2 := product.pair with index, out2
+  have r2 : relates(quotientFamilyMaps(R, n, I), k, quotientMk(R, I(k)))
+    unfold relates
+    exact quotientFamilyMaps.membership.backward at R, n, I, (k, quotientMk(R, I(k))) with ⟨pq2, k, index, rfl⟩
+  have v1 := FunctionBetween.apply_value with fn1, index, r1
+  have v2 := FunctionBetween.apply_value with fn2, index, r2
+  exact ⟨v1, v2⟩
+
+theorem cldEQuotientFamily.rings
+  shows ∀ k ∈ n, CommRing(quotientFamily(R, n, I)(k))
+proof
+  intros k hk
+  obtain ⟨e, _⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+  rw e
+  exact quotientRing.comm_ring at R, I(k) with comm, (ideals with k, hk)
+
+theorem cldEQuotientFamily.homs
+  shows ∀ k ∈ n, quotientFamilyMaps(R, n, I)(k) : R →+* quotientFamily(R, n, I)(k)
+proof
+  intros k hk
+  obtain ⟨e, e2⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+  rw [e, e2]
+  exact quotientMk.hom at R, I(k) with comm, (ideals with k, hk)
+
+theorem cldEIdealFamilyIntersection.ideal
+  shows Ideal(R, idealFamilyIntersection(R, n, I))
+proof
+  have ringR := CommRing.to_ring with comm
+  by_cases h : n = ∅
+  . have e : idealFamilyIntersection(R, n, I) = R.carrier
+      apply Subset.antisymmetric
+      . intros x hx
+        exact (idealFamilyIntersection.membership.forward with hx).left
+      . intros x hx
+        have all : ∀ k ∈ n, x ∈ I(k)
+          intros k hk
+          exfalso
+          rw h at hk
+          exact (empty.membership at k) with hk
+        exact idealFamilyIntersection.membership.backward with ⟨hx, all⟩
+    rw e
+    exact Ideal.whole at R with ringR
+  . have ne : n ≠ ∅
+      intro e
+      exact h with e
+    exact idealFamilyIntersection.ideal at R, n, I with comm, ne, ideals
+
+theorem cldEQuotientFamily.kernel
+  shows ringKernel(piLift(R, n, quotientFamily(R, n, I),
+      quotientFamilyMaps(R, n, I)), R.carrier,
+      Ring.zero(piRing(n, quotientFamily(R, n, I)))) =
+    idealFamilyIntersection(R, n, I)
+proof
+  have rings := cldEQuotientFamily.rings at R, I, n with comm, ideals
+  have homs := cldEQuotientFamily.homs at R, I, n with comm, ideals
+  have vals := cldEPiLift.vals at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, homs
+  obtain ⟨lfn, _⟩ := cldEPiLift.graph at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, vals
+  obtain ⟨_, _, pz, _, _, _⟩ := cldEPiRing.projections at n, quotientFamily(R, n, I) with rings
+  have zC := cldEPiZero.carrier at n, quotientFamily(R, n, I) with rings
+  obtain ⟨_, zV⟩ := cldEPiZero.graph at n, quotientFamily(R, n, I) with rings
+  rw pz
+  apply Subset.antisymmetric
+  . intros x hx
+    obtain ⟨xIn, ex⟩ := ringKernel.membership.forward with hx
+    have all : ∀ k ∈ n, x ∈ I(k)
+      intros k hk
+      obtain ⟨e1, e2⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+      have a := cldEPiLift.apply at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I), x, k with rings, vals, xIn, hk
+      rw ex at a
+      rw (zV with hk) at a
+      rw [e1, e2] at a
+      symm at a
+      exact (quotientMk.eq_zero_iff at R, I(k), x with comm, (ideals with k, hk), xIn).forward with a
+    exact idealFamilyIntersection.membership.backward with ⟨xIn, all⟩
+  . intros x hx
+    obtain ⟨xIn, all⟩ := idealFamilyIntersection.membership.forward with hx
+    have L := FunctionBetween.apply_closed with lfn, xIn
+    have same : piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I))(x) = piZero(n, quotientFamily(R, n, I))
+      apply cldEPiCarrier.ext at n, quotientFamily(R, n, I) with rings, L, zC
+      intros k hk
+      obtain ⟨e1, e2⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+      rw [(cldEPiLift.apply at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I), x, k with rings, vals, xIn, hk), (zV with hk), e1, e2]
+      exact (quotientMk.eq_zero_iff at R, I(k), x with comm, (ideals with k, hk), xIn).backward with (all with k, hk)
+    exact ringKernel.membership.backward with ⟨xIn, same⟩
+
+-- Helper: classes u(k) ∈ R ⧸ I(k), k ∈ m ⊆ n, of a pairwise coprime
+-- family have a common representative.
+theorem cldECrt.classes (u : Set) (m : Nat)
+  requires coprime : ∀ j k ∈ n, j ≠ k → idealSum(R, I(j), I(k)) = R.carrier
+  shows m ⊆ n → (∀ k ∈ m, u(k) ∈ Ring.carrier(R ⧸ I(k))) →
+    ∃ y ∈ R.carrier, ∀ k ∈ m, quotientMk(R, I(k))(y) = u(k)
+proof
+  induction m
+  | zero =>
+    intros mn us
+    have zeroIn : R[0] ∈ R.carrier by typecheck
+    have all : ∀ k ∈ 0, quotientMk(R, I(k))(R[0]) = u(k)
+      intros k hk
+      exfalso
+      have kNat := natural.member at 0 with hk
+      have lt := Less.of_membership at k, 0
+      have l := lt with hk
+      arith
+    exact ⟨R[0], zeroIn, all⟩
+  | succ(k) using ih =>
+    intros mn us
+    have sub : k ⊆ succ(k)
+      intros y hy
+      exact membership.into_successor at y, k with hy
+    have kn : k ⊆ n
+      intros y hy
+      exact mn with y, (sub with y, hy)
+    have kIn := membership.self_successor at k
+    have kN := mn with k, kIn
+    have kus : ∀ j ∈ k, u(j) ∈ Ring.carrier(R ⧸ I(j))
+      intros j hj
+      exact us with j, (sub with j, hj)
+    obtain ⟨y, yIn, hy⟩ := ih with kn, kus
+    have kIdeals : ∀ j ∈ k, Ideal(R, I(j))
+      intros j hj
+      exact ideals with j, (kn with j, hj)
+    have kCop : ∀ i j ∈ k, i ≠ j → idealSum(R, I(i), I(j)) = R.carrier
+      intros i hi j hj ne
+      exact coprime with i, (kn with i, hi), j, (kn with j, hj), ne
+    have idealK := ideals with k, kN
+    have toK : ∀ j ∈ k, idealSum(R, I(j), I(k)) = R.carrier
+      intros j hj
+      have ne : j ≠ k
+        intro jk
+        rw jk at hj
+        exact (membership.irreflexive at k) with hj
+      exact coprime with j, (kn with j, hj), k, kN, ne
+    have c := rmEFamilyProduct.coprime at R, I, I(k), k with comm, idealK, kIdeals, toK
+    have oneIn : R[1] ∈ R.carrier by typecheck
+    have o : R[1] ∈ idealSum(R, idealFamilyProduct(R, I, k), I(k))
+      rw c
+      exact oneIn
+    obtain ⟨_, a, aJ, b, bK, e⟩ := idealSum.membership.forward with o
+    have eqI := rmEFamilyProduct.eq_intersection at R, I, k with comm, kIdeals, kCop
+    rw eqI at aJ
+    obtain ⟨aIn, aAll⟩ := idealFamilyIntersection.membership.forward with aJ
+    have idealK2 := idealK
+    obtain ⟨boundK, _, sumsK, _, prodsK⟩ := idealK2
+    have bIn := boundK with bK
+    have uk := us with k, kIn
+    have sj := quotientMk.surjective at R, I(k) with comm, idealK
+    obtain ⟨mkF, onto⟩ := sj
+    obtain ⟨r, rIn, rel⟩ := onto with u(k), uk
+    have rv := FunctionBetween.apply_value with mkF, rIn, rel
+    have cIn : y + a * (r + -y) ∈ R.carrier by typecheck
+    have all : ∀ j ∈ succ(k), quotientMk(R, I(j))(y + a * (r + -y)) = u(j)
+      intros j hj
+      have jNat := natural.member at succ(k) with hj
+      rcases (membership.successor at j, k).forward with hj with jk | je
+      . have idealJ := kIdeals with j, jk
+        have idealJ2 := idealJ
+        obtain ⟨_, _, _, _, prodsJ⟩ := idealJ2
+        have aj := aAll with j, jk
+        have d : r + -y ∈ R.carrier by typecheck
+        have m := (prodsJ with (r + -y), d, a, aj).right
+        have eq : y + a * (r + -y) - y = a * (r + -y)
+          rw Ring.sub.value
+          ring
+        rw ← eq at m
+        have same := (quotientMk.eq_iff at R, I(j), y + a * (r + -y), y with comm, idealJ, cIn, yIn).backward with m
+        rw same
+        exact hy with j, jk
+      . rw je
+        have d : y + -r ∈ R.carrier by typecheck
+        have m := (prodsK with (y + -r), d, b, bK).right
+        have e3 : y + a * (r + -y) - r = (R[1] + -a) * (y + -r)
+          rw Ring.sub.value
+          ring
+        rw e at e3
+        have e4 : (a + b + -a) * (y + -r) = b * (y + -r) by ring
+        rw [e4] at e3
+        rw ← e3 at m
+        have same := (quotientMk.eq_iff at R, I(k), y + a * (r + -y), r with comm, idealK, cIn, rIn).backward with m
+        rw same
+        exact rv
+    exact ⟨y + a * (r + -y), cIn, all⟩
+
 theorem chineseRemainderMap.hom
   shows chineseRemainderMap(R, n, I) :
     R ⧸ idealFamilyIntersection(R, n, I) →+* piRing(n, quotientFamily(R, n, I))
 proof
-  sorry
+  have rings := cldEQuotientFamily.rings at R, I, n with comm, ideals
+  have homs := cldEQuotientFamily.homs at R, I, n with comm, ideals
+  have liftHom := piLift.hom at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, comm, homs
+  have cP := piRing.comm_ring at n, quotientFamily(R, n, I) with rings
+  have inter := cldEIdealFamilyIntersection.ideal at R, I, n with comm, ideals
+  have ker := cldEQuotientFamily.kernel at R, I, n with comm, ideals
+  have killed : idealFamilyIntersection(R, n, I) ⊆ ringKernel(piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)), R.carrier, Ring.zero(piRing(n, quotientFamily(R, n, I))))
+    intros x hx
+    rw ker
+    exact hx
+  unfold chineseRemainderMap
+  exact quotientRingLift.hom at R, idealFamilyIntersection(R, n, I), piRing(n, quotientFamily(R, n, I)), piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)) with comm, inter, cP, liftHom, killed
 
 theorem chineseRemainderMap.injective
   shows InjectiveBetween(chineseRemainderMap(R, n, I),
     Ring.carrier(R ⧸ idealFamilyIntersection(R, n, I)),
     Ring.carrier(piRing(n, quotientFamily(R, n, I))))
 proof
-  sorry
+  have rings := cldEQuotientFamily.rings at R, I, n with comm, ideals
+  have homs := cldEQuotientFamily.homs at R, I, n with comm, ideals
+  have liftHom := piLift.hom at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, comm, homs
+  have cP := piRing.comm_ring at n, quotientFamily(R, n, I) with rings
+  have inter := cldEIdealFamilyIntersection.ideal at R, I, n with comm, ideals
+  have ker := cldEQuotientFamily.kernel at R, I, n with comm, ideals
+  have killed : idealFamilyIntersection(R, n, I) ⊆ ringKernel(piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)), R.carrier, Ring.zero(piRing(n, quotientFamily(R, n, I))))
+    intros x hx
+    rw ker
+    exact hx
+  have hom := chineseRemainderMap.hom at R, I, n with comm, ideals
+  have qc := quotientRing.comm_ring at R, idealFamilyIntersection(R, n, I) with comm, inter
+  have lk := quotientRingLift.kernel at R, idealFamilyIntersection(R, n, I), piRing(n, quotientFamily(R, n, I)), piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)) with comm, inter, cP, liftHom, killed
+  rw ker at lk
+  have zeroIn : R[0] ∈ R.carrier by typecheck
+  obtain ⟨_, interZero, _⟩ := inter
+  have mz := (quotientMk.eq_zero_iff at R, idealFamilyIntersection(R, n, I), R[0] with comm, inter, zeroIn).backward with interZero
+  have mkh := quotientMk.hom at R, idealFamilyIntersection(R, n, I) with comm, inter
+  obtain ⟨_, _, mfn, _⟩ := mkh
+  have image : functionImage(quotientMk(R, idealFamilyIntersection(R, n, I)), idealFamilyIntersection(R, n, I), Ring.carrier(R ⧸ idealFamilyIntersection(R, n, I))) = {Ring.zero(R ⧸ idealFamilyIntersection(R, n, I))}
+    apply Subset.antisymmetric
+    . intros y hy
+      obtain ⟨_, x, xI, ye⟩ := functionImage.membership.forward with hy
+      have xIn := (idealFamilyIntersection.membership.forward with xI).left
+      have z := (quotientMk.eq_zero_iff at R, idealFamilyIntersection(R, n, I), x with comm, inter, xIn).backward with xI
+      rw [ye, z]
+      exact singleton.membership.backward at Ring.zero(R ⧸ idealFamilyIntersection(R, n, I)), Ring.zero(R ⧸ idealFamilyIntersection(R, n, I)) with rfl
+    . intros y hy
+      have e := singleton.membership.forward with hy
+      rw e
+      have zq := FunctionBetween.apply_closed with mfn, zeroIn
+      rw mz at zq
+      symm at mz
+      exact functionImage.membership.backward with ⟨zq, R[0], interZero, mz⟩
+  rw image at lk
+  unfold chineseRemainderMap
+  unfold chineseRemainderMap at hom
+  exact (RingHom.injective_iff_kernel at quotientRingLift(R, piRing(n, quotientFamily(R, n, I)), idealFamilyIntersection(R, n, I), piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I))), R ⧸ idealFamilyIntersection(R, n, I), piRing(n, quotientFamily(R, n, I)) with qc, cP, hom).backward with lk
 
 theorem chineseRemainderMap.iso
   requires coprime : ∀ j k ∈ n, j ≠ k → idealSum(R, I(j), I(k)) = R.carrier
   shows chineseRemainderMap(R, n, I) :
     R ⧸ idealFamilyIntersection(R, n, I) ≃+* piRing(n, quotientFamily(R, n, I))
 proof
-  sorry
+  have rings := cldEQuotientFamily.rings at R, I, n with comm, ideals
+  have homs := cldEQuotientFamily.homs at R, I, n with comm, ideals
+  have liftHom := piLift.hom at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, comm, homs
+  have cP := piRing.comm_ring at n, quotientFamily(R, n, I) with rings
+  have inter := cldEIdealFamilyIntersection.ideal at R, I, n with comm, ideals
+  have ker := cldEQuotientFamily.kernel at R, I, n with comm, ideals
+  have killed : idealFamilyIntersection(R, n, I) ⊆ ringKernel(piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)), R.carrier, Ring.zero(piRing(n, quotientFamily(R, n, I))))
+    intros x hx
+    rw ker
+    exact hx
+  have hom := chineseRemainderMap.hom at R, I, n with comm, ideals
+  have inj := chineseRemainderMap.injective at R, I, n with comm, ideals
+  have hom2 := hom
+  obtain ⟨_, _, cfn, _⟩ := hom2
+  obtain ⟨pc, _, _, _, _, _⟩ := cldEPiRing.projections at n, quotientFamily(R, n, I) with rings
+  have vals := cldEPiLift.vals at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, homs
+  obtain ⟨lfn, _⟩ := cldEPiLift.graph at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I) with rings, vals
+  have mkh := quotientMk.hom at R, idealFamilyIntersection(R, n, I) with comm, inter
+  obtain ⟨_, _, mfn, _⟩ := mkh
+  have onto : ∀ U ∈ Ring.carrier(piRing(n, quotientFamily(R, n, I))), ∃ X ∈ Ring.carrier(R ⧸ idealFamilyIntersection(R, n, I)), relates(chineseRemainderMap(R, n, I), X, U)
+    intros U hU
+    have hU2 := hU
+    rw pc at hU2
+    obtain ⟨_, uvals⟩ := piCarrier.membership.forward with hU2
+    have us : ∀ k ∈ n, U(k) ∈ Ring.carrier(R ⧸ I(k))
+      intros k hk
+      obtain ⟨e1, _⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+      have m := uvals with k, hk
+      rw e1 at m
+      exact m
+    have nn : n ⊆ n
+      intros z hz
+      exact hz
+    have cl := cldECrt.classes at R, I, n, U, n with comm, ideals, coprime
+    obtain ⟨y, yIn, hy⟩ := cl with nn, us
+    have X := FunctionBetween.apply_closed with mfn, yIn
+    have ap := quotientRingLift.apply_mk at R, idealFamilyIntersection(R, n, I), piRing(n, quotientFamily(R, n, I)), piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I)), y with comm, inter, cP, liftHom, killed, yIn
+    have L := FunctionBetween.apply_closed with lfn, yIn
+    have same : piLift(R, n, quotientFamily(R, n, I), quotientFamilyMaps(R, n, I))(y) = U
+      apply cldEPiCarrier.ext at n, quotientFamily(R, n, I) with rings, L, hU2
+      intros k hk
+      obtain ⟨_, e2⟩ := cldEQuotientFamily.apply at R, I, n, k with comm, ideals, hk
+      rw [(cldEPiLift.apply at n, quotientFamily(R, n, I), R, quotientFamilyMaps(R, n, I), y, k with rings, vals, yIn, hk), e2]
+      exact hy with k, hk
+    rw same at ap
+    have r := FunctionBetween.relates_apply with cfn, X
+    unfold chineseRemainderMap at r
+    rw ap at r
+    unfold chineseRemainderMap
+    exact ⟨quotientMk(R, idealFamilyIntersection(R, n, I))(y), X, r⟩
+  unfold Homomorphism.RingIso
+  exact ⟨hom, inj, cfn, onto⟩
 
 theorem chineseRemainder.exists_solution (x : Set)
   requires coprime : ∀ j k ∈ n, j ≠ k → idealSum(R, I(j), I(k)) = R.carrier
   requires targets : x : n → R.carrier
   shows ∃ y ∈ R.carrier, ∀ k ∈ n, call2(R.add, y, apply(R.neg, x(k))) ∈ I(k)
 proof
-  sorry
+  have xs : ∀ k ∈ n, x(k) ∈ R.carrier
+    intros k hk
+    exact FunctionBetween.apply_closed with targets, hk
+  have s := cldECrt.solution at R, I, x, n with comm
+  exact s with ideals, coprime, xs
 
 end ChineseRemainder
 
