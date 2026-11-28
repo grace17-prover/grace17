@@ -1,0 +1,199 @@
+-- Gauss sums over prime fields in an algebraic closure Ω of ℚ: the
+-- differences of floors ⌊c⟨x⟩⌋ − ⌊c⟨−x⟩⌋ on ℚ/ℤ and their distribution
+-- relation, Kronecker's theorem in Ω, roots of unity of order p are ≡ 1
+-- at the places above p, and the weak form of Stickelberger's theorem:
+-- the orders of the Gauss sums g(χ^t, ψ) at a place above p lie in [0, 1)
+-- and form an injective homomorphism ℤ/r → ℚ/ℤ.
+-- Source: grh-compact/src/Lib/Cyclotomic/Stickelberger/GaussSums.lean
+-- (floorDiff, sum_floorDiff, isOfFinOrder_of_norm_eq_one,
+-- residue_eq_one_of_pow_prime_eq_one, stickelberger).
+-- Not stated: smul_gaussSum (the Galois action on Gauss sums through the
+-- cyclotomic character) and exists_jacobi_family (Stickelberger's
+-- factorisation of Jacobi-type quotients with the Davenport–Hasse
+-- relation up to roots of unity), which need the Galois action of
+-- Gal(Ω/ℚ) on Ωˣ of Lib/ClassField/Places.
+-- Encoding. Ω, a fixed algebraic closure of ℚ in the source, is a
+-- parameter: a field extension record E with base ℚ (rationalRing) and
+-- IsAlgebraicClosure(E). The source's ClosurePlace Ω (ValuationSubring Ω)
+-- is a valuation subring B of Ω. ℚ/ℤ is the set of rationals in [0, 1)
+-- (each class by its representative fracRep), with addition mod 1. The
+-- order ordRat ℚ B x, normalised by ord p = 1 for B above p and chosen by
+-- Classical.epsilon in the source, is the rational a/n with x^n and p^a of
+-- the same valuation at B, unique when it exists (csLGOrdRat.spec). A
+-- character χ of 𝔽_p^× of exact order r gives the source's primitive
+-- t ↦ χ_t as t ↦ χ^t, t < r; the additive character ψ of 𝔽_p is a
+-- nontrivial homomorphism into Ωˣ.
+-- Part of the GRH blueprint (layer 4, Lib/Cyclotomic, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Cyclotomic.Stickelberger
+import GRH.Characters.Mul
+import GRH.Padic.Valuation
+
+section Stickelberger
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: ℚ/ℤ
+-- QZ: the rationals in [0, 1), the representatives fracRep of ℚ/ℤ.
+predicate RationalReal (x : Set) :=
+  ∃ a ∈ ℤ, ∃ n ∈ ℕ, n ≠ (0:N) ∧ x = R[realInt(a) / realNat(n)]
+
+def qzReps : Set := { x ∈ ℝ | (0:R) ≤ x ∧ x < (1:R) ∧ RationalReal(x) }
+
+-- Addition, negation and multiples in ℚ/ℤ on representatives.
+def qzAdd (x y : Set) : Set :=
+  ⋃({ z ∈ ℝ | (R[x + y] < (1:R) ∧ z = R[x + y]) ∨ ((1:R) ≤ R[x + y] ∧ z = R[x + y - 1]) })
+
+def qzNeg (x : Set) : Set :=
+  ⋃({ z ∈ ℝ | (x = realZero ∧ z = realZero) ∨ (x ≠ realZero ∧ z = R[1 - x]) })
+
+def qzNsmul (n x : Set) : Set := R[realNat(n) * x - realNat(realFloor(R[realNat(n) * x]))]
+
+-- QZ.ofZMod r b: the class of b/r, for b < r.
+def qzOfZMod (r b : Set) : Set := R[realNat(b) / realNat(r)]
+
+-- An integer a − b from naturals.
+def natDiffInt (a b : Set) : Set := integerAddValue(integerOfNat(a), integerNegValue(integerOfNat(b)))
+
+-- floorDiff c x = ⌊c⟨x⟩⌋ − ⌊c⟨−x⟩⌋.
+def floorDiff (c x : Set) : Set :=
+  natDiffInt(realFloor(R[realNat(c) * x]), realFloor(R[realNat(c) * qzNeg(x)]))
+
+-- Section: The closure Ω and its places
+def omegaRing (E : Set) : Set := Algebra.ring(E)
+
+def omega (E : Set) : Set := algebraCarrier(E)
+
+-- An algebraic closure of ℚ.
+predicate RationalClosure (E : Set) :=
+  IsAlgebraicClosure(E) ∧ Algebra.base(E) = rationalRing
+
+-- The natural p in Ω.
+def natInOmega (E p : Set) : Set := ringNat(Ring.add(omegaRing(E)), Ring.zero(omegaRing(E)),
+  Ring.one(omegaRing(E)), p)
+
+-- The place B lies above p: p is in the maximal ideal of B.
+predicate PlaceAbove (E B p : Set) :=
+  ValuationSubring(omegaRing(E), B) ∧ natInOmega(E, p) ∈ valuationSubringNonunits(omegaRing(E), B)
+
+-- x^n and p^a have the same valuation at B, a = a1 − a2.
+predicate SameValuation (E B p x n a1 a2 : Set) :=
+  ∃ u ∈ valuationSubringUnits(omegaRing(E), B),
+    call2(Ring.mul(omegaRing(E)), Ring.pow(omegaRing(E), x, n), Ring.pow(omegaRing(E), natInOmega(E, p), a2)) =
+      call2(Ring.mul(omegaRing(E)), u, Ring.pow(omegaRing(E), natInOmega(E, p), a1))
+
+-- ordRat ℚ B x: the rational a/n with v_B(x^n) = v_B(p^a).
+def csLGOrdRatValues (E B p x : Set) : Set :=
+  { q ∈ ℝ | ∃ n ∈ ℕ, n ≠ (0:N) ∧ ∃ a1 ∈ ℕ, ∃ a2 ∈ ℕ,
+    q = R[realInt(natDiffInt(a1, a2)) / realNat(n)] ∧ SameValuation(E, B, p, x, n, a1, a2) }
+
+def csLGOrdRat (E B p x : Set) : Set := ⋃(csLGOrdRatValues(E, B, p, x))
+
+-- Roots of unity of Ω.
+predicate RootOfUnityIn (E x : Set) :=
+  ∃ n ∈ ℕ, n ≠ (0:N) ∧ Ring.pow(omegaRing(E), x, n) = Ring.one(omegaRing(E))
+
+-- Section: Gauss sums over 𝔽_p
+-- A nontrivial additive character ψ : 𝔽_p → Ωˣ.
+predicate AddCharIn (E p ψ : Set) :=
+  FunctionBetween(ψ, Ring.carrier(zmod(p)), omega(E)) ∧
+  ψ(Ring.zero(zmod(p))) = Ring.one(omegaRing(E)) ∧
+  (∀ a ∈ Ring.carrier(zmod(p)), ∀ b ∈ Ring.carrier(zmod(p)),
+    ψ(call2(Ring.add(zmod(p)), a, b)) = call2(Ring.mul(omegaRing(E)), ψ(a), ψ(b))) ∧
+  ∃ a ∈ Ring.carrier(zmod(p)), ψ(a) ≠ Ring.one(omegaRing(E))
+
+-- g(χ, ψ) = Σ_a χ(a) ψ(a) in Ω.
+def gaussTermsIn (E p χ ψ : Set) : Set :=
+  { (a, call2(Ring.mul(omegaRing(E)), χ(a), ψ(a))) | a ∈ Ring.carrier(zmod(p)) }
+
+def gaussSumIn (E p χ ψ : Set) : Set :=
+  finiteRingSum(Ring.carrier(zmod(p)), omega(E), Ring.add(omegaRing(E)), Ring.zero(omegaRing(E)),
+    Ring.neg(omegaRing(E)), Ring.mul(omegaRing(E)), Ring.one(omegaRing(E)), gaussTermsIn(E, p, χ, ψ))
+
+-- χ has exact order r.
+predicate ExactOrderChar (E p χ r : Set) :=
+  MulChar(zmod(p), omegaRing(E), χ) ∧
+  mulCharPow(zmod(p), omegaRing(E), χ, r) = trivialMulChar(zmod(p), omegaRing(E)) ∧
+  ∀ s ∈ r, s ≠ (0:N) → mulCharPow(zmod(p), omegaRing(E), χ, s) ≠ trivialMulChar(zmod(p), omegaRing(E))
+
+-- Section: Laws
+-- The order ordRat is well defined: for B above p and x ≠ 0 it exists and
+-- is unique.
+theorem csLGOrdRat.spec (E B p x : Set)
+  requires closure : RationalClosure(E)
+  requires prime : Prime(p)
+  requires above : PlaceAbove(E, B, p)
+  requires hx : x ∈ omega(E)
+  requires nonzero : x ≠ Ring.zero(omegaRing(E))
+  shows csLGOrdRat(E, B, p, x) ∈ csLGOrdRatValues(E, B, p, x) ∧
+    ∀ q ∈ csLGOrdRatValues(E, B, p, x), q = csLGOrdRat(E, B, p, x)
+proof
+  sorry
+
+-- sum_floorDiff: for gcd(m, r) = 1 and v a unit mod r,
+-- Σ_{b mod r} floorDiff m (x + vb/r) = floorDiff m (r x).
+def floorDiffTerms (m r v x : Set) : Set :=
+  { (b, floorDiff(m, qzAdd(x, qzOfZMod(r, mul(v, b) % r)))) | b ∈ r }
+
+theorem floorDiff.distribution (m r v x : Set)
+  requires hm : m ∈ ℕ
+  requires hr : r ∈ ℕ
+  requires positive : r ≠ (0:N)
+  requires hv : v ∈ ℕ
+  requires coprime : IntegerCoprime(integerOfNat(m), integerOfNat(r))
+  requires unit : IntegerCoprime(integerOfNat(v), integerOfNat(r))
+  requires hx : x ∈ qzReps
+  shows finiteRingSum(r, Ring.carrier(integerRing), Ring.add(integerRing), Ring.zero(integerRing),
+    Ring.neg(integerRing), Ring.mul(integerRing), Ring.one(integerRing),
+    floorDiffTerms(m, r, v, x)) = floorDiff(m, qzNsmul(r, x))
+proof
+  sorry
+
+-- isOfFinOrder_of_norm_eq_one (Kronecker): an element of Ω in every
+-- valuation subring with |τ(x)| = 1 for every embedding τ : Ω → ℂ is a
+-- root of unity.
+theorem kronecker_root_of_unity (E x : Set)
+  requires closure : RationalClosure(E)
+  requires hx : x ∈ omega(E)
+  requires integral : ∀ B, ValuationSubring(omegaRing(E), B) → x ∈ B
+  requires norm : ∀ τ, RingHom(τ, omegaRing(E), complexRing) → complexAbs(τ(x)) = realOne
+  shows RootOfUnityIn(E, x)
+proof
+  sorry
+
+-- residue_eq_one_of_pow_prime_eq_one: at B above p, an x with x^p = 1 is
+-- ≡ 1 modulo the maximal ideal.
+theorem rootOfUnity.residue_one (E B p x : Set)
+  requires closure : RationalClosure(E)
+  requires prime : Prime(p)
+  requires above : PlaceAbove(E, B, p)
+  requires hx : x ∈ omega(E)
+  requires root : Ring.pow(omegaRing(E), x, p) = Ring.one(omegaRing(E))
+  shows Ring.sub(omegaRing(E), x, Ring.one(omegaRing(E))) ∈ valuationSubringNonunits(omegaRing(E), B)
+proof
+  sorry
+
+-- stickelberger (weak form): for χ of exact order r prime to p, ψ
+-- nontrivial and B above p, some injective homomorphism S : ℤ/r → ℚ/ℤ has
+-- S(t) = ordRat_B g(χ^t, ψ), so 0 ≤ ord_B g(χ^t, ψ) < 1.
+theorem stickelberger (E B p r χ ψ : Set)
+  requires closure : RationalClosure(E)
+  requires prime : Prime(p)
+  requires hr : r ∈ ℕ
+  requires positive : r ≠ (0:N)
+  requires coprime : IntegerCoprime(integerOfNat(p), integerOfNat(r))
+  requires above : PlaceAbove(E, B, p)
+  requires order : ExactOrderChar(E, p, χ, r)
+  requires additive : AddCharIn(E, p, ψ)
+  shows ∃ S ∈ functionSpace(r, qzReps),
+    (∀ s ∈ r, ∀ t ∈ r, S(add(s, t) % r) = qzAdd(S(s), S(t))) ∧
+    (∀ s ∈ r, ∀ t ∈ r, S(s) = S(t) → s = t) ∧
+    ∀ t ∈ r, S(t) = csLGOrdRat(E, B, p, gaussSumIn(E, p, mulCharPow(zmod(p), omegaRing(E), χ, t), ψ))
+proof
+  sorry
+
+end Stickelberger
