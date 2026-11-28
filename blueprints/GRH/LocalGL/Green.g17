@@ -1,0 +1,368 @@
+-- Green's characters of GLₙ(F_q): the characters θ_x of the multiplicative
+-- group named by roots of unity through a faithful character T of an
+-- algebraically closed extension, Green's cuspidal class functions τ_P of
+-- irreducible polynomials, labels (monic squarefree polynomials with
+-- nonzero constant term), the multiplicative map c ↦ Ξ_c, the determinant
+-- characters χ∘det and the naming of characters of F_q^× by elements;
+-- roots of an irreducible polynomial over a finite field form one
+-- Frobenius orbit; τ_P is cuspidal and does not depend on the root;
+-- orthonormality of the τ_P; the inner product of C_η with B·μ as a mean
+-- over a torus.
+-- Source: grh-compact/src/Lib/LocalGL/Green/FrobeniusOrbits.lean
+-- (monicsOfDegree, faithfulChar, IsFaithfulMulChar, thetaChar, greenTau,
+-- labelChar, IsLabel, detChar, root_pow_card_pow_eq_self_iff,
+-- aroots_eq_frobenius_orbit, exists_pow_card_pow_eq_of_root),
+-- Lib/LocalGL/Green/GreenTau.lean (labelChar_eq_greenTau,
+-- isCuspidal_greenTau, greenTau_eq_zero_of_dim_ne, greenTau_eq,
+-- rankInner_greenTau), Lib/LocalGL/Green/CuspidalInnerProduct.lean
+-- (thetaChar_spec, thetaChar_mul, charName, thetaChar_charName,
+-- charName_pow_eq_one, rankInner_greenCuspidal_mulMu).
+-- Not stated: the internal lemmas pow_pred_eq_one_iff,
+-- algebraMap_pow_card_pred_eq_one, aroots_pow_eq_frobenius_orbit,
+-- thetaChar_apply_pow, thetaChar_eq_apply_norm_pow,
+-- aroots_map_frobenius_pow, root_pow_card_pow_pred_eq_one and
+-- rankPart_greenCuspidal_pow.
+-- Encoding. The algebraically closed K with its algebra structure over the
+-- finite field k is a field extension record E (base k, ring K). The
+-- source's faithfulChar k, an injective character of an algebraic closure
+-- chosen by Classical.epsilon, is a parameter (E, T) with
+-- IsFaithfulMulChar(E, T). thetaChar T Q x = T^a for a chosen a with
+-- T(x) = exp(2πi/(Q − 1))^a: here a is the least such natural, a choice
+-- the source's statements do not see (they read θ_x only through
+-- thetaChar_spec, on the z with z^(Q−1) = 1). greenTau T P is formed at a
+-- root x of P chosen by Classical.epsilon; here it is the value common to
+-- all roots, which exists for irreducible P with P(0) ≠ 0 (greenTau.eq).
+-- labelChar T, a monoid map k[X] → Hall k given by normalizedFactors, is
+-- the unique map with Ξ_0 = 0, Ξ_u = 1 on units, Ξ_ab = Ξ_a ∗ Ξ_b for
+-- a, b ≠ 0 and Ξ_P = τ_P for monic irreducible P (labelCharMap.spec).
+-- detChar χ is χ(det A); the source's χ((−1)ⁿ χ_A(0)) is the same value.
+-- charName T χ, the inverse of a bijection, is the unique unit a of k
+-- with θ_a = χ on k (charName.spec).
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.Green
+import GRH.LocalGL.Cuspidal
+
+section Green
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Labels
+-- k[X] as a ring, and the order q of a finite field.
+def polyRing (K : Set) : Set := polynomialRing(K, {0})
+
+def fieldOrder (K : Set) : Set := cardinality(Ring.carrier(K))
+
+-- FrobeniusOrbits.lean, monicsOfDegree k r: the monic polynomials of
+-- degree r over k.
+def monicsOfDegree (K r : Set) : Set :=
+  { c ∈ uniPolys(K) | PolyMonic(K, c) ∧ polyNatDegree(K, c) = r }
+
+-- Squarefree c: every a with a² ∣ c is a unit.
+predicate PolySquarefree (K c : Set) :=
+  c ∈ uniPolys(K) ∧
+  ∀ a ∈ uniPolys(K), RingDvd(polyRing(K), call2(Ring.mul(polyRing(K)), a, a), c) →
+    RingUnit(polyRing(K), a)
+
+-- FrobeniusOrbits.lean, IsLabel r c: monic, squarefree, of degree r, with
+-- nonzero constant term.
+predicate IsLabel (K r c : Set) :=
+  PolyMonic(K, c) ∧ PolySquarefree(K, c) ∧ polyNatDegree(K, c) = r ∧
+  polyCoeff(c, (0:N)) ≠ Ring.zero(K)
+
+-- Monic irreducible polynomials.
+predicate MonicIrreducible (K P : Set) :=
+  PolyMonic(K, P) ∧ RingIrreducible(polyRing(K), P)
+
+-- Section: The characters θ_x
+-- FrobeniusOrbits.lean, IsFaithfulMulChar K T: K is algebraically closed
+-- and the multiplicative character T : K → ℂ is injective.
+predicate IsFaithfulMulChar (E T : Set) :=
+  FieldExtension(E) ∧ AlgebraicallyClosed(Algebra.ring(E)) ∧
+  MulChar(Algebra.ring(E), complexRing, T) ∧
+  ∀ x ∈ algebraCarrier(E), ∀ y ∈ algebraCarrier(E), T(x) = T(y) → x = y
+
+-- exp(2πi/N).
+def unitRoot (N : Set) : Set := expTwoPiI(R[realOne / realNat(N)])
+
+-- The naturals a with T(x) = exp(2πi/(Q − 1))^a, and the least of them.
+def thetaExponents (T Q x : Set) : Set :=
+  { a ∈ ℕ | T(x) = Ring.pow(complexRing, unitRoot(sub(Q, 1)), a) }
+
+def thetaExponent (T Q x : Set) : Set := leastNatural(thetaExponents(T, Q, x))
+
+-- FrobeniusOrbits.lean, thetaChar T Q x = T^a, T(x) = exp(2πi/(Q−1))^a.
+def thetaChar (E T Q x : Set) : Set :=
+  mulCharPow(Algebra.ring(E), complexRing, T, thetaExponent(T, Q, x))
+
+-- Section: Green's characters τ_P and Ξ_c
+-- (−1)^d in ℂ.
+def signPow (d : Set) : Set := Ring.pow(complexRing, ℂ[-complexOne], d)
+
+-- FrobeniusOrbits.lean, greenTau T P at the root x of P:
+-- (−1)^d rankPart d C_{θ_x}, d = deg P, θ_x taken for Q = q^d.
+def greenTauAt (E T P x : Set) : Set :=
+  hallSmul(Algebra.base(E), signPow(polyNatDegree(Algebra.base(E), P)),
+    rankPart(Algebra.base(E), polyNatDegree(Algebra.base(E), P),
+      greenCuspidal(E, thetaChar(E, T,
+        pow(fieldOrder(Algebra.base(E)), polyNatDegree(Algebra.base(E), P)), x))))
+
+-- greenTau T P: the value of greenTauAt common to the roots of P in K.
+def greenTauValues (E T P : Set) : Set :=
+  { greenTauAt(E, T, P, x) | x ∈ polyAlgebraRootSet(E, P) }
+
+def greenTau (E T P : Set) : Set := ⋃(greenTauValues(E, T, P))
+
+-- FrobeniusOrbits.lean, labelChar T: the multiplicative map c ↦ Ξ_c with
+-- Ξ_P = τ_P on monic irreducible P, Ξ_0 = 0.
+predicate LabelCharLaws (E T Ξ : Set) :=
+  Ξ ∈ functionSpace(uniPolys(Algebra.base(E)), hallFunctions(Algebra.base(E))) ∧
+  Ξ(Ring.zero(polyRing(Algebra.base(E)))) = hallZero(Algebra.base(E)) ∧
+  (∀ u ∈ uniPolys(Algebra.base(E)), RingUnit(polyRing(Algebra.base(E)), u) →
+    Ξ(u) = hallOne(Algebra.base(E))) ∧
+  (∀ a ∈ uniPolys(Algebra.base(E)), ∀ b ∈ uniPolys(Algebra.base(E)),
+    a ≠ Ring.zero(polyRing(Algebra.base(E))) → b ≠ Ring.zero(polyRing(Algebra.base(E))) →
+    Ξ(call2(Ring.mul(polyRing(Algebra.base(E))), a, b)) =
+      hallMul(Algebra.base(E), Ξ(a), Ξ(b))) ∧
+  (∀ P ∈ uniPolys(Algebra.base(E)), MonicIrreducible(Algebra.base(E), P) →
+    Ξ(P) = greenTau(E, T, P))
+
+def labelCharMaps (E T : Set) : Set :=
+  { Ξ ∈ functionSpace(uniPolys(Algebra.base(E)), hallFunctions(Algebra.base(E))) |
+    LabelCharLaws(E, T, Ξ) }
+
+def labelCharMap (E T : Set) : Set := ⋃(labelCharMaps(E, T))
+
+def labelChar (E T c : Set) : Set := labelCharMap(E, T)(c)
+
+-- FrobeniusOrbits.lean, detChar χ: A ↦ χ(det A) in every dimension.
+def detChar (K χ : Set) : Set :=
+  { (p, χ(matDet(K, fst(p), snd(p)))) | p ∈ squareMatrixPairs(K) }
+
+-- Section: Naming characters of k by elements
+-- The structure map k → K.
+def baseMap (E a : Set) : Set := Algebra.map(E)(a)
+
+-- CuspidalInnerProduct.lean, charName T χ: the unit a of k with
+-- θ_a(y) = χ(y) on k, θ_a taken for Q = |k|.
+predicate NamesChar (E T χ a : Set) :=
+  ∀ y ∈ Ring.carrier(Algebra.base(E)),
+    thetaChar(E, T, fieldOrder(Algebra.base(E)), baseMap(E, a))(baseMap(E, y)) = χ(y)
+
+def charNames (E T χ : Set) : Set :=
+  { a ∈ ringUnits(Algebra.base(E)) | NamesChar(E, T, χ, a) }
+
+def charName (E T χ : Set) : Set := ⋃(charNames(E, T, χ))
+
+-- Section: Frobenius orbits
+-- The finite fields k ⊆ K of this module: a field extension E with finite
+-- base and algebraically closed ring.
+predicate FiniteBaseClosure (E : Set) :=
+  FieldExtension(E) ∧ FiniteField(Algebra.base(E)) ∧ AlgebraicallyClosed(Algebra.ring(E))
+
+-- x^(q^i).
+def frobeniusPow (E x i : Set) : Set :=
+  Ring.pow(Algebra.ring(E), x, pow(fieldOrder(Algebra.base(E)), i))
+
+-- root_pow_card_pow_eq_self_iff: for a root x of an irreducible P,
+-- x^(q^m) = x iff deg P ∣ m.
+theorem frobeniusPow.fixed_iff (E P x m : Set)
+  requires extension : FieldExtension(E)
+  requires finite : FiniteField(Algebra.base(E))
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires root : x ∈ polyAlgebraRootSet(E, P)
+  requires hm : m ∈ ℕ
+  shows frobeniusPow(E, x, m) = x ↔ polyNatDegree(Algebra.base(E), P) ∣ m
+proof
+  sorry
+
+-- aroots_eq_frobenius_orbit: the roots of an irreducible P in an
+-- algebraically closed K are x^(q^i), 0 ≤ i < deg P, distinct and simple.
+def frobeniusOrbit (E x d : Set) : Set := { frobeniusPow(E, x, i) | i ∈ d }
+
+theorem polyAlgebraRootSet.frobenius_orbit (E P x : Set)
+  requires closure : FiniteBaseClosure(E)
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires root : x ∈ polyAlgebraRootSet(E, P)
+  shows polyAlgebraRootSet(E, P) = frobeniusOrbit(E, x, polyNatDegree(Algebra.base(E), P)) ∧
+    (∀ i ∈ polyNatDegree(Algebra.base(E), P), ∀ j ∈ polyNatDegree(Algebra.base(E), P),
+      frobeniusPow(E, x, i) = frobeniusPow(E, x, j) → i = j) ∧
+    ∀ y ∈ polyAlgebraRootSet(E, P),
+      polyRootMultiplicity(Algebra.ring(E),
+        polyMap(Algebra.base(E), Algebra.ring(E), Algebra.map(E))(P), y) = (1:N)
+proof
+  sorry
+
+-- Section: Laws of θ
+-- CuspidalInnerProduct.lean, thetaChar_spec: for Q ≥ 2 and x^(Q−1) = 1,
+-- θ_x = T^a for some a with T(x) = exp(2πi/(Q−1))^a.
+theorem thetaChar.spec (E T Q x : Set)
+  requires extension : FieldExtension(E)
+  requires character : MulChar(Algebra.ring(E), complexRing, T)
+  requires hQ : Q ∈ ℕ
+  requires two : (2:N) ≤ (Q:N)
+  requires hx : x ∈ algebraCarrier(E)
+  requires unit : Ring.pow(Algebra.ring(E), x, sub(Q, 1)) = Ring.one(Algebra.ring(E))
+  shows ∃ a ∈ ℕ, thetaChar(E, T, Q, x) = mulCharPow(Algebra.ring(E), complexRing, T, a) ∧
+    T(x) = Ring.pow(complexRing, unitRoot(sub(Q, 1)), a)
+proof
+  sorry
+
+-- thetaChar_mul: θ_{xy}(z) = θ_x(z) θ_y(z) on (Q − 1)-th roots of unity.
+theorem thetaChar.mul (E T Q x y z : Set)
+  requires extension : FieldExtension(E)
+  requires character : MulChar(Algebra.ring(E), complexRing, T)
+  requires hQ : Q ∈ ℕ
+  requires two : (2:N) ≤ (Q:N)
+  requires hx : x ∈ algebraCarrier(E)
+  requires hy : y ∈ algebraCarrier(E)
+  requires hz : z ∈ algebraCarrier(E)
+  requires ux : Ring.pow(Algebra.ring(E), x, sub(Q, 1)) = Ring.one(Algebra.ring(E))
+  requires uy : Ring.pow(Algebra.ring(E), y, sub(Q, 1)) = Ring.one(Algebra.ring(E))
+  requires uz : Ring.pow(Algebra.ring(E), z, sub(Q, 1)) = Ring.one(Algebra.ring(E))
+  shows thetaChar(E, T, Q, call2(Ring.mul(Algebra.ring(E)), x, y))(z) =
+    ℂ[thetaChar(E, T, Q, x)(z) * thetaChar(E, T, Q, y)(z)]
+proof
+  sorry
+
+-- charName and thetaChar_charName: for T faithful, every character χ of
+-- k is θ_a on k for exactly one unit a of k.
+theorem charName.spec (E T χ : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  shows charName(E, T, χ) ∈ ringUnits(Algebra.base(E)) ∧ NamesChar(E, T, χ, charName(E, T, χ)) ∧
+    ∀ a ∈ ringUnits(Algebra.base(E)), NamesChar(E, T, χ, a) → a = charName(E, T, χ)
+proof
+  sorry
+
+-- charName is multiplicative and onto the units: the group isomorphism
+-- MulChar k ℂ ≃* kˣ.
+theorem charName.mul (E T χ ψ : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires hψ : MulChar(Algebra.base(E), complexRing, ψ)
+  shows charName(E, T, mulCharProduct(Algebra.base(E), complexRing, χ, ψ)) =
+    call2(Ring.mul(Algebra.base(E)), charName(E, T, χ), charName(E, T, ψ))
+proof
+  sorry
+
+theorem charName.onto (E T a : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires ha : a ∈ ringUnits(Algebra.base(E))
+  shows ∃ χ, MulChar(Algebra.base(E), complexRing, χ) ∧ charName(E, T, χ) = a
+proof
+  sorry
+
+-- charName_pow_eq_one: χ^M = 1 implies x_χ^M = 1.
+theorem charName.pow_eq_one (E T χ M : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires hM : M ∈ ℕ
+  requires trivial : mulCharPow(Algebra.base(E), complexRing, χ, M) =
+    trivialMulChar(Algebra.base(E), complexRing)
+  shows Ring.pow(Algebra.base(E), charName(E, T, χ), M) = Ring.one(Algebra.base(E))
+proof
+  sorry
+
+-- Section: Green's τ_P
+-- greenTau_eq: for T faithful, P irreducible with P(0) ≠ 0, τ_P is
+-- greenTauAt at every root of P (so the common value exists).
+theorem greenTau.eq (E T P x : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires constant : polyCoeff(P, (0:N)) ≠ Ring.zero(Algebra.base(E))
+  requires root : x ∈ polyAlgebraRootSet(E, P)
+  shows greenTau(E, T, P) = greenTauAt(E, T, P, x)
+proof
+  sorry
+
+-- isCuspidal_greenTau and greenTau_eq_zero_of_dim_ne: τ_P is cuspidal and
+-- concentrated in dimension deg P.
+theorem greenTau.cuspidal (E T P : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires constant : polyCoeff(P, (0:N)) ≠ Ring.zero(Algebra.base(E))
+  shows greenTau(E, T, P) ∈ hallFunctions(Algebra.base(E)) ∧
+    IsCuspidal(Algebra.base(E), greenTau(E, T, P)) ∧
+    ConcentratedIn(Algebra.base(E), polyNatDegree(Algebra.base(E), P), greenTau(E, T, P))
+proof
+  sorry
+
+-- rankInner_greenTau: for monic irreducible P, S with nonzero constant
+-- terms, ⟨τ_P, τ_S⟩_{deg P} = [P = S]; and if P(1) ≠ 0, skew of τ_P in
+-- degree deg P kills 𝟙.
+theorem greenTau.orthonormal (E T P S : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hP : MonicIrreducible(Algebra.base(E), P)
+  requires hS : MonicIrreducible(Algebra.base(E), S)
+  requires constantP : polyCoeff(P, (0:N)) ≠ Ring.zero(Algebra.base(E))
+  requires constantS : polyCoeff(S, (0:N)) ≠ Ring.zero(Algebra.base(E))
+  shows (P = S → rankInner(Algebra.base(E), polyNatDegree(Algebra.base(E), P),
+      greenTau(E, T, P), greenTau(E, T, S)) = complexOne) ∧
+    (P ≠ S → rankInner(Algebra.base(E), polyNatDegree(Algebra.base(E), P),
+      greenTau(E, T, P), greenTau(E, T, S)) = complexZero)
+proof
+  sorry
+
+theorem greenTau.skew_constOne (E T P : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hP : MonicIrreducible(Algebra.base(E), P)
+  requires constant : polyCoeff(P, (0:N)) ≠ Ring.zero(Algebra.base(E))
+  requires atOne : polyEval(Algebra.base(E), P, Ring.one(Algebra.base(E))) ≠
+    Ring.zero(Algebra.base(E))
+  shows skew(Algebra.base(E), polyNatDegree(Algebra.base(E), P), greenTau(E, T, P),
+    constOne(Algebra.base(E))) = hallZero(Algebra.base(E))
+proof
+  sorry
+
+-- Section: The multiplicative map Ξ
+-- labelChar is well defined: over a finite field the laws determine one
+-- map, and labelChar_eq_greenTau.
+theorem labelCharMap.spec (E T : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  shows LabelCharLaws(E, T, labelCharMap(E, T)) ∧
+    ∀ Ξ, LabelCharLaws(E, T, Ξ) → Ξ = labelCharMap(E, T)
+proof
+  sorry
+
+-- Section: The torus formula
+-- The finite subextension L of K over k: an intermediate field F of E with
+-- [F : k] = m, and the k-linear map y ↦ zy of F for a unit z.
+def subextensionModule (E F : Set) : Set := algebraModule(subextension(E, F))
+
+def mulLeftMap (E F z : Set) : Set := { (y, call2(Ring.mul(Algebra.ring(E)), z, y)) | y ∈ F }
+
+def torusTerms (E F η B : Set) : Set :=
+  { (z, ℂ[complexConj(η(z)) *
+      hallAt(Algebra.base(E), B, subextensionModule(E, F), mulLeftMap(E, F, z))]) |
+    z ∈ F ∖ {Ring.zero(Algebra.ring(E))} }
+
+-- rankInner_greenCuspidal_mulMu (Green; Springer; Carter 7.4.5): for a
+-- finite intermediate field L of degree m, ⟨C_η, B·μ⟩_m is the mean over
+-- z ∈ Lˣ of conj η(z) B(y ↦ zy).
+theorem rankInner.greenCuspidal_mulMu (E F η B : Set)
+  requires closure : FiniteBaseClosure(E)
+  requires intermediate : IntermediateField(E, F)
+  requires finiteF : Finite(F)
+  requires hη : η ∈ functionSpace(algebraCarrier(E), complexCarrier)
+  requires hB : B ∈ hallFunctions(Algebra.base(E))
+  shows rankInner(Algebra.base(E), extensionDegree(subextension(E, F)),
+      greenCuspidal(E, η), mulMu(Algebra.base(E), B)) =
+    finMean(F ∖ {Ring.zero(Algebra.ring(E))}, torusTerms(E, F, η, B))
+proof
+  sorry
+
+end Green

@@ -1,0 +1,469 @@
+-- The parabolic-induction ring of class functions on square matrices over a
+-- field: the complex functions on similarity classes of square matrices of
+-- all sizes, their values at endomorphisms of finite-dimensional spaces,
+-- the induction product (F ∗ H)(g) = Σ_W F(g|W) H(g|V/W) over the g-stable
+-- subspaces W, the unit, the rank parts, the constant function 𝟙 and its
+-- inverse μ, block averages over block triangular endomorphisms,
+-- cuspidality, the rank-n inner product, the adjoint `skew`, the Brauer
+-- lift and the cuspidal function C_η = (β_η μ) ∗ 𝟙; the commutative ring
+-- laws, invertibility of 𝟙 over a finite field, the Mackey formula and
+-- Frobenius reciprocity.
+-- Source: grh-compact/src/Lib/LocalGL/Green/MackeyFormula.lean (SimClass,
+-- Hall, simClassOf, StableSubspace, endOnSub, endOnQuot, SimClass.dim,
+-- SimClass.charpoly, Hall.constOne, Hall.rankPart, Hall.evalGL,
+-- blockTriangularEnd, Hall.mul_simClassOf, simClassOf_eq_dualMap, the
+-- CommRing instance, Hall.mul_apply_eq_zero_of_dim_lt,
+-- Hall.isUnit_constOne, Hall.blockAverage, Hall.moebius, Hall.mulMu,
+-- Hall.IsCuspidal, Hall.rankInner, Hall.skew, Hall.brauerLift,
+-- Hall.greenCuspidal, Hall.blockAverage_mul,
+-- Hall.blockAverage_of_dim_eq_zero, Hall.charpoly_endOnSub_mul_endOnQuot),
+-- Lib/LocalGL/Green/InductionMean.lean (Hall.classInner_evalGL,
+-- Hall.rankInner_mul_eq_sum_skew). IsCentralProj.isChar is stated in
+-- GRH.LocalGL.GroupChars.
+-- Encoding. A field is a ring record K with Field(K). The source's
+-- SimClass k, pairs (n, g) with g an endomorphism of kⁿ up to conjugation,
+-- is replaced by its representatives: the pairs (n, A) of a natural n and
+-- an n × n matrix A (squareMatrixPairs); Hall k, the functions on classes,
+-- is the set hallFunctions(K) of complex functions on the pairs that are
+-- invariant under conjugation A ↦ PAP⁻¹. The value F(simClassOf g) at an
+-- endomorphism g of a finite-dimensional module V is hallAt(K, F, V, g),
+-- F at the matrix of g in a basis numbered by the dimension, which does
+-- not depend on the basis (hallAt.basis). The block triangular
+-- endomorphism (w, v) ↦ (bw, xw + av) lives on the product module W × V.
+-- Hall k as a commutative ring is the record hallRing(K). The inverse μ of
+-- 𝟙 (the source's Ring.inverse) is the unique μ with μ ∗ 𝟙 = 1, its
+-- existence and uniqueness over a finite field stated as
+-- hallMoebius.spec. An extension K → L (the source's [Algebra k K]) is a
+-- field extension record E with base K; the roots of a polynomial in L
+-- with multiplicity (aroots) are its root set with polyRootMultiplicity.
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.Hall
+import GRH.LocalGL.GroupChars
+
+section Hall
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Similarity classes and class functions
+-- The pairs (n, A) of a natural n and an n × n matrix A over K.
+def squareMatrixFamily (K : Set) : Set := { {n} × matrixSpace(K, n, n) | n ∈ ℕ }
+
+def squareMatrixPairs (K : Set) : Set := ⋃(squareMatrixFamily(K))
+
+-- The conjugate PAP⁻¹.
+def matConj (K n P A : Set) : Set :=
+  matMul(K, n, n, n, matMul(K, n, n, n, P, A), matInverse(K, n, P))
+
+-- MackeyFormula.lean, Hall k: the complex functions on similarity classes,
+-- read as the conjugation-invariant functions on the pairs (n, A).
+predicate ConjInvariant (K F : Set) :=
+  ∀ n ∈ ℕ, ∀ A ∈ matrixSpace(K, n, n), ∀ P ∈ invertibleMatrices(K, n),
+    F((n, matConj(K, n, P, A))) = F((n, A))
+
+def hallFunctions (K : Set) : Set :=
+  { F ∈ functionSpace(squareMatrixPairs(K), complexCarrier) | ConjInvariant(K, F) }
+
+-- MackeyFormula.lean, simClassOf g: F at an endomorphism g of a
+-- finite-dimensional K-module V is F at the matrix of g in a basis of V
+-- numbered by its dimension (independent of the basis, hallAt.basis).
+def hallAtValues (K F V g : Set) : Set :=
+  { c ∈ complexCarrier | ∃ n ∈ ℕ, ∃ b, ModuleBasis(V, K, n, b) ∧
+    c = F((n, linearToMatrix(V, K, V, n, b, n, b, g))) }
+
+def hallAt (K F V g : Set) : Set := ⋃(hallAtValues(K, F, V, g))
+
+-- The characteristic polynomial of an endomorphism (MackeyFormula.lean,
+-- SimClass.charpoly and LinearMap.charpoly): that of its matrix in any
+-- basis numbered by the dimension.
+def endCharpolyValues (K V g : Set) : Set :=
+  { p ∈ uniPolys(K) | ∃ n ∈ ℕ, ∃ b, ModuleBasis(V, K, n, b) ∧
+    p = matCharpoly(K, n, linearToMatrix(V, K, V, n, b, n, b, g)) }
+
+def endCharpoly (K V g : Set) : Set := ⋃(endCharpolyValues(K, V, g))
+
+-- The endomorphism v ↦ Av of Kⁿ.
+def matEnd (K p : Set) : Set := mulVecMap(K, fst(p), fst(p), snd(p))
+
+def coordSpace (K n : Set) : Set := coordinateModule(K, n)
+
+-- Section: Stable subspaces
+-- MackeyFormula.lean, StableSubspace g: the g-stable subspaces of V.
+def stableSubspaces (K V g : Set) : Set :=
+  { W ∈ 𝒫(Module.carrier(V)) | SubmoduleOf(W, V, K) ∧ ∀ x ∈ W, g(x) ∈ W }
+
+-- StableSubspace.endOnSub W = g|W, an endomorphism of the submodule W.
+def subModuleOf (K V W : Set) : Set := submoduleModule(V, K, W)
+
+def endOnSub (W g : Set) : Set := { (x, g(x)) | x ∈ W }
+
+-- StableSubspace.endOnQuot W: the endomorphism [x] ↦ [g x] of V/W.
+def quotModuleOf (K V W : Set) : Set := quotientModule(V, K, W)
+
+def endOnQuot (V W g : Set) : Set :=
+  { (⟦x⟧[Module.carrier(V), submoduleRelation(V, W)],
+      ⟦g(x)⟧[Module.carrier(V), submoduleRelation(V, W)]) | x ∈ Module.carrier(V) }
+
+-- Section: The induction product and the ring
+-- The terms F(g|W) H(g|V/W) of the product at g.
+def inductionTerms (K F H V g : Set) : Set :=
+  { (W, ℂ[hallAt(K, F, subModuleOf(K, V, W), endOnSub(W, g)) *
+      hallAt(K, H, quotModuleOf(K, V, W), endOnQuot(V, W, g))]) |
+    W ∈ stableSubspaces(K, V, g) }
+
+def inductionSum (K F H V g : Set) : Set :=
+  csLGSum(stableSubspaces(K, V, g), inductionTerms(K, F, H, V, g))
+
+-- MackeyFormula.lean, the Mul instance: (F ∗ H)(n, A) = Σ_W F(A|W) H(A|Kⁿ/W).
+def hallMul (K F H : Set) : Set :=
+  { (p, inductionSum(K, F, H, coordSpace(K, fst(p)), matEnd(K, p))) |
+    p ∈ squareMatrixPairs(K) }
+
+-- Hall.constOne = 𝟙 and Hall.rankPart n F (F on classes of dimension n,
+-- zero elsewhere); the unit 1 = rankPart 0 𝟙.
+def constOne (K : Set) : Set := squareMatrixPairs(K) × {complexOne}
+
+def rankPartValue (n F p : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | (fst(p) = n ∧ c = F(p)) ∨ (fst(p) ≠ n ∧ c = complexZero) })
+
+def rankPart (K n F : Set) : Set :=
+  { (p, rankPartValue(n, F, p)) | p ∈ squareMatrixPairs(K) }
+
+def hallOne (K : Set) : Set := rankPart(K, (0:N), constOne(K))
+
+-- The additive structure, pointwise.
+def hallAdd (K F H : Set) : Set := { (p, ℂ[F(p) + H(p)]) | p ∈ squareMatrixPairs(K) }
+def hallNeg (K F : Set) : Set := { (p, ℂ[-F(p)]) | p ∈ squareMatrixPairs(K) }
+def hallSub (K F H : Set) : Set := { (p, ℂ[F(p) - H(p)]) | p ∈ squareMatrixPairs(K) }
+def hallZero (K : Set) : Set := squareMatrixPairs(K) × {complexZero}
+def hallSmul (K a F : Set) : Set := { (p, ℂ[a * F(p)]) | p ∈ squareMatrixPairs(K) }
+
+def hallAddGraph (K : Set) : Set :=
+  { q ∈ (hallFunctions(K) × hallFunctions(K)) × hallFunctions(K) |
+    snd(q) = hallAdd(K, fst(fst(q)), snd(fst(q))) }
+
+def hallMulGraph (K : Set) : Set :=
+  { q ∈ (hallFunctions(K) × hallFunctions(K)) × hallFunctions(K) |
+    snd(q) = hallMul(K, fst(fst(q)), snd(fst(q))) }
+
+def hallNegGraph (K : Set) : Set :=
+  { q ∈ hallFunctions(K) × hallFunctions(K) | snd(q) = hallNeg(K, fst(q)) }
+
+-- MackeyFormula.lean, instance CommRing (Hall k).
+def hallRing (K : Set) : Set :=
+  Ring.mk(hallFunctions(K), hallAddGraph(K), hallZero(K), hallNegGraph(K),
+    hallMulGraph(K), hallOne(K))
+
+-- Hall.evalGL F: g ↦ F(g) on GLₙ(K).
+def evalGL (K n F : Set) : Set := { (g, F((n, g))) | g ∈ invertibleMatrices(K, n) }
+
+-- Section: Block averages, μ and cuspidality
+-- blockTriangularEnd a b x: (w, v) ↦ (bw, xw + av) on W × V, for a on V,
+-- b on W and x : W → V linear.
+def blockTriangularEnd (V a W b x : Set) : Set :=
+  { (u, (b(fst(u)), call2(Module.add(V), x(fst(u)), a(snd(u))))) |
+    u ∈ Module.carrier(W) × Module.carrier(V) }
+
+def blockTerms (K F V a W b : Set) : Set :=
+  { (x, hallAt(K, F, productModule(W, K, V), blockTriangularEnd(V, a, W, b, x))) |
+    x ∈ linearMaps(W, K, V) }
+
+-- Hall.blockAverage F a b: the mean of F over the block triangular
+-- endomorphisms with diagonal blocks a (on V) and b (on W).
+def blockAverageAt (K F V a W b : Set) : Set :=
+  finMean(linearMaps(W, K, V), blockTerms(K, F, V, a, W, b))
+
+def blockAverage (K F p q : Set) : Set :=
+  blockAverageAt(K, F, coordSpace(K, fst(p)), matEnd(K, p), coordSpace(K, fst(q)), matEnd(K, q))
+
+-- The class function b ↦ blockAverage F a b, for a fixed endomorphism a.
+def blockSlice (K F V a : Set) : Set :=
+  { (q, blockAverageAt(K, F, V, a, coordSpace(K, fst(q)), matEnd(K, q))) |
+    q ∈ squareMatrixPairs(K) }
+
+-- Hall.moebius: the inverse μ of 𝟙 for the induction product
+-- (hallMoebius.spec), and Hall.mulMu F = F · μ pointwise.
+def hallMoebiusCandidates (K : Set) : Set :=
+  { μ ∈ hallFunctions(K) | hallMul(K, μ, constOne(K)) = hallOne(K) }
+
+def hallMoebius (K : Set) : Set := ⋃(hallMoebiusCandidates(K))
+
+def mulMu (K F : Set) : Set := { (p, ℂ[F(p) * hallMoebius(K)(p)]) | p ∈ squareMatrixPairs(K) }
+
+-- Hall.IsCuspidal F: blockAverage F a b = 0 whenever both blocks have
+-- nonzero dimension.
+predicate IsCuspidal (K F : Set) :=
+  ∀ p ∈ squareMatrixPairs(K), ∀ q ∈ squareMatrixPairs(K),
+    fst(p) ≠ (0:N) → fst(q) ≠ (0:N) → blockAverage(K, F, p, q) = complexZero
+
+-- Hall.rankInner n F H: the mean over GLₙ(K) of conj F(g) · H(g).
+def rankInnerTerms (K n F H : Set) : Set :=
+  { (g, ℂ[complexConj(F((n, g))) * H((n, g))]) | g ∈ invertibleMatrices(K, n) }
+
+def rankInner (K n F H : Set) : Set := finMean(invertibleMatrices(K, n), rankInnerTerms(K, n, F, H))
+
+-- Hall.skew n F H: a ↦ rankInner n F (b ↦ blockAverage H a b).
+def skew (K n F H : Set) : Set :=
+  { (p, rankInner(K, n, F, blockSlice(K, H, coordSpace(K, fst(p)), matEnd(K, p)))) |
+    p ∈ squareMatrixPairs(K) }
+
+-- Section: The Brauer lift and the cuspidal function
+-- The roots in L of the characteristic polynomial of A, with multiplicity:
+-- the sum Σ_x mult(x) η(x) over its roots x in L (aroots K).
+def charpolyInExtension (E n A : Set) : Set :=
+  polyMap(Algebra.base(E), Algebra.ring(E), Algebra.map(E))(matCharpoly(Algebra.base(E), n, A))
+
+def brauerTerms (E η P : Set) : Set :=
+  { (x, ℂ[csLGNat(polyRootMultiplicity(Algebra.ring(E), P, x)) * η(x)]) |
+    x ∈ polyRootSet(Algebra.ring(E), P) }
+
+def rootSum (E η P : Set) : Set := csLGSum(polyRootSet(Algebra.ring(E), P), brauerTerms(E, η, P))
+
+-- Hall.brauerLift k η: the class function sending A to the sum of η over
+-- the roots in L of its characteristic polynomial, with multiplicity.
+def brauerLift (E η : Set) : Set :=
+  { (p, rootSum(E, η, charpolyInExtension(E, fst(p), snd(p)))) |
+    p ∈ squareMatrixPairs(Algebra.base(E)) }
+
+-- Hall.greenCuspidal k η = (β_η · μ) ∗ 𝟙.
+def greenCuspidal (E η : Set) : Set :=
+  hallMul(Algebra.base(E), mulMu(Algebra.base(E), brauerLift(E, η)),
+    constOne(Algebra.base(E)))
+
+-- Section: Values at endomorphisms
+-- simClassOf_out and simClassOf_eq_iff: hallAt does not depend on the
+-- basis, and is F itself at the coordinate endomorphism of a matrix.
+theorem hallAt.basis (K F V g n b : Set)
+  requires field : Field(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hg : g ∈ linearMaps(V, K, V)
+  requires natural : n ∈ ℕ
+  requires basis : ModuleBasis(V, K, n, b)
+  shows hallAt(K, F, V, g) = F((n, linearToMatrix(V, K, V, n, b, n, b, g)))
+proof
+  sorry
+
+theorem hallAt.matrix (K F p : Set)
+  requires field : Field(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hp : p ∈ squareMatrixPairs(K)
+  shows hallAt(K, F, coordSpace(K, fst(p)), matEnd(K, p)) = F(p)
+proof
+  sorry
+
+-- simClassOf_eq_of_equiv: intertwined endomorphisms have the same values.
+theorem hallAt.equiv (K F V g V2 g2 e : Set)
+  requires field : Field(K)
+  requires finite : FiniteDimensional(V, K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hg : g ∈ linearMaps(V, K, V)
+  requires hg2 : g2 ∈ linearMaps(V2, K, V2)
+  requires he : LinearEquiv(e, V, K, V2)
+  requires intertwines : ∀ x ∈ Module.carrier(V), e(g(x)) = g2(e(x))
+  shows hallAt(K, F, V, g) = hallAt(K, F, V2, g2)
+proof
+  sorry
+
+-- endCharpoly does not depend on the basis.
+theorem endCharpoly.basis (K V g n b : Set)
+  requires field : Field(K)
+  requires hg : g ∈ linearMaps(V, K, V)
+  requires natural : n ∈ ℕ
+  requires basis : ModuleBasis(V, K, n, b)
+  shows endCharpoly(K, V, g) = matCharpoly(K, n, linearToMatrix(V, K, V, n, b, n, b, g))
+proof
+  sorry
+
+-- simClassOf_eq_dualMap: a matrix is similar to its transpose, so every
+-- class function takes the same value at A and Aᵀ.
+theorem hallFunctions.transpose (K F n A : Set)
+  requires field : Field(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires natural : n ∈ ℕ
+  requires hA : A ∈ matrixSpace(K, n, n)
+  shows F((n, matTranspose(K, n, n, A))) = F((n, A))
+proof
+  sorry
+
+-- Hall.charpoly_endOnSub_mul_endOnQuot: χ(g|U) χ(g|V/U) = χ(g).
+theorem endCharpoly.sub_mul_quot (K V g U : Set)
+  requires field : Field(K)
+  requires finite : FiniteDimensional(V, K)
+  requires hg : g ∈ linearMaps(V, K, V)
+  requires hU : U ∈ stableSubspaces(K, V, g)
+  shows call2(Ring.mul(polynomialRing(K, {0})),
+      endCharpoly(K, subModuleOf(K, V, U), endOnSub(U, g)),
+      endCharpoly(K, quotModuleOf(K, V, U), endOnQuot(V, U, g))) =
+    endCharpoly(K, V, g)
+proof
+  sorry
+
+-- Section: The ring
+-- The induction product and the pointwise operations keep class functions.
+theorem hallMul.closed (K F H : Set)
+  requires field : FiniteField(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  shows hallMul(K, F, H) ∈ hallFunctions(K)
+proof
+  sorry
+
+-- Hall.mul_simClassOf: (F ∗ H)(g) = Σ_W F(g|W) H(g|V/W) at every
+-- endomorphism g of a finite-dimensional space.
+theorem hallMul.at (K F H V g : Set)
+  requires field : FiniteField(K)
+  requires finite : FiniteDimensional(V, K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  requires hg : g ∈ linearMaps(V, K, V)
+  shows hallAt(K, hallMul(K, F, H), V, g) = inductionSum(K, F, H, V, g)
+proof
+  sorry
+
+-- The CommRing instance on Hall k (and its ℂ-algebra structure).
+theorem hallRing.comm_ring (K : Set)
+  requires field : FiniteField(K)
+  shows CommRing(hallRing(K))
+proof
+  sorry
+
+theorem hallRing.smul_mul (K a F H : Set)
+  requires field : FiniteField(K)
+  requires ha : a ∈ complexCarrier
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  shows hallMul(K, hallSmul(K, a, F), H) = hallSmul(K, a, hallMul(K, F, H))
+proof
+  sorry
+
+-- Hall.one_apply: the unit is 1 on the class of dimension 0, else 0.
+theorem hallOne.value (K p : Set)
+  requires field : Field(K)
+  requires hp : p ∈ squareMatrixPairs(K)
+  shows (fst(p) = (0:N) → hallOne(K)(p) = complexOne) ∧
+    (fst(p) ≠ (0:N) → hallOne(K)(p) = complexZero)
+proof
+  sorry
+
+-- Hall.mul_apply_eq_zero_of_dim_lt: if F vanishes below dimension m and
+-- H below dimension n, then F ∗ H vanishes below dimension m + n.
+theorem hallMul.vanish_below (K F H m n : Set)
+  requires field : FiniteField(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  requires hm : m ∈ ℕ
+  requires hn : n ∈ ℕ
+  requires lowF : ∀ p ∈ squareMatrixPairs(K), (fst(p):N) < (m:N) → F(p) = complexZero
+  requires lowH : ∀ p ∈ squareMatrixPairs(K), (fst(p):N) < (n:N) → H(p) = complexZero
+  shows ∀ p ∈ squareMatrixPairs(K), (fst(p):N) < add(m, n) →
+    hallMul(K, F, H)(p) = complexZero
+proof
+  sorry
+
+-- Hall.isUnit_constOne: over a finite field 𝟙 is invertible; μ is its
+-- unique inverse.
+theorem hallMoebius.spec (K : Set)
+  requires field : FiniteField(K)
+  shows hallMoebius(K) ∈ hallFunctions(K) ∧
+    hallMul(K, hallMoebius(K), constOne(K)) = hallOne(K) ∧
+    ∀ μ ∈ hallFunctions(K), hallMul(K, μ, constOne(K)) = hallOne(K) → μ = hallMoebius(K)
+proof
+  sorry
+
+-- Section: The Mackey formula
+-- Hall.blockAverage_simClassOf: blockAverage at classes is the average at
+-- the endomorphisms themselves.
+theorem blockAverageAt.basis (K F V a W b : Set)
+  requires field : FiniteField(K)
+  requires finiteV : FiniteDimensional(V, K)
+  requires finiteW : FiniteDimensional(W, K)
+  requires hF : F ∈ hallFunctions(K)
+  requires ha : a ∈ linearMaps(V, K, V)
+  requires hb : b ∈ linearMaps(W, K, W)
+  shows blockAverageAt(K, F, V, a, W, b) =
+    hallAt(K, blockSlice(K, F, V, a), W, b)
+proof
+  sorry
+
+-- Hall.blockAverage_mul (Mackey formula): δ(F ∗ H)(a, b) =
+-- Σ_{A a-stable} (δF(a|A, ·) ∗ δH(a|V/A, ·))(b).
+def mackeyTerms (K F H V a W b : Set) : Set :=
+  { (A, hallAt(K, hallMul(K, blockSlice(K, F, subModuleOf(K, V, A), endOnSub(A, a)),
+      blockSlice(K, H, quotModuleOf(K, V, A), endOnQuot(V, A, a))), W, b)) |
+    A ∈ stableSubspaces(K, V, a) }
+
+theorem blockAverageAt.mul (K F H V a W b : Set)
+  requires field : FiniteField(K)
+  requires finiteV : FiniteDimensional(V, K)
+  requires finiteW : FiniteDimensional(W, K)
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  requires ha : a ∈ linearMaps(V, K, V)
+  requires hb : b ∈ linearMaps(W, K, W)
+  shows blockAverageAt(K, hallMul(K, F, H), V, a, W, b) =
+    csLGSum(stableSubspaces(K, V, a), mackeyTerms(K, F, H, V, a, W, b))
+proof
+  sorry
+
+-- Hall.blockAverage_of_dim_eq_zero: a block of dimension 0 averages to F.
+theorem blockAverage.dim_zero (K F o p : Set)
+  requires field : FiniteField(K)
+  requires hF : F ∈ hallFunctions(K)
+  requires ho : o ∈ squareMatrixPairs(K)
+  requires hp : p ∈ squareMatrixPairs(K)
+  requires zero : fst(o) = (0:N)
+  shows blockAverage(K, F, o, p) = F(p) ∧ blockAverage(K, F, p, o) = F(p)
+proof
+  sorry
+
+-- Section: Frobenius reciprocity
+-- Hall.classInner_evalGL: the class inner product on GLₙ(K) of evalGL F
+-- and evalGL H is rankInner n F H.
+theorem classInner.evalGL (K n F H : Set)
+  requires field : FiniteField(K)
+  requires natural : n ∈ ℕ
+  requires hF : F ∈ hallFunctions(K)
+  requires hH : H ∈ hallFunctions(K)
+  shows classInner(generalLinearGroup(K, n), evalGL(K, n, F), evalGL(K, n, H)) =
+    rankInner(K, n, F, H)
+proof
+  sorry
+
+-- evalGL F is a class function on GLₙ(K) (Shintani/LabelCharacters.lean,
+-- evalGL_conj), and every class function on GLₙ(K) is one
+-- (exists_eq_evalGL).
+theorem evalGL.class_function (K n F : Set)
+  requires field : FiniteField(K)
+  requires natural : n ∈ ℕ
+  requires hF : F ∈ hallFunctions(K)
+  shows IsClassFunction(generalLinearGroup(K, n), evalGL(K, n, F))
+proof
+  sorry
+
+theorem evalGL.surjective (K n Y : Set)
+  requires field : FiniteField(K)
+  requires natural : n ∈ ℕ
+  requires hY : IsClassFunction(generalLinearGroup(K, n), Y)
+  shows ∃ X ∈ hallFunctions(K), Y = evalGL(K, n, X)
+proof
+  sorry
+
+-- Hall.rankInner_mul_eq_sum_skew: ⟨A ∗ B, X⟩ₙ = Σ_{i+j=n} ⟨A, skew j B X⟩ᵢ.
+def reciprocityTerms (K n X A B : Set) : Set :=
+  { (i, rankInner(K, i, A, skew(K, sub(n, i), B, X))) | i ∈ succ(n) }
+
+theorem rankInner.mul_eq_sum_skew (K n X A B : Set)
+  requires field : FiniteField(K)
+  requires natural : n ∈ ℕ
+  requires hX : X ∈ hallFunctions(K)
+  requires hA : A ∈ hallFunctions(K)
+  requires hB : B ∈ hallFunctions(K)
+  shows rankInner(K, n, hallMul(K, A, B), X) = csLGSum(succ(n), reciprocityTerms(K, n, X, A, B))
+proof
+  sorry
+
+end Hall

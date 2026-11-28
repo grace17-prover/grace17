@@ -1,0 +1,261 @@
+-- Characters of finite groups as the local representation theory of GLₙ
+-- uses them: means and the inner product of complex functions on a finite
+-- set, class functions, characters of finite-dimensional complex
+-- representations and their spans over a coefficient set, the complex
+-- group algebra with its convolution, central idempotents, and orthogonal
+-- families of idempotents.
+-- Source: STAND-IN for grh-compact/src/Lib/General/Combinatorics/Average.lean
+-- (finMean, classInner, groupAlgElem, IsChar, IsClassFunction, IsIrrChar),
+-- Lib/General/Groups/VirtualCharacters.lean (virtualChars,
+-- isChar_of_mem_virtualChars), Lib/General/Groups/CentralProjections.lean
+-- (IsCentralProj, piTensorElem) and Mathlib's OrthogonalIdempotents; stated
+-- here for GRH.LocalGL until GRH.General.Groups exists.
+-- Encoding. A finite group is a group record G with finite carrier. A
+-- complex function on G is an element of functionSpace(G.carrier, ℂ); an
+-- element of the group algebra ℂ[G] is the same function, its coefficient
+-- family (groupAlgElem f = Σ f(g) g), with the convolution product
+-- (a b)(g) = Σ_h a(h) b(h⁻¹g). A character is the trace of a homomorphism
+-- G → GLₙ(ℂ) for some natural n (every finite-dimensional complex
+-- representation is isomorphic to one on ℂⁿ). The coefficient semiring S
+-- of virtualChars S G is its image Z ⊆ ℂ (the naturals or the integers
+-- read in ℂ).
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.GroupChars
+import GRH.Characters.Mul
+import GRH.Normed.Groups
+
+section GroupChars
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Sums and means
+-- The complex sum Σ_{x ∈ V} w(x) over a finite set V.
+def csLGSum (V w : Set) : Set := groupFiniteSum(complexAdditiveGroup, V, w)
+
+-- The complex product Π_{x ∈ V} w(x) over a finite set V.
+def csLGProduct (V w : Set) : Set :=
+  finiteRingProduct(V, complexCarrier, complexAdd, complexZero, complexNeg,
+    complexMul, complexOne, w)
+
+-- A natural number read in ℂ.
+def csLGNat (n : Set) : Set := complexOfReal(realNat(n))
+
+-- Average.lean, finMean f: the sum of the values of f over the finite set
+-- V divided by the number of elements of V.
+def finMean (V w : Set) : Set := complexDiv(csLGSum(V, w), csLGNat(cardinality(V)))
+
+-- The naturals and the integers read in ℂ, the coefficient sets ℕ and ℤ.
+def natComplexes : Set := { csLGNat(n) | n ∈ ℕ }
+def intComplexes : Set := { complexOfReal(realInt(a)) | a ∈ ℤ }
+
+-- Section: Class functions and the inner product
+-- A finite group.
+predicate FiniteGroup (G : Set) := Group(G) ∧ Finite(Group.carrier(G))
+
+-- The complex functions on G.
+def groupFunctions (G : Set) : Set := functionSpace(Group.carrier(G), complexCarrier)
+
+-- Average.lean, IsClassFunction f: f(xgx⁻¹) = f(g).
+predicate IsClassFunction (G f : Set) :=
+  f ∈ groupFunctions(G) ∧
+  ∀ g ∈ Group.carrier(G), ∀ x ∈ Group.carrier(G),
+    f(Group.mul(G)(Group.mul(G)(x, g), Group.inv(G)(x))) = f(g)
+
+-- Average.lean, classInner f h = mean over g of conj f(g) · h(g).
+def classInnerTerms (A f h : Set) : Set := { (g, ℂ[complexConj(f(g)) * h(g)]) | g ∈ A }
+
+def classInner (G f h : Set) : Set :=
+  finMean(Group.carrier(G), classInnerTerms(Group.carrier(G), f, h))
+
+-- Section: Characters
+-- Average.lean, IsChar f: f is the character g ↦ tr ρ(g) of a
+-- homomorphism ρ : G → GLₙ(ℂ).
+predicate IsChar (G f : Set) :=
+  f ∈ groupFunctions(G) ∧
+  ∃ n ∈ ℕ, ∃ ρ, GroupHom(ρ, G, generalLinearGroup(complexRing, n)) ∧
+    ∀ g ∈ Group.carrier(G), f(g) = matTrace(complexRing, n, ρ(g))
+
+-- The family t ↦ conj f(t) · h(ty) averaged in IsIrrChar.
+def irrCharTerms (G f h y : Set) : Set :=
+  { (t, ℂ[complexConj(f(t)) * h(Group.mul(G)(t, y))]) | t ∈ Group.carrier(G) }
+
+-- Average.lean, IsIrrChar f: f is a character with ⟨f, f⟩ = 1 and
+-- f(1) · mean_t conj f(t) h(ty) = ⟨f, h⟩ f(y) for every class function h.
+predicate IsIrrChar (G f : Set) :=
+  IsChar(G, f) ∧ classInner(G, f, f) = complexOne ∧
+  ∀ h, IsClassFunction(G, h) → ∀ y ∈ Group.carrier(G),
+    ℂ[f(Group.one(G)) * finMean(Group.carrier(G), irrCharTerms(G, f, h, y))] =
+      ℂ[classInner(G, f, h) * f(y)]
+
+-- VirtualCharacters.lean, virtualChars S G: the Z-linear combinations
+-- Σᵢ cᵢ χᵢ of finitely many characters, cᵢ ∈ Z.
+def virtualCharTerms (m c χ g : Set) : Set := { (i, ℂ[c(i) * χ(i)(g)]) | i ∈ m }
+
+predicate VirtualChar (Z G f : Set) :=
+  f ∈ groupFunctions(G) ∧
+  ∃ m ∈ ℕ, ∃ c ∈ functionSpace(m, Z), ∃ χ ∈ functionSpace(m, groupFunctions(G)),
+    (∀ i ∈ m, IsChar(G, χ(i))) ∧
+    ∀ g ∈ Group.carrier(G), f(g) = csLGSum(m, virtualCharTerms(m, c, χ, g))
+
+def virtualChars (Z G : Set) : Set := { f ∈ groupFunctions(G) | VirtualChar(Z, G, f) }
+
+-- Section: The group algebra
+-- The convolution (a b)(g) = Σ_h a(h) b(h⁻¹g), the product of ℂ[G].
+def convolutionTerms (G a b g : Set) : Set :=
+  { (h, ℂ[a(h) * b(Group.mul(G)(Group.inv(G)(h), g))]) | h ∈ Group.carrier(G) }
+
+def groupAlgMul (G a b : Set) : Set :=
+  { (g, csLGSum(Group.carrier(G), convolutionTerms(G, a, b, g))) | g ∈ Group.carrier(G) }
+
+-- The unit δ₁ of ℂ[G] and the zero element.
+def groupAlgOneValue (G g : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | (g = Group.one(G) ∧ c = complexOne) ∨
+    (g ≠ Group.one(G) ∧ c = complexZero) })
+
+def groupAlgOne (G : Set) : Set := { (g, groupAlgOneValue(G, g)) | g ∈ Group.carrier(G) }
+
+def groupAlgZero (G : Set) : Set := Group.carrier(G) × {complexZero}
+
+-- Sums of elements of ℂ[G] over a finite index set.
+def groupAlgSumTerms (G I e g : Set) : Set := { (i, e(i)(g)) | i ∈ I }
+
+def groupAlgSum (G I e : Set) : Set :=
+  { (g, csLGSum(I, groupAlgSumTerms(G, I, e, g))) | g ∈ Group.carrier(G) }
+
+-- CentralProjections.lean, IsCentralProj e: e is an idempotent of ℂ[G]
+-- whose coefficient function is a class function.
+predicate IsCentralProj (G e : Set) :=
+  IsClassFunction(G, e) ∧ groupAlgMul(G, e, e) = e
+
+-- Mathlib's OrthogonalIdempotents e: each e(i), i ∈ I, is idempotent and
+-- e(i) e(j) = 0 for i ≠ j.
+predicate OrthogonalIdempotents (G I e : Set) :=
+  (∀ i ∈ I, e(i) ∈ groupFunctions(G) ∧ groupAlgMul(G, e(i), e(i)) = e(i)) ∧
+  (∀ i ∈ I, ∀ j ∈ I, i ≠ j → groupAlgMul(G, e(i), e(j)) = groupAlgZero(G))
+
+-- Section: Products of groups
+-- The group ∏_{w ∈ I} G_w of a finite family of groups, coordinatewise.
+def piGroupCarriers (I G : Set) : Set := { Group.carrier(G(w)) | w ∈ I }
+
+def piGroupCarrier (I G : Set) : Set :=
+  { s ∈ functionSpace(I, ⋃(piGroupCarriers(I, G))) |
+    ∀ w ∈ I, s(w) ∈ Group.carrier(G(w)) }
+
+def piGroupMul (I G : Set) : Set :=
+  { p ∈ (piGroupCarrier(I, G) × piGroupCarrier(I, G)) × piGroupCarrier(I, G) |
+    ∀ w ∈ I, snd(p)(w) = Group.mul(G(w))(fst(fst(p))(w), snd(fst(p))(w)) }
+
+def piGroupOne (I G : Set) : Set := { (w, Group.one(G(w))) | w ∈ I }
+
+def piGroupInv (I G : Set) : Set :=
+  { p ∈ piGroupCarrier(I, G) × piGroupCarrier(I, G) |
+    ∀ w ∈ I, snd(p)(w) = Group.inv(G(w))(fst(p)(w)) }
+
+def piGroup (I G : Set) : Set :=
+  Group.mk(piGroupCarrier(I, G), piGroupMul(I, G), piGroupOne(I, G), piGroupInv(I, G))
+
+-- CentralProjections.lean, piTensorElem x: the element ⊗_w x_w of
+-- ℂ[∏ G_w], whose coefficient at (s_w) is Π_w x_w(s_w).
+def piTensorTerms (I x s : Set) : Set := { (w, x(w)(s(w))) | w ∈ I }
+
+def piTensorElem (I G x : Set) : Set :=
+  { (s, csLGProduct(I, piTensorTerms(I, x, s))) |
+    s ∈ piGroupCarrier(I, G) }
+
+-- Section: Laws
+-- VirtualCharacters.lean, isChar_of_mem_virtualChars: a natural
+-- combination of characters is a character.
+theorem virtualChars.nat_isChar (G f : Set)
+  requires finite : FiniteGroup(G)
+  requires hf : f ∈ virtualChars(natComplexes, G)
+  shows IsChar(G, f)
+proof
+  sorry
+
+-- Characters are class functions; the trivial character is a character.
+theorem IsChar.class_function (G f : Set)
+  requires finite : FiniteGroup(G)
+  requires hf : IsChar(G, f)
+  shows IsClassFunction(G, f)
+proof
+  sorry
+
+theorem IsChar.one (G : Set)
+  requires finite : FiniteGroup(G)
+  shows IsChar(G, Group.carrier(G) × {complexOne})
+proof
+  sorry
+
+-- Characters are virtual characters over any coefficient set holding 1,
+-- and virtual characters over the integers are closed under subtraction
+-- and products (virtualChars is a subalgebra).
+theorem IsChar.virtual (Z G f : Set)
+  requires finite : FiniteGroup(G)
+  requires hZ : complexOne ∈ Z
+  requires hf : IsChar(G, f)
+  shows f ∈ virtualChars(Z, G)
+proof
+  sorry
+
+def groupFunctionSub (G f h : Set) : Set :=
+  { (g, ℂ[f(g) - h(g)]) | g ∈ Group.carrier(G) }
+
+def groupFunctionMul (G f h : Set) : Set :=
+  { (g, ℂ[f(g) * h(g)]) | g ∈ Group.carrier(G) }
+
+theorem virtualChars.sub (G f h : Set)
+  requires finite : FiniteGroup(G)
+  requires hf : f ∈ virtualChars(intComplexes, G)
+  requires hh : h ∈ virtualChars(intComplexes, G)
+  shows groupFunctionSub(G, f, h) ∈ virtualChars(intComplexes, G)
+proof
+  sorry
+
+theorem virtualChars.mul (Z G f h : Set)
+  requires finite : FiniteGroup(G)
+  requires semiring : Z = natComplexes ∨ Z = intComplexes
+  requires hf : f ∈ virtualChars(Z, G)
+  requires hh : h ∈ virtualChars(Z, G)
+  shows groupFunctionMul(G, f, h) ∈ virtualChars(Z, G)
+proof
+  sorry
+
+-- The irreducibility criterion: a virtual character over ℤ with
+-- ⟨f, f⟩ = 1 and f(1) real and positive is an irreducible character.
+theorem virtualChars.irreducible_criterion (G f : Set)
+  requires finite : FiniteGroup(G)
+  requires hf : f ∈ virtualChars(intComplexes, G)
+  requires norm : classInner(G, f, f) = complexOne
+  requires positive : (0:R) < complexRe(f(Group.one(G)))
+  shows IsIrrChar(G, f)
+proof
+  sorry
+
+-- MackeyFormula.lean, IsCentralProj.isChar: for a central idempotent e of
+-- ℂ[G], g ↦ |G| e(g) is a character.
+def scaledCoefficients (G e : Set) : Set :=
+  { (g, ℂ[csLGNat(cardinality(Group.carrier(G))) * e(g)]) | g ∈ Group.carrier(G) }
+
+theorem IsCentralProj.isChar (G e : Set)
+  requires finite : FiniteGroup(G)
+  requires central : IsCentralProj(G, e)
+  shows IsChar(G, scaledCoefficients(G, e))
+proof
+  sorry
+
+-- CentralProjections.lean: ⊗_w of central idempotents is a central
+-- idempotent of ℂ[∏ G_w].
+theorem piTensorElem.central (I G x : Set)
+  requires finiteI : Finite(I)
+  requires finite : ∀ w ∈ I, FiniteGroup(G(w))
+  requires central : ∀ w ∈ I, IsCentralProj(G(w), x(w))
+  shows IsCentralProj(piGroup(I, G), piTensorElem(I, G, x))
+proof
+  sorry
+
+end GroupChars
