@@ -1,0 +1,563 @@
+-- Hecke L-functions over a number field K, for real s: the finite part ψ
+-- of a Hecke character of type n (open kernel, ψ(x) ∏_σ (σx/|σx|)^{n_σ} = 1
+-- on Kˣ), its coefficients ψ(ϖ_v) at the primes, the Euler product
+-- L^S(s, ψ) = exp(−Σ_v log(1 − a_v q_v^{−s})) for s > 1 extended to s = 1
+-- by its limit, Dirichlet density over the primes of degree one, the
+-- Euler product of a multiplicative function on ideals; Tate's finite
+-- integral, Hecke's theorem at s = 1 (continuation, density, and
+-- L^S(s, ψ) ≠ 0 for s ≥ 1 when ψ² ≠ 1); and the adelic theta sum of a
+-- tent, the Riemann-sum estimate that replaces Poisson summation.
+-- Source: grh-compact/src/Lib/ClassField/HeckeL/EulerProduct.lean
+-- (IsHeckeOfType, CharUnramifiedAt, heckeCoeff, eulerProd,
+-- HasPrimeDensity and their lemmas), HeckeL/HeckeContinuation.lean
+-- (apply_locIdele_eq_zpow, norm_eq_one, norm_heckeCoeff_le, pow, ne_one,
+-- tate_integral, exists_analyticAt_one_eulerProd, exists_hasPrimeDensity,
+-- eulerProd_ne_zero), HeckeL/IdelicThetaSum.lean (principalIdeles,
+-- ideleModule, adelicTent, ideleModule_principal_eq_one,
+-- exists_abs_sub_thetaSum_le). Part of: "Hecke L-functions: Euler
+-- product, continuation to s = 1, non-vanishing, prime densities (known
+-- result; see Lib.ClassField.HeckeL.HeckeContinuation)."
+-- Encoding. The source's PlaceEmbedding K (one embedding Φ_w chosen at
+-- each infinite place w) is a set Φ of embeddings meeting each infinite
+-- place once (PlaceEmbedding), and the type n : InfinitePlace → ℤ is a
+-- function on Φ. The coefficients use a uniformiser family ϖ
+-- (GRH.ClassField.Ideles, UniformizerFamily) for the source's chosen
+-- uniformisers; the statements hold for every family. The source's
+-- eulerProd is Mathlib's extendFrom (Ioi 1): for s > 1 the exponential
+-- of the series, and at s = 1 its limit from the right; here eulerProd at
+-- 1 is that limit when it exists (the union of the limits, empty
+-- otherwise), and eulerProd is empty below 1, where the source's value is
+-- not used. Families on the finite places are functions on finPlaces(K).
+-- Not stated: sum_inv_minFac_sq_le_finrank and log_euler_factor_bounds,
+-- technical estimates inside the proofs.
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.HeckeL
+import GRH.ClassField.Ideles
+import GRH.Proof.Forward.Characters
+import GRH.Calculus.Analytic
+
+section HeckeL
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Hecke characters of type n
+-- CoprimeValuation.lean, PlaceEmbedding K: Φ contains exactly one complex
+-- embedding in each infinite place {σ, σ̄}.
+predicate PlaceEmbedding (K Φ : Set) :=
+  NumberField(K) ∧ Φ ⊆ complexEmbeddings(K) ∧
+  (∀ w ∈ infinitePlaces(K), ∃ σ ∈ Φ, infinitePlaceOf(K, σ) = w) ∧
+  (∀ σ ∈ Φ, ∀ τ ∈ Φ, infinitePlaceOf(K, σ) = infinitePlaceOf(K, τ) → σ = τ)
+
+-- The phase σ(x)/|σ(x)| of x at σ, raised to n_σ.
+def phaseOf (σ x : Set) : Set := complexDiv(σ(x), complexOfReal(complexAbs(σ(x))))
+
+def heckeTypeFactors (Φ n x : Set) : Set :=
+  { (σ, complexIntPow(phaseOf(σ, x), n(σ))) | σ ∈ Φ }
+
+-- EulerProduct.lean, IsHeckeOfType ψ n: ψ has open kernel and
+-- ψ(x) ∏_w (Φ_w(x)/|Φ_w(x)|)^{n_w} = 1 for x ∈ Kˣ.
+predicate IsHeckeOfType (K Φ ψ n : Set) :=
+  PlaceEmbedding(K, Φ) ∧ OpenKernelCharacter(K, ψ) ∧ FunctionBetween(n, Φ, ℤ) ∧
+  (∀ x ∈ fieldUnits(K),
+    ℂ[ψ(principalIdele(K, x)) * charProduct(Φ, heckeTypeFactors(Φ, n, x))] = complexOne)
+
+-- The trivial character, ψ ≠ 1, and the power ψ^d; the type d·n.
+predicate NontrivialIdeleChar (K ψ : Set) :=
+  ∃ a ∈ finIdeleUnits(K), ψ(a) ≠ complexOne
+
+def ideleCharPow (K ψ : Set, d : Nat) : Set := { (a, ℂ[ψ(a) ^ d]) | a ∈ finIdeleUnits(K) }
+
+def typeScale (Φ n : Set, d : Nat) : Set := { (σ, integerMul(integerOfNat(d), n(σ))) | σ ∈ Φ }
+
+predicate NonzeroType (Φ n : Set) := ∃ σ ∈ Φ, n(σ) ≠ integerZero
+
+-- Section: Coefficients and Euler products
+-- The finite places outside and inside S.
+def placesOff (K S : Set) : Set := finPlaces(K) ∖ S
+
+def placesIn (K S : Set) : Set := finPlaces(K) ∩ S
+
+-- EulerProduct.lean, heckeCoeff ψ S: v ↦ ψ(locIdele v ϖ_v) off S, 0 on S.
+def zeroFamilyOn (A : Set) : Set := { (v, complexZero) | v ∈ A }
+
+def heckeCoeffOff (K ψ ϖ S : Set) : Set :=
+  { (v, ψ(locIdele(K, v, ϖ(v)))) | v ∈ placesOff(K, S) }
+
+def heckeCoeff (K ψ ϖ S : Set) : Set := heckeCoeffOff(K, ψ, ϖ, S) ∪ zeroFamilyOn(placesIn(K, S))
+
+-- q_v^{−s} for real s, as a complex number.
+def placeNormPow (K v s : Set) : Set :=
+  complexOfReal(realRpow(realNat(placeNorm(K, v)), R[-s]))
+
+-- The terms log(1 − a_v q_v^{−s}), and for s > 1 the Euler product
+-- exp(−Σ_v log(1 − a_v q_v^{−s})).
+def eulerLogTerms (K a s : Set) : Set :=
+  { (v, complexLog(ℂ[1 - a(v) * placeNormPow(K, v, s)])) | v ∈ finPlaces(K) }
+
+def eulerProdAbove (K a s : Set) : Set :=
+  complexExp(ℂ[-complexTsum(eulerLogTerms(K, a, s), finPlaces(K))])
+
+def openRayOne : Set := { s ∈ ℝ | realOne < s }
+
+def closedRayOne : Set := { s ∈ ℝ | realOne ≤ s }
+
+def eulerProdMap (K a : Set) : Set := { (s, eulerProdAbove(K, a, s)) | s ∈ openRayOne }
+
+-- The limits of the Euler product as s ↓ 1.
+def eulerProdLimits (K a : Set) : Set :=
+  { c ∈ complexCarrier | Tendsto(eulerProdMap(K, a), ℝ,
+      nhdsWithin(realLine, realOne, openRayOne), nhds(complexSpace, c)) }
+
+-- EulerProduct.lean, eulerProd a: extendFrom (Ioi 1) of the Euler product.
+def eulerProd (K a s : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | (realOne < s ∧ c = eulerProdAbove(K, a, s)) ∨
+    (s = realOne ∧ c ∈ eulerProdLimits(K, a)) })
+
+def eulerProdOn (K a : Set) : Set := { (s, eulerProd(K, a, s)) | s ∈ closedRayOne }
+
+-- The places of prime norm (primes of degree one), and the terms
+-- a_v q_v^{−s} restricted to them.
+def primeNormPlaces (K : Set) : Set := { v ∈ finPlaces(K) | Prime(placeNorm(K, v)) }
+
+def primeDensityTermsOn (K a s : Set) : Set :=
+  { (v, ℂ[a(v) * placeNormPow(K, v, s)]) | v ∈ primeNormPlaces(K) }
+
+def primeDensityTerms (K a s : Set) : Set :=
+  primeDensityTermsOn(K, a, s) ∪ zeroFamilyOn(placesOff(K, primeNormPlaces(K)))
+
+-- EulerProduct.lean, HasPrimeDensity a l: Σ_{q_v prime} a_v q_v^{−s} converges
+-- and equals −l log(s − 1) + O(1) as s ↓ 1.
+predicate HasPrimeDensity (K a l : Set) :=
+  ∃ x, ∃ C ∈ ℝ, ∃ δ ∈ ℝ, realZero < δ ∧ (∀ s ∈ ℝ, realOne < s → s < R[1 + δ] →
+    x(s) ∈ ℝ ∧ abs(x(s)) ≤ C ∧
+    ComplexHasSum(primeDensityTerms(K, a, s), finPlaces(K),
+      ℂ[complexOfReal(x(s)) - l * complexOfReal(realLog(R[s - 1]))]))
+
+-- A family bounded by 1.
+predicate UnitBoundedFamily (K a : Set) :=
+  FunctionBetween(a, finPlaces(K), complexCarrier) ∧
+  (∀ v ∈ finPlaces(K), complexAbs(a(v)) ≤ realOne)
+
+-- The family a with the coefficients at Q put to zero, and the finite
+-- product P(s) = ∏_{w∈Q} (1 − a_w q_w^{−s}).
+def familyOn (a A : Set) : Set := { (v, a(v)) | v ∈ A }
+
+def familyErase (K a Q : Set) : Set :=
+  familyOn(a, placesOff(K, Q)) ∪ zeroFamilyOn(placesIn(K, Q))
+
+def eraseFactors (K a Q s : Set) : Set :=
+  { (w, ℂ[1 - a(w) * placeNormPow(K, w, s)]) | w ∈ Q }
+
+def eraseProduct (K a Q : Set) : Set :=
+  { (s, complexFiniteProduct(Q, eraseFactors(K, a, Q, s))) | s ∈ ℝ }
+
+-- The inverse Euler factors (1 − a_v q_v^{−s})⁻¹ over a finite set F.
+def eulerFactorsInv (K a s : Set) : Set :=
+  { (v, complexInv(ℂ[1 - a(v) * placeNormPow(K, v, s)])) | v ∈ finPlaces(K) }
+
+-- The nonzero ideals of 𝓞_K, and a multiplicative function on them
+-- (a monoid homomorphism Ideal (𝓞 K) →* ℂ, read on nonzero ideals).
+def nonzeroIdeals (K : Set) : Set :=
+  { I ∈ 𝒫(ringOfIntegers(K)) | Ideal(ringOfIntegersRing(K), I) ∧
+    I ≠ {Ring.zero(ringOfIntegersRing(K))} }
+
+predicate IdealCharacter (K χ : Set) :=
+  FunctionBetween(χ, nonzeroIdeals(K), complexCarrier) ∧
+  χ(ringOfIntegers(K)) = complexOne ∧
+  (∀ I ∈ nonzeroIdeals(K), ∀ J ∈ nonzeroIdeals(K),
+    χ(idealProduct(ringOfIntegersRing(K), I, J)) = ℂ[χ(I) * χ(J)])
+
+def idealNormPow (K I s : Set) : Set :=
+  complexOfReal(realRpow(realNat(absNorm(K, I)), R[-s]))
+
+def idealSeriesTerms (K χ s : Set) : Set :=
+  { (I, ℂ[χ(I) * idealNormPow(K, I, s)]) | I ∈ nonzeroIdeals(K) }
+
+def idealNormPowReal (K s : Set) : Set :=
+  { (I, realRpow(realNat(absNorm(K, I)), R[-s])) | I ∈ nonzeroIdeals(K) }
+
+def restrictToPlaces (K χ : Set) : Set := { (v, χ(v)) | v ∈ finPlaces(K) }
+
+-- Weighted sums Σ_i w_i a_i of finitely many families, and the
+-- constant family c.
+def weightedTerms (ι w a v : Set) : Set := { (i, ℂ[w(i) * a(i)(v)]) | i ∈ ι }
+
+def weightedFamily (K ι w a : Set) : Set :=
+  { (v, finiteRingSum(ι, complexCarrier, complexAdd, complexZero, complexNeg,
+      complexMul, complexOne, weightedTerms(ι, w, a, v))) | v ∈ finPlaces(K) }
+
+def weightedLimitTerms (ι w l : Set) : Set := { (i, ℂ[w(i) * l(i)]) | i ∈ ι }
+
+def weightedLimit (ι w l : Set) : Set :=
+  finiteRingSum(ι, complexCarrier, complexAdd, complexZero, complexNeg,
+    complexMul, complexOne, weightedLimitTerms(ι, w, l))
+
+def constantFamily (K c : Set) : Set := { (v, c) | v ∈ finPlaces(K) }
+
+-- The family v ↦ c·#{w above v : q_w = q_v} for an extension f : K → L.
+def degreeOneAbove (K L f v : Set) : Set :=
+  { w ∈ finPlaces(L) | placeBelow(K, L, f, w) = v ∧ placeNorm(L, w) = placeNorm(K, v) }
+
+def degreeOneCount (K L f c : Set) : Set :=
+  { (v, ℂ[c * complexOfReal(realNat(cardinality(degreeOneAbove(K, L, f, v))))]) |
+    v ∈ finPlaces(K) }
+
+-- (s − 1)^l Euler product, for real s > 1 and complex l.
+def scaledEulerProd (K a l : Set) : Set :=
+  { (s, ℂ[realCpow(R[s - 1], l) * eulerProd(K, a, s)]) | s ∈ openRayOne }
+
+-- Section: Tate's integral
+-- The integrand Z(x) = f(x) ψ(x) |x|^s on the finite ideles.
+def tateIntegrand (K f ψ s : Set) : Set :=
+  { (x, ℂ[f(x) * ψ(x) * complexOfReal(realRpow(finIdeleAbs(K, x), s))]) |
+    x ∈ finIdeleUnits(K) }
+
+-- The real measure μ(Ôˣ ∩ V).
+def tateVolume (K μ V : Set) : Set := ennToReal(μ(idelesUnitOff(K, ∅) ∩ V))
+
+-- Section: The adelic theta sum
+-- IdelicThetaSum.lean: the ideles (mixedSpace K)ˣ × (𝔸f K)ˣ, their
+-- topology, product, and the principal ideles (the image of Kˣ).
+def mixedUnits (K : Set) : Set :=
+  { u ∈ mixedSpace(K) | ∀ σ ∈ complexEmbeddings(K), u(σ) ≠ complexZero }
+
+def fullIdeles (K : Set) : Set := mixedUnits(K) × finIdeleUnits(K)
+
+def fullIdeleSpace (K : Set) : Set :=
+  productSpace(subspace(infiniteAdeleSpace(K), mixedUnits(K)), finIdeleSpace(K))
+
+def mixedMul (K u w : Set) : Set := { (σ, ℂ[u(σ) * w(σ)]) | σ ∈ complexEmbeddings(K) }
+
+def fullIdeleMul (K a b : Set) : Set :=
+  (mixedMul(K, fst(a), fst(b)), finMul(K, snd(a), snd(b)))
+
+def principalFullIdeles (K : Set) : Set :=
+  { (mixedEmbedding(K)(x), principalIdele(K, x)) | x ∈ fieldUnits(K) }
+
+-- IdelicThetaSum.lean, ideleModule: |N(a_∞)| · |a_f|_f.
+def ideleModule (K a : Set) : Set := R[mixedNorm(K, fst(a)) * finIdeleAbs(K, snd(a))]
+
+-- The sup distance from u to 1 in the mixed space, max_σ |u(σ) − 1|.
+def mixedDistOne (K u : Set) : Set :=
+  ⋃({ r ∈ ℝ | (∀ σ ∈ complexEmbeddings(K), complexAbs(ℂ[u(σ) - 1]) ≤ r) ∧
+    (∃ σ ∈ complexEmbeddings(K), complexAbs(ℂ[u(σ) - 1]) = r) })
+
+-- IdelicThetaSum.lean, adelicTent r d: on x = (x_∞, x_f), max(r − |x_∞ − 1|, 0)
+-- if d(x_f − 1) ∈ Ô, and 0 otherwise.
+def tentHeight (K r u : Set) : Set :=
+  ⋃({ t ∈ ℝ | (realZero ≤ R[r - mixedDistOne(K, u)] ∧ t = R[r - mixedDistOne(K, u)]) ∨
+    (R[r - mixedDistOne(K, u)] < realZero ∧ t = realZero) })
+
+def adelicTent (K r d x : Set) : Set :=
+  ⋃({ t ∈ ℝ | (finMul(K, d, finAdd(K, snd(x), finNeg(K, finOne(K)))) ∈ finInt(K) ∧
+      t = tentHeight(K, r, fst(x))) ∨
+    (finMul(K, d, finAdd(K, snd(x), finNeg(K, finOne(K)))) ∉ finInt(K) ∧ t = realZero) })
+
+-- Θ_r(b) = Σ_γ adelicTent r d (γ b) over the principal ideles γ.
+def thetaTerms (K r d b : Set) : Set :=
+  { (γ, adelicTent(K, r, d, fullIdeleMul(K, γ, b))) | γ ∈ principalFullIdeles(K) }
+
+def thetaSum (K r d b : Set) : Set := realTsum(thetaTerms(K, r, d, b), principalFullIdeles(K))
+
+end HeckeL
+
+-- Section: Euler products and densities
+section EulerProducts
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+variable (K : Set)
+hypothesis numberField : NumberField(K)
+
+-- summable_absNorm_rpow: Σ_I N(I)^{−s} converges for s > 1.
+theorem idealNormPow.summable (s : Real)
+  requires large : realOne < s
+  shows RealSummable(idealNormPowReal(K, s), nonzeroIdeals(K))
+proof
+  sorry
+
+-- eulerProd_eq_exp: for |a_v| ≤ 1 and s > 1 the series of logarithms
+-- converges and the Euler product is its exponential; the Euler product is
+-- continuous on s > 1.
+theorem eulerProd.eq_exp (a : Set, s : Real)
+  requires bounded : UnitBoundedFamily(K, a)
+  requires large : realOne < s
+  shows ComplexSummableFamily(eulerLogTerms(K, a, s), finPlaces(K)) ∧
+    eulerProd(K, a, s) = complexExp(ℂ[-complexTsum(eulerLogTerms(K, a, s), finPlaces(K))]) ∧
+    ContinuousAtPoint(eulerProdMap(K, a), realLine, complexSpace, s)
+proof
+  sorry
+
+-- hasProd_eulerProd: ∏_v (1 − a_v q_v^{−s})⁻¹ converges unconditionally to
+-- the Euler product: finite products over sets F ⊇ F₀ are within ε.
+theorem eulerProd.has_prod (a : Set, s ε : Real)
+  requires bounded : UnitBoundedFamily(K, a)
+  requires large : realOne < s
+  requires positive : realZero < ε
+  shows ∃ F0 ∈ 𝒫(finPlaces(K)), Finite(F0) ∧
+    (∀ F ∈ 𝒫(finPlaces(K)), Finite(F) → F0 ⊆ F →
+      complexAbs(ℂ[complexFiniteProduct(F, eulerFactorsInv(K, a, s)) -
+        eulerProd(K, a, s)]) < ε)
+proof
+  sorry
+
+-- eulerProd_erase: P(s) = ∏_{w∈Q}(1 − a_w q_w^{−s}) is analytic at 1 with
+-- P(1) ≠ 0, and erasing the coefficients at Q multiplies the Euler
+-- product by P(s).
+theorem eulerProd.erase (a Q : Set)
+  requires bounded : UnitBoundedFamily(K, a)
+  requires places : Q ⊆ finPlaces(K)
+  requires finite : Finite(Q)
+  shows RealAnalyticAt(eraseProduct(K, a, Q), realOne) ∧
+    eraseProduct(K, a, Q)(realOne) ≠ complexZero ∧
+    (∀ s ∈ ℝ, realOne < s →
+      eulerProd(K, familyErase(K, a, Q), s) = ℂ[eraseProduct(K, a, Q)(s) * eulerProd(K, a, s)])
+proof
+  sorry
+
+-- hasPrimeDensity_of_tendsto: if (s − 1)^l L(s) → c ≠ 0 as s ↓ 1, a has
+-- density l.
+theorem HasPrimeDensity.of_tendsto (a l c : Set)
+  requires bounded : UnitBoundedFamily(K, a)
+  requires complex : l ∈ complexCarrier
+  requires limit : c ∈ complexCarrier
+  requires nonzero : c ≠ complexZero
+  requires tendsto : Tendsto(scaledEulerProd(K, a, l), ℝ,
+    nhdsWithin(realLine, realOne, openRayOne), nhds(complexSpace, c))
+  shows HasPrimeDensity(K, a, l)
+proof
+  sorry
+
+-- abs_log_norm_eulerProd_le: for 2 ≤ σ ≤ s the Euler product is nonzero
+-- and |log |L(s)|| ≤ 2[K:ℚ] 2^{2−σ}.
+theorem eulerProd.log_abs_le (a : Set, σ s : Real)
+  requires bounded : UnitBoundedFamily(K, a)
+  requires two : R[2] ≤ σ
+  requires above : σ ≤ s
+  shows eulerProd(K, a, s) ≠ complexZero ∧
+    abs(realLog(complexAbs(eulerProd(K, a, s)))) ≤
+      R[2 * realNat(numberFieldDegree(K)) * realRpow(R[2], R[2 - σ])]
+proof
+  sorry
+
+-- hasSum_eulerProd: for χ multiplicative on ideals with |χ| ≤ 1 and s > 1,
+-- Σ_I χ(I) N(I)^{−s} = the Euler product of the χ(v).
+theorem eulerProd.dirichlet_series (χ : Set, s : Real)
+  requires character : IdealCharacter(K, χ)
+  requires bounded : ∀ I ∈ nonzeroIdeals(K), complexAbs(χ(I)) ≤ realOne
+  requires large : realOne < s
+  shows ComplexHasSum(idealSeriesTerms(K, χ, s), nonzeroIdeals(K),
+    eulerProd(K, restrictToPlaces(K, χ), s))
+proof
+  sorry
+
+-- HasPrimeDensity.sum: densities add under finite weighted sums.
+theorem HasPrimeDensity.weighted_sum (ι w a l : Set)
+  requires finite : Finite(ι)
+  requires weights : FunctionBetween(w, ι, complexCarrier)
+  requires each : ∀ i ∈ ι, HasPrimeDensity(K, a(i), l(i))
+  shows HasPrimeDensity(K, weightedFamily(K, ι, w, a), weightedLimit(ι, w, l))
+proof
+  sorry
+
+-- HasPrimeDensity.re_le_re: if re a_v ≤ re b_v for almost all v of prime
+-- norm, the densities compare the same way.
+theorem HasPrimeDensity.re_le (a b l l2 F : Set)
+  requires first : HasPrimeDensity(K, a, l)
+  requires second : HasPrimeDensity(K, b, l2)
+  requires finite : Finite(F)
+  requires compare : ∀ v ∈ primeNormPlaces(K), v ∉ F → (complexRe(a(v)):R) ≤ complexRe(b(v))
+  shows (complexRe(l):R) ≤ complexRe(l2)
+proof
+  sorry
+
+-- hasPrimeDensity_const.
+theorem HasPrimeDensity.const (c : Set)
+  requires complex : c ∈ complexCarrier
+  shows HasPrimeDensity(K, constantFamily(K, c), c)
+proof
+  sorry
+
+-- frequently_prime_q: infinitely many primes of degree one.
+theorem primeNormPlaces.infinite
+  shows ¬Finite(primeNormPlaces(K))
+proof
+  sorry
+
+-- hasPrimeDensity_card_degree_one: for L/K, v ↦ c·#{w | v : q_w = q_v} has
+-- density c.
+theorem HasPrimeDensity.degree_one (L f c : Set)
+  requires numberL : NumberField(L)
+  requires hom : RingHom(f, K, L)
+  requires complex : c ∈ complexCarrier
+  shows HasPrimeDensity(K, degreeOneCount(K, L, f, c), c)
+proof
+  sorry
+
+end EulerProducts
+
+-- Section: Hecke characters
+section HeckeCharacters
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+variable (K ψ : Set)
+hypothesis numberField : NumberField(K)
+
+-- CharUnramifiedAt.apply_locIdele_eq_zpow: at an unramified place,
+-- ψ(locIdele w x) = ψ(locIdele w ϖ_w)^{ord_w x}.
+theorem CharUnramifiedAt.apply_locIdele (ϖ w x : Set)
+  requires character : IdeleCharacter(K, ψ)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  requires place : w ∈ finPlaces(K)
+  requires unramified : CharUnramifiedAt(K, ψ, w)
+  requires unit : x ∈ locUnits(K, w)
+  shows ψ(locIdele(K, w, x)) =
+    complexIntPow(ψ(locIdele(K, w, ϖ(w))), completionOrder(K, w, x))
+proof
+  sorry
+
+-- IsHeckeOfType.norm_eq_one: |ψ(x)| = 1.
+theorem IsHeckeOfType.abs_eq_one (Φ n x : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires idele : x ∈ finIdeleUnits(K)
+  shows complexAbs(ψ(x)) = realOne
+proof
+  sorry
+
+-- IsHeckeOfType.norm_heckeCoeff_le: the coefficients are bounded by 1.
+theorem IsHeckeOfType.coeff_bounded (Φ n ϖ S : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  shows UnitBoundedFamily(K, heckeCoeff(K, ψ, ϖ, S))
+proof
+  sorry
+
+-- IsHeckeOfType.pow: ψ^d has type d·n.
+theorem IsHeckeOfType.pow (Φ n : Set, d : Nat)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  shows IsHeckeOfType(K, Φ, ideleCharPow(K, ψ, d), typeScale(Φ, n, d))
+proof
+  sorry
+
+-- IsHeckeOfType.ne_one: over a CM field a character of nonzero type is not
+-- trivial.
+theorem IsHeckeOfType.nontrivial (Φ n : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires cm : CMField(K)
+  requires type : NonzeroType(Φ, n)
+  shows NontrivialIdeleChar(K, ψ)
+proof
+  sorry
+
+-- IsHeckeOfType.tate_integral: let f vanish off the ideles integral
+-- outside S and units at S, depend only on the S-components of integral
+-- ideles, and satisfy fψ = 1_V on Ôˣ for an open V ∋ 1. Then κ = μ(Ôˣ ∩ V)
+-- ≠ 0 and for s > 1, ∫ f ψ |·|^s dμ converges to κ L^S(s, ψ).
+theorem IsHeckeOfType.tate_integral (Φ n ϖ S f V μ : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  requires finite : Finite(S)
+  requires places : S ⊆ finPlaces(K)
+  requires haar : HaarMeasure(finIdeleGroup(K), finIdeleSpace(K), μ)
+  requires function : FunctionBetween(f, finIdeleUnits(K), complexCarrier)
+  requires open : V ∈ finIdeleOpens(K)
+  requires one : finOne(K) ∈ V
+  requires support : ∀ x ∈ finIdeleUnits(K), f(x) ≠ complexZero →
+    (∀ w ∈ finPlaces(K) ∖ S, x(w) ∈ adicCompletionIntegersIn(K, w)) ∧
+    (∀ w ∈ S, x(w) ∈ completionUnitsIn(K, w))
+  requires units : ∀ u ∈ idelesUnitOff(K, ∅),
+    (u ∈ V → ℂ[f(u) * ψ(u)] = complexOne) ∧ (u ∉ V → ℂ[f(u) * ψ(u)] = complexZero)
+  requires local : ∀ x ∈ finIdeleUnits(K), ∀ y ∈ finIdeleUnits(K), x ∈ finInt(K) →
+    y ∈ finInt(K) → (∀ w ∈ S, y(w) = x(w)) → f(y) = f(x)
+  shows tateVolume(K, μ, V) ≠ realZero ∧
+    (∀ s ∈ ℝ, realOne < s →
+      ComplexIntegrable(borelSpace(finIdeleSpace(K)), μ, tateIntegrand(K, f, ψ, s)) ∧
+      complexMeasureIntegral(borelSpace(finIdeleSpace(K)), μ, tateIntegrand(K, f, ψ, s)) =
+        ℂ[eulerProd(K, heckeCoeff(K, ψ, ϖ, S), s) * complexOfReal(tateVolume(K, μ, V))])
+proof
+  sorry
+
+-- exists_analyticAt_one_eulerProd (Hecke's theorem at s = 1): for ψ ≠ 1
+-- some F analytic at 1 agrees with L^S(s, ψ) for real s > 1 near 1.
+theorem IsHeckeOfType.analytic_at_one (Φ n ϖ S : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  requires finite : Finite(S)
+  requires nontrivial : NontrivialIdeleChar(K, ψ)
+  shows ∃ F, FunctionBetween(F, ℝ, complexCarrier) ∧ RealAnalyticAt(F, realOne) ∧
+    (∃ δ ∈ ℝ, realZero < δ ∧ (∀ s ∈ ℝ, realOne < s → s < R[1 + δ] →
+      F(s) = eulerProd(K, heckeCoeff(K, ψ, ϖ, S), s)))
+proof
+  sorry
+
+-- exists_hasPrimeDensity: for ψ ≠ 1, L^S(s, ψ) is continuous on s ≥ 1 and
+-- the ψ(ϖ_v) have density −m for some m ≥ 0, with L^S(s, ψ) ≠ 0 for s ≥ 1
+-- when m = 0.
+theorem IsHeckeOfType.prime_density (Φ n ϖ S : Set)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  requires finite : Finite(S)
+  requires nontrivial : NontrivialIdeleChar(K, ψ)
+  shows (∀ s ∈ closedRayOne, ContinuousWithinAtPoint(eulerProdOn(K, heckeCoeff(K, ψ, ϖ, S)),
+      realLine, complexSpace, closedRayOne, s)) ∧
+    (∃ m ∈ ℕ, (m = (0:N) → (∀ s ∈ closedRayOne,
+        eulerProd(K, heckeCoeff(K, ψ, ϖ, S), s) ≠ complexZero)) ∧
+      HasPrimeDensity(K, heckeCoeff(K, ψ, ϖ, S), complexOfReal(R[-realNat(m)])))
+proof
+  sorry
+
+-- eulerProd_ne_zero: for ψ² ≠ 1, L^S(s, ψ) ≠ 0 for real s ≥ 1.
+theorem IsHeckeOfType.eulerProd_ne_zero (Φ n ϖ S : Set, s : Real)
+  requires hecke : IsHeckeOfType(K, Φ, ψ, n)
+  requires uniformizers : UniformizerFamily(K, ϖ)
+  requires finite : Finite(S)
+  requires square : NontrivialIdeleChar(K, ideleCharPow(K, ψ, 2))
+  requires large : realOne ≤ s
+  shows eulerProd(K, heckeCoeff(K, ψ, ϖ, S), s) ≠ complexZero
+proof
+  sorry
+
+end HeckeCharacters
+
+-- Section: The adelic theta sum
+section ThetaSum
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+variable (K : Set)
+hypothesis numberField : NumberField(K)
+
+-- ideleModule_pos, ideleModule_principal_eq_one: the module is positive
+-- and 1 on principal ideles (the product formula).
+theorem ideleModule.pos (a : Set)
+  requires idele : a ∈ fullIdeles(K)
+  shows realZero < ideleModule(K, a)
+proof
+  sorry
+
+theorem ideleModule.principal (γ : Set)
+  requires principal : γ ∈ principalFullIdeles(K)
+  shows ideleModule(K, γ) = realOne
+proof
+  sorry
+
+-- exists_abs_sub_thetaSum_le: for 0 < r < 1 the principal ideles are
+-- discrete and, for some δ > 0 and C, each l > 0 has an i with
+-- |i − Θ_{r/3}(b)| ≤ C l^δ |Θ_r(b)| for every idele b of module l.
+theorem thetaSum.riemann_estimate (d : Set, r : Real)
+  requires idele : d ∈ finIdeleUnits(K)
+  requires positive : realZero < r
+  requires small : r < realOne
+  shows DiscreteSubset(fullIdeleSpace(K), principalFullIdeles(K)) ∧
+    (∃ δ ∈ ℝ, realZero < δ ∧ ∃ C ∈ ℝ, ∀ l ∈ ℝ, realZero < l → ∃ i ∈ ℝ,
+      ∀ b ∈ fullIdeles(K), ideleModule(K, b) = l →
+        abs(R[i - thetaSum(K, R[r / 3], d, b)]) ≤
+          R[C * realRpow(l, δ) * abs(thetaSum(K, r, d, b))])
+proof
+  sorry
+
+end ThetaSum
