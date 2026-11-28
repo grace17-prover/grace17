@@ -311,15 +311,15 @@ graph TD
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 168 | 165 | 3 |
 | GRH.Algebra.Divisibility | 108 | 108 | 0 |
-| GRH.Algebra.Ideals | 182 | 164 | 18 |
+| GRH.Algebra.Ideals | 216 | 213 | 3 |
 | GRH.Algebra.Localization | 88 | 88 | 0 |
-| GRH.Algebra.LocalRings | 48 | 41 | 7 |
+| GRH.Algebra.LocalRings | 53 | 53 | 0 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
 | GRH.Polynomial.Univariate | 145 | 143 | 2 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
-| GRH.Polynomial.Multivariate | 81 | 64 | 17 |
-| GRH.Algebra.Finiteness | 101 | 68 | 33 |
+| GRH.Polynomial.Multivariate | 84 | 71 | 13 |
+| GRH.Algebra.Finiteness | 104 | 72 | 32 |
 | GRH.Algebra.Integral | 61 | 50 | 11 |
 | GRH.Algebra.DVR | 51 | 42 | 9 |
 | GRH.Field.Galois | 79 | 1 | 78 |
@@ -435,5 +435,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9288** | **7002** | **2286** |
+| **total** | **9333** | **7074** | **2259** |
 <!-- /blueprint-status -->
