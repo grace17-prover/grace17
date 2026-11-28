@@ -52,6 +52,88 @@ predicate ComplexAnalyticOnNhd (f U : Set) := ∀ a ∈ U, ComplexAnalyticAt(f, 
 predicate EventuallyZeroAt (f a : Set) :=
   ∃ r ∈ ℝ, realZero < r ∧ (∀ z ∈ complexDisk(a, r), f(z) = complexZero)
 
+-- The coefficients c(n), c(n + 1), … of a power series with its first n
+-- terms removed, and the factorization it gives when those terms vanish.
+def cxaShiftN (c : Set, n : Nat) → Set
+  | c, zero => c
+  | c, succ(j) => complexShift(cxaShiftN(c, j))
+
+-- The indices of the nonzero coefficients.
+def cxaNonzeroIndices (c : Set) : Set := { k ∈ ℕ | c(k) ≠ complexZero }
+
+theorem cxaShiftN.radius (c r : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  shows PowerSeriesRadiusAtLeast(cxaShiftN(c, n), r)
+proof
+  induction n
+  | zero =>
+    rw cxaShiftN
+    exact radius
+  | succ(j) using ih =>
+    rw cxaShiftN
+    exact PowerSeriesRadiusAtLeast.shift with ih
+
+theorem cxaShiftN.value (c r : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  shows ∀ k ∈ ℕ, cxaShiftN(c, n)(k) = c(n + k)
+proof
+  induction n
+  | zero =>
+    intros k hk
+    have kNat := nat.omega.backward at k with hk
+    have same : (0:N) + k = k by arith
+    rw [cxaShiftN, same]
+  | succ(j) using ih =>
+    intros k hk
+    have kNat := nat.omega.backward at k with hk
+    have previous := cxaShiftN.radius at c, r, j with radius
+    have next : succ(k) ∈ ℕ by typecheck
+    have sj : succ(j) ∈ ℕ by typecheck
+    have sjNat := nat.omega.backward at succ(j) with sj
+    have same : j + succ(k) = succ(j) + k by arith
+    rw [cxaShiftN, (complexShift.value with previous.left, hk),
+      (ih with succ(k), next), same]
+
+theorem cxaShiftN.factor (c a r z : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  requires ha : a ∈ ℂ
+  requires hz : z ∈ complexDisk(a, r)
+  requires zeros : ∀ j ∈ n, c(j) = ℂ[0]
+  shows powerSeriesSum(c, a, r)(z) =
+    ℂ[(z - a) ^ n * powerSeriesSum(cxaShiftN(c, n), a, r)(z)]
+proof
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have za : ℂ[z - a] ∈ ℂ by typecheck
+  induction n
+  | zero =>
+    intros zeros
+    have sumMember := FunctionBetween.apply_closed with
+      (powerSeriesSum.function with radius, ha), hz
+    rw [cxaShiftN, monoidPow.zero]
+    ring
+  | succ(m) using ih =>
+    intros zeros
+    have earlier : ∀ j ∈ m, c(j) = ℂ[0]
+      intros j hj
+      have jIn := membership.into_successor at j, m with hj
+      exact zeros with j, jIn
+    have previous := ih with earlier
+    have shifted := cxaShiftN.radius at c, r, m with radius
+    have zeroN : (0:N) ∈ ℕ by typecheck
+    have first := cxaShiftN.value at c, r, m with radius
+    have firstValue := first with (0:N), zeroN
+    have plusZero : m + (0:N) = m by arith
+    have mIn := bootstrap.succ.self at m
+    rw [plusZero, (zeros with m, mIn)] at firstValue
+    have step := powerSeriesSum.shift with shifted, ha, hz, firstValue
+    have nextRadius := PowerSeriesRadiusAtLeast.shift with shifted
+    have nextMember := FunctionBetween.apply_closed with
+      (powerSeriesSum.function with nextRadius, ha), hz
+    have power := complexPow.member at ℂ[z - a], m with za
+    obtain ⟨zIn, _⟩ := complexDisk.membership.forward with hz
+    rw [previous, step, cxaShiftN, monoidPow.succ]
+    ring
+
 -- The order of the zero of f at a (Mathlib's analyticOrderNatAt): the n
 -- with f(z) = (z − a)ⁿ g(z) near a for some g analytic at a with
 -- g(a) ≠ 0; it is 0 when f vanishes identically near a, as in Mathlib.
@@ -62,7 +144,65 @@ defunique analyticOrderNat (f a : Set) (n ∈ ℕ) :=
     (∀ z ∈ complexDisk(a, r), f(z) = ℂ[(z - a) ^ n * g(z)]))
 requires analytic : ComplexAnalyticAt(f, a)
 proof
-  sorry
+  by_cases eventually : EventuallyZeroAt(f, a)
+  . have zeroN : (0:N) ∈ ℕ by typecheck
+    refine ⟨(0:N), zeroN, ?_⟩
+    left
+    refine ⟨eventually, ?_⟩
+    rfl
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic
+  have coefficients := radius.left
+  have value : ∀ z ∈ complexDisk(a, r), f(z) = powerSeriesSum(c, a, r)(z)
+    intros z hz
+    exact ComplexSumsTo.unique with (sums with z, hz),
+      (powerSeriesSum.sums with radius, aMember, hz)
+  have nonempty : cxaNonzeroIndices(c) ≠ ∅
+    intro empty
+    apply eventually
+    refine ⟨r, hr, positive, ?_⟩
+    intros z hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have allZero : ∀ k ∈ ℕ, c(k) = ℂ[0]
+      intros k hk
+      by_contra nonzero
+      have inS : k ∈ cxaNonzeroIndices(c) by simp [hk, nonzero]
+      rw empty at inS
+      simp at inS
+    have zeroSums := powerSeriesTerms.zero_sums with coefficients, aMember,
+      zMember, allZero
+    exact ComplexSumsTo.unique with (sums with z, hz), zeroSums
+  obtain ⟨n, member, minimal⟩ := set.foundation at cxaNonzeroIndices(c)
+    with nonempty
+  obtain ⟨nIn, nonzeroN⟩ := member
+  have nNat := nat.omega.backward at n with nIn
+  have zeros : ∀ j ∈ n, c(j) = ℂ[0]
+    intros j hj
+    have jIn := natural.member at n with hj
+    by_contra nonzero
+    have jOmega : j ∈ ℕ by typecheck
+    have inS : j ∈ cxaNonzeroIndices(c) by simp [jOmega, nonzero]
+    exact minimal with j, hj, inS
+  have shifted := cxaShiftN.radius at c, r, n with radius
+  have zeroN : (0:N) ∈ ℕ by typecheck
+  have center := complexDisk.center with aMember, hr, positive
+  have atCenter := ComplexSumsTo.unique with
+    (powerSeriesSum.sums with shifted, aMember, center),
+    (powerSeriesTerms.center_sums with shifted.left, aMember)
+  have firstValue := cxaShiftN.value at c, r, n with radius
+  have plusZero : n + (0:N) = n by arith
+  rw [(firstValue with (0:N), zeroN), plusZero] at atCenter
+  refine ⟨n, nIn, ?_⟩
+  right
+  refine ⟨eventually, powerSeriesSum(cxaShiftN(c, n), a, r), r, hr, positive,
+    ?_, ?_, ?_⟩
+  . refine ⟨aMember, cxaShiftN(c, n), r, hr, positive, shifted, ?_⟩
+    intros z hz
+    exact powerSeriesSum.sums with shifted, aMember, hz
+  . rw atCenter
+    exact nonzeroN
+  . intros z hz
+    rw (value with z, hz)
+    exact cxaShiftN.factor with radius, aMember, hz, zeros
 uniqueness
   sorry
 
@@ -184,7 +324,13 @@ theorem ComplexAnalyticAt.of_holomorphic (f U a : Set)
   requires member : a ∈ U
   shows ComplexAnalyticAt(f, a)
 proof
-  sorry
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have aMember := sub with a, member
+  obtain ⟨r, hr, positive, inside⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨c, radius, sums⟩ := HolomorphicOn.power_series with holomorphic,
+    member, hr, inside
+  refine ⟨aMember, c, r, hr, positive, radius, sums⟩
 
 -- The coefficients of the expansion are the derivatives divided by n!.
 theorem ComplexAnalyticAt.coefficients (f U a c r : Set, n : Nat)
@@ -246,7 +392,36 @@ theorem EventuallyZeroAt.connected (f U a : Set)
   requires somewhere : ∃ b ∈ U, f(b) ≠ complexZero
   shows ¬EventuallyZeroAt(f, a)
 proof
-  sorry
+  intro eventually
+  obtain ⟨r, hr, positive, zero⟩ := eventually
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have aMember := sub with a, member
+  obtain ⟨s, hs, sPositive, inside⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨t, ht, tPositive, leR, leS⟩ := realRadius.common with hr, hs,
+    positive, sPositive
+  have diskOpen := complexDisk.open with aMember, ht
+  have center := complexDisk.center with aMember, ht, tPositive
+  have nonempty : ∃ v, v ∈ complexDisk(a, t)
+    exact ⟨a, center⟩
+  have intoS := complexDisk.mono with aMember, ht, hs, leS
+  have intoR := complexDisk.mono with aMember, ht, hr, leR
+  have insideU : complexDisk(a, t) ⊆ U
+    intros z hz
+    exact inside with z, (intoS with z, hz)
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have constant := HolomorphicOn.const with isOpen, zeroMember
+  have agree : ∀ z ∈ complexDisk(a, t), f(z) = complexFunctionConst(ℂ[0], U)(z)
+    intros z hz
+    have zU := insideU with z, hz
+    rw (complexFunctionConst.value with zeroMember, zU)
+    exact zero with z, (intoR with z, hz)
+  have everywhere := holomorphic.identity with holomorphic, constant,
+    connected, diskOpen, nonempty, insideU, agree
+  obtain ⟨b, hb, nonzeroB⟩ := somewhere
+  have atB := everywhere with b, hb
+  rw (complexFunctionConst.value with zeroMember, hb) at atB
+  exact nonzeroB with atB
 
 -- Section: Meromorphic functions
 theorem MeromorphicAt.of_analytic (f a : Set)
