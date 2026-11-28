@@ -232,14 +232,15 @@ larger universe. Read literally, the Lean argument therefore asks for one
 Grothendieck universe, and so one inaccessible cardinal, for each universe
 level it uses, as in Carneiro's model of Lean's type theory.
 
-The port avoids them by bounding the rings instead of the universe. The
-proof never evaluates its functors on arbitrary rings. Every ring it uses
-is built from finitely many data by polynomial algebras, quotients,
-localizations, finite products, tensor products, and completions, and
-applied to rings of cardinality less than ℶ_ω each of these constructions
-yields a ring of cardinality less than ℶ_ω. No product, colimit, or
-sheafification in the region ranges over a proper class. The region is
-therefore formulated over the rings whose carriers lie in V_{ω·2}:
+Passmore's port avoids them by bounding the rings instead of the
+universe. The proof never evaluates its functors on arbitrary rings. Every
+ring it uses is built from finitely many data by polynomial algebras,
+quotients, localizations, finite products, tensor products, completions,
+Witt vectors, tilts, perfect closures, and period thickenings, and applied
+to rings of cardinality less than ℶ_ω each of these constructions yields a
+ring of cardinality less than ℶ_ω. No product, colimit, or sheafification
+in the region ranges over a proper class. The region is therefore
+formulated over the rings whose carriers lie in V_{ω·2}:
 
 - V_{ω·2} is a set, a stage of the cumulative hierarchy whose existence ZFC
   proves by the axiom of replacement. It is a model of Zermelo set theory.
@@ -248,13 +249,27 @@ therefore formulated over the rings whose carriers lie in V_{ω·2}:
 - The class of these rings is closed under the constructions above, so the
   theorems the rest of the proof takes from this region hold for them
   exactly as stated.
-- The category of these rings is small, the functors on it are sets, and so
-  are the Ext groups between them. Everything is formed in ZFC.
+
+The functors on these rings need room for their values. Ext is computed
+from free covers and injective envelopes, which are sums and products
+indexed by the whole category of test rings, and these leave V_{ω·2}. The
+values therefore lie in a second stage V_θ, where θ is the Hartogs number
+of V_{ω·2}, the least ordinal that does not inject into it. Under the axiom
+of choice θ is the successor cardinal ℶ_ω⁺, which is regular, so V_θ is
+closed under unions of families indexed by subsets of V_{ω·2}. V_θ plays
+the part of the next universe level, but like V_{ω·2} it is a set that ZFC
+proves exists: the category of test rings is small, the functors on it and
+the Ext groups between them are sets in V_θ, and everything is formed in
+ZFC.
+
+Some notions in the region, such as a universally closed morphism of
+schemes, quantify over all schemes. Such a definition is a formula about
+the class of schemes, not a set built from it, and needs no universe.
 
 This is an instance of a general phenomenon: a given argument uses only
 boundedly many stages of the cumulative hierarchy, and McLarty (2020) shows
 that the large structures of Grothendieck's cohomology can be founded this
-way, without universes. The port uses no large cardinal hypothesis, and its
-certificate is to be a certificate from ZFC alone. Were a large cardinal
-hypothesis to enter anywhere, the axiom audit would report the reliance at
-every theorem above it, up to the main theorem.
+way, without universes. Passmore's ZFC proof uses no large cardinal
+hypothesis, and its certificate is to be a certificate from ZFC alone. Were
+a large cardinal hypothesis to enter anywhere, the axiom audit would report
+the reliance at every theorem above it, up to the main theorem.
