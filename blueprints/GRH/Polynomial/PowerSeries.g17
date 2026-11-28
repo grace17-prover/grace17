@@ -2797,6 +2797,110 @@ theorem seriesDerivative.subst (f g : Set)
 proof
   sorry
 
+-- Helpers for substitution: the substituted series, its coefficients as
+-- one stable sum, and sums with a single nonzero term.
+theorem tkJ.series_subst (f g : Set)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substitutable : SeriesHasSubst(R, g)
+  shows seriesSubst(R, f, g) ∈ powerSeriesCarrier(R) ∧
+    (∀ n ∈ ℕ, seriesSubst(R, f, g)(n) = substCoeff(R, f, g, n))
+proof
+  obtain ⟨gIn, nil⟩ := substitutable
+  have rel : ∀ n ∈ ℕ, (n, substCoeff(R, f, g, n)) ∈ seriesSubst(R, f, g) ∧ substCoeff(R, f, g, n) ∈ R.carrier
+    intros n hn
+    have nNat := nat.omega.backward with hn
+    obtain ⟨v, _⟩ := substCoeff.selected at R, f, g, n with comm, series, gIn, nil
+    have r : (n, substCoeff(R, f, g, n)) ∈ seriesSubst(R, f, g)
+      apply seriesSubst.membership.backward
+      refine ⟨(product.pair with hn, v), n, hn, rfl⟩
+    exact ⟨r, v⟩
+  have fn : seriesSubst(R, f, g) : ℕ → R.carrier
+    apply tkJ.uni_graph_function
+    . intros u hu
+      exact (seriesSubst.membership.forward with hu).left
+    . intros x y z hy hz
+      obtain ⟨_, a, aIn, ea⟩ := seriesSubst.membership.forward with hy
+      obtain ⟨_, b, bIn, eb⟩ := seriesSubst.membership.forward with hz
+      obtain ⟨xa, ya⟩ := orderedPair.injective with ea
+      obtain ⟨xb, yb⟩ := orderedPair.injective with eb
+      rw [ya, yb, ← xa, ← xb]
+    . intros x hx
+      obtain ⟨r, v⟩ := rel with x, hx
+      exact ⟨substCoeff(R, f, g, x), v, r⟩
+  have mem := tkJ.series_of_function at R, seriesSubst(R, f, g) with comm, fn
+  refine ⟨mem, ?_⟩
+  intros n hn
+  obtain ⟨r, v⟩ := rel with n, hn
+  exact FunctionBetween.apply_value with fn, hn, r
+
+theorem tkJ.subst_coeff_eq (f g : Set) (n K : Nat)
+  requires series : f ∈ powerSeriesCarrier(R)
+  requires substitutable : SeriesHasSubst(R, g)
+  requires vanish : ∀ k ∈ ℕ, K ≤ k → Ring.pow(powerSeriesRing(R), g, k)(n) = R.zero
+  shows substCoeff(R, f, g, n) = finiteRingSum(K, R.carrier, R.add, R.zero, R.neg,
+    R.mul, R.one, substTerms(R, f, g, n, K))
+proof
+  obtain ⟨gIn, nil⟩ := substitutable
+  obtain ⟨_, K2, K2N, h⟩ := substCoeff.selected at R, f, g, n with comm, series, gIn, nil
+  have K2Nat := nat.omega.backward with K2N
+  have LN : K + K2 ∈ ℕ by typecheck
+  have l1 : K ≤ K + K2 by arith
+  have l2 : K2 ≤ K + K2 by arith
+  rw [(h with K + K2, LN, l2), (tkJ.subst_sum_stable at R, f, g, n, K, K + K2 with comm, series, gIn, vanish, l1)]
+
+theorem tkJ.sum_single (w L j : Set)
+  requires finite : Finite(L)
+  requires weights : w : L → R.carrier
+  requires index : j ∈ L
+  requires others : ∀ k ∈ L, k ≠ j → w(k) = R.zero
+  shows finiteRingSum(L, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, w) = w(j)
+proof
+  have parts := CommRing.parts with comm
+  have sub : {j} ⊆ L
+    intros x hx
+    rw singleton.membership at hx
+    rw hx
+    exact index
+  have closed : ∀ x ∈ {j}, w(x) ∈ R.carrier
+    intros x hx
+    have xL := sub with x, hx
+    exact FunctionBetween.apply_closed with weights, xL
+  have rF := restrict.function at w, L, R.carrier, {j}, R.carrier with weights, sub, closed
+  have agree : ∀ s ∈ {j}, w(s) = restrict(w, {j})(s)
+    intros s hs
+    rw (restrict.apply at w, L, R.carrier, {j}, R.carrier, s with weights, sub, closed, hs)
+  have zero : ∀ d ∈ L, ¬(d ∈ {j}) → w(d) = R.zero
+    intros d hd out
+    apply others with d, hd
+    intro e
+    apply out
+    rw e
+    simp [singleton.membership]
+  have jj : j ∈ {j} by simp [singleton.membership]
+  rw [(finiteRingSum.zero_extension at L, {j}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, w, restrict(w, {j}) with parts, finite, weights, rF, sub, agree, zero), (finiteRingSum.singleton at R.carrier, R.add, R.zero, R.neg, R.mul, R.one, restrict(w, {j}), j with parts, rF), (restrict.apply at w, L, R.carrier, {j}, R.carrier, j with weights, sub, closed, jj)]
+
+-- Helper: when g(0) = 0, (gᵏ)ₙ = 0 for n < k.
+theorem tkJ.pow_coeff_low (g : Set) (n k : Nat)
+  requires series : g ∈ powerSeriesCarrier(R)
+  requires zero : g(0) = R[0]
+  requires low : n < k
+  shows Ring.pow(powerSeriesRing(R), g, k)(n) = R.zero
+proof
+  have ps := powerSeriesRing.comm_ring at R with comm
+  obtain ⟨carrierEq, _, _, _, _, _⟩ := tkJ.series_projections at R with comm
+  have dvd := (seriesX.dvd_iff at R, g with comm, series).backward with zero
+  obtain ⟨xc, gc, h, hIn, hEq⟩ := dvd
+  have split : Ring.pow(powerSeriesRing(R), g, k) = call2(Ring.mul(powerSeriesRing(R)), Ring.pow(powerSeriesRing(R), seriesX(R), k), Ring.pow(powerSeriesRing(R), h, k))
+    rw hEq
+    exact Ring.mul_pow_comm at powerSeriesRing(R), seriesX(R), h, k with ps, xc, hIn
+  have w : Ring.pow(powerSeriesRing(R), h, k) ∈ Ring.carrier(powerSeriesRing(R)) by typecheck
+  rw carrierEq at w
+  obtain ⟨_, l⟩ := seriesCoeff.X_pow_mul at R, Ring.pow(powerSeriesRing(R), h, k), k, n with comm, w
+  have z := l with low
+  unfold seriesCoeff at z
+  rw split
+  exact z
+
 -- Substitution (PowerSeries.subst on HasSubst): a ring homomorphism in f
 -- (substAlgHom), X ↦ g (subst_X), constants fixed, composition
 -- (subst_comp_subst_apply), compatible with map (map_subst), the
@@ -2812,14 +2916,93 @@ theorem seriesSubst.X (g : Set)
   requires substitutable : SeriesHasSubst(R, g)
   shows seriesSubst(R, seriesX(R), g) = g
 proof
-  sorry
+  have ps := powerSeriesRing.comm_ring at R with comm
+  have psr := CommRing.to_ring with ps
+  obtain ⟨carrierEq, _, _, _, _, _⟩ := tkJ.series_projections at R with comm
+  have sub2 := substitutable
+  obtain ⟨gIn, nil⟩ := sub2
+  have gc : g ∈ Ring.carrier(powerSeriesRing(R))
+    rw carrierEq
+    exact gIn
+  obtain ⟨sx, x1, xn⟩ := tkJ.series_X at R with comm
+  obtain ⟨ss, sv⟩ := tkJ.series_subst at R, seriesX(R), g with comm, sx, substitutable
+  apply powerSeries.ext at R, seriesSubst(R, seriesX(R), g), g with comm, ss, gIn
+  intros n nN
+  have nNat := nat.omega.backward with nN
+  obtain ⟨K, KN, vanish⟩ := tkJ.pow_coeff_vanish at R, g, n with comm, gIn, nil
+  have KNat := nat.omega.backward with KN
+  have vanish2 : ∀ k ∈ ℕ, K + 2 ≤ k → Ring.pow(powerSeriesRing(R), g, k)(n) = R.zero
+    intros k kN le
+    have kNat := nat.omega.backward with kN
+    have le2 : K ≤ k by arith
+    exact vanish with k, kN, le2
+  have eq := tkJ.subst_coeff_eq at R, seriesX(R), g, n, K + 2 with comm, sx, substitutable, vanish2
+  obtain ⟨tF, tV⟩ := tkJ.subst_terms at R, seriesX(R), g, n, K + 2 with comm, sx, gIn
+  have fin := Finite.natural at K + 2
+  have oneNat : Nat(1) by typecheck
+  have lt : 1 < K + 2 by arith
+  have oneIn := (membership.of_Less at 1, K + 2 with oneNat) with lt
+  have others : ∀ k ∈ K + 2, k ≠ 1 → substTerms(R, seriesX(R), g, n, K + 2)(k) = R.zero
+    intros k hk ne
+    have kNat := natural.member at K + 2 with k, hk
+    have kN := nat.omega.forward with kNat
+    have pk : Ring.pow(powerSeriesRing(R), g, k) ∈ Ring.carrier(powerSeriesRing(R)) by typecheck
+    rw carrierEq at pk
+    have pkn := tkJ.series_coeff_mem at R, Ring.pow(powerSeriesRing(R), g, k), n with comm, pk
+    rw [(tV with k, hk), (xn with k, kN, ne)]
+    ring
+  have gn := tkJ.series_coeff_mem at R, g, n with comm, gIn
+  rw [(sv with n, nN), eq, (tkJ.sum_single at R, substTerms(R, seriesX(R), g, n, K + 2), K + 2, 1 with comm, fin, tF, oneIn, others), (tV with 1, oneIn), x1, (Ring.pow_one at powerSeriesRing(R), g with psr, gc)]
+  ring
 
 theorem seriesSubst.C (a g : Set)
   requires scalar : a ∈ R.carrier
   requires substitutable : SeriesHasSubst(R, g)
   shows seriesSubst(R, seriesConstant(R, a), g) = seriesConstant(R, a)
 proof
-  sorry
+  have ps := powerSeriesRing.comm_ring at R with comm
+  have psr := CommRing.to_ring with ps
+  obtain ⟨carrierEq, _, _, _, _, oneEq⟩ := tkJ.series_projections at R with comm
+  have sub2 := substitutable
+  obtain ⟨gIn, nil⟩ := sub2
+  have gc : g ∈ Ring.carrier(powerSeriesRing(R))
+    rw carrierEq
+    exact gIn
+  have oneIn : R.one ∈ R.carrier by typecheck
+  obtain ⟨sc, c0, cn⟩ := tkJ.series_constant at R, a with comm, scalar
+  obtain ⟨so, o0, on⟩ := tkJ.series_constant at R, R.one with comm, oneIn
+  obtain ⟨ss, sv⟩ := tkJ.series_subst at R, seriesConstant(R, a), g with comm, sc, substitutable
+  apply powerSeries.ext at R, seriesSubst(R, seriesConstant(R, a), g), seriesConstant(R, a) with comm, ss, sc
+  intros n nN
+  have nNat := nat.omega.backward with nN
+  obtain ⟨K, KN, vanish⟩ := tkJ.pow_coeff_vanish at R, g, n with comm, gIn, nil
+  have KNat := nat.omega.backward with KN
+  have vanish2 : ∀ k ∈ ℕ, K + 1 ≤ k → Ring.pow(powerSeriesRing(R), g, k)(n) = R.zero
+    intros k kN le
+    have kNat := nat.omega.backward with kN
+    have le2 : K ≤ k by arith
+    exact vanish with k, kN, le2
+  have eq := tkJ.subst_coeff_eq at R, seriesConstant(R, a), g, n, K + 1 with comm, sc, substitutable, vanish2
+  obtain ⟨tF, tV⟩ := tkJ.subst_terms at R, seriesConstant(R, a), g, n, K + 1 with comm, sc, gIn
+  have fin := Finite.natural at K + 1
+  have zeroNat : Nat(0) by typecheck
+  have lt : 0 < K + 1 by arith
+  have zeroIn := (membership.of_Less at 0, K + 1 with zeroNat) with lt
+  have others : ∀ k ∈ K + 1, k ≠ 0 → substTerms(R, seriesConstant(R, a), g, n, K + 1)(k) = R.zero
+    intros k hk ne
+    have kNat := natural.member at K + 1 with k, hk
+    have kN := nat.omega.forward with kNat
+    have pk : Ring.pow(powerSeriesRing(R), g, k) ∈ Ring.carrier(powerSeriesRing(R)) by typecheck
+    rw carrierEq at pk
+    have pkn := tkJ.series_coeff_mem at R, Ring.pow(powerSeriesRing(R), g, k), n with comm, pk
+    rw [(tV with k, hk), (cn with k, kN, ne)]
+    ring
+  rw [(sv with n, nN), eq, (tkJ.sum_single at R, substTerms(R, seriesConstant(R, a), g, n, K + 1), K + 1, 0 with comm, fin, tF, zeroIn, others), (tV with 0, zeroIn), c0, (Ring.pow_zero at powerSeriesRing(R), g with psr, gc), oneEq]
+  by_cases e : n = 0
+  . rw [e, o0, c0]
+    ring
+  . rw [(on with n, nN, e), (cn with n, nN, e)]
+    ring
 
 theorem seriesSubst.compose (f g h : Set)
   requires series : f ∈ powerSeriesCarrier(R)
@@ -2846,7 +3029,47 @@ theorem seriesSubst.constant_coeff (f g : Set)
   requires zero : g(0) = R[0]
   shows seriesSubst(R, f, g)(0) = f(0)
 proof
-  sorry
+  have ps := powerSeriesRing.comm_ring at R with comm
+  have psr := CommRing.to_ring with ps
+  have ringR := CommRing.to_ring with comm
+  obtain ⟨carrierEq, _, _, _, _, oneEq⟩ := tkJ.series_projections at R with comm
+  have zN : (0:Nat) ∈ ℕ by typecheck
+  have oneN : (1:Nat) ∈ ℕ by typecheck
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have oneIn : R.one ∈ R.carrier by typecheck
+  have nil : RingNilpotent(R, g(0))
+    unfold RingNilpotent
+    have g0 := tkJ.series_coeff_mem at R, g, 0 with comm, substituted
+    refine ⟨g0, 1, oneN, ?_⟩
+    rw [zero, (Ring.pow_one at R, R.zero with ringR, zeroIn)]
+  have hs : SeriesHasSubst(R, g)
+    unfold SeriesHasSubst
+    exact ⟨substituted, nil⟩
+  obtain ⟨so, o0, _⟩ := tkJ.series_constant at R, R.one with comm, oneIn
+  obtain ⟨ss, sv⟩ := tkJ.series_subst at R, f, g with comm, series, hs
+  have vanish : ∀ k ∈ ℕ, 1 ≤ k → Ring.pow(powerSeriesRing(R), g, k)(0) = R.zero
+    intros k kN le
+    have kNat := nat.omega.backward with kN
+    have lt : 0 < k by arith
+    exact tkJ.pow_coeff_low at R, g, 0, k with comm, substituted, zero, lt
+  have eq := tkJ.subst_coeff_eq at R, f, g, 0, 1 with comm, series, hs, vanish
+  obtain ⟨tF, tV⟩ := tkJ.subst_terms at R, f, g, 0, 1 with comm, series, substituted
+  have fin := Finite.natural at 1
+  have zeroNat : Nat(0) by typecheck
+  have lt : 0 < 1 by arith
+  have zIn := (membership.of_Less at 0, 1 with zeroNat) with lt
+  have others : ∀ k ∈ 1, k ≠ 0 → substTerms(R, f, g, 0, 1)(k) = R.zero
+    intros k hk ne
+    have kNat := natural.member at 1 with k, hk
+    have lt2 := Less.of_membership at k, 1 with hk
+    exfalso
+    arith
+  have gc : g ∈ Ring.carrier(powerSeriesRing(R))
+    rw carrierEq
+    exact substituted
+  have f0 := tkJ.series_coeff_mem at R, f, 0 with comm, series
+  rw [(sv with 0, zN), eq, (tkJ.sum_single at R, substTerms(R, f, g, 0, 1), 1, 0 with comm, fin, tF, zIn, others), (tV with 0, zIn), (Ring.pow_zero at powerSeriesRing(R), g with psr, gc), oneEq, o0]
+  ring
 
 -- When g(0) = 0, only the first n + 1 terms reach the n-th coefficient.
 theorem substCoeff.finite_sum (f g : Set) (n : Nat)
@@ -2856,7 +3079,23 @@ theorem substCoeff.finite_sum (f g : Set) (n : Nat)
   shows substCoeff(R, f, g, n) = finiteRingSum(succ(n), R.carrier, R.add, R.zero,
     R.neg, R.mul, R.one, substTerms(R, f, g, n, succ(n)))
 proof
-  sorry
+  have ringR := CommRing.to_ring with comm
+  have zeroIn : R.zero ∈ R.carrier by typecheck
+  have oneN : (1:Nat) ∈ ℕ by typecheck
+  have nil : RingNilpotent(R, g(0))
+    unfold RingNilpotent
+    have g0 := tkJ.series_coeff_mem at R, g, 0 with comm, substituted
+    refine ⟨g0, 1, oneN, ?_⟩
+    rw [zero, (Ring.pow_one at R, R.zero with ringR, zeroIn)]
+  have hs : SeriesHasSubst(R, g)
+    unfold SeriesHasSubst
+    exact ⟨substituted, nil⟩
+  have vanish : ∀ k ∈ ℕ, succ(n) ≤ k → Ring.pow(powerSeriesRing(R), g, k)(n) = R.zero
+    intros k kN le
+    have kNat := nat.omega.backward with kN
+    have lt : n < k by arith
+    exact tkJ.pow_coeff_low at R, g, n, k with comm, substituted, zero, lt
+  exact tkJ.subst_coeff_eq at R, f, g, n, succ(n) with comm, series, hs, vanish
 
 -- Substituting into a polynomial is evaluation (PowerSeries.subst_coe).
 theorem seriesSubst.polynomial (p g : Set)
