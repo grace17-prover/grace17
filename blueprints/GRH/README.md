@@ -408,12 +408,25 @@ graph TD
 | GRH.Category.Abelian | 45 | 1 | 44 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
-| GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
-| GRH.Fourier.Euclidean | 26 | 0 | 26 |
-| GRH.Fourier.Torus | 21 | 0 | 21 |
+| GRH.DiscreteSeries.Unitary | 14 | 0 | 14 |
+| GRH.DiscreteSeries.CayleyMeasure | 11 | 0 | 11 |
+| GRH.DiscreteSeries.Representation | 5 | 0 | 5 |
+| GRH.DiscreteSeries.Rigidity | 23 | 0 | 23 |
+| GRH.DiscreteSeries.Holomorphic | 17 | 0 | 17 |
+| GRH.DiscreteSeries.RightDerivatives | 8 | 0 | 8 |
+| GRH.DiscreteSeries.FlenstedJensen | 17 | 0 | 17 |
+| GRH.DiscreteSeries.RegularRep | 5 | 0 | 5 |
+| GRH.DiscreteSeries.CuspKernel | 19 | 0 | 19 |
+| GRH.DiscreteSeries.Character | 13 | 0 | 13 |
+| GRH.DiscreteSeries.KernelFixes | 9 | 0 | 9 |
+| GRH.DiscreteSeries.Theta | 19 | 0 | 19 |
 | GRH.GLn.Tableaux | 0 | 0 | 0 |
 | GRH.GLn.SchurModule | 21 | 0 | 21 |
 | GRH.GLn.WeightRep | 6 | 0 | 6 |
+| GRH.DiscreteSeries.WeylTrace | 1 | 0 | 1 |
+| GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
+| GRH.Fourier.Euclidean | 26 | 0 | 26 |
+| GRH.Fourier.Torus | 21 | 0 | 21 |
 | GRH.GLn.Branching | 7 | 0 | 7 |
 | GRH.GLn.Dual | 3 | 0 | 3 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
@@ -463,5 +476,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9761** | **7477** | **2284** |
+| **total** | **9922** | **7477** | **2445** |
 <!-- /blueprint-status -->
