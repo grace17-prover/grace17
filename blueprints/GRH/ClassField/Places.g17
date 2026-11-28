@@ -1,0 +1,381 @@
+-- Places of Ω over primes of number fields and the cyclotomic
+-- characters on decomposition and inertia groups: closedness of
+-- decomposition and inertia groups, roots of unity separated by a place,
+-- the modular and ℓ-adic cyclotomic characters on Frobenius elements and
+-- inertia, the chosen isomorphism ℤ/N ≅ μ_N, ℚ(ζ_N) inside Ω; the centre
+-- of a place on a number field, places over primes (existence in towers,
+-- uniqueness, units, uniformisers, conjugates, finitely many ramified
+-- primes for an open subgroup), the place of ℚ over a prime; uniformisers
+-- and the normalised order of a henselian local field, and the existence
+-- of Frobenius elements, which with inertia generate a local Galois group.
+-- Source: grh-compact/src/Lib/ClassField/Places/CyclotomicCharacter.lean
+-- (isClosed_decompGroup, decompGroup.val_smul, isClosed_inertiaGroup,
+-- eq_of_val_sub_lt_one, cycCharMod_spec, cycCharMod_eq_iff,
+-- cycCharMod_eq_one_of_dvd, IsFrob.cycCharMod_eq,
+-- IsFrob.mem_ker_cycCharMod_iff, cycCharMod_of_mem_inertiaGroup,
+-- IsFrob.cycChar_eq, cycChar_of_mem_inertiaGroup, isOpen_ker_cycCharMod,
+-- rootPowHom, cycloGalGroup, cycloField, the IsCyclotomicExtension
+-- instance, cycCharMod_surjective), Places/Places.lean
+-- (algebraMap_ringOfIntegers_mem, centrePrime, the IsPrime instance,
+-- IsPlaceOver.of_le_centrePrime, isPlaceOver_below, unique,
+-- valuationVia_eq_one_iff, valuation_natCast_lt_one_iff, isUniformiser_iff,
+-- smul, exists_rat_place_of_prime, exists_isPlaceOver_of_val_ne_one,
+-- finite_ramified, IsPlaceOver.exists_above) and Places/LocalFrobenius.lean
+-- (IsUniformiser.val_lt_one, isUniformiser_iff_irreducible,
+-- exists_isUniformiser, IsUniformiser.ordRat_eq_one, ordRat_eq_zero,
+-- frobenius_spec).
+-- Encoding. As in GRH.ClassField.Galois: Γ acting on Ω/K is (G, X, ρ, E),
+-- a place of Ω a valuation subring A, "A x = 1" is x ∈
+-- valuationSubringUnits(Ω, A) and "A x < 1" membership in the nonunits.
+-- The v-adic valuation of x ∈ K is read through ord_v (completionOrder).
+-- Mathlib's HasEnoughRootsOfUnity Ω N is "μ_N(Ω) has N elements". The
+-- source's rootPowHom (a choice) is any f with IsRootPowHom. A number
+-- field L between K and Ω is an intermediate field F (intermediateRing).
+-- cycCharMod_eq_iff_unitsRep, map_cycCharMod_mul, cycCharMod_prime_pow_eq,
+-- pow_dvd_cycChar_sub_iff, map_cycChar_smul, the equivariance lemmas,
+-- continuous_cycChar, isUniformiser_iff_of_isEquiv, isEquiv,
+-- exists_val_eq_pow_index, IsUniformiser.card_quot and
+-- IsUniformiser.exists_val_eq_zpow are not stated.
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.Places
+import GRH.ClassField.Global
+
+section PlacesDefs
+
+-- Places.lean, centrePrime K A: the integers of K whose image lies in the
+-- maximal ideal of A.
+def centrePrime (E A : Set) : Set :=
+  { x ∈ ringOfIntegers(Algebra.base(E)) |
+    Algebra.map(E)(x) ∈ valuationSubringNonunits(Algebra.ring(E), A) }
+
+-- CyclotomicCharacter.lean, rootPowHom: an injective homomorphism
+-- ℤ/N → Ωˣ onto the N-th roots of unity.
+predicate IsRootPowHom (W : Set, N : Nat, f : Set) :=
+  GroupHom(f, Ring.additive(zmod(N)), unitGroup(W)) ∧
+  InjectiveBetween(f, Ring.carrier(zmod(N)), ringUnits(W)) ∧
+  functionImage(f, Ring.carrier(zmod(N)), ringUnits(W)) = rootsOfUnity(W, N)
+
+-- CyclotomicCharacter.lean, cycloGalGroup N and cycloField N: the
+-- elements of Gal(Ω/ℚ) fixing the N-th roots of unity and their fixed
+-- field ℚ(ζ_N).
+def cycloGalGroup (Q : Set, N : Nat) : Set :=
+  { g ∈ algebraAutomorphisms(Q) | ∀ ζ ∈ rootsOfUnity(Algebra.ring(Q), N), g(ζ) = ζ }
+
+def cycloField (Q : Set, N : Nat) : Set := fixedField(Q, cycloGalGroup(Q, N))
+
+-- The places v whose inertia groups are not all inside U.
+def ramifiedForSubgroup (G ρ E U : Set) : Set :=
+  { v ∈ finPlaces(Algebra.base(E)) | ∃ A ∈ closurePlaces(Algebra.ring(E)),
+    IsPlaceOver(E, A, v) ∧ ¬(inertiaGroup(G, ρ, Algebra.ring(E), A) ⊆ U) }
+
+-- The products φⁿ i, n ∈ ℕ, i in a set I.
+def frobInertiaProducts (G φ I : Set) : Set :=
+  { c ∈ Group.carrier(G) | ∃ n ∈ ℕ, ∃ i ∈ I, c = Group.mul(G)(groupPow(G, φ, n), i) }
+
+-- A ∩ K as a ring, and A as an algebra over it.
+def valRingBelowRing (E A : Set) : Set := subringRing(Algebra.base(E), valRingBelow(E, A))
+
+def valRingExtension (E A : Set) : Set :=
+  Algebra.mk(valRingBelowRing(E, A), subringRing(Algebra.ring(E), A),
+    restrict(Algebra.map(E), valRingBelow(E, A)))
+
+end PlacesDefs
+
+-- Section: Decomposition, inertia and cyclotomic characters
+section Cyclotomic
+variable (G X ρ E A : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis place : ValuationSubring(Algebra.ring(E), A)
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis characteristic : CharP(Algebra.ring(E), 0)
+
+-- isClosed_decompGroup, isClosed_inertiaGroup.
+theorem decompGroup.closed
+  shows ClosedSubgroup(decompGroup(G, ρ, Algebra.ring(E), A), G, X) ∧
+    ClosedSubgroup(inertiaGroup(G, ρ, Algebra.ring(E), A), G, X)
+proof
+  sorry
+
+-- decompGroup.val_smul: σ ∈ D_A preserves the valuation of A.
+theorem decompGroup.val_smul (σ x : Set)
+  requires decomposition : σ ∈ decompGroup(G, ρ, Algebra.ring(E), A)
+  requires member : x ∈ algebraCarrier(E)
+  shows valueClass(Algebra.ring(E), A, ρ(σ)(x)) = valueClass(Algebra.ring(E), A, x)
+proof
+  sorry
+
+-- eq_of_val_sub_lt_one: N-th roots of unity congruent at A, N a unit at
+-- A, are equal.
+theorem rootsOfUnity.eq_of_congruent (x y : Set, N : Nat)
+  requires unitN : natCast(Algebra.ring(E), N) ∈ valuationSubringUnits(Algebra.ring(E), A)
+  requires first : Ring.pow(Algebra.ring(E), x, N) = Ring.one(Algebra.ring(E))
+  requires second : Ring.pow(Algebra.ring(E), y, N) = Ring.one(Algebra.ring(E))
+  requires congruent : Ring.sub(Algebra.ring(E), x, y) ∈ valuationSubringNonunits(Algebra.ring(E), A)
+  shows x = y
+proof
+  sorry
+
+-- cycCharMod_spec, cycCharMod_eq_iff: g acts on μ_N as ζ ↦ ζ^a exactly
+-- for a = cycCharMod N g.
+theorem cycCharMod.spec (g a : Set, N : Nat)
+  requires positive : 0 < N
+  requires member : g ∈ Group.carrier(G)
+  requires residue : a ∈ Ring.carrier(zmod(N))
+  shows cycCharMod(G, ρ, Algebra.ring(E), N)(g) = a ↔
+    (∀ ζ ∈ rootsOfUnity(Algebra.ring(E), N),
+      ρ(g)(ζ) = Ring.pow(Algebra.ring(E), ζ, zmodVal(N, a)))
+proof
+  sorry
+
+-- cycCharMod_eq_one_of_dvd.
+theorem cycCharMod.one_of_dvd (g : Set, M N : Nat)
+  requires positive : 0 < M
+  requires divides : M ∣ N
+  requires member : g ∈ Group.carrier(G)
+  requires trivial : cycCharMod(G, ρ, Algebra.ring(E), N)(g) = Ring.one(zmod(N))
+  shows cycCharMod(G, ρ, Algebra.ring(E), M)(g) = Ring.one(zmod(M))
+proof
+  sorry
+
+-- IsFrob.cycCharMod_eq, IsFrob.mem_ker_cycCharMod_iff: a q-Frobenius
+-- acts on μ_N as q, for N a unit at A; it fixes μ_N iff q ≡ 1 mod N.
+theorem IsFrob.cycCharMod (q σ : Set, N : Nat)
+  requires positive : 0 < N
+  requires natural : q ∈ ℕ
+  requires unitN : natCast(Algebra.ring(E), N) ∈ valuationSubringUnits(Algebra.ring(E), A)
+  requires frobenius : IsFrob(G, ρ, Algebra.ring(E), A, q, σ)
+  shows cycCharMod(G, ρ, Algebra.ring(E), N)(σ) = zmodCast(N)(integerOfNat(q)) ∧
+    (cycCharMod(G, ρ, Algebra.ring(E), N)(σ) = Ring.one(zmod(N)) ↔ q % N = 1 % N)
+proof
+  sorry
+
+-- cycCharMod_of_mem_inertiaGroup, cycChar_of_mem_inertiaGroup,
+-- IsFrob.cycChar_eq: inertia acts trivially on roots of unity of order
+-- prime to A, and the ℓ-adic character of a q-Frobenius is q.
+theorem inertiaGroup.cycCharMod (σ : Set, N : Nat)
+  requires positive : 0 < N
+  requires inertia : σ ∈ inertiaGroup(G, ρ, Algebra.ring(E), A)
+  requires unitN : natCast(Algebra.ring(E), N) ∈ valuationSubringUnits(Algebra.ring(E), A)
+  shows cycCharMod(G, ρ, Algebra.ring(E), N)(σ) = Ring.one(zmod(N))
+proof
+  sorry
+
+theorem IsFrob.cycChar (q σ : Set, l : Nat)
+  requires prime : Prime(l)
+  requires natural : q ∈ ℕ
+  requires unitL : natCast(Algebra.ring(E), l) ∈ valuationSubringUnits(Algebra.ring(E), A)
+  requires frobenius : IsFrob(G, ρ, Algebra.ring(E), A, q, σ)
+  shows cycChar(G, ρ, Algebra.ring(E), l)(σ) = natCast(padicIntRing(l), q) ∧
+    (σ ∈ inertiaGroup(G, ρ, Algebra.ring(E), A) →
+      cycChar(G, ρ, Algebra.ring(E), l)(σ) = Ring.one(padicIntRing(l)))
+proof
+  sorry
+
+-- isOpen_ker_cycCharMod: the kernel of cycCharMod N is open.
+theorem cycCharMod.open_kernel (N : Nat)
+  requires positive : 0 < N
+  shows OpenSubgroup(cycCharModKernel(G, ρ, Algebra.ring(E), N), G, X)
+proof
+  sorry
+
+-- rootPowHom exists.
+theorem IsRootPowHom.exists (N : Nat)
+  requires positive : 0 < N
+  shows ∃ f, IsRootPowHom(Algebra.ring(E), N, f)
+proof
+  sorry
+
+end Cyclotomic
+
+-- Section: Cyclotomic fields in Ω
+section CycloField
+variable (Q : Set)
+hypothesis qbar : IsQbar(Q)
+
+-- The IsCyclotomicExtension {N} ℚ (cycloField N) instance, and
+-- cycCharMod_surjective: Gal(Ω/ℚ) → (ℤ/N)ˣ is onto.
+theorem cycloField.cyclotomic (N : Nat)
+  requires positive : 0 < N
+  shows IntermediateField(Q, cycloField(Q, N)) ∧
+    IsCyclotomicExtension({N}, subextension(Q, cycloField(Q, N))) ∧
+    functionImage(cycCharMod(galoisGroup(Q), identity(algebraAutomorphisms(Q)), Algebra.ring(Q), N),
+      algebraAutomorphisms(Q), Ring.carrier(zmod(N))) = ringUnits(zmod(N))
+proof
+  sorry
+
+-- exists_rat_place_of_prime: for p prime, a place v of ℚ of norm p with
+-- ord_v(p) = 1, and every place of Ω at which p is not a unit lies over v.
+theorem exists_rat_place_of_prime (p : Nat)
+  requires prime : Prime(p)
+  shows ∃ v ∈ finPlaces(rationalRing), placeNorm(rationalRing, v) = p ∧
+    completionOrder(rationalRing, v,
+      adicCompletionEmbedding(rationalRing, v)(natCast(rationalRing, p))) = integerOne ∧
+    (∀ A ∈ closurePlaces(Algebra.ring(Q)),
+      natCast(Algebra.ring(Q), p) ∈ valuationSubringNonunits(Algebra.ring(Q), A) →
+        IsPlaceOver(Q, A, v))
+proof
+  sorry
+
+end CycloField
+
+-- Section: Places over primes
+section PlaceOver
+variable (E A : Set)
+hypothesis extension : FieldExtension(E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis place : ValuationSubring(Algebra.ring(E), A)
+
+-- algebraMap_ringOfIntegers_mem, the IsPrime instance of centrePrime.
+theorem centrePrime.prime
+  shows (∀ x ∈ ringOfIntegers(Algebra.base(E)), Algebra.map(E)(x) ∈ A) ∧
+    PrimeIdeal(ringOfIntegersRing(Algebra.base(E)), centrePrime(E, A))
+proof
+  sorry
+
+-- IsPlaceOver.of_le_centrePrime and unique: A lies over v as soon as v
+-- is in its centre, and over at most one v.
+theorem IsPlaceOver.of_le_centrePrime (v : Set)
+  requires prime : v ∈ finPlaces(Algebra.base(E))
+  requires inside : v ⊆ centrePrime(E, A)
+  shows IsPlaceOver(E, A, v)
+proof
+  sorry
+
+theorem IsPlaceOver.unique (v v2 : Set)
+  requires prime : v ∈ finPlaces(Algebra.base(E))
+  requires prime2 : v2 ∈ finPlaces(Algebra.base(E))
+  requires over : IsPlaceOver(E, A, v)
+  requires over2 : IsPlaceOver(E, A, v2)
+  shows v = v2
+proof
+  sorry
+
+-- valuationVia_eq_one_iff, valuation_natCast_lt_one_iff, isUniformiser_iff:
+-- for A over v, x ∈ Kˣ is a unit at A iff ord_v x = 0; n is in the
+-- maximal ideal of A iff n ∈ v; π is a uniformiser iff ord_v π = 1.
+theorem IsPlaceOver.valuation (v : Set)
+  requires prime : v ∈ finPlaces(Algebra.base(E))
+  requires over : IsPlaceOver(E, A, v)
+  shows (∀ x ∈ fieldUnits(Algebra.base(E)),
+      Algebra.map(E)(x) ∈ valuationSubringUnits(Algebra.ring(E), A) ↔
+        completionOrder(Algebra.base(E), v,
+          adicCompletionEmbedding(Algebra.base(E), v)(x)) = integerZero) ∧
+    (∀ n ∈ ℕ, natCast(Algebra.ring(E), n) ∈ valuationSubringNonunits(Algebra.ring(E), A) ↔
+      natCast(Algebra.base(E), n) ∈ v) ∧
+    natCast(Algebra.ring(E), placeNorm(Algebra.base(E), v)) ∈
+      valuationSubringNonunits(Algebra.ring(E), A) ∧
+    (∀ π ∈ fieldUnits(Algebra.base(E)), IsUniformiser(E, A, π) ↔
+      completionOrder(Algebra.base(E), v,
+        adicCompletionEmbedding(Algebra.base(E), v)(π)) = integerOne)
+proof
+  sorry
+
+-- isPlaceOver_below: in a tower K → L → Ω, a place over u of L lies over
+-- the place of K below u.
+theorem IsPlaceOver.below (F f u : Set)
+  requires extension2 : FieldExtension(F)
+  requires numberField2 : NumberField(Algebra.base(F))
+  requires sameClosure : Algebra.ring(F) = Algebra.ring(E)
+  requires hom : RingHom(f, Algebra.base(E), Algebra.base(F))
+  requires tower : ∀ x ∈ Ring.carrier(Algebra.base(E)), Algebra.map(F)(f(x)) = Algebra.map(E)(x)
+  requires prime : u ∈ finPlaces(Algebra.base(F))
+  requires over : IsPlaceOver(F, A, u)
+  shows IsPlaceOver(E, A, placeBelow(Algebra.base(E), Algebra.base(F), f, u))
+proof
+  sorry
+
+end PlaceOver
+
+-- Section: Places and Galois groups
+section PlacesGalois
+variable (G X ρ E : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis algebraic : AlgebraicExtension(E)
+
+-- IsPlaceOver.smul: g A lies over v with A.
+theorem IsPlaceOver.smul (A v g : Set)
+  requires over : IsPlaceOver(E, A, v)
+  requires member : g ∈ Group.carrier(G)
+  shows IsPlaceOver(E, placeTranslate(G, ρ, Algebra.ring(E), g, A), v)
+proof
+  sorry
+
+-- exists_isPlaceOver_of_val_ne_one: a place with a nonzero non-unit lies
+-- over some prime of K.
+theorem IsPlaceOver.exists_of_nonunit (A x : Set)
+  requires place : ValuationSubring(Algebra.ring(E), A)
+  requires nonzero : x ∈ ringUnits(Algebra.ring(E))
+  requires nonunit : x ∉ valuationSubringUnits(Algebra.ring(E), A)
+  shows ∃ v ∈ finPlaces(Algebra.base(E)), IsPlaceOver(E, A, v)
+proof
+  sorry
+
+-- finite_ramified: for U open, only finitely many v have a place above
+-- with inertia not inside U.
+theorem IsProGalois.finite_ramified (U : Set)
+  requires open : OpenSubgroup(U, G, X)
+  shows Finite(ramifiedForSubgroup(G, ρ, E, U))
+proof
+  sorry
+
+-- IsPlaceOver.exists_above: for K ⊆ L ⊆ Ω, a place over v lies over a
+-- place u of L above v.
+theorem IsPlaceOver.exists_above (A v F : Set)
+  requires over : IsPlaceOver(E, A, v)
+  requires prime : v ∈ finPlaces(Algebra.base(E))
+  requires intermediate : IntermediateField(E, F)
+  requires finite : FiniteExtension(subextension(E, F))
+  shows ∃ u ∈ finPlaces(intermediateRing(E, F)), IsPlaceOver(overExtension(E, F), A, u) ∧
+    placeBelow(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), u) = v
+proof
+  sorry
+
+end PlacesGalois
+
+-- Section: Local fields
+section LocalFrobenius
+variable (G X ρ E A : Set)
+hypothesis local : IsLocalGalois(G, X, ρ, E, A)
+
+-- IsUniformiser.val_lt_one, isUniformiser_iff_irreducible,
+-- exists_isUniformiser.
+theorem IsUniformiser.irreducible (π : Set)
+  requires member : π ∈ Ring.carrier(Algebra.base(E))
+  shows (IsUniformiser(E, A, π) → π ∈ valIdealBelow(E, A)) ∧
+    (IsUniformiser(E, A, π) ↔
+      π ∈ valRingBelow(E, A) ∧ RingIrreducible(valRingBelowRing(E, A), π))
+proof
+  sorry
+
+theorem IsUniformiser.exists
+  shows ∃ π ∈ ringUnits(Algebra.base(E)), IsUniformiser(E, A, π)
+proof
+  sorry
+
+-- IsUniformiser.ordRat_eq_one, ordRat_eq_zero.
+theorem ordRat.uniformiser_and_units (π x : Set)
+  requires uniformiser : IsUniformiser(E, A, π)
+  requires unit : π ∈ ringUnits(Algebra.base(E))
+  requires member : x ∈ ringUnits(Algebra.ring(E))
+  shows ordRat(E, A)(Algebra.map(E)(π)) = rationalOne ∧
+    (ordRat(E, A)(x) = rationalZero ↔ x ∈ valuationSubringUnits(Algebra.ring(E), A))
+proof
+  sorry
+
+-- frobenius_spec: an arithmetic Frobenius φ exists; for any such φ the
+-- products φⁿ i, i in inertia, are dense in Γ; A is integral over A ∩ K.
+theorem frobenius_spec
+  shows (∃ φ, IsFrob(G, ρ, Algebra.ring(E), A, residueCard(E, A), φ)) ∧
+    (∀ φ, IsFrob(G, ρ, Algebra.ring(E), A, residueCard(E, A), φ) →
+      closure(X, frobInertiaProducts(G, φ, inertiaGroup(G, ρ, Algebra.ring(E), A))) =
+        Group.carrier(G)) ∧
+    (∀ x ∈ A, IntegralElement(valRingExtension(E, A), x))
+proof
+  sorry
+
+end LocalFrobenius
