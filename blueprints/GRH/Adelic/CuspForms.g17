@@ -1,0 +1,408 @@
+-- Algebraic modular forms on the definite unitary group U_n over a CM
+-- field and the facts the endgame uses about them: the p-adic places
+-- ι : ℂ → ℂ_p and the valuation rings O_ι; algebraic forms of a weight,
+-- the forms integral at ι; the level forms of a congruence level with a
+-- character, their σ-conjugate pairings, squared norms ‖·‖²_σ, pairing
+-- matrices and squared covolumes; definiteness, Cauchy–Schwarz for
+-- conjugates, integrality of pairings, and Hadamard's inequality.
+-- Source: grh-compact/src/Lib/Adelic/CuspForms/LevelForms.lean
+-- (LevelPlaces, LevelForm, LevelForm.innerAt, innerAt_eq_stdClassSum,
+-- eq_zero_of_innerAt_self, normSqAt, norm_map_inner_le, integralForms,
+-- norm_inner_le_one, pairingMatrix, covolumeSq, covolumeSq_le,
+-- covolumeSq_elim_le), CuspForms/ClassReps.lean (embValRing, GaugeLe,
+-- integralFormsAt), Unitary/CongruenceLevel.lean (reduceFamily, levelOf,
+-- levelOf.reduction); with Lib/General/Algebra/AdicRingHomExt.lean
+-- (PadicPlace) and Lib/GLn/SchurModule/WeightRepBasic.lean (AlgForm,
+-- algFormRep, weightRep, gramForm, weylGauge; weylNormSq of
+-- Lib/GLn/Branching/BranchingVector.lean), stated here until
+-- GRH.GLn.SchurModule exists. The rest of the groups GRH.Adelic.CuspForms
+-- and CuspForms2 (Petersson, RealConvolution, SmoothFormPairing,
+-- Landherr, AlgebraicForms, CuspStep, FormRepresentation,
+-- ReproducingKernel, WeightParameter) is not yet stated.
+-- Encoding. A p-adic place ι : ℂ → ℂ_p is recorded by the absolute value
+-- z ↦ ‖ι(z)‖ it induces on ℂ (the only way the statements read ι), for
+-- some algebraic closure of ℚ_p and ring homomorphism into its ℂ_p; the
+-- places form a set. The weight (κ, e) enters through its weight datum ω,
+-- a record of the index set WeylIndex n κ, the representation weightRep
+-- κ e on the rational unitary matrices, the Gram matrix weylGramOver and
+-- the p-adic gauge weylGauge (a function of the place, the point of G_f
+-- and the vector); GRH.GLn.SchurModule will define the datum of each
+-- weight, and IsWeightDatum states the properties used. A form is a
+-- function φ on G_f × WeylIndex (the source's φ g i), so the forms are a
+-- submodule of the coordinate module. A level setting is a record T of
+-- the field, CM type, rank, the places w_i of the level, the subgroup H of
+-- Π_i GL_n(ResField w_i), the character χ of H and the weight datum.
+-- Part of the GRH blueprint (layer 4, Lib/Adelic, stage S4).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Adelic.CuspForms
+import GRH.Adelic.QuotientMeasure
+import GRH.Padic.Cp
+import GRH.Linear.Dimension
+
+section CuspForms
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: p-adic places
+-- AdicRingHomExt.lean, PadicPlace p: a ring homomorphism ιₚ : ℂ → ℂ_p,
+-- recorded by the absolute value z ↦ ‖ιₚ(z)‖ on ℂ.
+def padicPlaces (p : Set) : Set :=
+  { a ∈ functionSpace(complexCarrier, ℝ) | ∃ Ω, PadicAlgebraicClosure(p, Ω) ∧
+    ∃ h, RingHom(h, complexRing, cpField(p, Ω)) ∧
+      ∀ z ∈ complexCarrier, a(z) = cpNorm(p, Ω)(h(z)) }
+
+-- ‖ιₚ(z)‖, the norm of ℂ_p at the image of z.
+def padicPlaceNorm (p ι z : Set) : Set := ι(z)
+
+-- ClassReps.lean, embValRing: the valuation ring O_ι ⊂ ℂ of the complex
+-- numbers z with ‖ι(z)‖ ≤ 1.
+def embValRing (p ι : Set) : Set :=
+  { z ∈ complexCarrier | RealLe(padicPlaceNorm(p, ι, z), realOne) }
+
+-- Section: Weight data
+-- The weight datum of (κ, e): the index set WeylIndex n κ, the
+-- representation γ ↦ weightRep κ e γ of the rational unitary matrices,
+-- the Gram matrix weylGramOver and the gauge (ι, g, ξ) ↦ weylGauge κ e g ξ
+-- at the p-adic place ι.
+structure WeightDatum
+  | index rep gram gauge : Set
+
+-- ⟨u, v⟩ = conj(u)ᵀ G v (WeightRepBasic.lean, gramForm), and
+-- BranchingVector.lean, weylNormSq u = re ⟨u, u⟩.
+def gramTerms (ω u v : Set) : Set :=
+  { (q, ℂ[complexConj(u(fst(q))) * WeightDatum.gram(ω)(q) * v(snd(q))]) |
+    q ∈ WeightDatum.index(ω) × WeightDatum.index(ω) }
+
+def gramForm (ω u v : Set) : Set :=
+  groupFiniteSum(complexAdditiveGroup, WeightDatum.index(ω) × WeightDatum.index(ω),
+    gramTerms(ω, u, v))
+
+def weylNormSq (ω u : Set) : Set := complexRe(gramForm(ω, u, u))
+
+-- weylGauge κ e g ξ at the place ι.
+def weightGauge (ω ι g ξ : Set) : Set := WeightDatum.gauge(ω)((ι, (g, ξ)))
+
+-- The properties of the datum used here: a finite index set; weightRep a
+-- homomorphism of U_n(E) into the invertible matrices; the Gram matrix
+-- hermitian and positive definite with ⟨ρ(γ)u, ρ(γ)v⟩ = ⟨u, v⟩ for
+-- rational unitary γ; the gauge nonnegative, ultrametric and homogeneous
+-- (‖ι(c)‖ times), and at most 1 exactly at the ι-integral vectors when
+-- g ∈ K₀ (weylGauge_le_one_iff, weylGauge_smul, the norm of a
+-- sup-normed vector).
+def vectorsOf (ω : Set) : Set := functionSpace(WeightDatum.index(ω), complexCarrier)
+
+predicate IsWeightDatum (E Φ n ω : Set) :=
+  WeightDatum.Data(ω) ∧ CMType(E, Φ) ∧ Finite(n) ∧ Finite(WeightDatum.index(ω)) ∧
+  (∀ γ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)),
+    WeightDatum.rep(ω)(γ) ∈ invertibleMatrices(complexRing, WeightDatum.index(ω))) ∧
+  (∀ γ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)),
+    ∀ δ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)),
+      WeightDatum.rep(ω)(matMul(E, n, n, n, γ, δ)) =
+        matMul(complexRing, WeightDatum.index(ω), WeightDatum.index(ω),
+          WeightDatum.index(ω), WeightDatum.rep(ω)(γ), WeightDatum.rep(ω)(δ))) ∧
+  WeightDatum.gram(ω) ∈ matrixSpace(complexRing, WeightDatum.index(ω),
+    WeightDatum.index(ω)) ∧
+  (∀ u ∈ vectorsOf(ω), ∀ v ∈ vectorsOf(ω),
+    complexConj(gramForm(ω, u, v)) = gramForm(ω, v, u)) ∧
+  (∀ u ∈ vectorsOf(ω), (∃ i ∈ WeightDatum.index(ω), u(i) ≠ complexZero) →
+    realZero < weylNormSq(ω, u)) ∧
+  (∀ γ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)), ∀ u ∈ vectorsOf(ω),
+    ∀ v ∈ vectorsOf(ω),
+      gramForm(ω, mulVec(complexRing, WeightDatum.index(ω), WeightDatum.index(ω),
+        WeightDatum.rep(ω)(γ), u), mulVec(complexRing, WeightDatum.index(ω),
+          WeightDatum.index(ω), WeightDatum.rep(ω)(γ), v)) = gramForm(ω, u, v)) ∧
+  (∀ p ∈ ℕ, Prime(p) → ∀ ι ∈ padicPlaces(p), ∀ g ∈ gfMatrices(E, n),
+    ∀ u ∈ vectorsOf(ω),
+      RealLe(realZero, weightGauge(ω, ι, g, u)) ∧
+      (g ∈ kfMatrices(E, n) →
+        (RealLe(weightGauge(ω, ι, g, u), realOne) ↔
+          ∀ i ∈ WeightDatum.index(ω), u(i) ∈ embValRing(p, ι))))
+
+-- Section: Algebraic forms
+-- φ(g) = (φ(g, i))_i for a form φ on G_f × WeylIndex, and σ ∘ φ(g).
+def formAt (ω φ g : Set) : Set := { (i, φ((g, i))) | i ∈ WeightDatum.index(ω) }
+
+def conjFormAt (ω σ φ g : Set) : Set :=
+  { (i, σ(φ((g, i)))) | i ∈ WeightDatum.index(ω) }
+
+-- The functions G_f × WeylIndex → ℂ as a ℂ-module.
+def formFunctions (E n ω : Set) : Set :=
+  coordinateModule(complexRing, gfMatrices(E, n) × WeightDatum.index(ω))
+
+-- WeightRepBasic.lean, AlgForm n κ e = SmoothForm embFin (weightRep κ e):
+-- the forms with φ(γg) = weightRep(γ) φ(g) for γ ∈ U_n(E) (through
+-- embFin) and fixed on the right by an open subgroup of G_f.
+def algForms (E Φ n ω : Set) : Set :=
+  { φ ∈ Module.carrier(formFunctions(E, n, ω)) |
+    (∀ γ ∈ ratUnitaryMatrices(E, n, stdSpaceGram(E, n)), ∀ g ∈ gfMatrices(E, n),
+      formAt(ω, φ, matMul(finiteAdeleRing(E), n, n, n,
+        embFin(E, Φ, n, stdSpaceFrame(E, Φ, n), γ), g)) =
+      mulVec(complexRing, WeightDatum.index(ω), WeightDatum.index(ω),
+        WeightDatum.rep(ω)(γ), formAt(ω, φ, g))) ∧
+    (∃ K, Subgroup(K, gfGroup(E, n)) ∧ K ∈ TopologicalSpace.opens(gfSpace(E, n)) ∧
+      ∀ g ∈ gfMatrices(E, n), ∀ k ∈ K,
+        formAt(ω, φ, matMul(finiteAdeleRing(E), n, n, n, g, k)) = formAt(ω, φ, g)) }
+
+def algFormModule (E Φ n ω : Set) : Set :=
+  submoduleModule(formFunctions(E, n, ω), complexRing, algForms(E, Φ, n, ω))
+
+-- ClassReps.lean, GaugeLe d c at ι and integralFormsAt S d: the forms φ in
+-- S with weylGauge(gd, φ(g)) ≤ 1 for every g, a module over O_ι.
+def integralFormsAt (E n ω S d p ι : Set) : Set :=
+  { φ ∈ S | ∀ g ∈ gfMatrices(E, n),
+    RealLe(weightGauge(ω, ι, matMul(finiteAdeleRing(E), n, n, n, g, d),
+      formAt(ω, φ, g)), realOne) }
+
+-- ClassReps.lean, integralFormsAt is an O_ι-submodule: closed under sums
+-- and under multiplication by elements of O_ι.
+theorem integralFormsAt.submodule (E Φ n ω S d p ι φ ψ c : Set)
+  requires weight : IsWeightDatum(E, Φ, n, ω)
+  requires sub : S ⊆ algForms(E, Φ, n, ω)
+  requires submodule : SubmoduleOf(S, formFunctions(E, n, ω), complexRing)
+  requires hd : d ∈ gfMatrices(E, n)
+  requires prime : Prime(p)
+  requires place : ι ∈ padicPlaces(p)
+  requires hφ : φ ∈ integralFormsAt(E, n, ω, S, d, p, ι)
+  requires hψ : ψ ∈ integralFormsAt(E, n, ω, S, d, p, ι)
+  requires hc : c ∈ embValRing(p, ι)
+  shows call2(Module.add(formFunctions(E, n, ω)), φ, ψ) ∈ integralFormsAt(E, n, ω, S, d, p, ι) ∧
+    Module.smul(formFunctions(E, n, ω))(c, φ) ∈ integralFormsAt(E, n, ω, S, d, p, ι)
+proof
+  sorry
+
+-- Section: Level forms
+-- LevelForms.lean, LevelPlaces with a level H and character χ: the
+-- record of the field E, the CM type Φ, the rank n, the family w of
+-- places (chosenPlace ⊕ twistPlace), the subgroup H of
+-- Π_i GL_n(ResField w_i), the character χ : H → ℂ and the weight datum.
+structure LevelSetting
+  | field cmType rank places group char weight : Set
+
+-- The conjugate place w̄ = c(w) (star w in the source).
+def conjugatePlace (E w : Set) : Set := { cmConjugation(E)(a) | a ∈ w }
+
+-- CongruenceLevel.lean, reduceFamily w: k ∈ K₀ ↦ (k mod w_i)_i.
+def reduceMatrixAt (E n w k : Set) : Set := { (q, reduceAt(E, w, k(q))) | q ∈ n × n }
+
+def reduceFamily (T k : Set) : Set :=
+  { (i, reduceMatrixAt(LevelSetting.field(T), LevelSetting.rank(T),
+      LevelSetting.places(T)(i), k)) | i ∈ domain(LevelSetting.places(T)) }
+
+-- CongruenceLevel.lean, levelOf w H: the k ∈ K₀ whose reduction lies in H.
+def levelOf (T : Set) : Set :=
+  { k ∈ kfMatrices(LevelSetting.field(T), LevelSetting.rank(T)) |
+    reduceFamily(T, k) ∈ LevelSetting.group(T) }
+
+-- LevelForms.lean, isConjApart and LevelSetting data: the places are
+-- distinct finite places, no two conjugate (IsConjApart), H is a subgroup
+-- of Π_i GL_n(ResField w_i), χ a homomorphism H → ℂˣ, the weight datum
+-- satisfies IsWeightDatum.
+def residueGLs (T : Set) : Set :=
+  { (i, generalLinearGroup(resField(LevelSetting.field(T), LevelSetting.places(T)(i)),
+      LevelSetting.rank(T))) | i ∈ domain(LevelSetting.places(T)) }
+
+-- The product group Π_i F(i) of a family of groups (pointwise
+-- operations).
+def familyCarriers (I F : Set) : Set := { Group.carrier(F(i)) | i ∈ I }
+
+def familyCarrier (I F : Set) : Set :=
+  { u ∈ functionSpace(I, ⋃(familyCarriers(I, F))) |
+    ∀ i ∈ I, u(i) ∈ Group.carrier(F(i)) }
+
+def familyMul (I F : Set) : Set :=
+  { p ∈ (familyCarrier(I, F) × familyCarrier(I, F)) × familyCarrier(I, F) |
+    ∀ i ∈ I, snd(p)(i) = Group.mul(F(i))(fst(fst(p))(i), snd(fst(p))(i)) }
+
+def familyOne (I F : Set) : Set := { (i, Group.one(F(i))) | i ∈ I }
+
+def familyInv (I F : Set) : Set :=
+  { p ∈ familyCarrier(I, F) × familyCarrier(I, F) |
+    ∀ i ∈ I, snd(p)(i) = Group.inv(F(i))(fst(p)(i)) }
+
+def familyGroup (I F : Set) : Set :=
+  Group.mk(familyCarrier(I, F), familyMul(I, F), familyOne(I, F), familyInv(I, F))
+
+predicate IsLevelSetting (T : Set) :=
+  LevelSetting.Data(T) ∧
+  IsWeightDatum(LevelSetting.field(T), LevelSetting.cmType(T), LevelSetting.rank(T),
+    LevelSetting.weight(T)) ∧
+  Finite(domain(LevelSetting.places(T))) ∧
+  FunctionBetween(LevelSetting.places(T), domain(LevelSetting.places(T)),
+    finPlaces(LevelSetting.field(T))) ∧
+  (∀ i ∈ domain(LevelSetting.places(T)), ∀ j ∈ domain(LevelSetting.places(T)),
+    LevelSetting.places(T)(i) = LevelSetting.places(T)(j) → i = j) ∧
+  (∀ i ∈ domain(LevelSetting.places(T)), ∀ j ∈ domain(LevelSetting.places(T)),
+    LevelSetting.places(T)(j) ≠
+      conjugatePlace(LevelSetting.field(T), LevelSetting.places(T)(i))) ∧
+  Subgroup(LevelSetting.group(T),
+    familyGroup(domain(LevelSetting.places(T)), residueGLs(T))) ∧
+  GroupHom(LevelSetting.char(T),
+    subgroupGroup(familyGroup(domain(LevelSetting.places(T)), residueGLs(T)),
+      LevelSetting.group(T)), unitGroup(complexRing))
+
+-- The parts of the setting as one writes them.
+def levelWeight (T : Set) : Set := LevelSetting.weight(T)
+def levelGf (T : Set) : Set := gfMatrices(LevelSetting.field(T), LevelSetting.rank(T))
+def levelRatPoints (T : Set) : Set :=
+  stdRatPoints(LevelSetting.field(T), LevelSetting.cmType(T), LevelSetting.rank(T))
+def levelGfGroup (T : Set) : Set := gfGroup(LevelSetting.field(T), LevelSetting.rank(T))
+def levelFunctions (T : Set) : Set :=
+  formFunctions(LevelSetting.field(T), LevelSetting.rank(T), LevelSetting.weight(T))
+
+-- gk in G_f.
+def gfMul (T g k : Set) : Set :=
+  matMul(finiteAdeleRing(LevelSetting.field(T)), LevelSetting.rank(T),
+    LevelSetting.rank(T), LevelSetting.rank(T), g, k)
+
+-- LevelForms.lean, LevelForm: the algebraic forms of the weight on which
+-- the level acts through χ ∘ reduction: φ(gk) = χ(k mod w) φ(g).
+def levelForms (T : Set) : Set :=
+  { φ ∈ algForms(LevelSetting.field(T), LevelSetting.cmType(T), LevelSetting.rank(T),
+      LevelSetting.weight(T)) |
+    ∀ k ∈ levelOf(T), ∀ g ∈ levelGf(T), ∀ i ∈ WeightDatum.index(levelWeight(T)),
+      φ((gfMul(T, g, k), i)) = ℂ[LevelSetting.char(T)(reduceFamily(T, k)) * φ((g, i))] }
+
+def levelFormModule (T : Set) : Set :=
+  submoduleModule(levelFunctions(T), complexRing, levelForms(T))
+
+-- Section: Pairings and norms
+-- g ↦ ⟨σ ∘ φ(g), σ ∘ ψ(g)⟩ and g ↦ ‖σ ∘ φ(g)‖² (as complex numbers).
+def pairingAt (T σ φ τ ψ : Set) : Set :=
+  { (g, gramForm(levelWeight(T), conjFormAt(levelWeight(T), σ, φ, g),
+      conjFormAt(levelWeight(T), τ, ψ, g))) | g ∈ levelGf(T) }
+
+def normSqValues (T σ φ : Set) : Set :=
+  { (g, complexOfReal(weylNormSq(levelWeight(T), conjFormAt(levelWeight(T), σ, φ, g)))) |
+    g ∈ levelGf(T) }
+
+-- The class sum over U_n(E)\G_f/levelOf of a function on G_f.
+def levelClassSum (T f : Set) : Set :=
+  classSum(levelGfGroup(T), levelRatPoints(T), levelOf(T), f)
+
+-- LevelForms.lean, LevelForm.normSqAt σ φ: the class sum of the squared
+-- Gram norms of the vectors σ(φ(g)), a real number.
+def levelNormSqAt (T φ σ : Set) : Set := complexRe(levelClassSum(T, normSqValues(T, σ, φ)))
+
+-- LevelForms.lean, pairingMatrix y σ at the entry (i, l): the class sum of
+-- ⟨σ_i ∘ y_i(g), σ_l ∘ y_l(g)⟩; levelPairing is the entry for σ_i = σ_l = σ.
+def levelPairing (T σ φ ψ : Set) : Set := levelClassSum(T, pairingAt(T, σ, φ, σ, ψ))
+
+def pairingMatrix (T J y σ : Set) : Set :=
+  { (q, levelClassSum(T, pairingAt(T, σ(fst(q)), y(fst(q)), σ(snd(q)), y(snd(q))))) |
+    q ∈ J × J }
+
+-- The constant family j ↦ σ.
+def constFamily (J σ : Set) : Set := J × {σ}
+
+-- LevelForms.lean, covolumeSq y σ = |det pairingMatrix y (fun _ ↦ σ)|.
+def levelCovolumeSq (T J y σ : Set) : Set :=
+  complexAbs(matDet(complexRing, J, pairingMatrix(T, J, y, constFamily(J, σ))))
+
+-- LevelForms.lean, LevelForm.innerAt σ φ φ′ (innerAt_eq_stdClassSum): the
+-- unique z with σ(z) the class sum of ⟨σφ(g), σφ′(g)⟩, times the index
+-- [K₀ : level] (stdLevelIndex) in the source's normalisation of the
+-- pairing of smooth forms, which innerAt_eq_stdClassSum absorbs; and the
+-- inner product ⟨φ, φ′⟩ = innerAt 1.
+def levelInnerAt (T σ φ ψ : Set) : Set :=
+  ⋃({ z ∈ complexCarrier | σ(z) = levelPairing(T, σ, φ, ψ) })
+
+def complexIdentity : Set := { (z, z) | z ∈ complexCarrier }
+
+def levelInner (T φ ψ : Set) : Set := levelInnerAt(T, complexIdentity, φ, ψ)
+
+-- LevelForms.lean, LevelForm.integralForms ι: the level forms with
+-- weylGauge(g, φ(g)) ≤ 1 for every g, an O_ι-module.
+def levelIntegralForms (T p ι : Set) : Set :=
+  integralFormsAt(LevelSetting.field(T), LevelSetting.rank(T), levelWeight(T),
+    levelForms(T), matOne(finiteAdeleRing(LevelSetting.field(T)), LevelSetting.rank(T)),
+    p, ι)
+
+-- Section: Facts
+-- LevelForms.lean, the Module and FiniteDimensional instances of
+-- LevelForm: the level forms are a finite-dimensional ℂ-module.
+theorem levelForms.finite_dimensional (T : Set)
+  requires setting : IsLevelSetting(T)
+  shows SubmoduleOf(levelForms(T), levelFunctions(T), complexRing) ∧
+    FiniteDimensional(levelFormModule(T), complexRing)
+proof
+  sorry
+
+-- LevelForms.lean, LevelForm.eq_zero_of_innerAt_self: definiteness of
+-- the σ-conjugate pairing.
+theorem levelInnerAt.eq_zero (T σ φ : Set)
+  requires setting : IsLevelSetting(T)
+  requires aut : RingIso(σ, complexRing, complexRing)
+  requires hφ : φ ∈ levelForms(T)
+  requires zero : levelInnerAt(T, σ, φ, φ) = complexZero
+  shows φ = Module.zero(levelFunctions(T))
+proof
+  sorry
+
+-- The automorphism τ ↦ conj ∘ τ ∘ conj (σ conjugated by complex
+-- conjugation).
+def conjConjugate (σ : Set) : Set :=
+  { (z, complexConj(σ(complexConj(z)))) | z ∈ complexCarrier }
+
+-- LevelForms.lean, LevelForm.norm_map_inner_le (Cauchy–Schwarz for
+-- conjugates): |σ⟨φ′, φ⟩| ≤ ‖φ‖_σ ‖φ′‖_{σ′}, σ′ = conj ∘ σ ∘ conj.
+theorem levelInner.abs_map_le (T σ φ ψ : Set)
+  requires setting : IsLevelSetting(T)
+  requires aut : RingIso(σ, complexRing, complexRing)
+  requires hφ : φ ∈ levelForms(T)
+  requires hψ : ψ ∈ levelForms(T)
+  shows RealLe(complexAbs(σ(levelInner(T, ψ, φ))),
+    R[realSqrt(levelNormSqAt(T, φ, σ)) * realSqrt(levelNormSqAt(T, ψ, conjConjugate(σ)))])
+proof
+  sorry
+
+-- The place ι ∘ conj: z ↦ ‖ι(conj z)‖.
+def conjPlace (ι : Set) : Set := { (z, ι(complexConj(z))) | z ∈ complexCarrier }
+
+-- A · z for a natural A.
+def natTimes (A z : Set) : Set := ℂ[complexOfReal(realNat(A)) * z]
+
+-- LevelForms.lean, LevelForm.norm_inner_le_one: if A is divisible by the
+-- orders of all stabilisers U_n(E) ∩ g K g⁻¹ at the level, φ is integral
+-- at ι ∘ conj and φ′ at ι, then ‖ι(A⟨φ, φ′⟩)‖ ≤ 1.
+theorem levelInner.integral (T p ι A φ ψ : Set)
+  requires setting : IsLevelSetting(T)
+  requires prime : Prime(p)
+  requires place : ι ∈ padicPlaces(p)
+  requires hA : A ∈ ℕ
+  requires divides : ∀ g ∈ levelGf(T),
+    Divides(cardinality(classAut(levelGfGroup(T), levelRatPoints(T), levelOf(T), g)), A)
+  requires hφ : φ ∈ levelIntegralForms(T, p, conjPlace(ι))
+  requires hψ : ψ ∈ levelIntegralForms(T, p, ι)
+  shows RealLe(padicPlaceNorm(p, ι, natTimes(A, levelInner(T, φ, ψ))), realOne)
+proof
+  sorry
+
+-- LevelForms.lean, covolumeSq_le (Hadamard's inequality): k forms of
+-- squared norm at most e^β at σ have squared covolume at most e^{kβ}.
+theorem levelCovolumeSq.le (T σ y β : Set) (k : Nat)
+  requires setting : IsLevelSetting(T)
+  requires aut : RingIso(σ, complexRing, complexRing)
+  requires forms : FunctionBetween(y, k, levelForms(T))
+  requires hβ : β ∈ ℝ
+  requires bound : ∀ a ∈ k, RealLe(levelNormSqAt(T, y(a), σ), realExp(β))
+  shows RealLe(levelCovolumeSq(T, k, y, σ), realExp(R[realNat(k) * β]))
+proof
+  sorry
+
+-- LevelForms.lean, posSemidef_pairingMatrix and norm_map_det_gram_le:
+-- the pairing matrix is hermitian with nonnegative real determinant.
+theorem pairingMatrix.det_nonneg (T J y σ : Set)
+  requires setting : IsLevelSetting(T)
+  requires aut : RingIso(σ, complexRing, complexRing)
+  requires finite : Finite(J)
+  requires forms : FunctionBetween(y, J, levelForms(T))
+  shows matDet(complexRing, J, pairingMatrix(T, J, y, constFamily(J, σ))) =
+    complexOfReal(levelCovolumeSq(T, J, y, σ))
+proof
+  sorry
+
+end CuspForms
