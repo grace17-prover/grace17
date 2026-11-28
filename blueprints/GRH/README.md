@@ -389,6 +389,9 @@ graph TD
 | GRH.Category.Abelian | 45 | 1 | 44 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
+| GRH.Weil.Construction | 58 | 0 | 58 |
+| GRH.Weil.Unramified | 14 | 7 | 7 |
+| GRH.DiscreteSeries.Basic | 10 | 0 | 10 |
 | GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
 | GRH.Fourier.Euclidean | 26 | 0 | 26 |
 | GRH.Fourier.Torus | 21 | 0 | 21 |
@@ -396,9 +399,9 @@ graph TD
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
-| GRH.Weil.Construction | 58 | 0 | 58 |
-| GRH.Weil.Unramified | 14 | 7 | 7 |
+| GRH.Weil.Fock | 33 | 7 | 26 |
 | GRH.Weil.Construction2 | 23 | 9 | 14 |
+| GRH.Weil.RealData | 13 | 0 | 13 |
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 14 | 5 | 9 |
 | GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
@@ -417,5 +420,7 @@ graph TD
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
-| **total** | **9026** | **6787** | **2239** |
+| GRH.Weil.Operators | 9 | 0 | 9 |
+| GRH.Weil.Projections | 7 | 0 | 7 |
+| **total** | **9098** | **6794** | **2304** |
 <!-- /blueprint-status -->
