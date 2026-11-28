@@ -418,7 +418,7 @@ graph TD
 | GRH.GLn.Dual | 3 | 0 | 3 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
-| GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
+| GRH.Proof.Endgame.PrimeError | 11 | 8 | 3 |
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 14 | 5 | 9 |
 | GRH.Proof.Curve.PeriodDefs | 9 | 7 | 2 |
@@ -448,8 +448,11 @@ graph TD
 | GRH.Proof.Curve.FrameSections | 3 | 0 | 3 |
 | GRH.Proof.Curve.JetDivisibility | 1 | 0 | 1 |
 | GRH.Proof.Curve.KatzDivisibility | 1 | 0 | 1 |
+| GRH.Proof.Endgame.PolarMeasure | 41 | 41 | 0 |
+| GRH.Proof.Endgame.PolarReal | 30 | 30 | 0 |
+| GRH.Proof.Endgame.PolarLaplace | 44 | 44 | 0 |
 | GRH.Proof.Endgame.PolarLocal | 22 | 22 | 0 |
-| GRH.Proof.Endgame.PolarTools | 81 | 78 | 3 |
+| GRH.Proof.Endgame.PolarTools | 74 | 74 | 0 |
 | GRH.Proof.Endgame.CriterionTools | 17 | 17 | 0 |
 | GRH.Proof.Endgame.OneSidedCriterion | 1 | 1 | 0 |
 | GRH.Proof.Data.DataExist | 2 | 0 | 2 |
@@ -463,5 +466,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9761** | **7477** | **2284** |
+| **total** | **9876** | **7596** | **2280** |
 <!-- /blueprint-status -->
