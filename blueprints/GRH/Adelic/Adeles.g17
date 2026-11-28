@@ -1,0 +1,465 @@
+-- The adeles of a CM field with a CM type: the finite places, their
+-- residue fields and norms, the single-place adeles and reduction modulo a
+-- place; CM types Φ and the ring 𝔸 = ℂ^Φ × 𝔸_f with the diagonal embedding;
+-- the map of finite adeles induced by an embedding of number fields and
+-- complex conjugation on 𝔸_f; the standard additive character ψ = ψ_∞ ψ_f;
+-- density of E in 𝔸_f, approximation by E and by 𝓞_E (the Chinese
+-- remainder theorem), divisibility by the order at each place; and the
+-- abstract Hecke operators of a pair (G, K) on the level spaces of a
+-- representation.
+-- Source: grh-compact/src/Lib/Adelic/Adeles/CoprimeValuation.lean
+-- (PlaceEmbedding, CMType, FinPlace, 𝔸f, 𝔸, toAdele, ResField, FinPlace.q,
+-- singleAdele, Ô, reduceAt, adeleMap), Adeles/AdeleTopology.lean,
+-- Hecke/HeckeBasic.lean; with Adeles/AdditiveCharDefs.lean (ψf,
+-- stdAddChar) and Lib/General/LinearAlgebra/PartialDerivComm.lean
+-- (levelSpace, heckeFun), stated here until GRH.General.LinearAlgebra
+-- exists. Part of: "Adelic points of unitary groups, levels and Haar
+-- measures (known result; see Lib.Adelic.Reduction.MinkowskiSecond)".
+-- Encoding. Track G's finite adeles (GRH.NumberField.Adeles) are the
+-- 𝔸_f here: a finite adele is a function on the nonzero primes w of 𝓞_E
+-- with x(w) ∈ E_w; E_w is adicCompletionField(E, w) and 𝓞_w its subset
+-- adicCompletionIntegersIn(E, w). The source's 𝔸 E = (InfinitePlace E →
+-- ℂ) × 𝔸f E, read at the place w through the chosen embedding Φ w, is
+-- functionSpace(Φ, ℂ) × 𝔸f(E) with Φ the set of chosen embeddings (moved
+-- here from GRH.Weil.Unramified). A representation of a group record G
+-- on a module W is a function g ↦ π(g) of linear maps; a function chosen
+-- at representatives q.out of cosets is read as the unique value common
+-- to every choice of representatives.
+-- Part of the GRH blueprint (layer 4, Lib/Adelic, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Adelic.Adeles
+import GRH.NumberField.CM
+import GRH.NumberField.Adeles
+
+section Adeles
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Notation
+-- e(X) = e^{2πiX} for real X (layer 1's expTwoPiI, Mathlib's 𝐞).
+def circleExp (X : Set) : Set :=
+  complexExp(ℂ[complexImaginaryUnit * complexOfReal(R[2 * realPi * X])])
+
+-- Section: Finite places
+-- CoprimeValuation.lean, FinPlace E: the nonzero primes of 𝓞_E.
+def finPlaces (E : Set) : Set := heightOneSpectrum(ringOfIntegersRing(E))
+
+-- CoprimeValuation.lean, ResField w: the residue field of 𝓞_w, and
+-- FinPlace.q: the absolute norm of w, the order of that field.
+def resField (E w : Set) : Set := residueField(adicCompletionIntegers(E, w))
+
+def placeNorm (E w : Set) : Set := absNorm(E, w)
+
+-- Section: CM types and the adeles
+-- CoprimeValuation.lean, CMType E (NumberField, IsCMField, PlaceEmbedding):
+-- E is a CM number field and Φ contains exactly one of σ, σ̄ for each
+-- complex embedding σ (the embedding Φ w chosen at each infinite place w).
+predicate CMType (E Φ : Set) :=
+  NumberField(E) ∧ CMField(E) ∧ Φ ⊆ complexEmbeddings(E) ∧
+  (∀ σ ∈ complexEmbeddings(E), σ ∈ Φ ∨ conjugateEmbedding(E, σ) ∈ Φ) ∧
+  (∀ σ ∈ Φ, conjugateEmbedding(E, σ) ∉ Φ)
+
+-- The finite adeles 𝔸f(E) (CoprimeValuation.lean, 𝔸f), their carrier and
+-- operations, and Ô = Π 𝓞_w (CoprimeValuation.lean, Ô).
+def finAdeles (E : Set) : Set := Ring.carrier(finiteAdeleRing(E))
+def finAdd (E a b : Set) : Set := call2(Ring.add(finiteAdeleRing(E)), a, b)
+def finMul (E a b : Set) : Set := call2(Ring.mul(finiteAdeleRing(E)), a, b)
+def finNeg (E a : Set) : Set := apply(Ring.neg(finiteAdeleRing(E)), a)
+def finOne (E : Set) : Set := Ring.one(finiteAdeleRing(E))
+def finZero (E : Set) : Set := Ring.zero(finiteAdeleRing(E))
+def finInt (E : Set) : Set := integralFiniteAdeles(E)
+
+-- The image of a ∈ E in 𝔸f(E).
+def finOf (E a : Set) : Set := finiteAdeleEmbedding(E)(a)
+
+-- The inverse of a unit of 𝔸f(E), the unique b with ab = 1.
+def finInv (E a : Set) : Set :=
+  ⋃({ b ∈ finAdeles(E) | finMul(E, a, b) = finOne(E) })
+
+-- CoprimeValuation.lean, 𝔸 E = (InfinitePlace E → ℂ) × 𝔸f E, read through
+-- Φ: the ring ℂ^Φ × 𝔸f(E) and its product topology.
+def phiComplexRings (Φ : Set) : Set := { (σ, complexRing) | σ ∈ Φ }
+def phiComplexSpaces (Φ : Set) : Set := { (σ, complexSpace) | σ ∈ Φ }
+
+def cmAdeleRing (E Φ : Set) : Set :=
+  productRing(piRing(Φ, phiComplexRings(Φ)), finiteAdeleRing(E))
+
+def cmAdeleSpace (E Φ : Set) : Set :=
+  productSpace(piSpace(Φ, phiComplexSpaces(Φ)), finiteAdeleSpace(E))
+
+def cmAdeles (E Φ : Set) : Set := Ring.carrier(cmAdeleRing(E, Φ))
+
+-- CoprimeValuation.lean, toAdele: a ↦ ((σ(a))_{σ∈Φ}, a).
+def phiValues (Φ a : Set) : Set := { (σ, σ(a)) | σ ∈ Φ }
+
+def toCMAdele (E Φ a : Set) : Set := (phiValues(Φ, a), finOf(E, a))
+
+-- Section: Single places and reduction
+-- CoprimeValuation.lean, singleAdele w a: the finite adele with component
+-- a at w and 0 at every other place.
+def singleValue (E w a u : Set) : Set :=
+  ⋃({ z ∈ Ring.carrier(adicCompletionField(E, u)) |
+    (u = w ∧ z = a) ∨ (u ≠ w ∧ z = Ring.zero(adicCompletionField(E, u))) })
+
+def singleAdele (E w a : Set) : Set :=
+  { (u, singleValue(E, w, a, u)) | u ∈ finPlaces(E) }
+
+-- CoprimeValuation.lean, reduceAt w: Ô → ResField w, the residue class of
+-- the component x(w) ∈ 𝓞_w.
+def reduceAt (E w x : Set) : Set :=
+  ⋃({ c ∈ Ring.carrier(resField(E, w)) |
+    ∃ a ∈ c, adicCompletionInclusion(E, w)(a) = x(w) })
+
+-- Section: Maps of finite adeles
+-- CoprimeValuation.lean, adeleMap f: for an embedding f : K → L of number
+-- fields, the ring homomorphism 𝔸f(K) → 𝔸f(L) (componentwise the
+-- continuous extensions locMap of f); here the unique continuous map
+-- extending f, as K is dense in 𝔸f(K) (DenseRange.eq).
+defunique adeleMap (K L f : Set)
+    (t ∈ functionSpace(finAdeles(K), finAdeles(L))) :=
+  t : finiteAdeleSpace(K) ⇒ finiteAdeleSpace(L) ∧
+  ∀ a ∈ Ring.carrier(K), t(finOf(K, a)) = finOf(L, f(a))
+requires numberK : NumberField(K)
+requires numberL : NumberField(L)
+requires hom : RingHom(f, K, L)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- Complex conjugation on 𝔸f(E) (AdeleTopology.lean, the StarRing 𝔸f E):
+-- the unique continuous map 𝔸f(E) → 𝔸f(E) extending the conjugation c of
+-- E (adeleMap of c).
+defunique finStar (E : Set) (t ∈ functionSpace(finAdeles(E), finAdeles(E))) :=
+  t : finiteAdeleSpace(E) ⇒ finiteAdeleSpace(E) ∧
+  ∀ a ∈ Ring.carrier(E), t(finOf(E, a)) = finOf(E, cmConjugation(E)(a))
+requires cm : CMField(E)
+proof
+  sorry
+uniqueness
+  sorry
+
+-- Section: The standard additive character
+-- Tr_{E/ℚ}(a) as a real number: the real part of Σ_σ σ(a) over all complex
+-- embeddings (the sum is rational).
+def embeddingSumTerms (E a : Set) : Set := { (σ, σ(a)) | σ ∈ complexEmbeddings(E) }
+
+def traceReal (E a : Set) : Set :=
+  complexRe(groupFiniteSum(complexAdditiveGroup, complexEmbeddings(E),
+    embeddingSumTerms(E, a)))
+
+-- AdditiveCharDefs.lean, ψf: ψ_f(x) = e(Tr_{E/ℚ}(a)) for any a ∈ E with
+-- x − a ∈ Ô (the value does not depend on a, a theorem below).
+def finChar (E x : Set) : Set :=
+  ⋃({ w ∈ complexCarrier | ∃ a ∈ Ring.carrier(E),
+    finAdd(E, x, finNeg(E, finOf(E, a))) ∈ finInt(E) ∧ w = circleExp(traceReal(E, a)) })
+
+-- AdditiveCharDefs.lean, stdAddChar: ψ(x) = e(−Σ_{σ∈Φ} 2 re x_σ) ψ_f(x_f).
+def realPartTerms (Φ u : Set) : Set := { (σ, R[2 * complexRe(u(σ))]) | σ ∈ Φ }
+
+def adeleChar (E Φ x : Set) : Set :=
+  ℂ[circleExp(R[-realFiniteSum(realPartTerms(Φ, fst(x)), Φ)]) * finChar(E, snd(x))]
+
+-- AdditiveCharDefs.lean, ψf_eq: the value is well defined: for a ∈ E,
+-- ψ_f(a) = e(Tr a); ψ_f is a continuous character of 𝔸f(E) of modulus one.
+theorem finChar.of_field (E Φ a : Set)
+  requires cmType : CMType(E, Φ)
+  requires ha : a ∈ Ring.carrier(E)
+  shows finChar(E, finOf(E, a)) = circleExp(traceReal(E, a))
+proof
+  sorry
+
+theorem finChar.add (E Φ x y : Set)
+  requires cmType : CMType(E, Φ)
+  requires hx : x ∈ finAdeles(E)
+  requires hy : y ∈ finAdeles(E)
+  shows finChar(E, finAdd(E, x, y)) = ℂ[finChar(E, x) * finChar(E, y)] ∧
+    complexAbs(finChar(E, x)) = realOne
+proof
+  sorry
+
+-- AdditiveCharDefs.lean: ψ is trivial on E (the product formula for the
+-- additive character; stdAddChar_apply_toAdele).
+theorem adeleChar.of_field (E Φ a : Set)
+  requires cmType : CMType(E, Φ)
+  requires ha : a ∈ Ring.carrier(E)
+  shows adeleChar(E, Φ, toCMAdele(E, Φ, a)) = complexOne
+proof
+  sorry
+
+-- Section: Places and residue fields
+-- CoprimeValuation.lean, FinPlace.one_lt_q; AdeleTopology.lean,
+-- card_ResField and instFiniteResField: the residue field at w is finite
+-- of order q_w > 1.
+theorem resField.card (E w : Set)
+  requires numberField : NumberField(E)
+  requires hw : w ∈ finPlaces(E)
+  shows Finite(Ring.carrier(resField(E, w))) ∧
+    cardinality(Ring.carrier(resField(E, w))) = placeNorm(E, w) ∧
+    1 < placeNorm(E, w)
+proof
+  sorry
+
+-- AdeleTopology.lean, algebraMap_ResField_surjective: every residue class
+-- at w is the class of an element of 𝓞_E.
+theorem reduceAt.surjective (E w c : Set)
+  requires numberField : NumberField(E)
+  requires hw : w ∈ finPlaces(E)
+  requires hc : c ∈ Ring.carrier(resField(E, w))
+  shows ∃ a ∈ ringOfIntegers(E), reduceAt(E, w, finOf(E, a)) = c
+proof
+  sorry
+
+-- CoprimeValuation.lean, reduceAt is a ring homomorphism Ô → ResField w
+-- (on the integral adeles with their ring operations).
+theorem reduceAt.mul (E w x y : Set)
+  requires numberField : NumberField(E)
+  requires hw : w ∈ finPlaces(E)
+  requires hx : x ∈ finInt(E)
+  requires hy : y ∈ finInt(E)
+  shows reduceAt(E, w, finMul(E, x, y)) =
+      call2(Ring.mul(resField(E, w)), reduceAt(E, w, x), reduceAt(E, w, y)) ∧
+    reduceAt(E, w, finAdd(E, x, y)) =
+      call2(Ring.add(resField(E, w)), reduceAt(E, w, x), reduceAt(E, w, y)) ∧
+    reduceAt(E, w, finOne(E)) = Ring.one(resField(E, w))
+proof
+  sorry
+
+-- CoprimeValuation.lean, singleAdele_same, singleAdele_of_ne: the
+-- components of the single-place adele.
+theorem singleAdele.apply (E w a u : Set)
+  requires numberField : NumberField(E)
+  requires hw : w ∈ finPlaces(E)
+  requires ha : a ∈ Ring.carrier(adicCompletionField(E, w))
+  requires hu : u ∈ finPlaces(E)
+  shows singleAdele(E, w, a) ∈ finAdeles(E) ∧ singleAdele(E, w, a)(w) = a ∧
+    (u ≠ w → singleAdele(E, w, a)(u) = Ring.zero(adicCompletionField(E, u)))
+proof
+  sorry
+
+-- Section: Density and approximation
+-- AdeleTopology.lean, denseRange_algebraMap_finAdele: E is dense in 𝔸f(E).
+theorem finOf.dense (E : Set)
+  requires numberField : NumberField(E)
+  shows IsDense(finAdeles(E), TopologicalSpace.opens(finiteAdeleSpace(E)),
+    functionImage(finiteAdeleEmbedding(E), Ring.carrier(E), finAdeles(E)))
+proof
+  sorry
+
+-- AdeleTopology.lean, exists_sub_mem_Ô: every finite adele is congruent
+-- modulo Ô to an element of E.
+theorem finAdele.exists_sub_mem_int (E x : Set)
+  requires numberField : NumberField(E)
+  requires hx : x ∈ finAdeles(E)
+  shows ∃ a ∈ Ring.carrier(E), finAdd(E, x, finNeg(E, finOf(E, a))) ∈ finInt(E)
+proof
+  sorry
+
+-- The adele N·1 for a natural N.
+def finNat (E : Set, N : Nat) : Set := finOf(E, ringNat(Ring.add(E), Ring.zero(E), Ring.one(E), N))
+
+-- AdeleTopology.lean, exists_forall_mul_mem_Ô: a finite family of finite
+-- adeles is carried into Ô by some nonzero natural N.
+theorem finAdele.exists_nat_mul_mem_int (E I x : Set)
+  requires numberField : NumberField(E)
+  requires finite : Finite(I)
+  requires values : FunctionBetween(x, I, finAdeles(E))
+  shows ∃ N ∈ ℕ, N ≠ (0:N) ∧ ∀ i ∈ I, finMul(E, finNat(E, N), x(i)) ∈ finInt(E)
+proof
+  sorry
+
+-- AdeleTopology.lean, exists_eq_mul_iff_v_le: x = c y for some y ∈ Ô if
+-- and only if |x_w| ≤ |c_w| at every finite place w (written with the
+-- order at w: x_w = 0, or c_w ≠ 0 and ord_w c_w ≤ ord_w x_w).
+theorem finAdele.exists_eq_mul_iff (E x c : Set)
+  requires numberField : NumberField(E)
+  requires hx : x ∈ finAdeles(E)
+  requires hc : c ∈ finAdeles(E)
+  shows (∃ y ∈ finInt(E), x = finMul(E, c, y)) ↔
+    ∀ w ∈ finPlaces(E), x(w) = Ring.zero(adicCompletionField(E, w)) ∨
+      (c(w) ≠ Ring.zero(adicCompletionField(E, w)) ∧
+        integerLe(completionOrder(E, w, c(w)), completionOrder(E, w, x(w))))
+proof
+  sorry
+
+-- AdeleTopology.lean, exists_dvd_sub_algebraMap (the Chinese remainder
+-- theorem): for a ≠ 0 in 𝓞_E, every x ∈ Ô is congruent modulo aÔ to an
+-- element of 𝓞_E.
+theorem finInt.exists_dvd_sub (E a x : Set)
+  requires numberField : NumberField(E)
+  requires ha : a ∈ ringOfIntegers(E)
+  requires nonzero : a ≠ Ring.zero(E)
+  requires hx : x ∈ finInt(E)
+  shows ∃ b ∈ ringOfIntegers(E), ∃ y ∈ finInt(E),
+    finAdd(E, finOf(E, b), finNeg(E, x)) = finMul(E, finOf(E, a), y)
+proof
+  sorry
+
+-- AdeleTopology.lean, dense_Ô: 𝓞_E is dense in Ô.
+theorem finInt.dense (E : Set)
+  requires numberField : NumberField(E)
+  shows finInt(E) ⊆ closure(finAdeles(E), TopologicalSpace.opens(finiteAdeleSpace(E)),
+    functionImage(finiteAdeleEmbedding(E), ringOfIntegers(E), finAdeles(E)))
+proof
+  sorry
+
+-- Section: Maps of adeles and conjugation
+-- CoprimeValuation.lean, adeleMap is a continuous ring homomorphism
+-- (continuous_adeleMap) carrying Ô into Ô.
+theorem adeleMap.ring_hom (K L f : Set)
+  requires numberK : NumberField(K)
+  requires numberL : NumberField(L)
+  requires hom : RingHom(f, K, L)
+  shows RingHom(adeleMap(K, L, f), finiteAdeleRing(K), finiteAdeleRing(L)) ∧
+    ∀ x ∈ finInt(K), adeleMap(K, L, f)(x) ∈ finInt(L)
+proof
+  sorry
+
+-- AdeleTopology.lean, the StarRing and ContinuousStar instances of 𝔸f E
+-- and star_mem_Ô: conjugation is an involutive ring automorphism of
+-- 𝔸f(E) preserving Ô, the adeleMap of the conjugation of E.
+theorem finStar.ring_hom (E x : Set)
+  requires cm : CMField(E)
+  requires hx : x ∈ finAdeles(E)
+  shows RingHom(finStar(E), finiteAdeleRing(E), finiteAdeleRing(E)) ∧
+    finStar(E)(finStar(E)(x)) = x ∧
+    (x ∈ finInt(E) → finStar(E)(x) ∈ finInt(E)) ∧
+    finStar(E) = adeleMap(E, E, cmConjugation(E))
+proof
+  sorry
+
+-- Section: Level spaces and abstract Hecke operators
+-- A representation π of the group G on the A-module W: each π(g) is
+-- A-linear, π(1) = 1 and π(gh) = π(g)π(h) (Mathlib's Representation A G W).
+predicate GroupRep (G A W π : Set) :=
+  Group(G) ∧ (∀ g ∈ G.carrier, LinearMap(π(g), W, A, W)) ∧
+  (∀ v ∈ Module.carrier(W), π(G.one)(v) = v) ∧
+  (∀ g ∈ G.carrier, ∀ h ∈ G.carrier, ∀ v ∈ Module.carrier(W),
+    π(G.mul(g, h))(v) = π(g)(π(h)(v)))
+
+-- PartialDerivComm.lean, levelSpace π K χ: the v with π(k)v = χ(k)v for
+-- every k ∈ K; with χ = 1, the vectors fixed by K.
+def levelSpace (G K W π χ : Set) : Set :=
+  { v ∈ Module.carrier(W) | ∀ k ∈ K, π(k)(v) = Module.smul(W)(χ(k), v) }
+
+def fixedSpace (G K W π : Set) : Set :=
+  { v ∈ Module.carrier(W) | ∀ k ∈ K, π(k)(v) = v }
+
+-- The cosets gK on which f is not identically zero.
+def heckeSupport (G K A f : Set) : Set :=
+  { c ∈ leftCosets(G, K) | ∃ g ∈ c, f(g) ≠ Ring.zero(A) }
+
+-- HeckeBasic.lean, HasFiniteCosets K f: f is nonzero on only finitely many
+-- cosets gK (the source reads f at chosen representatives; for f right
+-- K-invariant, as in every use, the two agree), and IsBiInvariant K f.
+predicate HasFiniteCosets (G K A f : Set) := Finite(heckeSupport(G, K, A, f))
+
+predicate IsBiInvariant (G K A f : Set) :=
+  HasFiniteCosets(G, K, A, f) ∧
+  ∀ g ∈ G.carrier, ∀ k ∈ K, f(G.mul(g, k)) = f(g) ∧ f(G.mul(k, g)) = f(g)
+
+-- The systems of representatives of G/K.
+def cosetSections (G K : Set) : Set :=
+  { r ∈ functionSpace(leftCosets(G, K), G.carrier) | ∀ c ∈ leftCosets(G, K), r(c) ∈ c }
+
+-- Σ_{c} f(r_c) π(r_c) v over the cosets in the support, for the
+-- representatives r.
+def heckeTerms (G K A W π f v r : Set) : Set :=
+  { (c, Module.smul(W)(f(r(c)), π(r(c))(v))) | c ∈ heckeSupport(G, K, A, f) }
+
+def heckeSum (G K A W π f v r : Set) : Set :=
+  moduleSum(W, heckeSupport(G, K, A, f), heckeTerms(G, K, A, W, π, f, v, r))
+
+-- PartialDerivComm.lean, heckeFun π K f v = Σ_{gK} f(g) π(g) v: the value
+-- common to every system of representatives (it is one when f is right
+-- K-invariant and v is fixed by K, heckeFun.eq_sum).
+def heckeFun (G K A W π f v : Set) : Set :=
+  ⋃({ w ∈ Module.carrier(W) |
+    ∀ r ∈ cosetSections(G, K), w = heckeSum(G, K, A, W, π, f, v, r) })
+
+-- HeckeBasic.lean, heckeFun_sum and heckeFun_eq_sum: for f right
+-- K-invariant with finitely many cosets and v fixed by K, heckeFun is the
+-- sum at any representatives.
+theorem heckeFun.eq_sum (G K A W π f v r : Set)
+  requires commRing : CommRing(A)
+  requires rep : GroupRep(G, A, W, π)
+  requires subgroup : Subgroup(K, G)
+  requires values : FunctionBetween(f, G.carrier, Ring.carrier(A))
+  requires finite : HasFiniteCosets(G, K, A, f)
+  requires right : ∀ g ∈ G.carrier, ∀ k ∈ K, f(G.mul(g, k)) = f(g)
+  requires fixed : v ∈ fixedSpace(G, K, W, π)
+  requires section : r ∈ cosetSections(G, K)
+  shows heckeFun(G, K, A, W, π, f, v) = heckeSum(G, K, A, W, π, f, v, r)
+proof
+  sorry
+
+-- HeckeBasic.lean, levelSpace_anti: a larger subgroup has the smaller
+-- fixed space.
+theorem fixedSpace.anti (G K K2 W π : Set)
+  requires sub : K ⊆ K2
+  shows fixedSpace(G, K2, W, π) ⊆ fixedSpace(G, K, W, π)
+proof
+  sorry
+
+-- HeckeBasic.lean, heckeFun_mem_levelSpace: if f(gk) = f(g) for k ∈ K and
+-- χ′(k) f(kg) = f(g) for k ∈ K′, heckeFun sends K-fixed vectors into the
+-- χ′-level space of K′.
+theorem heckeFun.mem_levelSpace (G K K2 A W π χ f v : Set)
+  requires commRing : CommRing(A)
+  requires rep : GroupRep(G, A, W, π)
+  requires subgroup : Subgroup(K, G)
+  requires subgroup2 : Subgroup(K2, G)
+  requires values : FunctionBetween(f, G.carrier, Ring.carrier(A))
+  requires finite : HasFiniteCosets(G, K, A, f)
+  requires right : ∀ g ∈ G.carrier, ∀ k ∈ K, f(G.mul(g, k)) = f(g)
+  requires left : ∀ g ∈ G.carrier, ∀ k ∈ K2,
+    call2(Ring.mul(A), χ(k), f(G.mul(k, g))) = f(g)
+  requires fixed : v ∈ fixedSpace(G, K, W, π)
+  shows heckeFun(G, K, A, W, π, f, v) ∈ levelSpace(G, K2, W, π, χ)
+proof
+  sorry
+
+-- HeckeBasic.lean, IsBiInvariant.heckeFun_mem: a bi-invariant f keeps the
+-- K-fixed vectors.
+theorem IsBiInvariant.heckeFun_mem (G K A W π f v : Set)
+  requires commRing : CommRing(A)
+  requires rep : GroupRep(G, A, W, π)
+  requires subgroup : Subgroup(K, G)
+  requires values : FunctionBetween(f, G.carrier, Ring.carrier(A))
+  requires bi : IsBiInvariant(G, K, A, f)
+  requires fixed : v ∈ fixedSpace(G, K, W, π)
+  shows heckeFun(G, K, A, W, π, f, v) ∈ fixedSpace(G, K, W, π)
+proof
+  sorry
+
+-- The convolution x ↦ Σ_{gK} f′(g) f(g⁻¹x) at representatives r.
+def heckeConvTerms (G K A f2 f r x : Set) : Set :=
+  { (c, call2(Ring.mul(A), f2(r(c)), f(G.mul(G.inv(r(c)), x)))) |
+    c ∈ heckeSupport(G, K, A, f2) }
+
+def heckeConvolution (G K A f2 f r : Set) : Set :=
+  { (x, groupFiniteSum(Ring.additive(A), heckeSupport(G, K, A, f2),
+      heckeConvTerms(G, K, A, f2, f, r, x))) | x ∈ G.carrier }
+
+-- HeckeBasic.lean, heckeFun_heckeFun: f′(f v) = (f′ ∗ f) v.
+theorem heckeFun.heckeFun (G K A W π f f2 v r : Set)
+  requires commRing : CommRing(A)
+  requires rep : GroupRep(G, A, W, π)
+  requires subgroup : Subgroup(K, G)
+  requires values : FunctionBetween(f, G.carrier, Ring.carrier(A))
+  requires values2 : FunctionBetween(f2, G.carrier, Ring.carrier(A))
+  requires finite : HasFiniteCosets(G, K, A, f)
+  requires finite2 : HasFiniteCosets(G, K, A, f2)
+  requires right : ∀ g ∈ G.carrier, ∀ k ∈ K, f(G.mul(g, k)) = f(g)
+  requires fixed : v ∈ fixedSpace(G, K, W, π)
+  requires section : r ∈ cosetSections(G, K)
+  shows heckeFun(G, K, A, W, π, f2, heckeFun(G, K, A, W, π, f, v)) =
+    heckeFun(G, K, A, W, π, heckeConvolution(G, K, A, f2, f, r), v)
+proof
+  sorry
+
+end Adeles
