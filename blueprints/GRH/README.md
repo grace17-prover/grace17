@@ -344,12 +344,12 @@ graph TD
 | GRH.NumberField.CM | 23 | 0 | 23 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 91 | 70 | 21 |
-| GRH.Measure.Spaces | 225 | 174 | 51 |
-| GRH.Measure.Lebesgue | 131 | 89 | 42 |
-| GRH.Measure.LIntegral | 187 | 164 | 23 |
+| GRH.Measure.Spaces | 225 | 176 | 49 |
+| GRH.Measure.Lebesgue | 132 | 93 | 39 |
+| GRH.Measure.LIntegral | 199 | 186 | 13 |
 | GRH.Holomorphic | 515 | 515 | 0 |
 | GRH.Integral | 153 | 153 | 0 |
-| GRH.Measure.Bochner | 170 | 126 | 44 |
+| GRH.Measure.Bochner | 181 | 145 | 36 |
 | GRH.Measure.Product | 42 | 0 | 42 |
 | GRH.Calculus.Frechet | 71 | 55 | 16 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
@@ -392,7 +392,7 @@ graph TD
 | GRH.Weil.Construction | 58 | 0 | 58 |
 | GRH.Weil.Unramified | 14 | 7 | 7 |
 | GRH.DiscreteSeries.Basic | 10 | 0 | 10 |
-| GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
+| GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
 | GRH.Fourier.Euclidean | 26 | 0 | 26 |
 | GRH.Fourier.Torus | 21 | 0 | 21 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
@@ -432,5 +432,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9175** | **6886** | **2289** |
+| **total** | **9200** | **6937** | **2263** |
 <!-- /blueprint-status -->
