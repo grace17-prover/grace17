@@ -306,15 +306,15 @@ graph TD
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
 | GRH.Linear.Modules | 315 | 315 | 0 |
-| GRH.Linear.Dimension | 130 | 125 | 5 |
+| GRH.Linear.Dimension | 163 | 162 | 1 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
-| GRH.Linear.Exterior | 180 | 160 | 20 |
+| GRH.Linear.Exterior | 187 | 181 | 6 |
 | GRH.Matrix.Determinant | 168 | 165 | 3 |
 | GRH.Algebra.Divisibility | 108 | 108 | 0 |
 | GRH.Algebra.Ideals | 182 | 164 | 18 |
 | GRH.Algebra.Localization | 88 | 88 | 0 |
 | GRH.Algebra.LocalRings | 48 | 41 | 7 |
-| GRH.Matrix.Spectral | 72 | 56 | 16 |
+| GRH.Matrix.Spectral | 117 | 115 | 2 |
 | GRH.Polynomial.Univariate | 145 | 143 | 2 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
@@ -323,7 +323,7 @@ graph TD
 | GRH.Algebra.Integral | 61 | 50 | 11 |
 | GRH.Algebra.DVR | 51 | 42 | 9 |
 | GRH.Field.Galois | 79 | 1 | 78 |
-| GRH.Matrix.Groups | 91 | 81 | 10 |
+| GRH.Matrix.Groups | 111 | 110 | 1 |
 | GRH.Field.Finite | 65 | 3 | 62 |
 | GRH.Cyclotomy.RootsOfUnity | 45 | 1 | 44 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
@@ -435,5 +435,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9288** | **7002** | **2286** |
+| **total** | **9393** | **7148** | **2245** |
 <!-- /blueprint-status -->
