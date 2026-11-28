@@ -127,10 +127,9 @@ test("a guard registered by one module does not open the predicate in a module t
 });
 
 // Many typing rules of one module, none about `step`, and in another module
-// a typecheck whose search visits one goal per `step`. A goal charges its
-// budget for the rules the head index skips; the rules of a module the
-// scope does not import are not charged, so the search ends the same way
-// whether or not that module was loaded first.
+// a typecheck whose search visits one goal per `step`. The rules of a module
+// the scope does not import are never consulted, so the search ends the same
+// way whether or not that module was loaded first.
 const budgetRules = (proof: string): Entry => ({ file: "BudgetA.g17", source: `module BudgetA
 
 def other (x : Set) : Set := x
@@ -166,4 +165,44 @@ test("typing rules of a module that is not imported do not spend the typecheck b
 test("the admissions of a module that is not imported give no typing rules", () => {
   const alone = outcome([budgetSearch], "BudgetB");
   assert.equal(outcome([budgetRules("sorry"), budgetSearch], "BudgetB"), alone);
+});
+
+// The same search in a module that imports the many rules, some of them
+// with the head of the goal's term but a shape it does not have. A goal is
+// charged only for the rules whose conclusion matches it, so the rules
+// visible through an import change nothing either.
+const nearRules: Entry = { file: "BudgetN.g17", source: `module BudgetN
+import BudgetA
+import BudgetS
+
+${Array.from({ length: 300 }, (_, index) => `theorem step.other${index} (S x : Set)
+  requires member : x ∈ S
+  shows step(other(x)) ∈ S
+proof
+  unfold step
+  exact other.closed${index} at S, x with member
+`).join("\n")}` };
+const stepModule: Entry = dependent("BudgetS", [], `def step (x : Set) : Set := x
+`);
+
+test("typing rules that cannot match a goal do not spend its typecheck budget when imported", () => {
+  const search = (imports: readonly string[]): Entry => dependent("BudgetI", imports, `theorem step.closed (S x : Set)
+  requires member : x ∈ S
+  shows step(x) ∈ S
+proof
+  unfold step
+  exact member
+
+theorem deep (S x : Set)
+  requires member : x ∈ S
+  shows ${"step(".repeat(240)}x${")".repeat(240)} ∈ S
+proof
+  typecheck
+`);
+  const proved = (text: string): string => text.replace(/^error.*$/s, "").split("\n").filter(line => /^BudgetI\.deep:/.test(line)).join("\n");
+  const alone = outcome([stepModule, search(["BudgetS"])], "BudgetI");
+  assert.match(alone, /^BudgetI\.deep:/m);
+  const imported = outcome([stepModule, budgetRules("unfold other\n  exact member"), nearRules, search(["BudgetS", "BudgetN"])], "BudgetI");
+  assert.doesNotMatch(imported, /^error/);
+  assert.equal(proved(imported), proved(alone));
 });
