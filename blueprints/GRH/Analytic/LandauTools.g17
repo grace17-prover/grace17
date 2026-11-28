@@ -1,0 +1,688 @@
+-- Tools for Landau's lemma: limits on punctured neighborhoods, the
+-- identity theorem for meromorphic functions with complex values, and
+-- removable singularities.
+-- Part of the GRH blueprint (layer 4, Lib/Analytic).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Analytic.LandauTools
+import GRH.Analytic.Background
+
+section LandauTools
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Punctured neighborhoods
+-- Φ and Ψ agree on a punctured disk about a.
+predicate lndPuncturedAgree (Φ Ψ a : Set) :=
+  ∃ r ∈ ℝ, realZero < r ∧ (∀ z ∈ complexDisk(a, r), z ≠ a → Φ(z) = Ψ(z))
+
+-- The points of U where Φ and Ψ agree on a punctured disk, and those where
+-- they do not.
+def lndAgreeSet (Φ Ψ U : Set) : Set := { a ∈ U | lndPuncturedAgree(Φ, Ψ, a) }
+def lndDisagreeSet (Φ Ψ U : Set) : Set :=
+  { a ∈ U | ¬lndPuncturedAgree(Φ, Ψ, a) }
+
+-- The punctured disk of radius t about b.
+def lndPuncturedDisk (b t : Set) : Set := { w ∈ complexDisk(b, t) | w ≠ b }
+
+-- About a point b ≠ a of a disk centred at a lies a smaller disk that
+-- avoids a.
+theorem lndDisk.avoid (a r b : Set)
+  requires ha : a ∈ ℂ
+  requires hr : r ∈ ℝ
+  requires hb : b ∈ complexDisk(a, r)
+  requires distinct : b ≠ a
+  shows ∃ t ∈ ℝ, R[0] < t ∧ complexDisk(b, t) ⊆ complexDisk(a, r) ∧
+    (∀ z ∈ complexDisk(b, t), z ≠ a)
+proof
+  obtain ⟨s, hs, sPositive, inside⟩ := complexDisk.inner with ha, hr, hb
+  have bMember := (complexDisk.membership.forward with hb).left
+  have difference : ℂ[b - a] ∈ ℂ by typecheck
+  have nonzero : ℂ[b - a] ≠ ℂ[0]
+    intro same
+    apply distinct
+    have shape : b = ℂ[(b - a) + a] by ring
+    rw [shape, same]
+    ring
+  have distPositive := complexAbs.positive with difference, nonzero
+  have distReal : complexAbs(ℂ[b - a]) ∈ ℝ by typecheck
+  obtain ⟨t, ht, tPositive, leS, leD⟩ := realRadius.common with hs, distReal,
+    sPositive, distPositive
+  have intoS := complexDisk.mono at b, t, s with bMember, ht, hs, leS
+  refine ⟨t, ht, tPositive, ?_, ?_⟩
+  . intros z hz
+    exact inside with z, (intoS with z, hz)
+  . intros z hz same
+    obtain ⟨zMember, close⟩ := complexDisk.membership.forward with hz
+    rw same at close
+    have symm := complexAbs.dist_symm with ha, bMember
+    linarith
+
+-- Agreement on a punctured disk about a gives agreement on a punctured
+-- disk about every point near a.
+theorem lndPuncturedAgree.spread (Φ Ψ a : Set)
+  requires agree : lndPuncturedAgree(Φ, Ψ, a)
+  requires ha : a ∈ ℂ
+  shows ∃ r ∈ ℝ, R[0] < r ∧
+    (∀ b ∈ complexDisk(a, r), lndPuncturedAgree(Φ, Ψ, b))
+proof
+  have copy := agree
+  obtain ⟨r, hr, positive, near⟩ := copy
+  refine ⟨r, hr, positive, ?_⟩
+  intros b hb
+  by_cases same : b = a
+  . rw same
+    exact agree
+  . obtain ⟨t, ht, tPositive, inside, avoid⟩ := lndDisk.avoid with ha, hr, hb,
+      same
+    refine ⟨t, ht, tPositive, ?_⟩
+    intros z hz distinct
+    exact near with z, (inside with z, hz), (avoid with z, hz)
+
+-- w ↦ (w − a)ⁿ is holomorphic.
+theorem lndPowerMap.holomorphic (a U : Set, n : Nat)
+  requires ha : a ∈ ℂ
+  requires isOpen : ComplexOpen(U)
+  shows HolomorphicOn(cxaPowerMap(a, n), U)
+proof
+  have sub := ComplexOpen.subset with isOpen
+  have values : ComplexValuedOn(cxaPowerMap(a, n), U)
+    intros z hz
+    exact FunctionBetween.apply_closed with (cxaPowerMap.function with ha),
+      (sub with z, hz)
+  refine ⟨isOpen, values, ?_⟩
+  intros z hz
+  obtain ⟨D, hD, derivative, _⟩ := cxaPowerMap.derivative at a, U, z, n with
+    ha, isOpen, hz
+  exact ⟨D, hD, derivative⟩
+
+-- z ↦ (z − a)^m g(z) − (z − a)ⁿ h(z) is holomorphic where g and h are.
+theorem lndCross.holomorphic (g h a U : Set, m n : Nat)
+  requires holomorphicG : HolomorphicOn(g, U)
+  requires holomorphicH : HolomorphicOn(h, U)
+  requires ha : a ∈ ℂ
+  shows ∃ H, HolomorphicOn(H, U) ∧
+    (∀ z ∈ U, H(z) = ℂ[(z - a) ^ m * g(z) - (z - a) ^ n * h(z)])
+proof
+  have isOpen := holomorphicG.left
+  have sub := ComplexOpen.subset with isOpen
+  have pm := lndPowerMap.holomorphic at a, U, m with ha, isOpen
+  have pn := lndPowerMap.holomorphic at a, U, n with ha, isOpen
+  have first := HolomorphicOn.mul with pm, holomorphicG
+  have second := HolomorphicOn.mul with pn, holomorphicH
+  have negSecond := HolomorphicOn.neg with second
+  have total := HolomorphicOn.add with first, negSecond
+  refine ⟨complexFunctionAdd(complexFunctionMul(cxaPowerMap(a, m), g, U),
+    complexFunctionNeg(complexFunctionMul(cxaPowerMap(a, n), h, U), U), U),
+    total, ?_⟩
+  intros z hz
+  have zMember := sub with z, hz
+  have valuesPm := pm.right.left
+  have valuesPn := pn.right.left
+  have valuesG := holomorphicG.right.left
+  have valuesH := holomorphicH.right.left
+  have valuesFirst := first.right.left
+  have valuesSecond := second.right.left
+  have valuesNeg := negSecond.right.left
+  have gz := valuesG with z, hz
+  have hz2 := valuesH with z, hz
+  rw [(complexFunctionAdd.value with valuesFirst, valuesNeg, hz),
+    (complexFunctionNeg.value with valuesSecond, hz),
+    (complexFunctionMul.value with valuesPm, valuesG, hz),
+    (complexFunctionMul.value with valuesPn, valuesH, hz),
+    (cxaPowerMap.value with ha, zMember)]
+  ring
+
+-- Section: The identity theorem for meromorphic functions
+-- Two ring identities with the powers as atoms.
+theorem lndRing.cross (p q f g : Set)
+  requires hp : p ∈ ℂ
+  requires hq : q ∈ ℂ
+  requires hf : f ∈ ℂ
+  requires hg : g ∈ ℂ
+  requires zero : ℂ[p * (q * f) - q * (p * g)] = ℂ[0]
+  shows ℂ[(p * q) * (f - g)] = ℂ[0]
+proof
+  linear_combination zero
+
+theorem lndRing.self (p q f : Set)
+  requires hp : p ∈ ℂ
+  requires hq : q ∈ ℂ
+  requires hf : f ∈ ℂ
+  shows ℂ[p * (q * f) - q * (p * f)] = ℂ[0]
+proof
+  ring
+
+-- At a point where Φ and Ψ are meromorphic with complex values, agreement
+-- on a punctured disk about some point near a gives agreement on a
+-- punctured disk about a.
+theorem lndPuncturedAgree.closed (Φ Ψ a U : Set)
+  requires isOpen : ComplexOpen(U)
+  requires aU : a ∈ U
+  requires meromorphicΦ : MeromorphicAt(Φ, a)
+  requires meromorphicΨ : MeromorphicAt(Ψ, a)
+  requires valuesΦ : ∀ z ∈ U, Φ(z) ∈ ℂ
+  requires valuesΨ : ∀ z ∈ U, Ψ(z) ∈ ℂ
+  shows ∃ r ∈ ℝ, R[0] < r ∧ (∀ b ∈ complexDisk(a, r),
+    lndPuncturedAgree(Φ, Ψ, b) → lndPuncturedAgree(Φ, Ψ, a))
+proof
+  obtain ⟨aMember, n, hn, g, r1, hr1, positive1, analyticG, factorG⟩ :=
+    meromorphicΦ
+  obtain ⟨_, m, hm, h, r2, hr2, positive2, analyticH, factorH⟩ :=
+    meromorphicΨ
+  obtain ⟨ρ0, hρ0, positiveρ0, le01, le02⟩ := realRadius.common with hr1, hr2,
+    positive1, positive2
+  obtain ⟨sU, hsU, sUPositive, diskU⟩ := ComplexOpen.disk with isOpen, aU
+  obtain ⟨ρ, hρ, positiveρ, leρ0, leS⟩ := realRadius.common with hρ0, hsU,
+    positiveρ0, sUPositive
+  have le1 : ρ ≤ r1 by linarith
+  have le2 : ρ ≤ r2 by linarith
+  have intoS := complexDisk.mono at a, ρ, sU with aMember, hρ, hsU, leS
+  obtain ⟨u, hu, positiveU, intoρ, holomorphicG, holomorphicH⟩ :=
+    cxaAnalytic.common_disk with analyticG, analyticH, hρ, positiveρ
+  have into1 := complexDisk.mono at a, ρ, r1 with aMember, hρ, hr1, le1
+  have into2 := complexDisk.mono at a, ρ, r2 with aMember, hρ, hr2, le2
+  have nNat := nat.omega.backward at n with hn
+  have mNat := nat.omega.backward at m with hm
+  obtain ⟨H, holomorphicHH, valueH⟩ := lndCross.holomorphic at g, h, a,
+    complexDisk(a, u), m, n with holomorphicG, holomorphicH, aMember
+  have cancel : ∀ z ∈ complexDisk(a, u), z ≠ a → H(z) = ℂ[0] →
+      Φ(z) = Ψ(z)
+    intros z hz distinct vanish
+    have zρ := intoρ with z, hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have zU := diskU with z, (intoS with z, zρ)
+    have fz := valuesΦ with z, zU
+    have pz := valuesΨ with z, zU
+    have difference : ℂ[z - a] ∈ ℂ by typecheck
+    have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+      intro same
+      apply distinct
+      have shape : z = ℂ[(z - a) + a] by ring
+      rw [shape, same]
+      ring
+    have powerN := complexPow.member at ℂ[z - a], n with difference
+    have powerM := complexPow.member at ℂ[z - a], m with difference
+    have nonzeroN := cxaPow.nonzero at ℂ[z - a], n with difference, nonzeroD
+    have nonzeroM := cxaPow.nonzero at ℂ[z - a], m with difference, nonzeroD
+    have gValue := factorG with z, (into1 with z, zρ), distinct
+    have hValue := factorH with z, (into2 with z, zρ), distinct
+    have atZ := valueH with z, hz
+    rw [vanish, ← gValue, ← hValue] at atZ
+    symm at atZ
+    have product := lndRing.cross at ℂ[(z - a) ^ m], ℂ[(z - a) ^ n], Φ(z),
+      Ψ(z) with powerM, powerN, fz, pz, atZ
+    have pmn : ℂ[(z - a) ^ m * (z - a) ^ n] ∈ ℂ by typecheck
+    have nonzeroMN : ℂ[(z - a) ^ m * (z - a) ^ n] ≠ ℂ[0]
+      intro vanishMN
+      exact nonzeroN with (complexMul.eq_zero_cancel_left with powerM, powerN,
+        nonzeroM, vanishMN)
+    have diffMember : ℂ[Φ(z) - Ψ(z)] ∈ ℂ by typecheck
+    have zeroDiff := complexMul.eq_zero_cancel_left with pmn, diffMember,
+      nonzeroMN, product
+    linear_combination zeroDiff
+  refine ⟨u, hu, positiveU, ?_⟩
+  intros b hb agreeB
+  by_cases same : b = a
+  . rw same at agreeB
+    exact agreeB
+  . obtain ⟨rb, hrb, positiveB, nearB⟩ := agreeB
+    obtain ⟨t0, ht0, t0Positive, insideT0, avoidT0⟩ := lndDisk.avoid with
+      aMember, hu, hb, same
+    obtain ⟨t, ht, tPositive, leT0, leB⟩ := realRadius.common with ht0, hrb,
+      t0Positive, positiveB
+    have bMember := (complexDisk.membership.forward with hb).left
+    have intoT0 := complexDisk.mono at b, t, t0 with bMember, ht, ht0, leT0
+    have intoB := complexDisk.mono at b, t, rb with bMember, ht, hrb, leB
+    have diskOpen := complexDisk.open with aMember, hu
+    have zeroMember : ℂ[0] ∈ ℂ by typecheck
+    have constant := HolomorphicOn.const with diskOpen, zeroMember
+    have connected := complexDisk.connected with aMember, hu
+    have inside : lndPuncturedDisk(b, t) ⊆ complexDisk(a, u)
+      intros z hz
+      obtain ⟨zt, _⟩ := lndPuncturedDisk.membership.forward with hz
+      exact insideT0 with z, (intoT0 with z, zt)
+    have accumulates : ∀ r ∈ ℝ, R[0] < r →
+        (∃ s ∈ lndPuncturedDisk(b, t), s ≠ b ∧
+          complexAbs(ℂ[s - b]) < r)
+      intros r hr rPositive
+      obtain ⟨s, hs, distinctS, closeS⟩ := cxaDisk.punctured_point with
+        bMember, ht, hr, tPositive, rPositive
+      refine ⟨s, ?_, distinctS, closeS⟩
+      exact lndPuncturedDisk.membership.backward with ⟨hs, distinctS⟩
+    have agreeS : ∀ z ∈ lndPuncturedDisk(b, t),
+        H(z) = complexFunctionConst(ℂ[0], complexDisk(a, u))(z)
+      intros z hz
+      obtain ⟨zt, zb⟩ := lndPuncturedDisk.membership.forward with hz
+      have zu := insideT0 with z, (intoT0 with z, zt)
+      rw (complexFunctionConst.value with zeroMember, zu)
+      have za := avoidT0 with z, (intoT0 with z, zt)
+      have equal := nearB with z, (intoB with z, zt), zb
+      have zρ := intoρ with z, zu
+      have gValue := factorG with z, (into1 with z, zρ), za
+      have hValue := factorH with z, (into2 with z, zρ), za
+      rw [(valueH with z, zu), ← gValue, ← hValue, equal]
+      have zC := (complexDisk.membership.forward with zu).left
+      have pz := valuesΨ with z, (diskU with z, (intoS with z, zρ))
+      have difference : ℂ[z - a] ∈ ℂ by typecheck
+      have powerN := complexPow.member at ℂ[z - a], n with difference
+      have powerM := complexPow.member at ℂ[z - a], m with difference
+      exact lndRing.self at ℂ[(z - a) ^ m], ℂ[(z - a) ^ n], Ψ(z) with powerM,
+        powerN, pz
+    have everywhere := holomorphic.identity_accumulation with holomorphicHH,
+      constant, connected, inside, hb, accumulates, agreeS
+    refine ⟨u, hu, positiveU, ?_⟩
+    intros z hz distinct
+    have atZ := everywhere with z, hz
+    rw (complexFunctionConst.value with zeroMember, hz) at atZ
+    exact cancel with z, hz, distinct, atZ
+
+-- The identity theorem for meromorphic functions with complex values: if
+-- Φ and Ψ are meromorphic at every point of a connected open U, complex on
+-- U, and agree on a nonempty open V ⊆ U, then they agree on a punctured
+-- disk about every point of U.
+theorem lndMeromorphic.eq_near (Φ Ψ U V : Set)
+  requires isOpen : ComplexOpen(U)
+  requires connected : ComplexConnected(U)
+  requires meromorphicΦ : ∀ a ∈ U, MeromorphicAt(Φ, a)
+  requires meromorphicΨ : ∀ a ∈ U, MeromorphicAt(Ψ, a)
+  requires valuesΦ : ∀ z ∈ U, Φ(z) ∈ ℂ
+  requires valuesΨ : ∀ z ∈ U, Ψ(z) ∈ ℂ
+  requires openV : ComplexOpen(V)
+  requires inside : V ⊆ U
+  requires nonempty : ∃ b, b ∈ V
+  requires agree : ∀ z ∈ V, Φ(z) = Ψ(z)
+  shows ∀ a ∈ U, lndPuncturedAgree(Φ, Ψ, a)
+proof
+  have sub := ComplexOpen.subset with isOpen
+  have insideZ : lndAgreeSet(Φ, Ψ, U) ⊆ ℂ
+    intros a ha
+    obtain ⟨aU, _⟩ := lndAgreeSet.membership.forward with ha
+    exact sub with a, aU
+  have disksZ : ∀ a ∈ lndAgreeSet(Φ, Ψ, U), ∃ r ∈ ℝ, R[0] < r ∧
+      complexDisk(a, r) ⊆ lndAgreeSet(Φ, Ψ, U)
+    intros a ha
+    obtain ⟨aU, agreeA⟩ := lndAgreeSet.membership.forward with ha
+    have aMember := sub with a, aU
+    obtain ⟨r, hr, positive, spread⟩ := lndPuncturedAgree.spread with agreeA,
+      aMember
+    obtain ⟨s, hs, sPositive, diskU⟩ := ComplexOpen.disk with isOpen, aU
+    obtain ⟨t, ht, tPositive, leR, leS⟩ := realRadius.common with hr, hs,
+      positive, sPositive
+    have intoR := complexDisk.mono at a, t, r with aMember, ht, hr, leR
+    have intoS := complexDisk.mono at a, t, s with aMember, ht, hs, leS
+    refine ⟨t, ht, tPositive, ?_⟩
+    intros b hb
+    apply lndAgreeSet.membership.backward
+    exact ⟨(diskU with b, (intoS with b, hb)), (spread with b,
+      (intoR with b, hb))⟩
+  have openZ := ComplexOpen.of_disks with insideZ, disksZ
+  have insideW : lndDisagreeSet(Φ, Ψ, U) ⊆ ℂ
+    intros a ha
+    obtain ⟨aU, _⟩ := lndDisagreeSet.membership.forward with ha
+    exact sub with a, aU
+  have disksW : ∀ a ∈ lndDisagreeSet(Φ, Ψ, U), ∃ r ∈ ℝ, R[0] < r ∧
+      complexDisk(a, r) ⊆ lndDisagreeSet(Φ, Ψ, U)
+    intros a ha
+    obtain ⟨aU, notA⟩ := lndDisagreeSet.membership.forward with ha
+    have aMember := sub with a, aU
+    obtain ⟨r, hr, positive, closed⟩ := lndPuncturedAgree.closed with isOpen,
+      aU, (meromorphicΦ with a, aU), (meromorphicΨ with a, aU), valuesΦ,
+      valuesΨ
+    obtain ⟨s, hs, sPositive, diskU⟩ := ComplexOpen.disk with isOpen, aU
+    obtain ⟨t, ht, tPositive, leR, leS⟩ := realRadius.common with hr, hs,
+      positive, sPositive
+    have intoR := complexDisk.mono at a, t, r with aMember, ht, hr, leR
+    have intoS := complexDisk.mono at a, t, s with aMember, ht, hs, leS
+    refine ⟨t, ht, tPositive, ?_⟩
+    intros b hb
+    apply lndDisagreeSet.membership.backward
+    refine ⟨(diskU with b, (intoS with b, hb)), ?_⟩
+    intro agreeB
+    exact notA with (closed with b, (intoR with b, hb), agreeB)
+  have openW := ComplexOpen.of_disks with insideW, disksW
+  have covers : U ⊆ lndAgreeSet(Φ, Ψ, U) ∪ lndDisagreeSet(Φ, Ψ, U)
+    intros a aU
+    apply union2.membership.backward
+    by_cases agreeA : lndPuncturedAgree(Φ, Ψ, a)
+    . left
+      exact lndAgreeSet.membership.backward with ⟨aU, agreeA⟩
+    . right
+      exact lndDisagreeSet.membership.backward with ⟨aU, agreeA⟩
+  have apart : ∀ a ∈ U, a ∈ lndAgreeSet(Φ, Ψ, U) →
+      a ∈ lndDisagreeSet(Φ, Ψ, U) → ⊥
+    intros a aU inZ inW
+    obtain ⟨_, agreeA⟩ := lndAgreeSet.membership.forward with inZ
+    obtain ⟨_, notA⟩ := lndDisagreeSet.membership.forward with inW
+    exact notA with agreeA
+  obtain ⟨b, bV⟩ := nonempty
+  have bU := inside with b, bV
+  have bMember := sub with b, bU
+  obtain ⟨s, hs, sPositive, diskV⟩ := ComplexOpen.disk with openV, bV
+  have agreeB : lndPuncturedAgree(Φ, Ψ, b)
+    refine ⟨s, hs, sPositive, ?_⟩
+    intros z hz distinct
+    exact agree with z, (diskV with z, hz)
+  have start : ∃ x, x ∈ U ∧ x ∈ lndAgreeSet(Φ, Ψ, U)
+    exact ⟨b, bU, (lndAgreeSet.membership.backward with ⟨bU, agreeB⟩)⟩
+  have all := ComplexConnected.clopen with connected, openZ, openW, covers,
+    apart, start
+  intros a aU
+  obtain ⟨_, agreeA⟩ := lndAgreeSet.membership.forward with (all with a, aU)
+  exact agreeA
+
+-- Section: Limits on punctured neighborhoods
+-- The ε–δ form of a limit along the punctured neighborhoods of s.
+theorem lndPunctured.close (f s L : Set)
+  requires limit : HasPuncturedLimit(f, s, L)
+  requires hs : s ∈ ℂ
+  requires hL : L ∈ ℂ
+  shows ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    (∀ z ∈ complexDisk(s, d), z ≠ s → complexAbs(ℂ[f(z) - L]) < e)
+proof
+  obtain ⟨metric, carrier, space⟩ := cxaSpace.parts
+  have top := MetricSpace.topological_space with metric
+  have sM : s ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup,
+      complexAbs))
+    rw carrier
+    exact hs
+  have LM : L ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup,
+      complexAbs))
+    rw carrier
+    exact hL
+  intros e he ePositive
+  have eReal : Real(e) by typecheck
+  have ballSub : ball(normMetric(complexAdditiveGroup, complexAbs), L, e) ⊆
+      MetricSpace.carrier(normMetric(complexAdditiveGroup, complexAbs))
+    exact ball_subset at normMetric(complexAdditiveGroup, complexAbs), L, e
+      with metric
+  have ballNhds : ball(normMetric(complexAdditiveGroup, complexAbs), L, e) ∈
+      nhds(complexSpace, L)
+    rw space
+    apply (nhds.metric_iff at normMetric(complexAdditiveGroup, complexAbs), L,
+      ball(normMetric(complexAdditiveGroup, complexAbs), L, e) with metric,
+      LM).backward
+    refine ⟨ballSub, e, he, ePositive, ?_⟩
+    intros w hw
+    exact hw
+  have tendsto : Tendsto(f, complexCarrier, nhdsPunctured(complexSpace, s),
+    nhds(complexSpace, L)) := limit
+  have pre := tendsto with ball(normMetric(complexAdditiveGroup, complexAbs),
+    L, e), ballNhds
+  rw space at pre
+  unfold nhdsPunctured at pre
+  obtain ⟨_, U, hU, sU, capU⟩ := (nhdsWithin.mem_iff at
+    metricTopology(normMetric(complexAdditiveGroup, complexAbs)), s,
+    TopologicalSpace.carrier(metricTopology(normMetric(complexAdditiveGroup,
+      complexAbs))) ∖ {s},
+    functionPreimage(f, complexCarrier,
+      ball(normMetric(complexAdditiveGroup, complexAbs), L, e)) with
+    top).forward with pre
+  have openU := Open.of_mem at metricTopology(normMetric(complexAdditiveGroup,
+    complexAbs)), U with top, hU
+  have subU := Open.subset at metricTopology(normMetric(complexAdditiveGroup,
+    complexAbs)), U with top, openU
+  rw metricTopology.carrier at subU
+  obtain ⟨d, hd, dPositive, ballU⟩ := (Open.iff_balls at
+    normMetric(complexAdditiveGroup, complexAbs), U with metric,
+    subU).forward with openU, s, sU
+  refine ⟨d, hd, dPositive, ?_⟩
+  intros z hz distinct
+  obtain ⟨zC, close⟩ := complexDisk.membership.forward with hz
+  have zM : z ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup,
+      complexAbs))
+    rw carrier
+    exact zC
+  have zBall : z ∈ ball(normMetric(complexAdditiveGroup, complexAbs), s, d)
+    apply (mem_ball at normMetric(complexAdditiveGroup, complexAbs), s, z, d
+      with metric, sM, zM).backward
+    rw [(cxaSpace.dist with hs, zC), (complexAbs.dist_symm with hs, zC)]
+    exact close
+  have zU := ballU with z, zBall
+  have zCarrier : z ∈ TopologicalSpace.carrier(metricTopology(
+      normMetric(complexAdditiveGroup, complexAbs)))
+    rw [metricTopology.carrier, carrier]
+    exact zC
+  have zDiff : z ∈ TopologicalSpace.carrier(metricTopology(
+      normMetric(complexAdditiveGroup, complexAbs))) ∖ {s}
+    apply difference.membership.backward
+    refine ⟨zCarrier, ?_⟩
+    intro single
+    apply distinct
+    simp at single
+  have zCap := intersection.membership.backward with ⟨zU, zDiff⟩
+  have zPre := capU with z, zCap
+  obtain ⟨_, fzBall⟩ := functionPreimage.membership.forward with zPre
+  have fzM := ballSub with f(z), fzBall
+  have fzC : f(z) ∈ ℂ
+    rw carrier at fzM
+    exact fzM
+  have near := (mem_ball at normMetric(complexAdditiveGroup, complexAbs), L,
+    f(z), e with metric, LM, fzM).forward with fzBall
+  rw [(cxaSpace.dist with hL, fzC), (complexAbs.dist_symm with hL, fzC)]
+    at near
+  exact near
+
+-- Section: Removable singularities
+-- An analytic g with (z − a)^k · w(z) = g(z), where |w(z)| is small near a,
+-- vanishes at a.
+theorem lndAnalytic.zero_of_small (g w a : Set, k : Nat, r : Real)
+  requires analytic : ComplexAnalyticAt(g, a)
+  requires positive : R[0] < r
+  requires valuesW : ∀ z ∈ ℂ, w(z) ∈ ℂ
+  requires factor : ∀ z ∈ complexDisk(a, r), z ≠ a →
+    g(z) = ℂ[(z - a) ^ k * w(z)]
+  requires small : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    (∀ z ∈ complexDisk(a, d), z ≠ a → complexAbs(w(z)) < e)
+  shows g(a) = ℂ[0]
+proof
+  have aMember := analytic.left
+  have ga := cxaAnalytic.value_member with analytic
+  obtain ⟨ρ, hρ, positiveρ, continuous⟩ := cxaAnalytic.continuous with analytic
+  have centerρ := complexDisk.center with aMember, hρ, positiveρ
+  by_contra nonzero
+  have absPositive := complexAbs.positive with ga, nonzero
+  have eReal : half(complexAbs(g(a))) ∈ ℝ by typecheck
+  have ePositive := half.positive with absPositive
+  have twice := half.add_self at complexAbs(g(a))
+  obtain ⟨_, _, near⟩ := continuous
+  obtain ⟨d1, hd1, positive1, close1⟩ := near with a, centerρ,
+    half(complexAbs(g(a))), eReal, ePositive
+  obtain ⟨d2, hd2, positive2, close2⟩ := small with half(complexAbs(g(a))),
+    eReal, ePositive
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  have hr : r ∈ ℝ by typecheck
+  obtain ⟨m1, hm1, pm1, m1r, m1ρ⟩ := realRadius.common with hr, hρ, positive,
+    positiveρ
+  obtain ⟨m2, hm2, pm2, m2a, m2d⟩ := realRadius.common with hm1, hd2, pm1,
+    positive2
+  obtain ⟨m, hm, pm, mA, mOne⟩ := realRadius.common with hm2, oneReal, pm2,
+    onePositive
+  obtain ⟨z, hz, distinct, closeZ⟩ := cxaDisk.punctured_point with aMember,
+    hm, hd1, pm, positive1
+  obtain ⟨zC, zm⟩ := complexDisk.membership.forward with hz
+  have zr : z ∈ complexDisk(a, r)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have zρ : z ∈ complexDisk(a, ρ)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have zd2 : z ∈ complexDisk(a, d2)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have gzClose := close1 with z, zρ, closeZ
+  have wSmall := close2 with z, zd2, distinct
+  have value := factor with z, zr, distinct
+  have wz := valuesW with z, zC
+  have difference : ℂ[z - a] ∈ ℂ by typecheck
+  have absValue : complexAbs(g(z)) =
+      R[complexAbs(ℂ[z - a]) ^ k * complexAbs(w(z))]
+    rw [value, (complexAbs.mul with (complexPow.member at ℂ[z - a], k with
+      difference), wz), (complexAbs.pow with difference)]
+  have distNonneg := complexAbs.nonnegative with difference
+  have distLe : complexAbs(ℂ[z - a]) ≤ R[1] by linarith
+  obtain ⟨powNonneg, powLe⟩ := realPow.unit_interval at complexAbs(ℂ[z - a]),
+    k with distNonneg, distLe
+  have conv : realPow(complexAbs(ℂ[z - a]), k) =
+      monoidPow(realMul, realOne, complexAbs(ℂ[z - a]), k)
+    unfold realPow
+    rfl
+  rw conv at powLe
+  have wNonneg := complexAbs.nonnegative with wz
+  have product := realLe.mul_right_of_nonnegative with powLe, wNonneg
+  have gz : g(z) ∈ ℂ by
+    rw value
+    typecheck
+  have diffC : ℂ[g(a) - g(z)] ∈ ℂ by typecheck
+  have split : ℂ[(g(a) - g(z)) + g(z)] = g(a) by ring
+  have tri := complexAbs.triangle with diffC, gz
+  rw split at tri
+  have symm := complexAbs.dist_symm with ga, gz
+  have one : R[1 * complexAbs(w(z))] = complexAbs(w(z)) by ring
+  have r1 : complexAbs(g(a)) ∈ ℝ by typecheck
+  have r2 : complexAbs(g(z)) ∈ ℝ by typecheck
+  have r3 : complexAbs(ℂ[g(a) - g(z)]) ∈ ℝ by typecheck
+  have r4 : complexAbs(ℂ[g(z) - g(a)]) ∈ ℝ by typecheck
+  have r5 : complexAbs(w(z)) ∈ ℝ by typecheck
+  have r6 : R[complexAbs(ℂ[z - a]) ^ k * complexAbs(w(z))] ∈ ℝ by typecheck
+  have r7 : R[R[1] * complexAbs(w(z))] ∈ ℝ by typecheck
+  have gzBound : complexAbs(g(z)) < half(complexAbs(g(a))) by linarith
+  have gaBound : complexAbs(g(a)) <
+      R[half(complexAbs(g(a))) + half(complexAbs(g(a)))] by linarith
+  have bad : complexAbs(g(a)) < complexAbs(g(a)) by linarith
+  have irreflexive := realLess.irreflexive_on
+  exact irreflexive with complexAbs(g(a)), bad
+
+-- If (z − a)ⁿ Φ(z) = g(z) near a with g analytic at a, Φ complex-valued
+-- and (z − a) Φ(z) → 0, then Φ agrees off a with a function holomorphic
+-- on a disk about a.
+theorem lndRemovable.of_factor (Φ a : Set, n : Nat)
+  requires ha : a ∈ ℂ
+  requires valuesΦ : ∀ z ∈ ℂ, Φ(z) ∈ ℂ
+  requires small : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    (∀ z ∈ complexDisk(a, d), z ≠ a → complexAbs(ℂ[(z - a) * Φ(z)]) < e)
+  shows ∀ g, ∀ r ∈ ℝ, R[0] < r → ComplexAnalyticAt(g, a) →
+    (∀ z ∈ complexDisk(a, r), z ≠ a → ℂ[(z - a) ^ n * Φ(z)] = g(z)) →
+    ∃ h, ∃ t ∈ ℝ, R[0] < t ∧ HolomorphicOn(h, complexDisk(a, t)) ∧
+      (∀ z ∈ complexDisk(a, t), z ≠ a → Φ(z) = h(z))
+proof
+  induction n
+  | zero =>
+    intros g r hr positive analytic factor
+    obtain ⟨t, ht, tPositive, holo⟩ := cxaAnalytic.holomorphic_disk with
+      analytic
+    obtain ⟨u, hu, uPositive, leR, leT⟩ := realRadius.common with hr, ht,
+      positive, tPositive
+    have intoR := complexDisk.mono at a, u, r with ha, hu, hr, leR
+    have intoT := complexDisk.mono at a, u, t with ha, hu, ht, leT
+    have diskOpen := complexDisk.open with ha, hu
+    have holoU := HolomorphicOn.mono with holo, diskOpen, intoT
+    refine ⟨g, u, hu, uPositive, holoU, ?_⟩
+    intros z hz distinct
+    have zC := (complexDisk.membership.forward with hz).left
+    have fz := valuesΦ with z, zC
+    have value := factor with z, (intoR with z, hz), distinct
+    rw monoidPow.zero at value
+    rw ← value
+    ring
+  | succ(k) using ih =>
+    intros g r hr positive analytic factor
+    have wValues : ∀ z ∈ ℂ, subMulMap(Φ, a)(z) ∈ ℂ
+      intros z hz
+      exact FunctionBetween.apply_closed with
+        (subMulMap.function with valuesΦ, ha), hz
+    have kfactor : ∀ z ∈ complexDisk(a, r), z ≠ a →
+        g(z) = ℂ[(z - a) ^ k * subMulMap(Φ, a)(z)]
+      intros z hz distinct
+      have zC := (complexDisk.membership.forward with hz).left
+      have fz := valuesΦ with z, zC
+      have value := factor with z, hz, distinct
+      rw monoidPow.succ at value
+      rw [← value, (subMulMap.value with valuesΦ, ha, zC)]
+      ring
+    have smallW : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+        (∀ z ∈ complexDisk(a, d), z ≠ a → complexAbs(subMulMap(Φ, a)(z)) < e)
+      intros e he ePositive
+      obtain ⟨d, hd, dPositive, near⟩ := small with e, he, ePositive
+      refine ⟨d, hd, dPositive, ?_⟩
+      intros z hz distinct
+      have zC := (complexDisk.membership.forward with hz).left
+      rw (subMulMap.value with valuesΦ, ha, zC)
+      exact near with z, hz, distinct
+    have hr2 : Real(r) by typecheck
+    have zeroAt := lndAnalytic.zero_of_small at g, subMulMap(Φ, a), a, k, r
+      with analytic, positive, wValues, kfactor, smallW
+    obtain ⟨_, c, ρ, hρ, positiveρ, radius, sums⟩ := analytic
+    have center := complexDisk.center with ha, hρ, positiveρ
+    have atCenter := ComplexSumsTo.unique with (sums with a, center),
+      (powerSeriesTerms.center_sums with radius.left, ha)
+    have first : c((0:N)) = ℂ[0] by
+      rw ← atCenter
+      exact zeroAt
+    have shifted := PowerSeriesRadiusAtLeast.shift with radius
+    have analyticShift : ComplexAnalyticAt(powerSeriesSum(complexShift(c), a,
+        ρ), a)
+      refine ⟨ha, complexShift(c), ρ, hρ, positiveρ, shifted, ?_⟩
+      intros z hz
+      exact powerSeriesSum.sums with shifted, ha, hz
+    obtain ⟨u, hu, uPositive, leR, leρ⟩ := realRadius.common with hr, hρ,
+      positive, positiveρ
+    have intoR := complexDisk.mono at a, u, r with ha, hu, hr, leR
+    have intoρ := complexDisk.mono at a, u, ρ with ha, hu, hρ, leρ
+    have next : ∀ z ∈ complexDisk(a, u), z ≠ a →
+        ℂ[(z - a) ^ k * Φ(z)] = powerSeriesSum(complexShift(c), a, ρ)(z)
+      intros z hz distinct
+      have zr := intoR with z, hz
+      have zρ := intoρ with z, hz
+      have zC := (complexDisk.membership.forward with hz).left
+      have fz := valuesΦ with z, zC
+      have difference : ℂ[z - a] ∈ ℂ by typecheck
+      have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+        intro same
+        apply distinct
+        have shape : z = ℂ[(z - a) + a] by ring
+        rw [shape, same]
+        ring
+      have gValue := ComplexSumsTo.unique with (sums with z, zρ),
+        (powerSeriesSum.sums with radius, ha, zρ)
+      have shiftValue := powerSeriesSum.shift with radius, ha, zρ, first
+      have value := factor with z, zr, distinct
+      rw [gValue, shiftValue, monoidPow.succ] at value
+      have sMember := FunctionBetween.apply_closed with
+        (powerSeriesSum.function with radius, ha), zρ
+      have product : ℂ[(z - a) * ((z - a) ^ k * Φ(z) -
+          powerSeriesSum(complexShift(c), a, ρ)(z))] = ℂ[0] by
+        linear_combination value
+      have diffMember : ℂ[(z - a) ^ k * Φ(z) -
+          powerSeriesSum(complexShift(c), a, ρ)(z)] ∈ ℂ by typecheck
+      have zero := complexMul.eq_zero_cancel_left with difference, diffMember,
+        nonzeroD, product
+      linear_combination zero
+    exact ih with powerSeriesSum(complexShift(c), a, ρ), u, hu, uPositive,
+      analyticShift, next
+
+-- Removable singularities: if Φ is meromorphic at a with complex values and
+-- (z − a) Φ(z) → 0, then Φ agrees off a with a function holomorphic on a
+-- disk about a.
+theorem lndRemovable (Φ a : Set)
+  requires meromorphic : MeromorphicAt(Φ, a)
+  requires valuesΦ : ∀ z ∈ ℂ, Φ(z) ∈ ℂ
+  requires small : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    (∀ z ∈ complexDisk(a, d), z ≠ a → complexAbs(ℂ[(z - a) * Φ(z)]) < e)
+  shows ∃ h, ∃ t ∈ ℝ, R[0] < t ∧ HolomorphicOn(h, complexDisk(a, t)) ∧
+    (∀ z ∈ complexDisk(a, t), z ≠ a → Φ(z) = h(z))
+proof
+  obtain ⟨aMember, n, hn, g, r, hr, positive, analytic, factor⟩ := meromorphic
+  have nNat := nat.omega.backward at n with hn
+  have general := lndRemovable.of_factor at Φ, a, n with aMember, valuesΦ,
+    small
+  exact general with g, r, hr, positive, analytic, factor
+
+end LandauTools
