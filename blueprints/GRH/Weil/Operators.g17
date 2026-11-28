@@ -1,0 +1,333 @@
+-- The Weil representation ω of the adelic unitary group G = G_∞ × G_f of
+-- signs s on the data space 𝒮(V): splitting characters υ, the finite
+-- multiplier Δ_f(g) = υ(det u)|det u|^{−1/2} through saturating matrices
+-- (uÔⁿ = Ôⁿ ∩ g⁻¹Ôⁿ), the multiplier Δ(g) = Δ_f(g_f) ∏_τ conj det d_τ,
+-- the action of G on 𝔸ⁿ with trivial cocycle, ω(g) and its laws; box
+-- products 𝒮(V₁) × 𝒮(V₂) → 𝒮(V) for a splitting of the coordinates, and
+-- ω on block matrices.
+-- Source: grh-compact/src/Lib/General/NumberTheory/UpsilonValues.lean
+-- (SplittingChar), Lib/Weil/Construction/FiniteMultiplier.lean (Sat,
+-- Sat.exists_saturating, chiAdelic, chiFin, glMultiplier,
+-- Sat.glMultiplier_eq, glMultiplier_inv, glMultiplier_star,
+-- finMultiplier), Lib/Weil/Construction/ThetaFunctional.lean
+-- (weilMultiplier, adelicAction), PairDefs.lean (Space.ω),
+-- Lib/Adelic/Unitary/SpaceDefs.lean (GInf, G, G.mat), DataProduct.lean
+-- (G.blockEmb, Space.boxProd, rho_boxProd, boxProd_vacElem,
+-- weilMultiplier_fromBlocks, omega_boxProd). Part of: "Adelic Weil
+-- representation of a unitary group and the invariant theta functional
+-- (known result; see Lib.Weil.DualPair.PairSplitting)."
+-- Encoding. The source's WeilData carries the splitting character υ; the
+-- record WeilDatum of GRH.Weil.Unramified does not, so the objects that
+-- need it (the finite multiplier, Δ and ω) take υ as an argument with
+-- the hypothesis SplittingChar(W, υ). υ is a function on the ideles
+-- (the units of 𝔸 = ℂ^Φ × 𝔸_f). The source's continuity of υ and its
+-- value −1 at uniformisers of self-conjugate places (WeilData.υ_inert)
+-- are not used by the statements here and are left out. The source
+-- chooses a saturating matrix (saturatingElem); here Δ_f(g) is the value
+-- χ_f(det u) common to all saturating u (Sat.glMultiplier_eq), with
+-- |det u|^{−1/2} = [Ôⁿ : uÔⁿ]^{1/2}, the index of the lattices. An
+-- element g of G is its matrix over 𝔸 (G.mat), whose component at τ is
+-- in U(s) and whose finite part is in G_f.
+-- Part of the GRH blueprint (layer 4, Lib/Weil, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Weil.Operators
+import GRH.Weil.RealData
+
+section Operators
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Splitting characters
+-- The ideles 𝔸ˣ of the Weil data, and the idele (1, x) of a finite idele.
+def idelesOf (W : Set) : Set := ringUnits(adeleRingOf(W))
+
+def oneInfinite (W : Set) : Set := { (σ, complexOne) | σ ∈ WeilDatum.cmType(W) }
+
+def finIdele (W x : Set) : Set := (oneInfinite(W), x)
+
+-- x_τ/|x_τ| multiplied over τ ∈ Φ.
+def phaseTerms (W x : Set) : Set :=
+  { (σ, complexDiv(fst(x)(σ), complexOfReal(complexAbs(fst(x)(σ))))) |
+    σ ∈ WeilDatum.cmType(W) }
+
+-- UpsilonValues.lean, SplittingChar: a unitary character υ of the ideles,
+-- trivial on Eˣ, with υ(x̄) = υ(x)⁻¹ and υ(x) = ∏_τ x_τ/|x_τ| when the
+-- finite part of x is a unit of Ô.
+predicate SplittingChar (W υ : Set) :=
+  IsWeilDatum(W) ∧ FunctionBetween(υ, idelesOf(W), complexCarrier) ∧
+  (∀ x ∈ idelesOf(W), ∀ y ∈ idelesOf(W),
+    υ(call2(Ring.mul(adeleRingOf(W)), x, y)) = ℂ[υ(x) * υ(y)]) ∧
+  (∀ x ∈ idelesOf(W), complexAbs(υ(x)) = realOne) ∧
+  (∀ a ∈ Ring.carrier(WeilDatum.field(W)), a ≠ Ring.zero(WeilDatum.field(W)) →
+    υ(toAdeleMap(W)(a)) = complexOne) ∧
+  (∀ x ∈ idelesOf(W), υ(adeleStar(W)(x)) = complexInv(υ(x))) ∧
+  (∀ x ∈ idelesOf(W), snd(x) ∈ ringUnits(integralFiniteAdeles(WeilDatum.field(W))) →
+    υ(x) = complexFiniteProduct(WeilDatum.cmType(W), phaseTerms(W, x)))
+
+-- Section: The finite multiplier
+-- Matrices over 𝔸_f and the integral ones (over Ô).
+def finMatrices (W n : Set) : Set := matrixSpace(finiteAdeleRing(WeilDatum.field(W)), n, n)
+
+predicate IntegralMatrix (W n A : Set) :=
+  A ∈ finMatrices(W, n) ∧ ∀ q ∈ n × n, A(q) ∈ finInt(WeilDatum.field(W))
+
+def finMatMul (W n A B : Set) : Set :=
+  matMul(finiteAdeleRing(WeilDatum.field(W)), n, n, n, A, B)
+
+-- FiniteMultiplier.lean, Sat (Ô).matrix g u: u and gu are integral and
+-- u⁻¹ = l + mg for integral l, m (that is uÔⁿ = Ôⁿ ∩ g⁻¹Ôⁿ).
+predicate Saturating (W n g u : Set) :=
+  u ∈ invertibleMatrices(finiteAdeleRing(WeilDatum.field(W)), n) ∧
+  IntegralMatrix(W, n, u) ∧ IntegralMatrix(W, n, finMatMul(W, n, g, u)) ∧
+  ∃ l, ∃ m, IntegralMatrix(W, n, l) ∧ IntegralMatrix(W, n, m) ∧
+    matInverse(finiteAdeleRing(WeilDatum.field(W)), n, u) =
+      matAdd(finiteAdeleRing(WeilDatum.field(W)), n, n, l, finMatMul(W, n, m, g))
+
+-- FiniteMultiplier.lean, Sat.exists_saturating.
+theorem Saturating.exists (W n g : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires hg : g ∈ invertibleMatrices(finiteAdeleRing(WeilDatum.field(W)), n)
+  shows ∃ u, Saturating(W, n, g, u)
+proof
+  sorry
+
+-- The lattice uÔⁿ of an integral u, inside Ôⁿ.
+def latticeImage (W n u : Set) : Set :=
+  { mulVec(finiteAdeleRing(WeilDatum.field(W)), n, n, u, x) | x ∈ stdLattice(W, n) }
+
+-- The index [L : H] of a subgroup H of L in an abelian group G.
+def addCoset (G x H : Set) : Set := { hAdd(G, x, h) | h ∈ H }
+
+def relCosets (G L H : Set) : Set := { addCoset(G, x, H) | x ∈ L }
+
+def relIndex (G L H : Set) : Set := cardinality(relCosets(G, L, H))
+
+-- χ_f(det u) = υ(det u)|det u|^{−1/2} for an integral invertible u, with
+-- |det u|^{−1} = [Ôⁿ : uÔⁿ] (FiniteMultiplier.lean, chiFin).
+def latticeIndex (W n u : Set) : Set :=
+  relIndex(Module.additive(finVectorModule(W, n)), stdLattice(W, n), latticeImage(W, n, u))
+
+def chiFinDet (W υ n u : Set) : Set :=
+  ℂ[υ(finIdele(W, matDet(finiteAdeleRing(WeilDatum.field(W)), n, u))) *
+    complexOfReal(realSqrt(realNat(latticeIndex(W, n, u))))]
+
+-- FiniteMultiplier.lean, glMultiplier g = χ_f(det u) for the chosen
+-- saturating u; it does not depend on u (Sat.glMultiplier_eq).
+def glMultiplier (W υ n g : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | ∀ u, Saturating(W, n, g, u) → c = chiFinDet(W, υ, n, u) })
+
+theorem glMultiplier.eq (W υ n g u : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires finite : Finite(n)
+  requires hg : g ∈ invertibleMatrices(finiteAdeleRing(WeilDatum.field(W)), n)
+  requires saturating : Saturating(W, n, g, u)
+  shows glMultiplier(W, υ, n, g) = chiFinDet(W, υ, n, u)
+proof
+  sorry
+
+-- |x| for a finite idele x: the index ratio [Ô : xÔ ∩ Ô]/[Ô : x⁻¹Ô ∩ Ô]
+-- of the one-dimensional lattices, that is ∏_w |x_w|_w.
+def scalarLattice (W x : Set) : Set :=
+  { finMul(WeilDatum.field(W), x, o) | o ∈ finInt(WeilDatum.field(W)) }
+
+def finIdeleNorm (W x : Set) : Set :=
+  R[realNat(relIndex(Ring.additive(finiteAdeleRing(WeilDatum.field(W))),
+      finInt(WeilDatum.field(W)),
+      scalarLattice(W, finInv(WeilDatum.field(W), x)) ∩ finInt(WeilDatum.field(W)))) /
+    realNat(relIndex(Ring.additive(finiteAdeleRing(WeilDatum.field(W))),
+      finInt(WeilDatum.field(W)), scalarLattice(W, x) ∩ finInt(WeilDatum.field(W))))]
+
+-- FiniteMultiplier.lean, glMultiplier_inv and glMultiplier_star:
+-- Δ_f(g⁻¹) = χ_f(det g) Δ_f(g), Δ_f(g*) = conj Δ_f(g).
+def chiFinValue (W υ n g : Set) : Set :=
+  ℂ[υ(finIdele(W, matDet(finiteAdeleRing(WeilDatum.field(W)), n, g))) *
+    complexOfReal(realInv(realSqrt(finIdeleNorm(W, matDet(finiteAdeleRing(WeilDatum.field(W)),
+      n, g)))))]
+
+theorem glMultiplier.inv (W υ n g : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires finite : Finite(n)
+  requires hg : g ∈ invertibleMatrices(finiteAdeleRing(WeilDatum.field(W)), n)
+  shows glMultiplier(W, υ, n, matInverse(finiteAdeleRing(WeilDatum.field(W)), n, g)) =
+    ℂ[chiFinValue(W, υ, n, g) * glMultiplier(W, υ, n, g)]
+proof
+  sorry
+
+theorem glMultiplier.star (W υ n g : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires finite : Finite(n)
+  requires hg : g ∈ invertibleMatrices(finiteAdeleRing(WeilDatum.field(W)), n)
+  shows glMultiplier(W, υ, n, conjTranspose(finiteAdeleRing(WeilDatum.field(W)),
+      finStar(WeilDatum.field(W)), n, n, g)) = complexConj(glMultiplier(W, υ, n, g))
+proof
+  sorry
+
+-- Section: The adelic unitary group and its action
+-- SpaceDefs.lean, G E s = G_∞ × G_f: the matrices g over 𝔸 with
+-- gᴴ stdForm(s) g = stdForm(s), with the topology of their entries.
+def adelicStdForm (W n s : Set) : Set :=
+  stdForm(WeilDatum.field(W), WeilDatum.cmType(W), n, s)
+
+def adelicUnitaryMatrices (W n s : Set) : Set :=
+  formUnitaryMatrices(adeleRingOf(W), adeleStar(W), n, adelicStdForm(W, n, s))
+
+def adelicUnitaryGroup (W n s : Set) : Set :=
+  formUnitaryGroup(adeleRingOf(W), adeleStar(W), n, adelicStdForm(W, n, s))
+
+def adelicEntrySpaces (W n : Set) : Set :=
+  { (q, cmAdeleSpace(WeilDatum.field(W), WeilDatum.cmType(W))) | q ∈ n × n }
+
+def adelicUnitarySpace (W n s : Set) : Set :=
+  subspace(piSpace(n × n, adelicEntrySpaces(W, n)), adelicUnitaryMatrices(W, n, s))
+
+-- The component g_τ ∈ U(s) at τ ∈ Φ and the finite part g_f ∈ G_f.
+def matrixAtPlace (n g τ : Set) : Set := { (q, fst(g(q))(τ)) | q ∈ n × n }
+
+def finiteMatrixPart (n g : Set) : Set := { (q, snd(g(q))) | q ∈ n × n }
+
+-- ThetaFunctional.lean, weilMultiplier g = (∏_τ realMultiplier g_τ) Δ_f(g_f).
+def placeMultipliers (W n s g : Set) : Set :=
+  { (τ, realMultiplier(n, s, matrixAtPlace(n, g, τ))) | τ ∈ WeilDatum.cmType(W) }
+
+def weilMultiplier (W υ n s g : Set) : Set :=
+  ℂ[complexFiniteProduct(WeilDatum.cmType(W), placeMultipliers(W, n, s, g)) *
+    glMultiplier(W, υ, n, finiteMatrixPart(n, g))]
+
+def weilMultiplierMap (W υ n s : Set) : Set :=
+  { (g, weilMultiplier(W, υ, n, s, g)) | g ∈ adelicUnitaryMatrices(W, n, s) }
+
+-- g • x = gx on 𝔸ⁿ.
+def adelicMulVec (W n g : Set) : Set :=
+  { (x, mulVec(adeleRingOf(W), n, n, g, x)) | x ∈ adelicVectors(W, n) }
+
+def adelicAct (W n s : Set) : Set :=
+  { (g, adelicMulVec(W, n, g)) | g ∈ adelicUnitaryMatrices(W, n, s) }
+
+-- The components of an element of G: g_τ ∈ U(s) and g_f ∈ G_f.
+theorem adelicUnitaryMatrices.components (W n s g τ : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  requires hg : g ∈ adelicUnitaryMatrices(W, n, s)
+  requires hτ : τ ∈ WeilDatum.cmType(W)
+  shows matrixAtPlace(n, g, τ) ∈ signUnitaryMatrices(n, s) ∧
+    finiteMatrixPart(n, g) ∈ gfMatrices(WeilDatum.field(W), n)
+proof
+  sorry
+
+-- ThetaFunctional.lean, adelicAction: G acts on (𝔸ⁿ, β) preserving β and
+-- the measure, with multiplier Δ and trivial cocycle.
+theorem adelicAct.multiplier (W υ n s : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  shows MultiplierAction(adelicUnitaryGroup(W, n, s), adelicUnitarySpace(W, n, s),
+    adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n), adelicBeta(W, n, s),
+    vacuumFn(W, n), adelicAct(W, n, s), weilMultiplierMap(W, υ, n, s),
+    trivialCocycle(adelicUnitaryGroup(W, n, s)))
+proof
+  sorry
+
+-- Section: The Weil representation
+-- PairDefs.lean, Space.ω g: ω(g)c = Δ(g) ∫ c(y) ϱ(gy)e dy on 𝒮(V).
+def dataOmega (W υ n s g : Set) : Set :=
+  weilRep(adelicUnitaryGroup(W, n, s), adelicVectorGroup(W, n), adelicVectorSpace(W, n),
+    vacuumMeasure(W, n), adelicBeta(W, n, s), vacuumFn(W, n), adelicAct(W, n, s),
+    weilMultiplierMap(W, υ, n, s))(g)
+
+-- PairDefs.lean (Space.ω a homomorphism, weilRep_heisOp and
+-- modelInner_weilRep): ω(gh) = ω(g)ω(h), ω(g)ϱ(y) = ϱ(gy)ω(g), and ω(g)
+-- preserves ⟨·, ·⟩.
+theorem dataOmega.laws (W υ n s g h y f f2 : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  requires hg : g ∈ adelicUnitaryMatrices(W, n, s)
+  requires hh : h ∈ adelicUnitaryMatrices(W, n, s)
+  requires hy : y ∈ adelicVectors(W, n)
+  requires hf : f ∈ dataSpace(W, n, s)
+  requires hf2 : f2 ∈ dataSpace(W, n, s)
+  shows dataOmega(W, υ, n, s, g)(f) ∈ dataSpace(W, n, s) ∧
+    dataOmega(W, υ, n, s, matMul(adeleRingOf(W), n, n, n, g, h))(f) =
+      dataOmega(W, υ, n, s, g)(dataOmega(W, υ, n, s, h)(f)) ∧
+    dataOmega(W, υ, n, s, g)(dataHeis(W, n, s, y)(f)) =
+      dataHeis(W, n, s, mulVec(adeleRingOf(W), n, n, g, y))(dataOmega(W, υ, n, s, g)(f)) ∧
+    dataInner(W, n, dataOmega(W, υ, n, s, g)(f), dataOmega(W, υ, n, s, g)(f2)) =
+      dataInner(W, n, f, f2)
+proof
+  sorry
+
+-- Section: Box products
+-- DataProduct.lean, Space.boxProd: for a bijection e : n₁ ⊔ n₂ → n with
+-- s ∘ e = s₁ ⊔ s₂, the bilinear map 𝒮(V₁) × 𝒮(V₂) → 𝒮(V),
+-- c₁ ⊠ c₂ = ∬ c₁(y₁) c₂(y₂) ϱ(y₁, 0) ϱ(0, y₂) e dy₁ dy₂ (OrthogonalSum.tmul
+-- of the splitting (x₁, x₂) ↦ (x₁ ⊔ x₂) ∘ e⁻¹ of 𝔸ⁿ).
+def adelicSplitValue (W n1 n2 n e p : Set) : Set :=
+  compose(vecAppend(adeleRingOf(W), n1, n2, fst(p), snd(p)), converse(e, n1 ⊎ n2, n),
+    n, n1 ⊎ n2, cmAdeles(WeilDatum.field(W), WeilDatum.cmType(W)))
+
+def adelicSplit (W n1 n2 n e : Set) : Set :=
+  { (p, adelicSplitValue(W, n1, n2, n, e, p)) | p ∈ adelicVectors(W, n1) × adelicVectors(W, n2) }
+
+def boxProd (W n1 s1 n2 s2 n s e f1 f2 : Set) : Set :=
+  orthogonalTmul(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n), adelicVectorGroup(W, n1), adelicVectorSpace(W, n1),
+    vacuumMeasure(W, n1), adelicVectorGroup(W, n2), adelicVectorSpace(W, n2),
+    vacuumMeasure(W, n2), adelicSplit(W, n1, n2, n, e), f1, f2)
+
+-- DataProduct.lean (Space.boxProd, rho_boxProd, boxProd_vacElem): the
+-- splitting is an orthogonal sum, e₁ ⊠ e₂ = e, and ϱ(y)(f₁ ⊠ f₂) =
+-- ϱ(y ∘ e ∘ inl)f₁ ⊠ ϱ(y ∘ e ∘ inr)f₂.
+theorem boxProd.laws (W n1 s1 n2 s2 n s e y f1 f2 : Set)
+  requires weil : IsWeilDatum(W)
+  requires split : SignSplitting(n1, s1, n2, s2, n, s, e)
+  requires hy : y ∈ adelicVectors(W, n)
+  requires hf1 : f1 ∈ dataSpace(W, n1, s1)
+  requires hf2 : f2 ∈ dataSpace(W, n2, s2)
+  shows OrthogonalSum(adelicVectorGroup(W, n), adelicVectorSpace(W, n), adelicBeta(W, n, s),
+      vacuumFn(W, n), adelicVectorGroup(W, n1), adelicVectorSpace(W, n1), adelicBeta(W, n1, s1),
+      vacuumFn(W, n1), adelicVectorGroup(W, n2), adelicVectorSpace(W, n2),
+      adelicBeta(W, n2, s2), vacuumFn(W, n2), adelicSplit(W, n1, n2, n, e)) ∧
+    boxProd(W, n1, s1, n2, s2, n, s, e, f1, f2) ∈ dataSpace(W, n, s) ∧
+    boxProd(W, n1, s1, n2, s2, n, s, e, dataVacuum(W, n1), dataVacuum(W, n2)) =
+      dataVacuum(W, n) ∧
+    dataHeis(W, n, s, y)(boxProd(W, n1, s1, n2, s2, n, s, e, f1, f2)) =
+      boxProd(W, n1, s1, n2, s2, n, s, e,
+        dataHeis(W, n1, s1, compose(y, compose(e, leftInclusion(n1, n2), n1, n1 ⊎ n2, n), n1, n,
+          cmAdeles(WeilDatum.field(W), WeilDatum.cmType(W))))(f1),
+        dataHeis(W, n2, s2, compose(y, compose(e, rightInclusion(n1, n2), n2, n1 ⊎ n2, n), n2,
+          n, cmAdeles(WeilDatum.field(W), WeilDatum.cmType(W))))(f2))
+proof
+  sorry
+
+-- g reindexed along e is block diagonal with blocks g₁, g₂.
+def reindexedMatrix (n1 n2 e g : Set) : Set :=
+  { (q, g((e(fst(q)), e(snd(q))))) | q ∈ (n1 ⊎ n2) × (n1 ⊎ n2) }
+
+-- DataProduct.lean, weilMultiplier_fromBlocks and Space.omega_boxProd:
+-- for g block diagonal with blocks g₁, g₂, Δ(g) = Δ(g₁)Δ(g₂) and
+-- ω(g)(f₁ ⊠ f₂) = ω(g₁)f₁ ⊠ ω(g₂)f₂.
+theorem boxProd.omega (W υ n1 s1 n2 s2 n s e g g1 g2 f1 f2 : Set)
+  requires splitting : SplittingChar(W, υ)
+  requires split : SignSplitting(n1, s1, n2, s2, n, s, e)
+  requires hg : g ∈ adelicUnitaryMatrices(W, n, s)
+  requires hg1 : g1 ∈ adelicUnitaryMatrices(W, n1, s1)
+  requires hg2 : g2 ∈ adelicUnitaryMatrices(W, n2, s2)
+  requires block : reindexedMatrix(n1, n2, e, g) = fromBlocks(adeleRingOf(W), n1, n2, n1, n2,
+    g1, matZero(adeleRingOf(W), n1, n2), matZero(adeleRingOf(W), n2, n1), g2)
+  requires hf1 : f1 ∈ dataSpace(W, n1, s1)
+  requires hf2 : f2 ∈ dataSpace(W, n2, s2)
+  shows weilMultiplier(W, υ, n, s, g) =
+      ℂ[weilMultiplier(W, υ, n1, s1, g1) * weilMultiplier(W, υ, n2, s2, g2)] ∧
+    dataOmega(W, υ, n, s, g)(boxProd(W, n1, s1, n2, s2, n, s, e, f1, f2)) =
+      boxProd(W, n1, s1, n2, s2, n, s, e, dataOmega(W, υ, n1, s1, g1)(f1),
+        dataOmega(W, υ, n2, s2, g2)(f2))
+proof
+  sorry
+
+end Operators
