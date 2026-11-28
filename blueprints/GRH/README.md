@@ -386,8 +386,11 @@ graph TD
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Proof.Endgame.PrimeError | 4 | 0 | 4 |
+| GRH.Weil.Construction | 58 | 0 | 58 |
+| GRH.Weil.Unramified | 20 | 8 | 12 |
+| GRH.Weil.Construction2 | 23 | 9 | 14 |
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
-| GRH.Proof.Data.Different | 13 | 5 | 8 |
+| GRH.Proof.Data.Different | 14 | 5 | 9 |
 | GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
 | GRH.Proof.Endgame.CriterionTools | 2 | 0 | 2 |
 | GRH.Proof.Endgame.OneSidedCriterion | 1 | 1 | 0 |
@@ -403,5 +406,6 @@ graph TD
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
-| **total** | **8731** | **6639** | **2092** |
+| GRH.Weil.Construction.Local | 18 | 1 | 17 |
+| **total** | **8851** | **6657** | **2194** |
 <!-- /blueprint-status -->
