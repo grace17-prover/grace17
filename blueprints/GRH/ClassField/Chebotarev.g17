@@ -1,0 +1,497 @@
+-- Chebotarev's density theorem in its existence form and the filter of
+-- "most Frobenii"; the existence theorem of class field theory for
+-- totally complex fields by Kummer counting, and the p-adic avatar of an
+-- algebraic Hecke character: norms in towers, ideles that are n-th powers
+-- at S and their index, characters unramified off S, the sum of orders
+-- times Frobenius values, roots fixed by decomposition groups, Kummer
+-- characters, μ ∘ Art for continuous characters of the ideles, detecting
+-- points, and the avatar with its local values.
+-- Source: grh-compact/src/Lib/ClassField/Chebotarev/FrobeniusFilter.lean
+-- (chebotarev, FrobeniusDatum, mostFrobenii, mostFrobeniiAt,
+-- tendsto_mostFrobeniiAt, eventually_mostFrobenii, mostFrobenii_push,
+-- dense_of_mostFrobenii, the NeBot instance) and Global/Avatars.lean
+-- (adeleNorm_adeleNorm, idelesPowAt, index_pow_local_le,
+-- index_pow_at_places_le, QZChar.sup_le_ker_abelianLift_artinMap,
+-- QZChar.eq_zero_of_unramified_off, sum_ord_smul_frob_eq_zero,
+-- IsPlaceOver.smul_root_eq_of_local_pow, exists_kummer_chars,
+-- exists_comp_artinMap, exists_detecting_points_hom, exists_avatar,
+-- AlgHeckeChar.avatar, AlgHeckeChar.continuous_avatar,
+-- AlgHeckeChar.avatar_localArtin).
+-- Encoding. Γ = Gal(Ω/K) is galoisGroup(E) with the Krull topology and
+-- the identity action, E = (K, Ω, ι) with Ω an algebraic closure of K.
+-- A Frobenius datum (w, A, s) is a triple in finPlaces(K) × (places of
+-- Ω × Gal(Ω/K)); mostFrobenii E is the filter of GRH.Topology.Filters on
+-- the set of data. The source's chosen place over w (placeOver w) becomes
+-- every place over w in hypotheses on χ (equivalent for an abelian χ, by
+-- conjugacy) and some place over v in sum_ord_smul_frob_eq_zero. The
+-- source's ιℓ : ℂ ≅ ℚ̄_p is a p-adic place ι ∈ padicPlaces(p) of
+-- GRH.General.PadicPlace (any ring homomorphism ℂ → ℂ_p, not required
+-- to be an isomorphism onto ℚ̄_p), and the avatar takes values in ℂ_pˣ; the
+-- avatar is "the unique" homomorphism with its values on Artin symbols
+-- (unique because the Artin map is onto Γ^ab). In exists_kummer_chars the
+-- isomorphism ℤ/n ≅ μ_n is j ↦ ζ^j for a primitive n-th root ζ ∈ K.
+-- index_range_pow_eq (a lemma on abelian groups) is not stated.
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.Chebotarev
+import GRH.ClassField.Global
+import GRH.ClassField.AlgebraicHecke
+import GRH.ClassField.Cohomology
+
+section ChebotarevDefs
+
+-- The Frobenius condition in Gal(Ω/K).
+predicate IsGalFrob (E A q σ : Set) :=
+  IsFrob(galoisGroup(E), identity(algebraAutomorphisms(E)), Algebra.ring(E), A, q, σ)
+
+-- FrobeniusFilter.lean, FrobeniusDatum E: w of prime norm, A over w, and
+-- a geometric Frobenius s (s⁻¹ an arithmetic Frobenius) at A.
+predicate IsFrobeniusDatum (E w A s : Set) :=
+  w ∈ primeNormPlaces(Algebra.base(E)) ∧ IsPlaceOver(E, A, w) ∧
+  s ∈ algebraAutomorphisms(E) ∧
+  IsGalFrob(E, A, placeNorm(Algebra.base(E), w), Group.inv(galoisGroup(E))(s))
+
+def frobeniusData (E : Set) : Set :=
+  { d ∈ finPlaces(Algebra.base(E)) × (closurePlaces(Algebra.ring(E)) × algebraAutomorphisms(E)) |
+    IsFrobeniusDatum(E, fst(d), fst(snd(d)), snd(snd(d))) }
+
+def frobOf (d : Set) : Set := snd(snd(d))
+
+def frobMap (E : Set) : Set := { (d, frobOf(d)) | d ∈ frobeniusData(E) }
+
+-- The places w at which every datum at w with Frobenius in O lies in Y.
+def frobGoodPlaces (E O Y : Set) : Set :=
+  { w ∈ finPlaces(Algebra.base(E)) | ∀ d ∈ frobeniusData(E), fst(d) = w → frobOf(d) ∈ O → d ∈ Y }
+
+-- FrobeniusFilter.lean, mostFrobenii E: Y is a member when each nonempty
+-- open V has a nonempty open O ⊆ V such that, at almost every w, every
+-- datum at w with Frobenius in O lies in Y.
+def mostFrobenii (E : Set) : Set :=
+  { Y ∈ 𝒫(frobeniusData(E)) | ∀ V ∈ krullOpens(E), V ≠ ∅ →
+    (∃ O ∈ krullOpens(E), O ⊆ V ∧ O ≠ ∅ ∧
+      frobGoodPlaces(E, O, Y) ∈ cofinite(finPlaces(Algebra.base(E)))) }
+
+-- FrobeniusFilter.lean, mostFrobeniiAt E g: mostFrobenii E ⊓ comap frob
+-- (𝓝 g).
+def mostFrobeniiAt (E g : Set) : Set :=
+  filterInf(frobeniusData(E), mostFrobenii(E),
+    filterComap(frobMap(E), frobeniusData(E), nhds(krullTopology(E), g)))
+
+-- d ↦ f(frob d); the data at places in P; the data with Frobenius in P.
+def frobCompose (E f : Set) : Set := { (d, f(frobOf(d))) | d ∈ frobeniusData(E) }
+
+def dataAtPlaces (E P : Set) : Set := { d ∈ frobeniusData(E) | fst(d) ∈ P }
+
+def dataWithFrob (E P : Set) : Set := { d ∈ frobeniusData(E) | frobOf(d) ∈ P }
+
+-- The data y of F such that every datum x of E with π(w_x) = w_y and
+-- φ(s_x) = s_y lies in Y (mostFrobenii_push).
+def pushedData (E F φ π Y : Set) : Set :=
+  { y ∈ frobeniusData(F) | ∀ x ∈ frobeniusData(E), π(fst(x)) = fst(y) →
+    φ(frobOf(x)) = frobOf(y) → x ∈ Y }
+
+-- Avatars.lean, idelesPowAt S n: the finite ideles that are n-th powers
+-- in K_vˣ at every v ∈ S; and the n-th powers of K_vˣ.
+def locPowers (K v : Set, n : Nat) : Set :=
+  { y ∈ locUnits(K, v) | ∃ b ∈ locUnits(K, v), y = Ring.pow(adicCompletionField(K, v), b, n) }
+
+def idelesPowAt (K S : Set, n : Nat) : Set :=
+  { a ∈ finIdeleUnits(K) | ∀ v ∈ S, a(v) ∈ locPowers(K, v, n) }
+
+-- The v-part of the ideal (n): N(v)^{ord_v(n)}.
+def natLocalPart (K v : Set, n : Nat) : Set :=
+  pow(placeNorm(K, v), integerNatAbs(completionOrder(K, v,
+    adicCompletionEmbedding(K, v)(natCast(K, n)))))
+
+-- The trivial action of G on a group V.
+def trivialGAction (G V : Set) : Set :=
+  { (p, snd(p)) | p ∈ Group.carrier(G) × Group.carrier(V) }
+
+-- Σ_j ord_{w_j}(x) χ(s_j) (sum_ord_smul_frob_eq_zero).
+def ordFrobTerms (K w χ s x J : Set) : Set :=
+  { (j, groupZpow(qzGroup, χ(s(j)), completionOrder(K, w(j), adicCompletionEmbedding(K, w(j))(x)))) |
+    j ∈ J }
+
+-- The products n_i in ℤ.
+def intFamily (ι n : Set) : Set := { (i, integerOfNat(n(i))) | i ∈ ι }
+
+def intProduct (ι n : Set) : Set :=
+  finiteRingProduct(ι, Ring.carrier(integerRing), Ring.add(integerRing), Ring.zero(integerRing),
+    Ring.neg(integerRing), Ring.mul(integerRing), Ring.one(integerRing), intFamily(ι, n))
+
+-- The avatar's value ι(θ(x)) ∏_σ (ι σ)(x_p)^{n_σ} at a finite idele x.
+def avatarFactors (K p ι n x : Set) : Set :=
+  { (σ, unitZpow(placeCp(p, ι), adeleExtensionAlong(K, p, ι, placeAfter(K, ι, σ), x), n(σ))) |
+    σ ∈ complexEmbeddings(K) }
+
+def avatarValue (K p ι θ x : Set) : Set :=
+  call2(Ring.mul(placeCp(p, ι)), placeHom(ι)(fst(θ)(x)),
+    finiteRingProduct(complexEmbeddings(K), Ring.carrier(placeCp(p, ι)),
+      Ring.add(placeCp(p, ι)), Ring.zero(placeCp(p, ι)), Ring.neg(placeCp(p, ι)),
+      Ring.mul(placeCp(p, ι)), Ring.one(placeCp(p, ι)), avatarFactors(K, p, ι, snd(θ), x)))
+
+-- AlgHeckeChar.avatar θ: the homomorphism μ : Gal(Ω/K) → ℂ_pˣ with
+-- μ(g) = ι(θ(x)) ∏_σ (ισ)(x_p)^{n_σ} whenever Art x is the class of g.
+predicate IsAvatar (E p ι θ μ : Set) :=
+  GroupHom(μ, galoisGroup(E), unitGroup(placeCp(p, ι))) ∧
+  (∀ x ∈ finIdeleUnits(Algebra.base(E)), ∀ g ∈ algebraAutomorphisms(E),
+    csCFArtinMap(galoisGroup(E), krullTopology(E), identity(algebraAutomorphisms(E)), E)(x) =
+        abelianClass(galoisGroup(E), krullTopology(E), g) →
+      μ(g) = avatarValue(Algebra.base(E), p, ι, θ, x))
+
+def avatar (E p ι θ : Set) : Set :=
+  ⋃({ μ ∈ functionSpace(algebraAutomorphisms(E), ringUnits(placeCp(p, ι))) |
+    IsAvatar(E, p, ι, θ, μ) })
+
+def cpUnitsSpace (p ι : Set) : Set :=
+  subspace(cpSpace(p, placeClosure(ι)), ringUnits(placeCp(p, ι)))
+
+end ChebotarevDefs
+
+-- Section: Chebotarev and the filter of most Frobenii
+section Frobenii
+variable (E : Set)
+hypothesis closure : IsAlgebraicClosure(E)
+hypothesis numberField : NumberField(Algebra.base(E))
+
+-- chebotarev: for W open and nonempty in Gal(Ω/K) and S finite, some v ∉ S
+-- of prime norm has a place A above it with a Frobenius in W and every
+-- Frobenius at A in W.
+theorem chebotarev (W S : Set)
+  requires open : W ∈ krullOpens(E)
+  requires nonempty : W ≠ ∅
+  requires places : S ⊆ finPlaces(Algebra.base(E))
+  requires finite : Finite(S)
+  shows ∃ v ∈ primeNormPlaces(Algebra.base(E)), v ∉ S ∧
+    (∃ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, v) ∧
+      (∃ σ ∈ W, IsGalFrob(E, A, placeNorm(Algebra.base(E), v), σ)) ∧
+      (∀ τ, IsGalFrob(E, A, placeNorm(Algebra.base(E), v), τ) → τ ∈ W))
+proof
+  sorry
+
+-- mostFrobenii is a filter, and mostFrobeniiAt g is proper (NeBot).
+theorem mostFrobenii.filter (g : Set)
+  requires member : g ∈ algebraAutomorphisms(E)
+  shows IsFilter(frobeniusData(E), mostFrobenii(E)) ∧
+    ProperFilter(frobeniusData(E), mostFrobeniiAt(E, g))
+proof
+  sorry
+
+-- tendsto_mostFrobeniiAt: f(frob) → f(g) along mostFrobeniiAt g for f
+-- continuous.
+theorem mostFrobeniiAt.tendsto (Y f g : Set)
+  requires member : g ∈ algebraAutomorphisms(E)
+  requires continuous : f : krullTopology(E) ⇒ Y
+  shows Tendsto(frobCompose(E, f), frobeniusData(E), mostFrobeniiAt(E, g), nhds(Y, f(g)))
+proof
+  sorry
+
+-- eventually_mostFrobenii: a property of the place holding at almost all
+-- places holds for most Frobenii.
+theorem mostFrobenii.of_cofinite (P : Set)
+  requires cofinitely : Eventually(cofinite(finPlaces(Algebra.base(E))), P)
+  shows Eventually(mostFrobenii(E), dataAtPlaces(E, P))
+proof
+  sorry
+
+-- mostFrobenii_push: along an open embedding φ : Gal(Ω/K) → Gal(Ω/F′)
+-- and a map π of places, a member of mostFrobenii E pushes to an
+-- eventual property of mostFrobenii F.
+theorem mostFrobenii.push (F φ π Y : Set)
+  requires closure2 : IsAlgebraicClosure(F)
+  requires numberField2 : NumberField(Algebra.base(F))
+  requires continuous : φ : krullTopology(E) ⇒ krullTopology(F)
+  requires injective : InjectiveBetween(φ, algebraAutomorphisms(E), algebraAutomorphisms(F))
+  requires openMap : ∀ O ∈ krullOpens(E),
+    functionImage(φ, O, algebraAutomorphisms(F)) ∈ krullOpens(F)
+  requires places : FunctionBetween(π, finPlaces(Algebra.base(E)), finPlaces(Algebra.base(F)))
+  requires member : Y ∈ mostFrobenii(E)
+  shows Eventually(mostFrobenii(F), pushedData(E, F, φ, π, Y))
+proof
+  sorry
+
+-- dense_of_mostFrobenii: a property of most Frobenii holds on a dense set.
+theorem mostFrobenii.dense (P : Set)
+  requires subset : P ⊆ algebraAutomorphisms(E)
+  requires eventually : Eventually(mostFrobenii(E), dataWithFrob(E, P))
+  shows Dense(krullTopology(E), P)
+proof
+  sorry
+
+end Frobenii
+
+-- Section: Powers of ideles
+section Powers
+variable (K : Set)
+hypothesis numberField : NumberField(K)
+
+-- adeleNorm_adeleNorm: norms compose in a tower K → L → M.
+theorem adeleNorm.tower (L M f h g y : Set)
+  requires numberL : NumberField(L)
+  requires numberM : NumberField(M)
+  requires homKL : RingHom(f, K, L)
+  requires homLM : RingHom(h, L, M)
+  requires composite : RingHom(g, K, M)
+  requires tower : ∀ x ∈ Ring.carrier(K), g(x) = h(f(x))
+  requires adele : y ∈ finAdeles(M)
+  shows adeleNorm(K, L, f, adeleNorm(L, M, h, y)) = adeleNorm(K, M, g, y)
+proof
+  sorry
+
+-- index_pow_local_le: [K_vˣ : K_vˣⁿ] is finite and at most n² N(v)^{ord_v n}.
+theorem locPowers.index_le (v : Set, n : Nat)
+  requires place : v ∈ finPlaces(K)
+  requires nonzero : n ≠ 0
+  shows Finite(leftCosets(unitGroup(adicCompletionField(K, v)), locPowers(K, v, n))) ∧
+    (index(unitGroup(adicCompletionField(K, v)), locPowers(K, v, n)):N) ≤
+      n * n * (natLocalPart(K, v, n):N)
+proof
+  sorry
+
+-- index_pow_at_places_le: for finite S the ideles that are n-th powers
+-- at S have finite index at most n^(2|S| + [K:ℚ]).
+theorem idelesPowAt.index_le (S : Set, n : Nat)
+  requires places : S ⊆ finPlaces(K)
+  requires finite : Finite(S)
+  requires nonzero : n ≠ 0
+  shows Finite(leftCosets(finIdeleGroup(K), idelesPowAt(K, S, n))) ∧
+    (index(finIdeleGroup(K), idelesPowAt(K, S, n)):N) ≤
+      pow(n, 2 * (cardinality(S):N) + (numberFieldDegree(K):N))
+proof
+  sorry
+
+end Powers
+
+-- Section: Characters unramified off S
+section Unramified
+variable (G X ρ E S : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis places : S ⊆ finPlaces(Algebra.base(E))
+hypothesis finite : Finite(S)
+
+-- QZChar.sup_le_ker_abelianLift_artinMap: χ killing complex conjugations
+-- and inertia off S, with nχ killing the decomposition groups at S, kills
+-- Art of Kˣ · (n-th powers at S ∩ units off S).
+theorem qzChars.kernel_contains (χ : Set, n : Nat)
+  requires character : χ ∈ qzChars(G, X)
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → χ(c) = Group.one(qzGroup)
+  requires atS : ∀ w ∈ S, ∀ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, w) →
+    (∀ g ∈ decompGroup(G, ρ, Algebra.ring(E), A), groupPow(qzGroup, χ(g), n) = Group.one(qzGroup))
+  requires offS : ∀ w ∈ finPlaces(Algebra.base(E)), w ∉ S →
+    (∀ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, w) →
+      inertiaGroup(G, ρ, Algebra.ring(E), A) ⊆ qzCharKernel(G, χ))
+  shows ideleSubgroupProduct(Algebra.base(E), principalIdeles(Algebra.base(E)),
+      idelesPowAt(Algebra.base(E), S, n) ∩ idelesUnitOff(Algebra.base(E), S)) ⊆
+    artinCharKernel(G, X, ρ, E, χ)
+proof
+  sorry
+
+-- QZChar.eq_zero_of_unramified_off: when Kˣ and the units off S generate
+-- the finite ideles, a continuous homomorphism z from Γ to a discrete
+-- abelian group killing complex conjugations, the decomposition groups at
+-- S and the inertia groups off S is trivial.
+theorem qzChars.trivial_of_unramified_off (V z : Set)
+  requires generate : ideleSubgroupProduct(Algebra.base(E), principalIdeles(Algebra.base(E)),
+    idelesUnitOff(Algebra.base(E), S)) = finIdeleUnits(Algebra.base(E))
+  requires group : AbelianGroup(V)
+  requires cocycle : z ∈ Z1(G, X, V, trivialGAction(G, V))
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → z(c) = Group.one(V)
+  requires atS : ∀ w ∈ S, ∀ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, w) →
+    (∀ g ∈ decompGroup(G, ρ, Algebra.ring(E), A), z(g) = Group.one(V))
+  requires offS : ∀ w ∈ finPlaces(Algebra.base(E)), w ∉ S →
+    (∀ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, w) →
+      (∀ g ∈ inertiaGroup(G, ρ, Algebra.ring(E), A), z(g) = Group.one(V)))
+  shows ∀ g ∈ Group.carrier(G), z(g) = Group.one(V)
+proof
+  sorry
+
+-- exists_detecting_points_hom: for K totally complex with [ideles : m-th
+-- powers at S] = I finite, finitely many p_i ∈ Γ and n_i ≥ 2 with
+-- ∏ n_i ∣ h_K I detect every locally constant homomorphism x killed by m
+-- and unramified off S.
+theorem exists_detecting_points (m : Nat)
+  requires complex : TotallyComplex(Algebra.base(E))
+  requires finiteIndex : Finite(leftCosets(finIdeleGroup(Algebra.base(E)),
+    idelesPowAt(Algebra.base(E), S, m)))
+  shows ∃ ι, Finite(ι) ∧ (∃ pt, FunctionBetween(pt, ι, Group.carrier(G)) ∧
+    (∃ n, FunctionBetween(n, ι, ℕ) ∧ (∀ i ∈ ι, 2 ≤ (n(i):N)) ∧
+      RingDvd(integerRing, intProduct(ι, n),
+        integerMul(integerOfNat(classNumber(Algebra.base(E))),
+          integerOfNat(index(finIdeleGroup(Algebra.base(E)), idelesPowAt(Algebra.base(E), S, m))))) ∧
+      (∀ B, ∀ x, AbelianGroup(B) → x ∈ Z1(G, X, B, trivialGAction(G, B)) →
+        (∀ g ∈ Group.carrier(G), groupPow(B, x(g), m) = Group.one(B)) →
+        (∀ w ∈ finPlaces(Algebra.base(E)), w ∉ S →
+          (∀ A ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, A, w) →
+            (∀ g ∈ inertiaGroup(G, ρ, Algebra.ring(E), A), x(g) = Group.one(B)))) →
+        (∀ i ∈ ι, groupPow(B, x(pt(i)), n(i)) = Group.one(B)) ∧
+        ((∀ i ∈ ι, x(pt(i)) = Group.one(B)) → (∀ g ∈ Group.carrier(G), x(g) = Group.one(B))))))
+proof
+  sorry
+
+end Unramified
+
+-- Section: Kummer theory and the existence theorem
+section Kummer
+variable (G X ρ E : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis characteristic : CharP(Algebra.ring(E), 0)
+
+-- sum_ord_smul_frob_eq_zero: let nχ = 0 and χ(Art x) = 0 for x ∈ Kˣ, χ
+-- unramified at distinct w_j with Frobenii s_j; at every other v let
+-- χ(Art_v x) = 0, or χ be unramified at some B over v with x/rⁿ a unit at
+-- B for an inertia-fixed r. Then Σ_j ord_{w_j}(x) χ(s_j) = 0.
+theorem sum_ord_frob_eq_zero (χ x J w A s : Set, n : Nat)
+  requires character : χ ∈ qzChars(G, X)
+  requires torsion : ∀ g ∈ Group.carrier(G), groupPow(qzGroup, χ(g), n) = Group.one(qzGroup)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  requires reciprocity : abelianLift(G, X, χ,
+    csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), x))) = Group.one(qzGroup)
+  requires finite : Finite(J)
+  requires injective : InjectiveBetween(w, J, finPlaces(Algebra.base(E)))
+  requires frobenii : ∀ j ∈ J, IsPlaceOver(E, A(j), w(j)) ∧
+    IsFrob(G, ρ, Algebra.ring(E), A(j), placeNorm(Algebra.base(E), w(j)), s(j)) ∧
+    inertiaGroup(G, ρ, Algebra.ring(E), A(j)) ⊆ qzCharKernel(G, χ)
+  requires others : ∀ v ∈ finPlaces(Algebra.base(E)), v ∉ functionImage(w, J, finPlaces(Algebra.base(E))) →
+    abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v,
+        ideleAt(Algebra.base(E), v, principalIdele(Algebra.base(E), x)))) = Group.one(qzGroup) ∨
+      (∃ B ∈ closurePlaces(Algebra.ring(E)), IsPlaceOver(E, B, v) ∧
+        inertiaGroup(G, ρ, Algebra.ring(E), B) ⊆ qzCharKernel(G, χ) ∧
+        (∃ r ∈ ringUnits(Algebra.ring(E)),
+          call2(Ring.mul(Algebra.ring(E)), Algebra.map(E)(x),
+              ringInverse(Algebra.ring(E), Ring.pow(Algebra.ring(E), r, n))) ∈
+            valuationSubringUnits(Algebra.ring(E), B) ∧
+          (∀ g ∈ inertiaGroup(G, ρ, Algebra.ring(E), B), ρ(g)(r) = r)))
+  shows qzFiniteSum(J, ordFrobTerms(Algebra.base(E), w, χ, s, x, J)) = Group.one(qzGroup)
+proof
+  sorry
+
+-- IsPlaceOver.smul_root_eq_of_local_pow: for A over v and x ∈ Kˣ an n-th
+-- power in K_v with rⁿ = x, every g ∈ D_A fixing the n-th roots of unity
+-- fixes r.
+theorem IsPlaceOver.fixes_local_root (v A x r g : Set, n : Nat)
+  requires positive : 0 < n
+  requires place : v ∈ finPlaces(Algebra.base(E))
+  requires over : IsPlaceOver(E, A, v)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  requires localPower : adicCompletionEmbedding(Algebra.base(E), v)(x) ∈ locPowers(Algebra.base(E), v, n)
+  requires root : r ∈ algebraCarrier(E)
+  requires power : Ring.pow(Algebra.ring(E), r, n) = Algebra.map(E)(x)
+  requires decomposition : g ∈ decompGroup(G, ρ, Algebra.ring(E), A)
+  requires cyclotomic : cycCharMod(G, ρ, Algebra.ring(E), n)(g) = Ring.one(zmod(n))
+  shows ρ(g)(r) = r
+proof
+  sorry
+
+-- exists_kummer_chars: if Γ fixes μ_n (ζ a primitive n-th root), there are
+-- Kummer characters κ_x : Γ → ℤ/n, additive in x, with ζ^{κ_x(g)} = ga/a
+-- for aⁿ = x; and for K totally complex, S finite containing the places
+-- over n with Kˣ·(units off S) everything, an idele killed by every κ_u ∘
+-- Art, u an S-unit, lies in Kˣ · (n-th powers at S ∩ units off S).
+theorem exists_kummer_chars (ζ : Set, n : Nat)
+  requires positive : 0 < n
+  requires primitive : IsPrimitiveRoot(Algebra.ring(E), ζ, n)
+  requires trivialOnRoots : ∀ g ∈ Group.carrier(G),
+    cycCharMod(G, ρ, Algebra.ring(E), n)(g) = Ring.one(zmod(n))
+  shows ∃ κ, FunctionBetween(κ, fieldUnits(Algebra.base(E)),
+      Z1(G, X, Ring.additive(zmod(n)), trivialGAction(G, Ring.additive(zmod(n))))) ∧
+    (∀ x ∈ fieldUnits(Algebra.base(E)), ∀ y ∈ fieldUnits(Algebra.base(E)),
+      κ(call2(Ring.mul(Algebra.base(E)), x, y)) =
+        cochainMul(Ring.additive(zmod(n)), Group.carrier(G), κ(x), κ(y))) ∧
+    (∀ x ∈ fieldUnits(Algebra.base(E)), ∀ a ∈ algebraCarrier(E),
+      Ring.pow(Algebra.ring(E), a, n) = Algebra.map(E)(x) →
+      (∀ g ∈ Group.carrier(G),
+        call2(Ring.mul(Algebra.ring(E)), Ring.pow(Algebra.ring(E), ζ, zmodVal(n, κ(x)(g))), a) =
+          ρ(g)(a))) ∧
+    (TotallyComplex(Algebra.base(E)) → ∀ S, S ⊆ finPlaces(Algebra.base(E)) → Finite(S) →
+      ideleSubgroupProduct(Algebra.base(E), principalIdeles(Algebra.base(E)),
+        idelesUnitOff(Algebra.base(E), S)) = finIdeleUnits(Algebra.base(E)) →
+      (∀ v ∈ finPlaces(Algebra.base(E)), natCast(Algebra.base(E), n) ∈ v → v ∈ S) →
+      (∀ a ∈ finIdeleUnits(Algebra.base(E)),
+        (∀ u ∈ sUnits(Algebra.base(E), S),
+          abelianLift(G, X, zmodCharToQZ(G, κ(u), n), csCFArtinMap(G, X, ρ, E)(a)) =
+            Group.one(qzGroup)) →
+        a ∈ ideleSubgroupProduct(Algebra.base(E), principalIdeles(Algebra.base(E)),
+          idelesPowAt(Algebra.base(E), S, n) ∩ idelesUnitOff(Algebra.base(E), S))))
+proof
+  sorry
+
+-- exists_comp_artinMap (existence theorem): for K totally complex, a
+-- continuous homomorphism θ from the finite ideles to a T₁ topological
+-- group C, trivial on Kˣ, is μ ∘ Art for a continuous μ : Γ → C.
+theorem exists_comp_artinMap (C Z θ : Set)
+  requires complex : TotallyComplex(Algebra.base(E))
+  requires topological : TopologicalGroup(C, Z)
+  requires separated : T1Space(Z)
+  requires hom : GroupHom(θ, finIdeleGroup(Algebra.base(E)), C)
+  requires continuous : θ : finIdeleSpace(Algebra.base(E)) ⇒ Z
+  requires principal : ∀ x ∈ fieldUnits(Algebra.base(E)),
+    θ(principalIdele(Algebra.base(E), x)) = Group.one(C)
+  shows ∃ μ, GroupHom(μ, G, C) ∧ μ : X ⇒ Z ∧
+    (∀ x ∈ finIdeleUnits(Algebra.base(E)), ∀ g ∈ Group.carrier(G),
+      csCFArtinMap(G, X, ρ, E)(x) = abelianClass(G, X, g) → μ(g) = θ(x))
+proof
+  sorry
+
+end Kummer
+
+-- Section: The p-adic avatar
+section Avatar
+variable (E : Set, p : Nat, ι : Set)
+hypothesis closure : IsAlgebraicClosure(E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis complex : TotallyComplex(Algebra.base(E))
+hypothesis prime : Prime(p)
+hypothesis place : ι ∈ padicPlaces(p)
+
+-- exists_avatar, AlgHeckeChar.avatar, continuous_avatar: every algebraic
+-- Hecke character θ has exactly one avatar; it is continuous, and θ ↦
+-- avatar θ is multiplicative.
+theorem avatar.exists_unique (θ : Set)
+  requires hecke : θ ∈ csCFAlgHeckeChars(Algebra.base(E))
+  shows IsAvatar(E, p, ι, θ, avatar(E, p, ι, θ)) ∧
+    (∀ μ, IsAvatar(E, p, ι, θ, μ) → μ = avatar(E, p, ι, θ)) ∧
+    avatar(E, p, ι, θ) : krullTopology(E) ⇒ cpUnitsSpace(p, ι)
+proof
+  sorry
+
+theorem avatar.mul (θ η g : Set)
+  requires hecke : θ ∈ csCFAlgHeckeChars(Algebra.base(E))
+  requires hecke2 : η ∈ csCFAlgHeckeChars(Algebra.base(E))
+  requires member : g ∈ algebraAutomorphisms(E)
+  shows avatar(E, p, ι, csCFAlgHeckeMul(Algebra.base(E), θ, η))(g) =
+    call2(Ring.mul(placeCp(p, ι)), avatar(E, p, ι, θ)(g), avatar(E, p, ι, η)(g))
+proof
+  sorry
+
+-- AlgHeckeChar.avatar_localArtin: for A over v with v ∤ p, or n_σ = 0 for
+-- every σ inducing v through ι, if g ∈ D_A has class Art_v(x), the avatar
+-- at g is ι(θ(locIdele v x)).
+theorem avatar.localArtin (θ A v x g : Set)
+  requires hecke : θ ∈ csCFAlgHeckeChars(Algebra.base(E))
+  requires placeV : v ∈ finPlaces(Algebra.base(E))
+  requires over : IsPlaceOver(E, A, v)
+  requires offP : natCast(Algebra.base(E), p) ∉ v ∨
+    (∀ σ ∈ complexEmbeddings(Algebra.base(E)),
+      inducedPlace(Algebra.base(E), p, ι, placeAfter(Algebra.base(E), ι, σ)) = v →
+        snd(θ)(σ) = integerZero)
+  requires unit : x ∈ locUnits(Algebra.base(E), v)
+  requires decomposition : g ∈ decompGroup(galoisGroup(E), identity(algebraAutomorphisms(E)),
+    Algebra.ring(E), A)
+  requires symbol : localArtin(galoisGroup(E), krullTopology(E), identity(algebraAutomorphisms(E)),
+      E, A, v)(x) =
+    abelianClass(decompSubgroup(galoisGroup(E), identity(algebraAutomorphisms(E)),
+        Algebra.ring(E), A),
+      decompSpace(galoisGroup(E), krullTopology(E), identity(algebraAutomorphisms(E)),
+        Algebra.ring(E), A), g)
+  shows avatar(E, p, ι, θ)(g) = placeHom(ι)(fst(θ)(locIdele(Algebra.base(E), v, x)))
+proof
+  sorry
+
+end Avatar
