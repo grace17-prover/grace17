@@ -1,0 +1,1278 @@
+-- Landau's lemma for polar functions, from the moments of the density
+-- K e^(B v) − E(v) e^v: its Laplace transform continues K/(s − B) − Φ(s)
+-- across every disk about a large real x that stays right of the abscissa
+-- of convergence, so a residue off the real axis right of the abscissa
+-- vanishes; and the abscissa is B, since a pole-free real point of the
+-- abscissa would let the Taylor series at a nearby real point, whose
+-- terms are moments of one sign, converge left of the abscissa.
+-- Source: grh-compact/src/Lib/Analytic/Landau/PolarLandau.lean
+-- (IsPolar.landau). Related work: Montgomery-Vaughan, Multiplicative
+-- Number Theory I, Lemma 15.1, 2007; Widder, The Laplace Transform, 1941,
+-- II Thm 5b.
+-- Part of the GRH blueprint (layer 4, Lib/Analytic).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Analytic.LandauCore
+import GRH.Analytic.LandauMoments
+
+section LandauCore
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Complex helpers
+-- If (s − 1)Φ(s) is analytic on re s ≥ 1, Φ is holomorphic on re s > 1.
+theorem lndPhi.holomorphic (Φ : Set)
+  requires functionΦ : FunctionBetween(Φ, ℂ, ℂ)
+  requires analytic : ComplexAnalyticOnNhd(subMulMap(Φ, ℂ[1]),
+    closedRightHalfPlane(R[1]))
+  shows HolomorphicOn(Φ, rightHalfPlane(R[1]))
+proof
+  have isOpen := rightHalfPlane.open at R[1]
+  have sub := ComplexOpen.subset with isOpen
+  have valuesΦ : ∀ w ∈ ℂ, Φ(w) ∈ ℂ
+    intros w hw
+    exact FunctionBetween.apply_closed with functionΦ, hw
+  have one : ℂ[1] ∈ ℂ by typecheck
+  have values : ComplexValuedOn(subMulMap(Φ, ℂ[1]), rightHalfPlane(R[1]))
+    intros z hz
+    exact FunctionBetween.apply_closed with
+      (subMulMap.function with valuesΦ, one), (sub with z, hz)
+  have analyticOpen : ComplexAnalyticOnNhd(subMulMap(Φ, ℂ[1]),
+      rightHalfPlane(R[1]))
+    intros z hz
+    obtain ⟨zC, zRe⟩ := rightHalfPlane.membership.forward with hz
+    have closed : z ∈ closedRightHalfPlane(R[1])
+      apply closedRightHalfPlane.membership.backward
+      refine ⟨zC, ?_⟩
+      linarith
+    exact analytic with z, closed
+  have holomorphicS := (ComplexAnalyticOnNhd.iff_holomorphic with isOpen,
+    values).forward with analyticOpen
+  have holomorphicP := lndPowerMap.holomorphic at ℂ[1], rightHalfPlane(R[1]),
+    (1:N) with one, isOpen
+  have nonvanishing : ∀ z ∈ rightHalfPlane(R[1]),
+      cxaPowerMap(ℂ[1], (1:N))(z) ≠ ℂ[0]
+    intros z hz
+    obtain ⟨zC, zRe⟩ := rightHalfPlane.membership.forward with hz
+    have pow1 : ℂ[(z - 1) ^ (1:N)] = ℂ[z - 1]
+      rw [monoidPow.succ, monoidPow.zero]
+      ring
+    rw [(cxaPowerMap.value with one, zC), pow1]
+    intro zero
+    have reZero : complexRe(ℂ[z - 1]) = complexRe(ℂ[0]) by rw zero
+    have zeroC : ℂ[0] ∈ ℂ by typecheck
+    rw [(complexRe.sub with zC, one), complexRe.one] at reZero
+    have zeroRe : complexRe(ℂ[0]) = R[0]
+      have z0 := complexOfReal.zero
+      rw ← z0
+      exact complexOfReal.re at R[0]
+    rw zeroRe at reZero
+    linarith
+  have quotient := HolomorphicOn.div with holomorphicS, holomorphicP,
+    nonvanishing
+  have agree : ∀ z ∈ rightHalfPlane(R[1]),
+      complexFunctionDiv(subMulMap(Φ, ℂ[1]), cxaPowerMap(ℂ[1], (1:N)),
+        rightHalfPlane(R[1]))(z) = Φ(z)
+    intros z hz
+    have zC := sub with z, hz
+    have fz := valuesΦ with z, zC
+    have nonzero := nonvanishing with z, hz
+    have pow1 : ℂ[(z - 1) ^ (1:N)] = ℂ[z - 1]
+      rw [monoidPow.succ, monoidPow.zero]
+      ring
+    rw [(cxaPowerMap.value with one, zC), pow1] at nonzero
+    have difference : ℂ[z - 1] ∈ ℂ by typecheck
+    have cancel := complexInv.mul_cancel with difference, nonzero
+    have inverse := complexInv.member with difference
+    rw [(complexFunctionDiv.value with holomorphicS.right.left,
+      holomorphicP.right.left, hz), (subMulMap.value with valuesΦ, one, zC),
+      (cxaPowerMap.value with one, zC), pow1]
+    unfold complexDiv
+    linear_combination Φ(z) * cancel
+  exact HolomorphicOn.congr with quotient, agree
+
+-- z ↦ k/(z − b) − L(z) is holomorphic where L is, off b.
+theorem lndPoleMinus.holomorphic (L U b k : Set)
+  requires holomorphicL : HolomorphicOn(L, U)
+  requires hb : b ∈ ℂ
+  requires hk : k ∈ ℂ
+  requires avoid : ∀ z ∈ U, z ≠ b
+  shows ∃ Λ, HolomorphicOn(Λ, U) ∧
+    (∀ z ∈ U, Λ(z) = ℂ[complexDiv(k, ℂ[z - b]) - L(z)])
+proof
+  have isOpen := holomorphicL.left
+  have sub := ComplexOpen.subset with isOpen
+  have negB : ℂ[-b] ∈ ℂ by typecheck
+  have constK := HolomorphicOn.const with isOpen, hk
+  have constB := HolomorphicOn.const with isOpen, negB
+  have identity := HolomorphicOn.id with isOpen
+  have denominator := HolomorphicOn.add with identity, constB
+  have valuesId := identity.right.left
+  have valuesB := constB.right.left
+  have valuesK := constK.right.left
+  have valuesD := denominator.right.left
+  have valuesL := holomorphicL.right.left
+  have denominatorValue : ∀ z ∈ U, complexFunctionAdd(complexFunctionId(U),
+      complexFunctionConst(ℂ[-b], U), U)(z) = ℂ[z - b]
+    intros z hz
+    have zC := sub with z, hz
+    rw [(complexFunctionAdd.value with valuesId, valuesB, hz),
+      (complexFunctionId.value with sub, hz),
+      (complexFunctionConst.value with negB, hz)]
+    ring
+  have nonvanishing : ∀ z ∈ U, complexFunctionAdd(complexFunctionId(U),
+      complexFunctionConst(ℂ[-b], U), U)(z) ≠ ℂ[0]
+    intros z hz zero
+    have zC := sub with z, hz
+    rw (denominatorValue with z, hz) at zero
+    apply (avoid with z, hz)
+    have shape : z = ℂ[(z - b) + b] by ring
+    rw [shape, zero]
+    ring
+  have quotient := HolomorphicOn.div with constK, denominator, nonvanishing
+  have negL := HolomorphicOn.neg with holomorphicL
+  have total := HolomorphicOn.add with quotient, negL
+  refine ⟨complexFunctionAdd(complexFunctionDiv(complexFunctionConst(k, U),
+    complexFunctionAdd(complexFunctionId(U), complexFunctionConst(ℂ[-b], U), U),
+    U), complexFunctionNeg(L, U), U), total, ?_⟩
+  intros z hz
+  have zC := sub with z, hz
+  have lz := valuesL with z, hz
+  rw [(complexFunctionAdd.value with quotient.right.left, negL.right.left, hz),
+    (complexFunctionNeg.value with valuesL, hz),
+    (complexFunctionDiv.value with valuesK, valuesD, hz),
+    (complexFunctionConst.value with hk, hz), (denominatorValue with z, hz)]
+  ring
+
+-- If (z − p)Φ(z) → L and Φ agrees off p, near p, with a function
+-- holomorphic on a disk about p, then L = 0.
+theorem lndResidue.zero (Φ Λ p L : Set, ε : Real)
+  requires limit : HasPuncturedLimit(subMulMap(Φ, p), p, L)
+  requires valuesΦ : ∀ w ∈ ℂ, Φ(w) ∈ ℂ
+  requires hp : p ∈ ℂ
+  requires hL : L ∈ ℂ
+  requires holomorphic : HolomorphicOn(Λ, complexDisk(p, ε))
+  requires positive : (0:R) < ε
+  requires agree : lndPuncturedAgree(Φ, Λ, p)
+  shows L = ℂ[0]
+proof
+  by_contra nonzero
+  have absPositive := complexAbs.positive with hL, nonzero
+  have eReal : half(complexAbs(L)) ∈ ℝ by typecheck
+  have ePositive := half.positive with absPositive
+  have twice := half.add_self at complexAbs(L)
+  obtain ⟨d, hd, dPositive, close⟩ := (lndPunctured.close with limit, hp, hL)
+    with half(complexAbs(L)), eReal, ePositive
+  have hε : ε ∈ ℝ by typecheck
+  have center := complexDisk.center with hp, hε, positive
+  have continuous := HolomorphicOn.continuous with holomorphic
+  obtain ⟨_, valuesΛ, near⟩ := continuous
+  have oneReal : R[1] ∈ ℝ by typecheck
+  have onePositive : R[0] < R[1] by linarith
+  obtain ⟨d2, hd2, positive2, close2⟩ := near with p, center, R[1], oneReal,
+    onePositive
+  have λp := valuesΛ with p, center
+  have absΛ := complexAbs.nonnegative with λp
+  have mReal : R[complexAbs(Λ(p)) + 1] ∈ ℝ by typecheck
+  have mNonneg : R[0] ≤ R[complexAbs(Λ(p)) + 1] by linarith
+  obtain ⟨η, hη, ηPositive, ηScaled, ηSmall⟩ := realScale.absorb at
+    R[complexAbs(Λ(p)) + 1], half(complexAbs(L)) with mReal, eReal, mNonneg,
+    ePositive
+  obtain ⟨rA, hrA, rAPositive, nearA⟩ := agree
+  obtain ⟨m1, hm1, pm1, m1d, m1d2⟩ := realRadius.common with hd, hd2,
+    dPositive, positive2
+  obtain ⟨m2, hm2, pm2, m2a, m2ε⟩ := realRadius.common with hm1, hε, pm1,
+    positive
+  obtain ⟨m3, hm3, pm3, m3a, m3r⟩ := realRadius.common with hm2, hrA, pm2,
+    rAPositive
+  obtain ⟨z, hz, distinct, closeZ⟩ := cxaDisk.punctured_point with hp, hm3, hη,
+    pm3, ηPositive
+  obtain ⟨zC, zm⟩ := complexDisk.membership.forward with hz
+  have zd : z ∈ complexDisk(p, d)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have zε : z ∈ complexDisk(p, ε)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have zA : z ∈ complexDisk(p, rA)
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    linarith
+  have zd2 : complexAbs(ℂ[z - p]) < d2 by linarith
+  have equal := nearA with z, zA, distinct
+  have λz := valuesΛ with z, zε
+  have fz := valuesΦ with z, zC
+  have nearΛ := close2 with z, zε, zd2
+  have diffΛ : ℂ[Λ(z) - Λ(p)] ∈ ℂ by typecheck
+  have splitΛ : ℂ[(Λ(z) - Λ(p)) + Λ(p)] = Λ(z) by ring
+  have triΛ := complexAbs.triangle with diffΛ, λp
+  rw splitΛ at triΛ
+  have difference : ℂ[z - p] ∈ ℂ by typecheck
+  have wValue : subMulMap(Φ, p)(z) = ℂ[(z - p) * Λ(z)]
+    rw [(subMulMap.value with valuesΦ, hp, zC), equal]
+  have closeW := close with z, zd, distinct
+  rw wValue at closeW
+  have absW := complexAbs.mul with difference, λz
+  have absZ := complexAbs.nonnegative with λz
+  have absD := complexAbs.nonnegative with difference
+  have distLe : complexAbs(ℂ[z - p]) ≤ η by linarith
+  have first := realLe.mul_right_of_nonnegative at complexAbs(ℂ[z - p]), η,
+    complexAbs(Λ(z)) with distLe, absZ
+  have λLe : complexAbs(Λ(z)) ≤ R[complexAbs(Λ(p)) + 1] by linarith
+  have ηNonneg : (0:R) ≤ η by linarith
+  have second := realLe.mul_left_of_nonnegative at complexAbs(Λ(z)),
+    R[complexAbs(Λ(p)) + 1], η with λLe, ηNonneg
+  have swap : R[η * (complexAbs(Λ(p)) + 1)] =
+    R[(complexAbs(Λ(p)) + 1) * η] by ring
+  have w : ℂ[(z - p) * Λ(z)] ∈ ℂ by typecheck
+  have diffL : ℂ[L - (z - p) * Λ(z)] ∈ ℂ by typecheck
+  have splitL : ℂ[(L - (z - p) * Λ(z)) + (z - p) * Λ(z)] = L by ring
+  have triL := complexAbs.triangle with diffL, w
+  rw splitL at triL
+  have symm := complexAbs.dist_symm with hL, w
+  have r1 : complexAbs(L) ∈ ℝ by typecheck
+  have r2 : complexAbs(ℂ[L - (z - p) * Λ(z)]) ∈ ℝ by typecheck
+  have r3 : complexAbs(ℂ[(z - p) * Λ(z)]) ∈ ℝ by typecheck
+  have r4 : complexAbs(ℂ[(z - p) * Λ(z) - L]) ∈ ℝ by typecheck
+  have r5 : R[complexAbs(ℂ[z - p]) * complexAbs(Λ(z))] ∈ ℝ by typecheck
+  have r6 : R[η * complexAbs(Λ(z))] ∈ ℝ by typecheck
+  have r7 : R[η * (complexAbs(Λ(p)) + 1)] ∈ ℝ by typecheck
+  have bad : complexAbs(L) < complexAbs(L) by linarith
+  have irreflexive := realLess.irreflexive_on
+  exact irreflexive with complexAbs(L), bad
+
+-- Section: The setting
+-- E is measurable with |E(v)| ≤ C e^v on v ≥ 0; Φ : ℂ → ℂ is meromorphic,
+-- the transform of E for re s > 2, with (s − 1)Φ(s) analytic on re s ≥ 1;
+-- the density K e^(B v) − E(v) e^v is ≥ 0 on v > 0; K ≥ 0 and B > 0.
+predicate lndSetting (E Φ : Set, C K B : Real) :=
+  FunctionBetween(E, ℝ, ℝ) ∧
+  Measurable(E, realMeasurableSpace, realMeasurableSpace) ∧
+  FunctionBetween(Φ, complexCarrier, complexCarrier) ∧ Meromorphic(Φ) ∧
+  (∀ V ∈ ℝ, (0:R) ≤ V → abs(E(V)) ≤ R[C * realExp(V)]) ∧
+  (∀ s ∈ complexCarrier, (2:R) < complexRe(s) →
+    Φ(s) = laplaceTransform(E, s)) ∧
+  ComplexAnalyticOnNhd(subMulMap(Φ, ℂ[1]), closedRightHalfPlane(R[1])) ∧
+  (∀ W ∈ ℝ, (0:R) < W → (0:R) ≤ lndDensity(E, K, B)(W)) ∧
+  (0:R) ≤ K ∧ (0:R) < B
+
+-- The real points of (x − w, x).
+def lndSegment (x w : Real) : Set :=
+  { z ∈ complexCarrier | ∃ t ∈ ℝ, R[x - w] < t ∧ t < x ∧ z = complexOfReal(t) }
+
+-- |t − x| for real t, x.
+theorem lndReal.dist (t x : Real)
+  shows complexAbs(ℂ[complexOfReal(t) - complexOfReal(x)]) = abs(R[t - x])
+proof
+  rw [← complexOfReal.sub, complexAbs.of_real]
+
+-- Section: The representation near a large real point
+-- Let σ > B have a finite moment and x > max(2, σ). On the disk D of
+-- radius x − σ about x, Φ agrees off each point, near it, with
+-- Λ(z) = K/(z − B) − Σ cₖ (z − x)ᵏ, the series of the moments at x.
+theorem lndRep (E Φ : Set, C K B σ x : Real)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires bσ : B < σ
+  requires below : σ < x
+  requires two : (2:R) < x
+  requires finite : lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+  shows ∃ Λ, HolomorphicOn(Λ, complexDisk(complexOfReal(x), R[x - σ])) ∧
+    (∀ z ∈ complexDisk(complexOfReal(x), R[x - σ]),
+      Λ(z) = ℂ[complexDiv(complexOfReal(K), ℂ[z - complexOfReal(B)]) -
+        powerSeriesSum(lndCoeff(lndDensity(E, K, B), x), complexOfReal(x),
+          R[x - σ])(z)]) ∧
+    (∀ p ∈ complexDisk(complexOfReal(x), R[x - σ]),
+      lndPuncturedAgree(Φ, Λ, p))
+proof
+  obtain ⟨function, measurableE, functionΦ, meromorphic, boundC, transform,
+    analyticOne, nonnegG, kNonneg, bPositive⟩ := setting
+  obtain ⟨gValues, gMeasurable⟩ := lndDensity.facts at E, K, B with function,
+    measurableE
+  have radius := lndCoeff.radius at lndDensity(E, K, B), σ, x with gValues,
+    gMeasurable, nonnegG, below, finite
+  have xC := complexOfReal.mem at x
+  have bC := complexOfReal.mem at B
+  have kC := complexOfReal.mem at K
+  have rReal : R[x - σ] ∈ ℝ by typecheck
+  have holomorphicL := powerSeriesSum.holomorphic with radius, xC
+  have avoid : ∀ z ∈ complexDisk(complexOfReal(x), R[x - σ]),
+      z ≠ complexOfReal(B)
+    intros z hz same
+    obtain ⟨_, close⟩ := complexDisk.membership.forward with hz
+    rw [same, lndReal.dist] at close
+    have nonpos : R[B - x] ≤ (0:R) by linarith
+    have absNeg := abs.of_nonpositive at R[B - x] with nonpos
+    rw absNeg at close
+    linarith
+  obtain ⟨Λ, holomorphicΛ, valueΛ⟩ := lndPoleMinus.holomorphic with
+    holomorphicL, bC, kC, avoid
+  -- a small disk V about x inside D and inside re z > 2
+  have xσ : (0:R) < R[x - σ] by linarith
+  have x2Real : R[x - 2] ∈ ℝ by typecheck
+  have x2 : (0:R) < R[x - 2] by linarith
+  obtain ⟨w, hw, wPositive, wσ, w2⟩ := realRadius.common with rReal, x2Real,
+    xσ, x2
+  have wReal : Real(w) by typecheck
+  have intoD := complexDisk.mono at complexOfReal(x), w, R[x - σ] with xC, hw,
+    rReal, wσ
+  have halfPlane : complexDisk(complexOfReal(x), w) ⊆ rightHalfPlane(R[1])
+    intros z hz
+    obtain ⟨zC, close⟩ := complexDisk.membership.forward with hz
+    apply rightHalfPlane.membership.backward
+    refine ⟨zC, ?_⟩
+    have difference : ℂ[z - complexOfReal(x)] ∈ ℂ by typecheck
+    have reLe := complexAbs.re_le with difference
+    rw [(complexRe.sub with zC, xC), complexOfReal.re] at reLe
+    have reReal : complexRe(z) ∈ ℝ by typecheck
+    have lower := abs.upper_neg at R[complexRe(z) - x]
+    linarith
+  have holomorphicΦ := lndPhi.holomorphic with functionΦ, analyticOne
+  have openV := complexDisk.open with xC, hw
+  have connectedV := complexDisk.connected with xC, hw
+  have ΦV := HolomorphicOn.mono with holomorphicΦ, openV, halfPlane
+  have ΛV := HolomorphicOn.mono with holomorphicΛ, openV, intoD
+  have centerV := complexDisk.center with xC, hw, wPositive
+  have inside : lndSegment(x, w) ⊆ complexDisk(complexOfReal(x), w)
+    intros z hz
+    obtain ⟨zC, t, ht, tLow, tHigh, zEq⟩ := lndSegment.membership.forward with
+      hz
+    have tReal : Real(t) by typecheck
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    rw [zEq, lndReal.dist]
+    have nonpos : R[t - x] ≤ (0:R) by linarith
+    rw (abs.of_nonpositive at R[t - x] with nonpos)
+    linarith
+  have accumulates : ∀ r ∈ ℝ, R[0] < r → (∃ s ∈ lndSegment(x, w),
+      s ≠ complexOfReal(x) ∧ complexAbs(ℂ[s - complexOfReal(x)]) < r)
+    intros r hr rPositive
+    obtain ⟨m, hm, mPositive, mr, mw⟩ := realRadius.common with hr, hw,
+      rPositive, wPositive
+    have mReal : Real(m) by typecheck
+    have hmHalf := half.positive with mPositive
+    have hmBelow := half.lt_self with mPositive
+    have tReal : R[x - half(m)] ∈ ℝ by typecheck
+    have tC := complexOfReal.mem at R[x - half(m)]
+    have dist := lndReal.dist at R[x - half(m)], x
+    have same : R[x - half(m) - x] = R[-half(m)] by ring
+    rw [same, (abs.neg at half(m))] at dist
+    have halfNonneg : (0:R) ≤ half(m) by linarith
+    rw (abs.of_nonnegative at half(m) with halfNonneg) at dist
+    refine ⟨complexOfReal(R[x - half(m)]), ?_, ?_, ?_⟩
+    . apply lndSegment.membership.backward
+      refine ⟨tC, R[x - half(m)], tReal, ?_, ?_, rfl⟩
+      . linarith
+      . linarith
+    . intro same2
+      rw [same2, ← complexOfReal.sub] at dist
+      have zero : R[x - x] = R[0] by ring
+      rw [zero, complexOfReal.zero, complexAbs.zero] at dist
+      linarith
+    . rw dist
+      linarith
+  have agreeS : ∀ z ∈ lndSegment(x, w), Φ(z) = Λ(z)
+    intros z hz
+    obtain ⟨zC, t, ht, tLow, tHigh, zEq⟩ := lndSegment.membership.forward with
+      hz
+    have tReal : Real(t) by typecheck
+    have zD := intoD with z, (inside with z, hz)
+    rw (valueΛ with z, zD)
+    rw zEq at zD
+    rw zEq
+    have t2 : (2:R) < t by linarith
+    have tB : B < t by linarith
+    have tσ : σ < t by linarith
+    have tx : t ≤ x by linarith
+    obtain ⟨tFinite, moment⟩ := lndDensity.moment at E, C, K, B, t with
+      function, measurableE, boundC, nonnegG, kNonneg, t2, tB
+    have tCm := complexOfReal.mem at t
+    have reT : (2:R) < complexRe(complexOfReal(t)) by
+      rw complexOfReal.re
+      exact t2
+    have atT := transform with complexOfReal(t), tCm, reT
+    obtain ⟨_, sums⟩ := lndCoeff.sums_real at lndDensity(E, K, B), σ, x, t
+      with gValues, gMeasurable, nonnegG, below, finite, tσ, tx
+    have sumL := powerSeriesSum.sums with radius, xC, zD
+    have lValue := ComplexSumsTo.unique with sumL, sums
+    have gap : R[t - B] ≠ R[0] by
+      intro zero
+      linarith
+    have quotient := complexOfReal.div at K, R[t - B] with gap
+    rw complexOfReal.sub at quotient
+    unfold complexDiv
+    rw [lValue, ← quotient, atT]
+    have mR := ennToReal.boch_member with (lndMoment.member at
+      lndDensity(E, K, B), t, (0:N))
+    have lt : laplaceTransform(E, complexOfReal(t)) ∈ ℂ by
+      rw ← atT
+      exact FunctionBetween.apply_closed with functionΦ, tCm
+    linear_combination moment
+  have agreeV := holomorphic.identity_accumulation with ΦV, ΛV, connectedV,
+    inside, centerV, accumulates, agreeS
+  -- the identity theorem on D
+  have openD := complexDisk.open with xC, rReal
+  have connectedD := complexDisk.connected with xC, rReal
+  have subD := complexDisk.subset at complexOfReal(x), R[x - σ]
+  have meromorphicΦ : ∀ a ∈ complexDisk(complexOfReal(x), R[x - σ]),
+      MeromorphicAt(Φ, a)
+    intros a ha
+    exact meromorphic with a, (subD with a, ha)
+  have meromorphicΛ : ∀ a ∈ complexDisk(complexOfReal(x), R[x - σ]),
+      MeromorphicAt(Λ, a)
+    intros a ha
+    have analytic := ComplexAnalyticAt.of_holomorphic with holomorphicΛ, ha
+    exact MeromorphicAt.of_analytic with analytic
+  have valuesΦ : ∀ z ∈ complexDisk(complexOfReal(x), R[x - σ]), Φ(z) ∈ ℂ
+    intros z hz
+    exact FunctionBetween.apply_closed with functionΦ, (subD with z, hz)
+  have valuesΛ : ∀ z ∈ complexDisk(complexOfReal(x), R[x - σ]), Λ(z) ∈ ℂ
+    intros z hz
+    exact holomorphicΛ.right.left with z, hz
+  have nonempty : ∃ b, b ∈ complexDisk(complexOfReal(x), w)
+    exact ⟨complexOfReal(x), centerV⟩
+  have near := lndMeromorphic.eq_near with openD, connectedD, meromorphicΦ,
+    meromorphicΛ, valuesΦ, valuesΛ, openV, intoD, nonempty, agreeV
+  exact ⟨Λ, holomorphicΛ, valueΛ, near⟩
+
+-- Every p with re p > σ lies in the disk of radius x − σ about some real
+-- x > max(2, σ).
+theorem lndNear.center (p : Set, σ : Real)
+  requires hp : p ∈ ℂ
+  requires below : σ < complexRe(p)
+  shows ∃ x ∈ ℝ, (2:R) < x ∧ σ < x ∧ complexRe(p) < x ∧
+    p ∈ complexDisk(complexOfReal(x), R[x - σ])
+proof
+  have reReal := complexRe.real with hp
+  have imReal := complexIm.real with hp
+  have reTyped : Real(complexRe(p)) by exact reReal
+  have imTyped : Real(complexIm(p)) by exact imReal
+  have δPositive : (0:R) < R[complexRe(p) - σ] by linarith
+  have δNonzero : R[complexRe(p) - σ] ≠ R[0] by
+    intro zero
+    linarith
+  have absRe := abs.nonnegative at complexRe(p)
+  have upperRe := abs.upper_neg at complexRe(p)
+  have square := realMulValue.square_nonnegative at complexIm(p)
+  have quotientNonneg : (0:R) ≤ R[complexIm(p) * complexIm(p) /
+      (complexRe(p) - σ)]
+    have inv := realInvValue.positive at R[complexRe(p) - σ] with δPositive
+    have invR := realInvValue.real at R[complexRe(p) - σ]
+    rw realDiv.eq_mul_inv
+    have sq : (0:R) ≤ R[complexIm(p) * complexIm(p)] by linarith
+    have invNonneg : (0:R) ≤ realInvValue(R[complexRe(p) - σ]) by linarith
+    exact realMulValue.nonnegative at R[complexIm(p) * complexIm(p)],
+      realInvValue(R[complexRe(p) - σ]) with sq, invNonneg
+  have cancel := realDiv.mul_left at R[complexIm(p) * complexIm(p)],
+    R[complexRe(p) - σ] with δNonzero
+  have tReal : R[complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+    (complexRe(p) - σ) + 2 + abs(complexRe(p))] ∈ ℝ by typecheck
+  have xReal : R[complexRe(p) + (complexIm(p) * complexIm(p) /
+    (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p)))] ∈ ℝ
+    by typecheck
+  refine ⟨R[complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+    (complexRe(p) - σ) + 2 + abs(complexRe(p)))], xReal, ?_, ?_, ?_, ?_⟩
+  . linarith
+  . linarith
+  . linarith
+  . have xC := complexOfReal.mem at R[complexRe(p) + (complexIm(p) *
+      complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) + 2 +
+      abs(complexRe(p)))]
+    apply complexDisk.membership.backward
+    refine ⟨hp, ?_⟩
+    have difference : ℂ[p - complexOfReal(R[complexRe(p) + (complexIm(p) *
+      complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) + 2 +
+      abs(complexRe(p)))])] ∈ ℂ by typecheck
+    have normSq := complexAbs.square with difference
+    have shape := complex.ext with difference
+    have dRe := complexRe.real with difference
+    have dIm := complexIm.real with difference
+    have dReT : Real(complexRe(ℂ[p - complexOfReal(R[complexRe(p) +
+      (complexIm(p) * complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) +
+      2 + abs(complexRe(p)))])])) by exact dRe
+    have dImT : Real(complexIm(ℂ[p - complexOfReal(R[complexRe(p) +
+      (complexIm(p) * complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) +
+      2 + abs(complexRe(p)))])])) by exact dIm
+    have nsq := complexNormSquared.pair at complexRe(ℂ[p - complexOfReal(
+      R[complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+      (complexRe(p) - σ) + 2 + abs(complexRe(p)))])]), complexIm(ℂ[p -
+      complexOfReal(R[complexRe(p) + (complexIm(p) * complexIm(p) /
+      (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p)))])])
+    rw ← shape at nsq
+    rw [(complexRe.sub with hp, xC), (complexIm.sub with hp, xC),
+      complexOfReal.re, complexOfReal.im] at nsq
+    rw nsq at normSq
+    have absNonneg := complexAbs.nonnegative with difference
+    by_contra notLess
+    have ge : R[complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ)
+        + (complexRe(p) - σ) + 2 + abs(complexRe(p))) - σ] ≤
+        complexAbs(ℂ[p - complexOfReal(R[complexRe(p) + (complexIm(p) *
+          complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) + 2 +
+          abs(complexRe(p)))])])
+      have r1 : complexAbs(ℂ[p - complexOfReal(R[complexRe(p) + (complexIm(p) *
+          complexIm(p) / (complexRe(p) - σ) + (complexRe(p) - σ) + 2 +
+          abs(complexRe(p)))])]) ∈ ℝ by typecheck
+      have total := realLess.trichotomy at complexAbs(ℂ[p - complexOfReal(
+        R[complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+        (complexRe(p) - σ) + 2 + abs(complexRe(p)))])]),
+        R[complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+        (complexRe(p) - σ) + 2 + abs(complexRe(p))) - σ]
+      cases total with less | rest
+      . exfalso
+        exact notLess with less
+      . cases rest with equal | greater
+        . linarith
+        . linarith
+    have bNonneg : (0:R) ≤ R[complexRe(p) + (complexIm(p) * complexIm(p) /
+        (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p))) - σ]
+      by linarith
+    have squares := realMulValue.square_le_of_le with bNonneg, ge
+    rw normSq at squares
+    have qReal : R[complexIm(p) * complexIm(p) / (complexRe(p) - σ)] ∈ ℝ by
+      typecheck
+    have ident : R[(complexRe(p) + (complexIm(p) * complexIm(p) /
+        (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p))) - σ) *
+        (complexRe(p) + (complexIm(p) * complexIm(p) / (complexRe(p) - σ) +
+        (complexRe(p) - σ) + 2 + abs(complexRe(p))) - σ)] =
+        R[(complexRe(p) - (complexRe(p) + (complexIm(p) * complexIm(p) /
+        (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p))))) *
+        (complexRe(p) - (complexRe(p) + (complexIm(p) * complexIm(p) /
+        (complexRe(p) - σ) + (complexRe(p) - σ) + 2 + abs(complexRe(p))))) +
+        (complexIm(p) - 0) * (complexIm(p) - 0) +
+        (complexIm(p) * complexIm(p) + 3 * (complexRe(p) - σ) *
+        (complexRe(p) - σ) + 4 * (complexRe(p) - σ) + 2 * abs(complexRe(p)) *
+        (complexRe(p) - σ))] by
+      linear_combination 2 * cancel
+    have dd := realMulValue.positive at R[complexRe(p) - σ],
+      R[complexRe(p) - σ] with δPositive, δPositive
+    have δNonneg : (0:R) ≤ R[complexRe(p) - σ] by linarith
+    have aδ := realMulValue.nonnegative at abs(complexRe(p)),
+      R[complexRe(p) - σ] with absRe, δNonneg
+    have three : R[3 * (complexRe(p) - σ) * (complexRe(p) - σ)] =
+      R[3 * ((complexRe(p) - σ) * (complexRe(p) - σ))] by ring
+    have twoA : R[2 * abs(complexRe(p)) * (complexRe(p) - σ)] =
+      R[2 * (abs(complexRe(p)) * (complexRe(p) - σ))] by ring
+    linarith
+
+-- Section: Consequences of the representation
+-- If σ > B has a finite moment, every residue at p with re p > σ vanishes.
+theorem lndResidue.vanishes (E Φ : Set, C K B σ : Real, p L : Set)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires bσ : B < σ
+  requires finite : lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+  requires hp : p ∈ ℂ
+  requires right : σ < complexRe(p)
+  requires hL : L ∈ ℂ
+  requires limit : HasPuncturedLimit(subMulMap(Φ, p), p, L)
+  shows L = ℂ[0]
+proof
+  have copy := setting
+  obtain ⟨_, _, functionΦ, _⟩ := copy
+  have valuesΦ : ∀ w ∈ ℂ, Φ(w) ∈ ℂ
+    intros w hw
+    exact FunctionBetween.apply_closed with functionΦ, hw
+  obtain ⟨x, hx, two, below, _, inside⟩ := lndNear.center with hp, right
+  have xReal : Real(x) by typecheck
+  obtain ⟨Λ, holomorphicΛ, _, near⟩ := lndRep at E, Φ, C, K, B, σ, x with
+    setting, bσ, below, two, finite
+  have xC := complexOfReal.mem at x
+  have rReal : R[x - σ] ∈ ℝ by typecheck
+  obtain ⟨ε, hε, εPositive, diskP⟩ := complexDisk.inner with xC, rReal, inside
+  have openP := complexDisk.open with hp, hε
+  have holomorphicP := HolomorphicOn.mono with holomorphicΛ, openP, diskP
+  have εReal : Real(ε) by typecheck
+  exact lndResidue.zero at Φ, Λ, p, L, ε with limit, valuesΦ, hp, hL,
+    holomorphicP, εPositive, (near with p, inside)
+
+-- If σ > B has a finite moment, then right of every real z > σ, within
+-- any ε, lies a real z′ where Φ(z′) = K/(z′ − B) − ∫ D(v) e^(−z′ v) dv,
+-- the moment being finite.
+theorem lndRealValues (E Φ : Set, C K B σ z ε : Real)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires bσ : B < σ
+  requires finite : lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+  requires right : σ < z
+  requires positive : (0:R) < ε
+  shows ∃ Z ∈ ℝ, z < Z ∧ Z < R[z + ε] ∧
+    lndMoment(lndDensity(E, K, B), Z, (0:N)) ≠ ennTop ∧
+    Φ(complexOfReal(Z)) = ℂ[complexOfReal(R[K / (Z - B)]) -
+      complexOfReal(ennToReal(lndMoment(lndDensity(E, K, B), Z, (0:N))))]
+proof
+  have copy := setting
+  obtain ⟨function, measurableE, functionΦ, _, _, _, _, nonnegG, _, _⟩ := copy
+  obtain ⟨gValues, gMeasurable⟩ := lndDensity.facts at E, K, B with function,
+    measurableE
+  have zC := complexOfReal.mem at z
+  have reZ : σ < complexRe(complexOfReal(z)) by
+    rw complexOfReal.re
+    exact right
+  obtain ⟨x, hx, two, below, zxRe, inside⟩ := lndNear.center with zC, reZ
+  have xReal : Real(x) by typecheck
+  obtain ⟨Λ, holomorphicΛ, valueΛ, near⟩ := lndRep at E, Φ, C, K, B, σ, x
+    with setting, bσ, below, two, finite
+  obtain ⟨ρ, hρ, ρPositive, nearZ⟩ := near with complexOfReal(z), inside
+  have radius := lndCoeff.radius at lndDensity(E, K, B), σ, x with gValues,
+    gMeasurable, nonnegG, below, finite
+  have xC := complexOfReal.mem at x
+  rw complexOfReal.re at zxRe
+  have zx : z < x := zxRe
+  have gapReal : R[x - z] ∈ ℝ by typecheck
+  have gap : (0:R) < R[x - z] by linarith
+  have hε : ε ∈ ℝ by typecheck
+  obtain ⟨m1, hm1, pm1, m1ε, m1ρ⟩ := realRadius.common with hε, hρ, positive,
+    ρPositive
+  obtain ⟨m, hm, pm, mA, mGap⟩ := realRadius.common with hm1, gapReal, pm1, gap
+  have mReal : Real(m) by typecheck
+  have halfPositive := half.positive with pm
+  have halfBelow := half.lt_self with pm
+  have ZReal : R[z + half(m)] ∈ ℝ by typecheck
+  have ZC := complexOfReal.mem at R[z + half(m)]
+  have Zσ : σ < R[z + half(m)] by linarith
+  have Zx : R[z + half(m)] ≤ x by linarith
+  have distZ := lndReal.dist at R[z + half(m)], z
+  have shift : R[z + half(m) - z] = half(m) by ring
+  have halfNonneg : (0:R) ≤ half(m) by linarith
+  rw [shift, (abs.of_nonnegative at half(m) with halfNonneg)] at distZ
+  have inρ : complexOfReal(R[z + half(m)]) ∈ complexDisk(complexOfReal(z), ρ)
+    apply complexDisk.membership.backward
+    refine ⟨ZC, ?_⟩
+    rw distZ
+    linarith
+  have distinct : complexOfReal(R[z + half(m)]) ≠ complexOfReal(z)
+    intro same
+    have back := complexOfReal.injective with same
+    linarith
+  have equal := nearZ with complexOfReal(R[z + half(m)]), inρ, distinct
+  have inD : complexOfReal(R[z + half(m)]) ∈ complexDisk(complexOfReal(x),
+      R[x - σ])
+    apply complexDisk.membership.backward
+    refine ⟨ZC, ?_⟩
+    rw lndReal.dist
+    have nonpos : R[z + half(m) - x] ≤ (0:R) by linarith
+    rw (abs.of_nonpositive at R[z + half(m) - x] with nonpos)
+    linarith
+  obtain ⟨ZFinite, sums⟩ := lndCoeff.sums_real at lndDensity(E, K, B), σ, x,
+    R[z + half(m)] with gValues, gMeasurable, nonnegG, below, finite, Zσ, Zx
+  have sumL := powerSeriesSum.sums with radius, xC, inD
+  have lValue := ComplexSumsTo.unique with sumL, sums
+  have bLess : B < R[z + half(m)] by linarith
+  have gapB : R[z + half(m) - B] ≠ R[0] by
+    intro zero
+    linarith
+  have quotient := complexOfReal.div at K, R[z + half(m) - B] with gapB
+  rw complexOfReal.sub at quotient
+  refine ⟨R[z + half(m)], ZReal, ?_, ?_, ZFinite, ?_⟩
+  . linarith
+  . linarith
+  . rw [equal, (valueΛ with complexOfReal(R[z + half(m)]), inD), lValue]
+    unfold complexDiv
+    rw ← quotient
+
+-- Section: The abscissa
+-- At a real a > B right of which every moment is finite, a residue L with
+-- re L ≥ 0 vanishes: along real z ↓ a, (z − a)Φ(z) is real and at most
+-- (z − a) K/(z − B).
+theorem lndResidue.real_zero (E Φ : Set, C K B a : Real, L : Set)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires bA : B < a
+  requires finiteAbove : ∀ σ ∈ ℝ, a < σ →
+    lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+  requires hL : L ∈ ℂ
+  requires limit : HasPuncturedLimit(subMulMap(Φ, complexOfReal(a)),
+    complexOfReal(a), L)
+  requires reNonneg : (0:R) ≤ complexRe(L)
+  shows L = ℂ[0]
+proof
+  have copy := setting
+  obtain ⟨_, _, functionΦ, _, _, _, _, _, kNonneg, _⟩ := copy
+  have valuesΦ : ∀ w ∈ ℂ, Φ(w) ∈ ℂ
+    intros w hw
+    exact FunctionBetween.apply_closed with functionΦ, hw
+  have aC := complexOfReal.mem at a
+  have reL := complexRe.real with hL
+  have imL := complexIm.real with hL
+  have reLT : Real(complexRe(L)) by exact reL
+  have imLT : Real(complexIm(L)) by exact imL
+  have gap : (0:R) < R[a - B] by linarith
+  have key : ∀ e ∈ ℝ, (0:R) < e →
+      complexRe(L) < R[e + e] ∧ abs(complexIm(L)) < e
+    intros e he ePositive
+    have eT : Real(e) by typecheck
+    obtain ⟨d, hd, dPositive, close⟩ := (lndPunctured.close with limit, aC,
+      hL) with e, he, ePositive
+    have κReal : R[K / (a - B)] ∈ ℝ by typecheck
+    have invGap := realInvValue.positive at R[a - B] with gap
+    have invGapR := realInvValue.real at R[a - B]
+    have invNonneg : (0:R) ≤ realInvValue(R[a - B]) by linarith
+    have κNonneg : (0:R) ≤ R[K / (a - B)]
+      rw realDiv.eq_mul_inv
+      exact realMulValue.nonnegative at K, realInvValue(R[a - B]) with kNonneg,
+        invNonneg
+    obtain ⟨η, hη, ηPositive, ηScaled, ηSmall⟩ := realScale.absorb at
+      R[K / (a - B)], e with κReal, he, κNonneg, ePositive
+    obtain ⟨m, hm, mPositive, md, mη⟩ := realRadius.common with hd, hη,
+      dPositive, ηPositive
+    have mT : Real(m) by typecheck
+    have h1 := half.positive with mPositive
+    have h1Below := half.lt_self with mPositive
+    have h2 := half.positive with h1
+    have h2Below := half.lt_self with h1
+    have twiceM := half.add_self at m
+    have σReal : R[a + half(half(m))] ∈ ℝ by typecheck
+    have σT : Real(R[a + half(half(m))]) by typecheck
+    have σAbove : a < R[a + half(half(m))] by linarith
+    have σB : B < R[a + half(half(m))] by linarith
+    have σFinite := finiteAbove with R[a + half(half(m))], σReal, σAbove
+    have zT : Real(R[a + half(m)]) by typecheck
+    have σz : R[a + half(half(m))] < R[a + half(m)] by linarith
+    have hmT : Real(half(m)) by typecheck
+    obtain ⟨Z, hZ, zLow, zHigh, zFinite, zValue⟩ := lndRealValues at E, Φ, C,
+      K, B, R[a + half(half(m))], R[a + half(m)], half(m) with setting, σB,
+      σFinite, σz, h1
+    have ZT : Real(Z) by typecheck
+    have ZC := complexOfReal.mem at Z
+    have dist := lndReal.dist at Z, a
+    have zaNonneg : (0:R) ≤ R[Z - a] by linarith
+    rw (abs.of_nonnegative at R[Z - a] with zaNonneg) at dist
+    have inD : complexOfReal(Z) ∈ complexDisk(complexOfReal(a), d)
+      apply complexDisk.membership.backward
+      refine ⟨ZC, ?_⟩
+      rw dist
+      linarith
+    have distinct : complexOfReal(Z) ≠ complexOfReal(a)
+      intro same
+      have back := complexOfReal.injective with same
+      linarith
+    have closeZ := close with complexOfReal(Z), inD, distinct
+    have gMember := lndMoment.member at lndDensity(E, K, B), Z, (0:N)
+    obtain ⟨gReal, gNonneg⟩ := ennreal.finite with gMember, zFinite
+    obtain ⟨gToReal, _⟩ := ennToReal.of_finite with gMember, zFinite
+    rw gToReal at zValue
+    have zbGap : R[Z - B] ≠ R[0] by
+      intro zero
+      linarith
+    have wValue : subMulMap(Φ, complexOfReal(a))(complexOfReal(Z)) =
+        complexOfReal(R[(Z - a) * (K / (Z - B) -
+          lndMoment(lndDensity(E, K, B), Z, (0:N)))])
+      rw [(subMulMap.value with valuesΦ, aC, ZC), zValue, complexOfReal.mul,
+        complexOfReal.sub, complexOfReal.sub]
+    rw wValue at closeZ
+    have uReal : R[(Z - a) * (K / (Z - B) - lndMoment(lndDensity(E, K, B), Z,
+      (0:N)))] ∈ ℝ by typecheck
+    have uC := complexOfReal.mem at R[(Z - a) * (K / (Z - B) -
+      lndMoment(lndDensity(E, K, B), Z, (0:N)))]
+    have difference : ℂ[complexOfReal(R[(Z - a) * (K / (Z - B) -
+      lndMoment(lndDensity(E, K, B), Z, (0:N)))]) - L] ∈ ℂ by typecheck
+    have reLe := complexAbs.re_le with difference
+    have imLe := complexAbs.abs_im_le with difference
+    rw [(complexRe.sub with uC, hL), complexOfReal.re] at reLe
+    rw [(complexIm.sub with uC, hL), complexOfReal.im] at imLe
+    have zeroMinus : R[0 - complexIm(L)] = R[-complexIm(L)] by ring
+    rw [zeroMinus, abs.neg] at imLe
+    have upper := abs.upper_neg at R[R[(Z - a) * (K / (Z - B) -
+      lndMoment(lndDensity(E, K, B), Z, (0:N)))] - complexRe(L)]
+    -- the real value is at most e
+    have zbPositive : (0:R) < R[Z - B] by linarith
+    have gapLe : R[a - B] ≤ R[Z - B] by linarith
+    have invLe := realInvValue.antitone_le at R[a - B], R[Z - B] with gap, gapLe
+    have invZR := realInvValue.real at R[Z - B]
+    have kStep := realLe.mul_left_of_nonnegative at realInvValue(R[Z - B]),
+      realInvValue(R[a - B]), K with invLe, kNonneg
+    have divZ := realDiv.eq_mul_inv at K, R[Z - B]
+    have divA := realDiv.eq_mul_inv at K, R[a - B]
+    have kzReal : R[K / (Z - B)] ∈ ℝ by typecheck
+    have kzLe : R[K / (Z - B)] ≤ R[K / (a - B)] by linarith
+    have zaLe : R[Z - a] ≤ η by linarith
+    have step1 := realLe.mul_right_of_nonnegative at R[Z - a], η,
+      R[K / (a - B)] with zaLe, κNonneg
+    have step2 := realLe.mul_left_of_nonnegative at R[K / (Z - B)],
+      R[K / (a - B)], R[Z - a] with kzLe, zaNonneg
+    have step3 := realMulValue.nonnegative at R[Z - a],
+      lndMoment(lndDensity(E, K, B), Z, (0:N)) with zaNonneg, gNonneg
+    have expand : R[(Z - a) * (K / (Z - B) - lndMoment(lndDensity(E, K, B), Z,
+        (0:N)))] = R[(Z - a) * (K / (Z - B)) - (Z - a) *
+        lndMoment(lndDensity(E, K, B), Z, (0:N))] by ring
+    have swap : R[η * (K / (a - B))] = R[K / (a - B) * η] by ring
+    refine ⟨?_, ?_⟩
+    . linarith
+    . linarith
+  -- im L = 0 and re L ≤ 0
+  have imZero : complexIm(L) = R[0]
+    by_contra nonzero
+    have absPositive := abs.positive_of_ne at complexIm(L) with nonzero
+    have halfReal : half(abs(complexIm(L))) ∈ ℝ by typecheck
+    have halfPositive := half.positive with absPositive
+    have halfBelow := half.lt_self with absPositive
+    obtain ⟨_, small⟩ := key with half(abs(complexIm(L))), halfReal,
+      halfPositive
+    linarith
+  have reZero : complexRe(L) = R[0]
+    by_contra nonzero
+    have rePositive : (0:R) < complexRe(L)
+      have total := realLess.trichotomy at R[0], complexRe(L)
+      cases total with less | rest
+      . exact less
+      . exfalso
+        cases rest with equal | greater
+        . apply nonzero
+          symm
+          exact equal
+        . linarith
+    have h1 := half.positive with rePositive
+    have h2 := half.positive with h1
+    have q := half.add_self at half(complexRe(L))
+    have q2 := half.add_self at complexRe(L)
+    have quarterReal : half(half(complexRe(L))) ∈ ℝ by typecheck
+    obtain ⟨small, _⟩ := key with half(half(complexRe(L))), quarterReal, h2
+    linarith
+  have shape := complex.ext with hL
+  rw [shape, reZero, imZero]
+  have zero := complexOfReal.zero
+  have zeroR : R[0] ∈ ℝ by typecheck
+  rw [← zero, (complexOfReal.value at R[0] with zeroR)]
+
+-- The real points Z of (x − w, x) with a finite moment where
+-- Φ(Z) = K/(Z − B) − ∫ D(v) e^(−Z v) dv.
+def lndGood (E Φ : Set, K B x w : Real) : Set :=
+  { z ∈ complexCarrier | ∃ Z ∈ ℝ, R[x - w] < Z ∧ Z < x ∧
+    lndMoment(lndDensity(E, K, B), Z, (0:N)) ≠ ennTop ∧ z = complexOfReal(Z) ∧
+    Φ(z) = ℂ[complexOfReal(R[K / (Z - B)]) -
+      complexOfReal(ennToReal(lndMoment(lndDensity(E, K, B), Z, (0:N))))] }
+
+-- If Φ agrees off a real a > B, near a, with a function holomorphic on a
+-- disk about a, and every moment right of a is finite, then some moment
+-- left of a, right of B, is finite: the Taylor series at a real point just
+-- right of a has the moments as coefficients and converges left of a.
+theorem lndTaylor.finite (E Φ : Set, C K B a : Real, h : Set, t0 : Real)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires bA : B < a
+  requires finiteAbove : ∀ σ ∈ ℝ, a < σ →
+    lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+  requires holomorphicH : HolomorphicOn(h, complexDisk(complexOfReal(a), t0))
+  requires t0Positive : (0:R) < t0
+  requires agreeH : ∀ z ∈ complexDisk(complexOfReal(a), t0),
+    z ≠ complexOfReal(a) → Φ(z) = h(z)
+  shows ∃ τ ∈ ℝ, B < τ ∧ τ < a ∧
+    lndMoment(lndDensity(E, K, B), τ, (0:N)) ≠ ennTop
+proof
+  have copy := setting
+  obtain ⟨function, measurableE, functionΦ, _, _, _, _, nonnegG, kNonneg,
+    _⟩ := copy
+  obtain ⟨gValues, gMeasurable⟩ := lndDensity.facts at E, K, B with function,
+    measurableE
+  have aC := complexOfReal.mem at a
+  have bC := complexOfReal.mem at B
+  have kC := complexOfReal.mem at K
+  have ht0 : t0 ∈ ℝ by typecheck
+  have gapReal : R[a - B] ∈ ℝ by typecheck
+  have gap : (0:R) < R[a - B] by linarith
+  obtain ⟨t, ht, tPositive, tt0, tGap⟩ := realRadius.common with ht0, gapReal,
+    t0Positive, gap
+  have tT : Real(t) by typecheck
+  have openT := complexDisk.open with aC, ht
+  have intoT0 := complexDisk.mono at complexOfReal(a), t, t0 with aC, ht, ht0,
+    tt0
+  have holomorphicT := HolomorphicOn.mono with holomorphicH, openT, intoT0
+  have avoid : ∀ z ∈ complexDisk(complexOfReal(a), t), z ≠ complexOfReal(B)
+    intros z hz same
+    obtain ⟨_, close⟩ := complexDisk.membership.forward with hz
+    rw [same, lndReal.dist] at close
+    have nonpos : R[B - a] ≤ (0:R) by linarith
+    rw (abs.of_nonpositive at R[B - a] with nonpos) at close
+    linarith
+  obtain ⟨Hf, holomorphicHf, valueHf⟩ := lndPoleMinus.holomorphic with
+    holomorphicT, bC, kC, avoid
+  -- t/2, t/4, t/8
+  have q1 := half.positive with tPositive
+  have q1Below := half.lt_self with tPositive
+  have q2 := half.positive with q1
+  have q2Below := half.lt_self with q1
+  have q3 := half.positive with q2
+  have q3Below := half.lt_self with q2
+  have sum1 := half.add_self at t
+  have sum2 := half.add_self at half(t)
+  have sum3 := half.add_self at half(half(t))
+  have hq1 : half(t) ∈ ℝ by typecheck
+  have xReal : R[a + half(half(t))] ∈ ℝ by typecheck
+  have xT : Real(R[a + half(half(t))]) by typecheck
+  have xC := complexOfReal.mem at R[a + half(half(t))]
+  have σReal : R[a + half(half(half(t)))] ∈ ℝ by typecheck
+  have σT : Real(R[a + half(half(half(t)))]) by typecheck
+  have σAbove : a < R[a + half(half(half(t)))] by linarith
+  have σB : B < R[a + half(half(half(t)))] by linarith
+  have σx : R[a + half(half(half(t)))] < R[a + half(half(t))] by linarith
+  have σFinite := finiteAbove with R[a + half(half(half(t)))], σReal, σAbove
+  -- the disk of radius t/2 about x lies in the disk of radius t about a
+  have xInT : complexOfReal(R[a + half(half(t))]) ∈
+      complexDisk(complexOfReal(a), t)
+    apply complexDisk.membership.backward
+    refine ⟨xC, ?_⟩
+    rw lndReal.dist
+    have nonneg : (0:R) ≤ R[a + half(half(t)) - a] by linarith
+    rw (abs.of_nonnegative at R[a + half(half(t)) - a] with nonneg)
+    linarith
+  have distXA := lndReal.dist at R[a + half(half(t))], a
+  have nonnegXA : (0:R) ≤ R[a + half(half(t)) - a] by linarith
+  rw (abs.of_nonnegative at R[a + half(half(t)) - a] with nonnegXA) at distXA
+  have insideHalf : complexDisk(complexOfReal(R[a + half(half(t))]), half(t)) ⊆
+      complexDisk(complexOfReal(a), t)
+    intros z hz
+    obtain ⟨zC, close⟩ := complexDisk.membership.forward with hz
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    have triangle := complexAbs.dist_triangle with zC, xC, aC
+    linarith
+  obtain ⟨dcoef, radiusD, sumsD⟩ := HolomorphicOn.power_series with
+    holomorphicHf, xInT, hq1, insideHalf
+  have radiusC := lndCoeff.radius at lndDensity(E, K, B),
+    R[a + half(half(half(t)))], R[a + half(half(t))] with gValues, gMeasurable,
+    nonnegG, σx, σFinite
+  have rReal : R[a + half(half(t)) - (a + half(half(half(t))))] ∈ ℝ by
+    typecheck
+  have rT : Real(R[a + half(half(t)) - (a + half(half(half(t))))]) by typecheck
+  have rPositive : (0:R) < R[a + half(half(t)) - (a + half(half(half(t))))] by
+    linarith
+  have rHalf : R[a + half(half(t)) - (a + half(half(half(t))))] ≤ half(t) by
+    linarith
+  have intoHalf := complexDisk.mono at complexOfReal(R[a + half(half(t))]),
+    R[a + half(half(t)) - (a + half(half(half(t))))], half(t) with xC, rReal,
+    hq1, rHalf
+  have openR := complexDisk.open with xC, rReal
+  have connectedR := complexDisk.connected with xC, rReal
+  have intoT : complexDisk(complexOfReal(R[a + half(half(t))]),
+      R[a + half(half(t)) - (a + half(half(half(t))))]) ⊆
+      complexDisk(complexOfReal(a), t)
+    intros z hz
+    exact insideHalf with z, (intoHalf with z, hz)
+  have holomorphicHR := HolomorphicOn.mono with holomorphicHf, openR, intoT
+  have holomorphicL := powerSeriesSum.holomorphic with radiusC, xC
+  have centerR := complexDisk.center with xC, rReal, rPositive
+  have inside : lndGood(E, Φ, K, B, R[a + half(half(t))],
+      R[a + half(half(t)) - (a + half(half(half(t))))]) ⊆
+      complexDisk(complexOfReal(R[a + half(half(t))]),
+        R[a + half(half(t)) - (a + half(half(half(t))))])
+    intros z hz
+    obtain ⟨zC, Z, hZ, zLow, zHigh, _, zEq, _⟩ := lndGood.membership.forward
+      with hz
+    have ZT : Real(Z) by typecheck
+    apply complexDisk.membership.backward
+    refine ⟨zC, ?_⟩
+    rw [zEq, lndReal.dist]
+    have nonpos : R[Z - (a + half(half(t)))] ≤ (0:R) by linarith
+    rw (abs.of_nonpositive at R[Z - (a + half(half(t)))] with nonpos)
+    linarith
+  have accumulates : ∀ r ∈ ℝ, R[0] < r → (∃ s ∈ lndGood(E, Φ, K, B,
+      R[a + half(half(t))], R[a + half(half(t)) - (a + half(half(half(t))))]),
+      s ≠ complexOfReal(R[a + half(half(t))]) ∧
+      complexAbs(ℂ[s - complexOfReal(R[a + half(half(t))])]) < r)
+    intros r hr rPositive2
+    obtain ⟨m, hm, mPositive, mr, mR⟩ := realRadius.common with hr, rReal,
+      rPositive2, rPositive
+    have mT : Real(m) by typecheck
+    have hmPositive := half.positive with mPositive
+    have hmBelow := half.lt_self with mPositive
+    have z0T : Real(R[a + half(half(t)) - half(m)]) by typecheck
+    have hmT : Real(half(m)) by typecheck
+    have σz0 : R[a + half(half(half(t)))] < R[a + half(half(t)) - half(m)] by
+      linarith
+    obtain ⟨Z, hZ, zLow, zHigh, zFinite, zValue⟩ := lndRealValues at E, Φ, C,
+      K, B, R[a + half(half(half(t)))], R[a + half(half(t)) - half(m)],
+      half(m) with setting, σB, σFinite, σz0, hmPositive
+    have ZT : Real(Z) by typecheck
+    have ZC := complexOfReal.mem at Z
+    have dist := lndReal.dist at Z, R[a + half(half(t))]
+    have nonpos : R[Z - (a + half(half(t)))] ≤ (0:R) by linarith
+    rw (abs.of_nonpositive at R[Z - (a + half(half(t)))] with nonpos) at dist
+    refine ⟨complexOfReal(Z), ?_, ?_, ?_⟩
+    . apply lndGood.membership.backward
+      refine ⟨ZC, Z, hZ, ?_, ?_, zFinite, rfl, zValue⟩
+      . linarith
+      . linarith
+    . intro same
+      have back := complexOfReal.injective with same
+      linarith
+    . rw dist
+      linarith
+  have agreeS : ∀ z ∈ lndGood(E, Φ, K, B, R[a + half(half(t))],
+      R[a + half(half(t)) - (a + half(half(half(t))))]), Hf(z) =
+      powerSeriesSum(lndCoeff(lndDensity(E, K, B), R[a + half(half(t))]),
+        complexOfReal(R[a + half(half(t))]),
+        R[a + half(half(t)) - (a + half(half(half(t))))])(z)
+    intros z hz
+    have zR := inside with z, hz
+    obtain ⟨zC, Z, hZ, zLow, zHigh, zFinite, zEq, zValue⟩ :=
+      lndGood.membership.forward with hz
+    have ZT : Real(Z) by typecheck
+    have zT := intoT with z, zR
+    have zT0 := intoT0 with z, zT
+    have distinct : z ≠ complexOfReal(a)
+      intro same
+      rw same at zEq
+      have back := complexOfReal.injective with zEq
+      linarith
+    have hValue := agreeH with z, zT0, distinct
+    have Zσ : R[a + half(half(half(t)))] < Z by linarith
+    have Zx : Z ≤ R[a + half(half(t))] by linarith
+    obtain ⟨_, sums⟩ := lndCoeff.sums_real at lndDensity(E, K, B),
+      R[a + half(half(half(t)))], R[a + half(half(t))], Z with gValues,
+      gMeasurable, nonnegG, σx, σFinite, Zσ, Zx
+    rw zEq at zR
+    have sumL := powerSeriesSum.sums with radiusC, xC, zR
+    have lValue := ComplexSumsTo.unique with sumL, sums
+    have zbGap : R[Z - B] ≠ R[0] by
+      intro zero
+      linarith
+    have quotient := complexOfReal.div at K, R[Z - B] with zbGap
+    rw complexOfReal.sub at quotient
+    rw [(valueHf with z, zT), ← hValue, zValue, zEq, lValue]
+    unfold complexDiv
+    rw ← quotient
+    ring
+  have agreeR := holomorphic.identity_accumulation with holomorphicHR,
+    holomorphicL, connectedR, inside, centerR, accumulates, agreeS
+  -- the two series have the same coefficients
+  have radiusDR := PowerSeriesRadiusAtLeast.mono at dcoef, half(t),
+    R[a + half(half(t)) - (a + half(half(half(t))))] with radiusD, rHalf
+  have sameSums : ∀ z ∈ complexDisk(complexOfReal(R[a + half(half(t))]),
+      R[a + half(half(t)) - (a + half(half(half(t))))]),
+      powerSeriesSum(lndCoeff(lndDensity(E, K, B), R[a + half(half(t))]),
+        complexOfReal(R[a + half(half(t))]),
+        R[a + half(half(t)) - (a + half(half(half(t))))])(z) =
+      powerSeriesSum(dcoef, complexOfReal(R[a + half(half(t))]),
+        R[a + half(half(t)) - (a + half(half(half(t))))])(z)
+    intros z hz
+    have sumD := powerSeriesSum.sums with radiusDR, xC, hz
+    have sumH := sumsD with z, (intoHalf with z, hz)
+    have dValue := ComplexSumsTo.unique with sumD, sumH
+    rw [dValue, ← (agreeR with z, hz)]
+  have coefficients : ∀ n ∈ ℕ, lndCoeff(lndDensity(E, K, B),
+      R[a + half(half(t))])(n) = dcoef(n)
+    intros n hn
+    have nNat := nat.omega.backward at n with hn
+    exact powerSeries.unique at lndCoeff(lndDensity(E, K, B),
+      R[a + half(half(t))]), dcoef, complexOfReal(R[a + half(half(t))]),
+      R[a + half(half(t)) - (a + half(half(half(t))))], n with radiusC,
+      radiusDR, xC, rReal, rPositive, sameSums
+  have sequenceC := lndCoeff.function at lndDensity(E, K, B),
+    R[a + half(half(t))]
+  have sequenceD := radiusD.left
+  have equalCoefficients := FunctionBetween.ext with sequenceC, sequenceD,
+    coefficients
+  -- convergence at τ = a − t/8 < a
+  have τReal : R[a - half(half(half(t)))] ∈ ℝ by typecheck
+  have τT : Real(R[a - half(half(half(t)))]) by typecheck
+  have τC := complexOfReal.mem at R[a - half(half(half(t)))]
+  have τInHalf : complexOfReal(R[a - half(half(half(t)))]) ∈
+      complexDisk(complexOfReal(R[a + half(half(t))]), half(t))
+    apply complexDisk.membership.backward
+    refine ⟨τC, ?_⟩
+    rw lndReal.dist
+    have nonpos : R[a - half(half(half(t))) - (a + half(half(t)))] ≤ (0:R) by
+      linarith
+    rw (abs.of_nonpositive at R[a - half(half(half(t))) - (a + half(half(t)))]
+      with nonpos)
+    linarith
+  have sumsτ := sumsD with complexOfReal(R[a - half(half(half(t)))]), τInHalf
+  rw ← equalCoefficients at sumsτ
+  have τx : R[a - half(half(half(t)))] ≤ R[a + half(half(t))] by linarith
+  have τFinite := lndCoeff.finite_of_sums at lndDensity(E, K, B),
+    R[a + half(half(half(t)))], R[a + half(half(t))], R[a - half(half(half(t)))],
+    Hf(complexOfReal(R[a - half(half(half(t)))])) with gValues, gMeasurable,
+    nonnegG, σx, σFinite, τx, sumsτ
+  refine ⟨R[a - half(half(half(t)))], τReal, ?_, ?_, τFinite⟩
+  . linarith
+  . linarith
+
+-- Section: Landau's lemma
+-- The reals σ = B or with an infinite moment; their supremum is the
+-- abscissa of convergence (at least B).
+def lndInfinite (E : Set, K B : Real) : Set :=
+  { σ ∈ ℝ | σ = B ∨ lndMoment(lndDensity(E, K, B), σ, (0:N)) = ennTop }
+
+-- Landau's lemma in the setting: residues r of Φ, complex, with
+-- re r(X) ≥ 0 for real X > B, vanish at every ρ with re ρ > B.
+theorem lndLandau.core (E Φ r : Set, C K B : Real, ρ : Set)
+  requires setting : lndSetting(E, Φ, C, K, B)
+  requires valuesR : ∀ z ∈ ℂ, r(z) ∈ ℂ
+  requires residuesAt : ∀ q ∈ ℂ, (0:R) < complexRe(q) →
+    HasPuncturedLimit(subMulMap(Φ, q), q, r(q))
+  requires residues : ∀ X ∈ ℝ, B < X → (0:R) ≤ complexRe(r(complexOfReal(X)))
+  requires hρ : ρ ∈ ℂ
+  requires right : B < complexRe(ρ)
+  shows r(ρ) = ℂ[0]
+proof
+  have copy := setting
+  obtain ⟨function, measurableE, functionΦ, meromorphic, boundC, _, _,
+    nonnegG, kNonneg, bPositive⟩ := copy
+  have valuesΦ : ∀ w ∈ ℂ, Φ(w) ∈ ℂ
+    intros w hw
+    exact FunctionBetween.apply_closed with functionΦ, hw
+  obtain ⟨gValues, _⟩ := lndDensity.facts at E, K, B with function,
+    measurableE
+  have bR : B ∈ ℝ by typecheck
+  have σ1Real : R[B + 3] ∈ ℝ by typecheck
+  have σ1T : Real(R[B + 3]) by typecheck
+  have two : (2:R) < R[B + 3] by linarith
+  have above : B < R[B + 3] by linarith
+  obtain ⟨σ1Finite, _⟩ := lndDensity.moment at E, C, K, B, R[B + 3] with
+    function, measurableE, boundC, nonnegG, kNonneg, two, above
+  have bounded : ∀ τ ∈ lndInfinite(E, K, B), τ ≤ R[B + 3]
+    intros τ hτ
+    obtain ⟨τR, cases⟩ := lndInfinite.membership.forward with hτ
+    have τT : Real(τ) by typecheck
+    cases cases with isB | top
+    . rw isB
+      linarith
+    . by_contra notLe
+      have le : R[B + 3] ≤ τ
+        have total := realLess.trichotomy at τ, R[B + 3]
+        cases total with less | rest
+        . exfalso
+          apply notLe
+          linarith
+        . cases rest with equal | greater
+          . linarith
+          . linarith
+      have mono := lndMoment.antitone at lndDensity(E, K, B), R[B + 3], τ with
+        gValues, nonnegG, le
+      rw top at mono
+      exact σ1Finite with (EnnLe.top_eq with mono)
+  have bMember : B ∈ lndInfinite(E, K, B)
+    apply lndInfinite.membership.backward
+    refine ⟨bR, ?_⟩
+    left
+    rfl
+  have nonempty : Nonempty(lndInfinite(E, K, B))
+    exact ⟨B, bMember⟩
+  have subsetReals : lndInfinite(E, K, B) ⊆ ℝ
+    intros τ hτ
+    obtain ⟨τR, _⟩ := lndInfinite.membership.forward with hτ
+    exact τR
+  have upperBound : ∃ D, RealUpperBound(lndInfinite(E, K, B), D)
+    refine ⟨R[B + 3], ?_⟩
+    refine ⟨σ1T, subsetReals, ?_⟩
+    intros τ hτ
+    obtain ⟨τR, _⟩ := lndInfinite.membership.forward with hτ
+    have τT : Real(τ) by typecheck
+    exact realLe.subset with (bounded with τ, hτ)
+  obtain ⟨a, lub⟩ := Real.least_upper_bound_property with nonempty, upperBound
+  obtain ⟨upperA, least⟩ := lub
+  obtain ⟨aT, _, belowA⟩ := upperA
+  have aR : a ∈ ℝ by typecheck
+  have bLeA : B ≤ a
+    have sub := belowA with B, bMember
+    exact realLe.of_subset with sub
+  have finiteAbove : ∀ σ ∈ ℝ, a < σ →
+      lndMoment(lndDensity(E, K, B), σ, (0:N)) ≠ ennTop
+    intros σ hσ aσ top
+    have σT : Real(σ) by typecheck
+    have member : σ ∈ lndInfinite(E, K, B)
+      apply lndInfinite.membership.backward
+      refine ⟨hσ, ?_⟩
+      right
+      exact top
+    have le := realLe.of_subset with (belowA with σ, member)
+    linarith
+  have infiniteBelow : ∀ σ ∈ ℝ, B ≤ σ → σ < a →
+      lndMoment(lndDensity(E, K, B), σ, (0:N)) = ennTop
+    intros σ hσ bσ σa
+    have σT : Real(σ) by typecheck
+    by_contra finite
+    have upper : RealUpperBound(lndInfinite(E, K, B), σ)
+      refine ⟨σT, subsetReals, ?_⟩
+      intros τ hτ
+      obtain ⟨τR, cases⟩ := lndInfinite.membership.forward with hτ
+      have τT : Real(τ) by typecheck
+      apply realLe.subset
+      cases cases with isB | top
+      . rw isB
+        exact bσ
+      . by_contra notLe
+        have le : σ ≤ τ
+          have total := realLess.trichotomy at τ, σ
+          cases total with less | rest
+          . exfalso
+            apply notLe
+            linarith
+          . cases rest with equal | greater
+            . linarith
+            . linarith
+        have mono := lndMoment.antitone at lndDensity(E, K, B), σ, τ with
+          gValues, nonnegG, le
+        rw top at mono
+        exact finite with (EnnLe.top_eq with mono)
+    have aLe := realLe.of_subset with (least with σ, upper)
+    linarith
+  have vanishRight : ∀ q ∈ ℂ, a < complexRe(q) → r(q) = ℂ[0]
+    intros q hq aq
+    have reQ := complexRe.real with hq
+    have reT : Real(complexRe(q)) by exact reQ
+    have gapPositive : (0:R) < R[complexRe(q) - a] by linarith
+    have halfPositive := half.positive with gapPositive
+    have halfBelow := half.lt_self with gapPositive
+    have σReal : R[a + half(R[complexRe(q) - a])] ∈ ℝ by typecheck
+    have σT : Real(R[a + half(R[complexRe(q) - a])]) by typecheck
+    have aσ : a < R[a + half(R[complexRe(q) - a])] by linarith
+    have bσ : B < R[a + half(R[complexRe(q) - a])] by linarith
+    have σq : R[a + half(R[complexRe(q) - a])] < complexRe(q) by linarith
+    have σFinite := finiteAbove with R[a + half(R[complexRe(q) - a])], σReal,
+      aσ
+    have qPositive : (0:R) < complexRe(q) by linarith
+    exact lndResidue.vanishes at E, Φ, C, K, B, R[a + half(R[complexRe(q) - a])],
+      q, r(q) with setting, bσ, σFinite, hq, σq, (valuesR with q, hq),
+      (residuesAt with q, hq, qPositive)
+  have aLeB : a ≤ B
+    by_contra notLe
+    have bA : B < a
+      have total := realLess.trichotomy at a, B
+      cases total with less | rest
+      . exfalso
+        apply notLe
+        linarith
+      . cases rest with equal | greater
+        . exfalso
+          apply notLe
+          linarith
+        . exact greater
+    have aC := complexOfReal.mem at a
+    have reA : (0:R) < complexRe(complexOfReal(a)) by
+      rw complexOfReal.re
+      linarith
+    have limitA := residuesAt with complexOfReal(a), aC, reA
+    have rA := valuesR with complexOfReal(a), aC
+    have reNonneg := residues with a, aR, bA
+    have zeroA := lndResidue.real_zero at E, Φ, C, K, B, a, r(complexOfReal(a))
+      with setting, bA, finiteAbove, rA, limitA, reNonneg
+    rw zeroA at limitA
+    have zeroC : ℂ[0] ∈ ℂ by typecheck
+    have small : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+        (∀ z ∈ complexDisk(complexOfReal(a), d), z ≠ complexOfReal(a) →
+          complexAbs(ℂ[(z - complexOfReal(a)) * Φ(z)]) < e)
+      intros e he ePositive
+      obtain ⟨d, hd, dPositive, close⟩ := (lndPunctured.close with limitA, aC,
+        zeroC) with e, he, ePositive
+      refine ⟨d, hd, dPositive, ?_⟩
+      intros z hz distinct
+      have zC := (complexDisk.membership.forward with hz).left
+      have fz := valuesΦ with z, zC
+      have c := close with z, hz, distinct
+      rw (subMulMap.value with valuesΦ, aC, zC) at c
+      have same : ℂ[(z - complexOfReal(a)) * Φ(z) - 0] =
+        ℂ[(z - complexOfReal(a)) * Φ(z)] by ring
+      rw same at c
+      exact c
+    obtain ⟨h, t0, ht0, t0Positive, holomorphicH, agreeH⟩ := lndRemovable with
+      (meromorphic with complexOfReal(a), aC), valuesΦ, small
+    have t0T : Real(t0) by typecheck
+    obtain ⟨τ, hτ, bτ, τa, τFinite⟩ := lndTaylor.finite at E, Φ, C, K, B, a, h,
+      t0 with setting, bA, finiteAbove, holomorphicH, t0Positive, agreeH
+    have bLeτ : B ≤ τ by linarith
+    exact τFinite with (infiniteBelow with τ, hτ, bLeτ, τa)
+  have aρ : a < complexRe(ρ) by linarith
+  exact vanishRight with ρ, hρ, aρ
+
+end LandauCore
