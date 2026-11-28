@@ -1246,12 +1246,995 @@ proof
     have as := matMul.assoc at R, n, n, n, n, matPow(R, n, A, j), matPow(R, n, A, m), A with ring, finite, finite, pj, pm, matrix
     rw [js, e1, ih, e2, as]
 
+end Charpoly
+
+-- Section: Evaluation of polynomials at a matrix (helpers)
+-- p(A) agrees with Cumulus's evaluation at a matrix on a natural index
+-- set, and is carried along a reindexing bijection; both by induction on
+-- polynomials (sums of monomial terms).
+section CldAEvaluation
+variable (R : Set)
+hypothesis ring : CommRing(R)
+
+theorem cldA.matrixSpace.cumulus (m : Nat) (B : Set)
+  requires matrix : B ∈ matrixSpace(R, m, m)
+  shows B : R ^ m × m
+proof
+  have same := squareMatrixRing.nat at R, m with ring
+  have carrier : Ring.carrier(squareMatrixRing(R, m)) = matrixSpace(R, m, m)
+    unfold squareMatrixRing
+    ring_projections
+  apply Matrix.of_mem
+  rw [← same, carrier]
+  exact matrix
+
+theorem cldA.squareMatrixRing.one (n : Set)
+  shows Ring.one(squareMatrixRing(R, n)) = matOne(R, n)
+proof
+  unfold squareMatrixRing
+  ring_projections
+
+theorem cldA.commutant.pow (m : Nat) (B : Set) (k : Nat)
+  requires matrix : B ∈ matrixSpace(R, m, m)
+  shows monoidPow(Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), B, k) = matPow(R, m, B, k)
+proof
+  have finite := Finite.natural at m
+  have guard := cldA.matrixSpace.cumulus at R, m, B with ring, matrix
+  have same := squareMatrixRing.nat at R, m with ring
+  have target := commutant.comm_ring at R, m, B with ring, guard
+  have targetRing := CommRing.to_ring with target
+  have self := commutant.self_mem at R, m, B with ring, guard
+  have monoid := IsRing.multiplicative with (Ring.parts with targetRing)
+  induction k
+  | zero =>
+    have one := commutant.one_value at R, m, B with ring, guard
+    have sq := cldA.squareMatrixRing.one at R, m with ring
+    rw [monoidPow.zero, one, ← same, sq]
+    simp [matPow]
+  | succ(j) using ih =>
+    have closed := monoidPow.closed at Ring.carrier(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), B, j with monoid, self
+    have mv := commutant.mul_value at R, m, B, B, monoidPow(Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), B, j) with ring, guard, self, closed
+    have pj := matPow.mem at R, m, B, j with ring, finite, matrix
+    have me := squareMatrixRing.mul_eq at R, m, B, matPow(R, m, B, j) with ring, finite, matrix, pj
+    have e1 : matPow(R, m, B, succ(j)) = matMul(R, m, m, m, matPow(R, m, B, j), B)
+      simp [matPow]
+    have p1 : matPow(R, m, B, 1) = B
+      have z : matPow(R, m, B, 1) = matMul(R, m, m, m, matPow(R, m, B, 0), B)
+        simp [matPow]
+      have z0 : matPow(R, m, B, 0) = matOne(R, m)
+        simp [matPow]
+      have o := matMul.one_left at R, m, m, B with ring, finite, matrix
+      rw [z, z0, o]
+    have a1 := matPow.add at R, m, B, 1, j with ring, finite, matrix
+    have a2 := matPow.add at R, m, B, j, 1 with ring, finite, matrix
+    have c : 1 + j = j + 1 by arith
+    have s : j + 1 = succ(j) by arith
+    rw [p1] at a1
+    rw [p1] at a2
+    rw [monoidPow.succ, ih]
+    rw ih at mv
+    rw [mv, ← same, me, e1, ← a2, ← c, a1]
+
+theorem cldA.matrixSpace.of_cumulus (m : Nat) (B : Set)
+  requires guard : B : R ^ m × m
+  shows B ∈ matrixSpace(R, m, m)
+proof
+  have same := squareMatrixRing.nat at R, m with ring
+  have carrier : Ring.carrier(squareMatrixRing(R, m)) = matrixSpace(R, m, m)
+    unfold squareMatrixRing
+    ring_projections
+  have member := Matrix.mem_ring with guard
+  rw [← same, carrier] at member
+  exact member
+
+theorem cldA.scalarMatrix.eq (m : Nat) (a : Set)
+  requires scalar : a ∈ R.carrier
+  shows scalarMatrix(R, m, a) = matScalar(R, m, a)
+proof
+  have ringR := CommRing.to_ring with ring
+  have guard := scalarMatrix.guard at R, m, a with ring, scalar
+  have left := cldA.matrixSpace.of_cumulus at R, m, scalarMatrix(R, m, a) with ring, guard
+  have right := matScalar.mem_of at R, m, a with ring, scalar
+  apply (matrixSpace.ext at R, m, m, scalarMatrix(R, m, a), matScalar(R, m, a) with ring, left, right).backward
+  intros i hi j hj
+  have e := scalarMatrix.entry at R, m, a, i, j with ring, scalar, hi, hj
+  obtain ⟨d1, d2⟩ := matScalar.entry_of at R, m, a, i, j with ring, scalar, hi, hj
+  have zeroR := Ring.zero_mem at R with ringR
+  have oneR := Ring.one_mem at R with ringR
+  rw e
+  by_cases same : i = j
+  . have s := singleValue.same at R.carrier, R.zero, R.one, j, i with zeroR, oneR, same
+    rw [s, d1 with same]
+    ring
+  . have s := singleValue.other at R.carrier, R.zero, R.one, j, i with zeroR, oneR, same
+    rw [s, d2 with same]
+    ring
+
+theorem cldA.matrixEvaluation.term (m : Nat) (B a : Set) (k : Nat)
+  requires matrix : B ∈ matrixSpace(R, m, m)
+  requires scalar : a ∈ R.carrier
+  shows matrixEvaluation(R, m, B)(polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)})) =
+    matSmul(R, m, m, a, matPow(R, m, B, k))
+proof
+  have finite := Finite.natural at m
+  have guard := cldA.matrixSpace.cumulus at R, m, B with ring, matrix
+  have parts := CommRing.parts with ring
+  have target := commutant.comm_ring at R, m, B with ring, guard
+  have targetParts := CommRing.parts with target
+  have hom := scalarEmbedding.hom at R, m, B with ring, guard
+  have homParts := RingHom.parts with hom
+  have self := commutant.self_mem at R, m, B with ring, guard
+  have assignment := constantFunction.function at {0}, Ring.carrier(commutant(R, m, B)), B with self
+  have monomial := monomials.univariate at k
+  have zeroR := Ring.zero_mem at R with (CommRing.to_ring with ring)
+  have term := polynomialTerm.member at {0}, R.carrier, R.zero, a, {(0, k)} with zeroR, scalar
+  have value := polynomialAtOver.value at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), scalarEmbedding(R, m), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B), polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)}) with parts, targetParts, homParts, assignment, term
+  have mapped := polynomialMap.term at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), scalarEmbedding(R, m), a, {(0, k)} with parts, targetParts, homParts, scalar, monomial
+  unfold matrixEvaluation
+  rw [evaluationHom.graph, value, mapped]
+  have embedded := scalarEmbedding.value at R, m, a with ring, scalar
+  have scalarIn := commutant.scalar_mem at R, m, B, a with ring, guard, scalar
+  have h := monomialEvaluate.function at {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B) with targetParts, assignment
+  rw embedded
+  have evaluated := polynomialEvaluate.term at {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), monomialEvaluate({0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B)), scalarMatrix(R, m, a), {(0, k)} with targetParts, h, scalarIn, monomial
+  unfold polynomialAt
+  rw evaluated
+  have index : 0 ∈ {0} by simp [singleton.membership]
+  have domain : {0} ⊆ {0} by simp [Subset]
+  have covers := functionSupport.subset at {(0, k)}, {0}, 0
+  have finite0 := Finite.singleton at 0
+  have onDomain := monomialEvaluate.on_domain at {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B), {(0, k)}, {0} with targetParts, assignment, monomial, domain, finite0, covers
+  have weights := monomialWeights.function at {0}, {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B), {(0, k)} with targetParts, assignment, monomial, domain
+  have single := finiteRingProduct.singleton at Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), monomialWeights({0}, {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B), {(0, k)}), 0 with targetParts, weights
+  have w0 := monomialWeights.value at {0}, {0}, Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), constantFunction({0}, Ring.carrier(commutant(R, m, B)), B), {(0, k)}, 0 with targetParts, assignment, monomial, domain, index
+  have v0 := constantFunction.apply at {0}, Ring.carrier(commutant(R, m, B)), 0, B with index, self
+  have kN : k ∈ ℕ by typecheck
+  have kk := constantFunction.univariate at ℕ, k with kN
+  have k0 := constantFunction.apply at {0}, ℕ, 0, k with index, kN
+  rw kk at k0
+  rw [onDomain, single, w0, v0, k0]
+  have pw := cldA.commutant.pow at R, m, B, k with ring, matrix
+  rw pw
+  have monoid := IsRing.multiplicative with (Ring.parts with (CommRing.to_ring with target))
+  have closed := monoidPow.closed at Ring.carrier(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), B, k with monoid, self
+  rw pw at closed
+  have mv := commutant.mul_value at R, m, B, scalarMatrix(R, m, a), matPow(R, m, B, k) with ring, guard, scalarIn, closed
+  have same := squareMatrixRing.nat at R, m with ring
+  have pk := matPow.mem at R, m, B, k with ring, finite, matrix
+  have sm := matScalar.mem_of at R, m, a with ring, scalar
+  have se := cldA.scalarMatrix.eq at R, m, a with ring, scalar
+  have me := squareMatrixRing.mul_eq at R, m, matScalar(R, m, a), matPow(R, m, B, k) with ring, finite, sm, pk
+  have sc := matScalar.mul at R, m, m, a, matPow(R, m, B, k) with ring, finite, scalar, pk
+  rw [mv, ← same, se, me, sc]
+theorem cldA.polyCoeff.mem (p : Set) (k : Nat)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows p({(0, k)}) ∈ R.carrier
+proof
+  have mk := monomials.univariate at k
+  rw polynomialRing.carrierOf at member
+  exact polynomials.coefficient with member, mk
+
+theorem cldA.polyDegrees.finite (p : Set)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows Finite(polyDegrees(R, p)) ∧ polyDegrees(R, p) ⊆ ℕ
+proof
+  have parts := member
+  rw polynomialRing.carrierOf at parts
+  have finite := polynomials.finite_support with parts
+  have domain := functionSupport.subset at p, monomials({0}), R.zero
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have exponents := monomialExponent.function at {0}, 0 with zero
+  have imageFinite := Finite.function_image with exponents, finite, domain
+  have sub : polyDegrees(R, p) ⊆ functionImage(monomialExponent({0}, 0), functionSupport(p, monomials({0}), R.zero), ℕ)
+    intros k hk
+    unfold polyDegrees at hk
+    obtain ⟨kN, nz⟩ := hk
+    have kNat := nat.omega.backward with kN
+    have mk := monomials.univariate at k
+    have supp : {(0, k)} ∈ functionSupport(p, monomials({0}), R.zero)
+      exact functionSupport.membership.backward with ⟨mk, nz⟩
+    have ev := monomialExponent.value at {0}, 0, {(0, k)} with zero, mk
+    have same := constantFunction.univariate at ℕ, k with kN
+    have v := constantFunction.apply at {0}, ℕ, 0, k with zero, kN
+    rw same at v
+    rw v at ev
+    apply functionImage.membership.backward
+    refine ⟨kN, {(0, k)}, supp, ?_⟩
+    rw ev
+  have nat : polyDegrees(R, p) ⊆ ℕ
+    intros k hk
+    unfold polyDegrees at hk
+    exact hk.left
+  have fs := Finite.subset with imageFinite, sub
+  exact ⟨fs, nat⟩
+
+theorem cldA.matSmul.zero_scalar (m2 n2 A : Set)
+  requires matrix : A ∈ matrixSpace(R, m2, n2)
+  shows matSmul(R, m2, n2, R.zero, A) = matZero(R, m2, n2)
+proof
+  have ringR := CommRing.to_ring with ring
+  have zeroR := Ring.zero_mem at R with ringR
+  have left := matSmul.mem_of at R, m2, n2, R.zero, A with ring, zeroR, matrix
+  have right := matZero.mem_of at R, m2, n2 with ring
+  apply (matrixSpace.ext at R, m2, n2, matSmul(R, m2, n2, R.zero, A), matZero(R, m2, n2) with ring, left, right).backward
+  intros i hi j hj
+  have e1 := matSmul.at at R, m2, n2, R.zero, A, i, j with ring, zeroR, matrix, hi, hj
+  have e2 := matZero.at at R, m2, n2, i, j with ring, hi, hj
+  have x := matrixSpace.entry_mem with matrix, hi, hj
+  rw [e1, e2]
+  ring
+
+theorem cldA.matrixModule.carrier (m2 n2 : Set)
+  shows Module.carrier(matrixModule(R, m2, n2)) = matrixSpace(R, m2, n2)
+proof
+  unfold matrixModule
+  rw [coordinateModule.carrier_space, matrixSpace.eq]
+
+theorem cldA.matSmul.add_scalar (m2 n2 a b A : Set)
+  requires first : a ∈ R.carrier
+  requires second : b ∈ R.carrier
+  requires matrix : A ∈ matrixSpace(R, m2, n2)
+  shows matSmul(R, m2, n2, a + b, A) =
+    matAdd(R, m2, n2, matSmul(R, m2, n2, a, A), matSmul(R, m2, n2, b, A))
+proof
+  have ringR := CommRing.to_ring with ring
+  have ab := Ring.add_mem at R, a, b with ringR, first, second
+  have sa := matSmul.mem_of at R, m2, n2, a, A with ring, first, matrix
+  have sb := matSmul.mem_of at R, m2, n2, b, A with ring, second, matrix
+  have left := matSmul.mem_of at R, m2, n2, a + b, A with ring, ab, matrix
+  have right := matAdd.mem_of at R, m2, n2, matSmul(R, m2, n2, a, A), matSmul(R, m2, n2, b, A) with ring, sa, sb
+  apply (matrixSpace.ext at R, m2, n2, matSmul(R, m2, n2, a + b, A), matAdd(R, m2, n2, matSmul(R, m2, n2, a, A), matSmul(R, m2, n2, b, A)) with ring, left, right).backward
+  intros i hi j hj
+  have e1 := matSmul.at at R, m2, n2, a + b, A, i, j with ring, ab, matrix, hi, hj
+  have e2 := matAdd.at at R, m2, n2, matSmul(R, m2, n2, a, A), matSmul(R, m2, n2, b, A), i, j with ring, sa, sb, hi, hj
+  have e3 := matSmul.at at R, m2, n2, a, A, i, j with ring, first, matrix, hi, hj
+  have e4 := matSmul.at at R, m2, n2, b, A, i, j with ring, second, matrix, hi, hj
+  have x := matrixSpace.entry_mem with matrix, hi, hj
+  rw [e1, e2, e3, e4]
+  ring
+
+theorem cldA.squareMatrixRing.add_eq (n A B : Set)
+  requires first : A ∈ matrixSpace(R, n, n)
+  requires second : B ∈ matrixSpace(R, n, n)
+  shows call2(Ring.add(squareMatrixRing(R, n)), A, B) = matAdd(R, n, n, A, B)
+proof
+  have values : ∀ X ∈ matrixSpace(R, n, n), ∀ Y ∈ matrixSpace(R, n, n), matAdd(R, n, n, X, Y) ∈ matrixSpace(R, n, n)
+    intros X hX Y hY
+    exact matAdd.mem_of at R, n, n, X, Y with ring, hX, hY
+  have same : call2(Ring.add(squareMatrixRing(R, n)), A, B) = matAddition(R, n)((A, B))
+    unfold squareMatrixRing
+    ring_projections
+    unfold call2
+    rfl
+  rw same
+  exact matAddition.graph_entry at R, n, A, B with values, first, second
+
+theorem cldA.squareMatrixRing.zero (n : Set)
+  shows Ring.zero(squareMatrixRing(R, n)) = matZero(R, n, n)
+proof
+  unfold squareMatrixRing
+  ring_projections
+
+theorem cldA.monomial.shape (m : Set)
+  requires member : m ∈ monomials({0})
+  shows Nat(m(0)) ∧ m = {(0, m(0))}
+proof
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have e := monomials.exponent at {0}, m, 0 with member, zero
+  have single := monomials.univariate at m(0)
+  have eq : m = {(0, m(0))}
+    apply monomials.ext at {0}, m, {(0, m(0))} with member, single
+    intros i hi
+    rw singleton.membership at hi
+    rw hi
+    have kN : m(0) ∈ ℕ by typecheck
+    have same := constantFunction.univariate at ℕ, m(0) with kN
+    have v := constantFunction.apply at {0}, ℕ, 0, m(0) with zero, kN
+    rw same at v
+    rw v
+  exact ⟨e, eq⟩
+
+end CldAEvaluation
+
+section CldAPolyTerms
+variable (R n : Set)
+hypothesis ring : CommRing(R)
+hypothesis finite : Finite(n)
+
+theorem cldA.matPolyTerms.value (A p : Set) (k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows relates(matPolyTerms(R, n, A, p), k, matSmul(R, n, n, p({(0, k)}), matPow(R, n, A, k)))
+proof
+  have c := cldA.polyCoeff.mem at R, p, k with ring, member
+  have pk := matPow.mem at R, n, A, k with ring, finite, matrix
+  have sm := matSmul.mem_of at R, n, n, p({(0, k)}), matPow(R, n, A, k) with ring, c, pk
+  have kN : k ∈ ℕ by typecheck
+  unfold relates
+  apply matPolyTerms.membership.backward
+  refine ⟨(product.pair with kN, sm), k, kN, rfl⟩
+
+theorem cldA.matPolyTerms.function (A p : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyTerms(R, n, A, p) : ℕ → matrixSpace(R, n, n)
+proof
+  constructor
+    intros q0 hq
+    obtain ⟨bounded, _⟩ := matPolyTerms.membership.forward with hq
+    exact bounded
+  . constructor
+      intros z0 first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := matPolyTerms.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := matPolyTerms.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros k kN
+      have kNat := nat.omega.backward with kN
+      have c := cldA.polyCoeff.mem at R, p, k with ring, member
+      have pk := matPow.mem at R, n, A, k with ring, finite, matrix
+      have sm := matSmul.mem_of at R, n, n, p({(0, k)}), matPow(R, n, A, k) with ring, c, pk
+      refine ⟨matSmul(R, n, n, p({(0, k)}), matPow(R, n, A, k)), sm, (cldA.matPolyTerms.value at R, n, A, p, k with ring, finite, matrix, member)⟩
+
+theorem cldA.matPolyTerms.apply (A p : Set) (k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyTerms(R, n, A, p)(k) = matSmul(R, n, n, p({(0, k)}), matPow(R, n, A, k))
+proof
+  have function := cldA.matPolyTerms.function at R, n, A, p with ring, finite, matrix, member
+  have kN : k ∈ ℕ by typecheck
+  have rel := cldA.matPolyTerms.value at R, n, A, p, k with ring, finite, matrix, member
+  exact FunctionBetween.apply_value with function, kN, rel
+
+theorem cldA.matPolyEval.over (A p D : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires finiteD : Finite(D)
+  requires natural : D ⊆ ℕ
+  requires covers : polyDegrees(R, p) ⊆ D
+  shows matPolyEval(R, n, A, p) =
+    moduleSum(matrixModule(R, n, n), D, restrict(matPolyTerms(R, n, A, p), D))
+proof
+  have ringR := CommRing.to_ring with ring
+  have module := matrixModule.module at R, n, n with ring
+  have terms := cldA.matPolyTerms.function at R, n, A, p with ring, finite, matrix, member
+  have carrier : Module.carrier(matrixModule(R, n, n)) = matrixSpace(R, n, n)
+    unfold matrixModule
+    rw [coordinateModule.carrier_space, matrixSpace.eq]
+  have zeroM : Module.zero(matrixModule(R, n, n)) = matZero(R, n, n)
+    unfold matrixModule
+    rw coordinateModule.zero_space
+    unfold matZero
+    rfl
+  rw ← carrier at terms
+  have restricted := restrict.domain_function with terms, natural
+  have vanishing : ∀ k ∈ D, k ∉ polyDegrees(R, p) → restrict(matPolyTerms(R, n, A, p), D)(k) = Module.zero(matrixModule(R, n, n))
+    intros k hk outside
+    have kN := natural with k, hk
+    have kNat := nat.omega.backward with kN
+    have r := restrict.domain_apply with terms, natural, hk
+    have v := cldA.matPolyTerms.apply at R, n, A, p, k with ring, finite, matrix, member
+    have zeroCoeff : p({(0, k)}) = R.zero
+      by_contra nz
+      apply outside
+      unfold polyDegrees
+      exact ⟨kN, nz⟩
+    have pk := matPow.mem at R, n, A, k with ring, finite, matrix
+    have z := cldA.matSmul.zero_scalar at R, n, n, matPow(R, n, A, k) with ring, pk
+    rw [r, v, zeroCoeff, z, zeroM]
+  have sub := moduleSum.subset_support at R, matrixModule(R, n, n), polyDegrees(R, p), D, restrict(matPolyTerms(R, n, A, p), D) with ringR, module, finiteD, covers, restricted, vanishing
+  have nested := restrict.nested at matPolyTerms(R, n, A, p), polyDegrees(R, p), D with covers
+  rw [sub, nested]
+  unfold matPolyEval
+  rfl
+
+theorem cldA.matPolyEval.term (A a : Set) (k : Nat)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires scalar : a ∈ R.carrier
+  shows matPolyEval(R, n, A, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)})) =
+    matSmul(R, n, n, a, matPow(R, n, A, k))
+proof
+  have ringR := CommRing.to_ring with ring
+  have module := matrixModule.module at R, n, n with ring
+  have zeroR := Ring.zero_mem at R with ringR
+  have mk := monomials.univariate at k
+  have member0 := polynomialTerm.member at {0}, R.carrier, R.zero, a, {(0, k)} with zeroR, scalar
+  have member : polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)}) ∈ Ring.carrier(polynomialRing(R, {0}))
+    rw polynomialRing.carrierOf
+    exact member0
+  have kN : k ∈ ℕ by typecheck
+  have natural : {k} ⊆ ℕ by simp [Subset, singleton.membership]
+  have finiteK := Finite.singleton at k
+  have covers : polyDegrees(R, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)})) ⊆ {k}
+    intros j hj
+    unfold polyDegrees at hj
+    obtain ⟨jN, nz⟩ := hj
+    have jNat := nat.omega.backward with jN
+    apply singleton.membership.backward
+    by_contra different
+    apply nz
+    have mj := monomials.univariate at j
+    have ne : {(0, j)} ≠ {(0, k)}
+      intro eq
+      apply different
+      have v1 := constantFunction.univariate at ℕ, j with jN
+      have v2 := constantFunction.univariate at ℕ, k with kN
+      have zero : 0 ∈ {0} by simp [singleton.membership]
+      have a1 := constantFunction.apply at {0}, ℕ, 0, j with zero, jN
+      have a2 := constantFunction.apply at {0}, ℕ, 0, k with zero, kN
+      rw [v1] at a1
+      rw [v2] at a2
+      rw eq at a1
+      cc
+    exact polynomialTerm.other at {0}, R.carrier, R.zero, a, {(0, k)}, {(0, j)} with zeroR, scalar, mj, ne
+  have over := cldA.matPolyEval.over at R, n, A, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)}), {k} with ring, finite, matrix, member, finiteK, natural, covers
+  have terms := cldA.matPolyTerms.function at R, n, A, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)}) with ring, finite, matrix, member
+  have carrier := cldA.matrixModule.carrier at R, n, n
+  rw ← carrier at terms
+  have restricted := restrict.domain_function with terms, natural
+  have single := moduleSum.singleton at R, matrixModule(R, n, n), k, restrict(matPolyTerms(R, n, A, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)})), {k}) with ringR, module, restricted
+  have kk := singleton.self at k
+  have r := restrict.domain_apply with terms, natural, kk
+  have v := cldA.matPolyTerms.apply at R, n, A, polynomialTerm({0}, R.carrier, R.zero, a, {(0, k)}), k with ring, finite, matrix, member
+  have same := polynomialTerm.same at {0}, R.carrier, R.zero, a, {(0, k)} with zeroR, scalar, mk
+  rw [over, single, r, v, same]
+
+theorem cldA.matPolyEval.zero (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPolyEval(R, n, A, constantFunction(monomials({0}), R.carrier, R.zero)) = matZero(R, n, n)
+proof
+  have ringR := CommRing.to_ring with ring
+  have module := matrixModule.module at R, n, n with ring
+  have pr := CommRing.to_ring with (polynomialRing.comm_ring at R, {0} with ring)
+  have member := Ring.zero_mem at polynomialRing(R, {0}) with pr
+  rw polynomialRing.zeroOf at member
+  have natural : ∅ ⊆ ℕ by simp [Subset]
+  have finite0 := Finite.empty
+  have covers : polyDegrees(R, constantFunction(monomials({0}), R.carrier, R.zero)) ⊆ ∅
+    intros j hj
+    unfold polyDegrees at hj
+    obtain ⟨jN, nz⟩ := hj
+    exfalso
+    apply nz
+    have jNat := nat.omega.backward with jN
+    have mj := monomials.univariate at j
+    have zeroR := Ring.zero_mem at R with ringR
+    exact constantFunction.apply at monomials({0}), R.carrier, {(0, j)}, R.zero with mj, zeroR
+  have over := cldA.matPolyEval.over at R, n, A, constantFunction(monomials({0}), R.carrier, R.zero), ∅ with ring, finite, matrix, member, finite0, natural, covers
+  have terms := cldA.matPolyTerms.function at R, n, A, constantFunction(monomials({0}), R.carrier, R.zero) with ring, finite, matrix, member
+  have carrier := cldA.matrixModule.carrier at R, n, n
+  rw ← carrier at terms
+  have restricted := restrict.domain_function with terms, natural
+  have empty := moduleSum.empty at R, matrixModule(R, n, n), restrict(matPolyTerms(R, n, A, constantFunction(monomials({0}), R.carrier, R.zero)), ∅) with ringR, module, restricted
+  have zeroM : Module.zero(matrixModule(R, n, n)) = matZero(R, n, n)
+    unfold matrixModule
+    rw coordinateModule.zero_space
+    unfold matZero
+    rfl
+  rw [over, empty, zeroM]
+
+theorem cldA.matPolyEval.add (A p q : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires memberP : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires memberQ : q ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyEval(R, n, A, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q)) =
+    matAdd(R, n, n, matPolyEval(R, n, A, p), matPolyEval(R, n, A, q))
+proof
+  have ringR := CommRing.to_ring with ring
+  have parts := CommRing.parts with ring
+  have module := matrixModule.module at R, n, n with ring
+  have p0 := memberP
+  rw polynomialRing.carrierOf at p0
+  have q0 := memberQ
+  rw polynomialRing.carrierOf at q0
+  have s0 := polynomials.add at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q with parts, p0, q0
+  have memberS : coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q) ∈ Ring.carrier(polynomialRing(R, {0}))
+    rw polynomialRing.carrierOf
+    exact s0
+  have pF := polynomials.function with p0
+  have qF := polynomials.function with q0
+  obtain ⟨finP, natP⟩ := cldA.polyDegrees.finite at R, p with ring, memberP
+  obtain ⟨finQ, natQ⟩ := cldA.polyDegrees.finite at R, q with ring, memberQ
+  have finiteD := Finite.union with finP, finQ
+  have natural : polyDegrees(R, p) ∪ polyDegrees(R, q) ⊆ ℕ
+    intros k hk
+    rw union2.membership at hk
+    cases hk with inP | inQ
+    . exact natP with k, inP
+    . exact natQ with k, inQ
+  have coverP : polyDegrees(R, p) ⊆ polyDegrees(R, p) ∪ polyDegrees(R, q) by simp [Subset, union2.membership]
+  have coverQ : polyDegrees(R, q) ⊆ polyDegrees(R, p) ∪ polyDegrees(R, q) by simp [Subset, union2.membership]
+  have coeffAdd : ∀ k ∈ ℕ, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q)({(0, k)}) = p({(0, k)}) + q({(0, k)})
+    intros k kN
+    have kNat := nat.omega.backward with kN
+    have mk := monomials.univariate at k
+    exact coefficientAdd.value at monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q, {(0, k)} with parts, pF, qF, mk
+  have coverS : polyDegrees(R, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q)) ⊆ polyDegrees(R, p) ∪ polyDegrees(R, q)
+    intros k hk
+    unfold polyDegrees at hk
+    obtain ⟨kN, nz⟩ := hk
+    rw union2.membership
+    by_contra neither
+    apply nz
+    have pz : p({(0, k)}) = R.zero
+      by_contra pnz
+      apply neither
+      left
+      unfold polyDegrees
+      exact ⟨kN, pnz⟩
+    have qz : q({(0, k)}) = R.zero
+      by_contra qnz
+      apply neither
+      right
+      unfold polyDegrees
+      exact ⟨kN, qnz⟩
+    have c := coeffAdd with k, kN
+    rw [c, pz, qz]
+    have zeroR := Ring.zero_mem at R with ringR
+    ring
+  have overP := cldA.matPolyEval.over at R, n, A, p, polyDegrees(R, p) ∪ polyDegrees(R, q) with ring, finite, matrix, memberP, finiteD, natural, coverP
+  have overQ := cldA.matPolyEval.over at R, n, A, q, polyDegrees(R, p) ∪ polyDegrees(R, q) with ring, finite, matrix, memberQ, finiteD, natural, coverQ
+  have overS := cldA.matPolyEval.over at R, n, A, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q), polyDegrees(R, p) ∪ polyDegrees(R, q) with ring, finite, matrix, memberS, finiteD, natural, coverS
+  have carrier := cldA.matrixModule.carrier at R, n, n
+  have termsP := cldA.matPolyTerms.function at R, n, A, p with ring, finite, matrix, memberP
+  have termsQ := cldA.matPolyTerms.function at R, n, A, q with ring, finite, matrix, memberQ
+  have termsS := cldA.matPolyTerms.function at R, n, A, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q) with ring, finite, matrix, memberS
+  rw ← carrier at termsP
+  rw ← carrier at termsQ
+  rw ← carrier at termsS
+  have rP := restrict.domain_function with termsP, natural
+  have rQ := restrict.domain_function with termsQ, natural
+  have rS := restrict.domain_function with termsS, natural
+  have sumP := moduleSum.mem at R, matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q)) with ringR, module, finiteD, rP
+  have sumQ := moduleSum.mem at R, matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q)) with ringR, module, finiteD, rQ
+  rw carrier at sumP
+  rw carrier at sumQ
+  have zeroR := Ring.zero_mem at R with ringR
+  obtain ⟨addOp, _⟩ := matrixModule.operations at R, n, n, moduleSum(matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q))), moduleSum(matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q))), R.zero with ring, sumP, sumQ, zeroR
+  have added := moduleSum.add at R, matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q)), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q)) with ringR, module, finiteD, rP, rQ
+  rw [overP, overQ, overS, ← addOp, added]
+  have sP := functionSpace.mem_iff.backward with rP
+  have sQ := functionSpace.mem_iff.backward with rQ
+  have spaceSum := pointwiseSum.space at R, polyDegrees(R, p) ∪ polyDegrees(R, q), matrixModule(R, n, n), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q)), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q)) with module, sP, sQ
+  have fSum := functionSpace.mem_iff.forward with spaceSum
+  apply moduleSum.congr at R, matrixModule(R, n, n), polyDegrees(R, p) ∪ polyDegrees(R, q), restrict(matPolyTerms(R, n, A, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q)), polyDegrees(R, p) ∪ polyDegrees(R, q)), pointwiseSum(polyDegrees(R, p) ∪ polyDegrees(R, q), matrixModule(R, n, n), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q)), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q))) with ringR, module, finiteD, rS, fSum
+  intros k hk
+  have kN := natural with k, hk
+  have kNat := nat.omega.backward with kN
+  have at1 := pointwiseSum.at at R, polyDegrees(R, p) ∪ polyDegrees(R, q), matrixModule(R, n, n), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p) ∪ polyDegrees(R, q)), restrict(matPolyTerms(R, n, A, q), polyDegrees(R, p) ∪ polyDegrees(R, q)), k with module, sP, sQ, hk
+  have r1 := restrict.domain_apply with termsP, natural, hk
+  have r2 := restrict.domain_apply with termsQ, natural, hk
+  have r3 := restrict.domain_apply with termsS, natural, hk
+  have v1 := cldA.matPolyTerms.apply at R, n, A, p, k with ring, finite, matrix, memberP
+  have v2 := cldA.matPolyTerms.apply at R, n, A, q, k with ring, finite, matrix, memberQ
+  have v3 := cldA.matPolyTerms.apply at R, n, A, coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, p, q), k with ring, finite, matrix, memberS
+  have c := coeffAdd with k, kN
+  have cp := cldA.polyCoeff.mem at R, p, k with ring, memberP
+  have cq := cldA.polyCoeff.mem at R, q, k with ring, memberQ
+  have pk := matPow.mem at R, n, A, k with ring, finite, matrix
+  have sp := matSmul.mem_of at R, n, n, p({(0, k)}), matPow(R, n, A, k) with ring, cp, pk
+  have sq := matSmul.mem_of at R, n, n, q({(0, k)}), matPow(R, n, A, k) with ring, cq, pk
+  obtain ⟨addK, _⟩ := matrixModule.operations at R, n, n, matSmul(R, n, n, p({(0, k)}), matPow(R, n, A, k)), matSmul(R, n, n, q({(0, k)}), matPow(R, n, A, k)), R.zero with ring, sp, sq, zeroR
+  have dist := cldA.matSmul.add_scalar at R, n, n, p({(0, k)}), q({(0, k)}), matPow(R, n, A, k) with ring, cp, cq, pk
+  rw [at1, r1, r2, r3, v1, v2, v3, c, dist, addK]
+
+theorem cldA.matPolyEval.mem (A p : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyEval(R, n, A, p) ∈ matrixSpace(R, n, n)
+proof
+  have ringR := CommRing.to_ring with ring
+  have module := matrixModule.module at R, n, n with ring
+  obtain ⟨finD, natD⟩ := cldA.polyDegrees.finite at R, p with ring, member
+  have terms := cldA.matPolyTerms.function at R, n, A, p with ring, finite, matrix, member
+  have carrier := cldA.matrixModule.carrier at R, n, n
+  rw ← carrier at terms
+  have restricted := restrict.domain_function with terms, natD
+  have sum := moduleSum.mem at R, matrixModule(R, n, n), polyDegrees(R, p), restrict(matPolyTerms(R, n, A, p), polyDegrees(R, p)) with ringR, module, finD, restricted
+  rw carrier at sum
+  unfold matPolyEval
+  exact sum
+end CldAPolyTerms
+
+def cldA.evalAgree (R m B : Set) : Set :=
+  { p ∈ polynomials({0}, R.carrier, R.zero) |
+    matrixEvaluation(R, m, B)(p) = matPolyEval(R, m, B, p) }
+
+section CldAAgreement
+variable (R : Set)
+hypothesis ring : CommRing(R)
+
+theorem cldA.matrixEvaluation.matPolyEval (m : Nat) (B p : Set)
+  requires matrix : B ∈ matrixSpace(R, m, m)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matrixEvaluation(R, m, B)(p) = matPolyEval(R, m, B, p)
+proof
+  have finite := Finite.natural at m
+  have guard := cldA.matrixSpace.cumulus at R, m, B with ring, matrix
+  have parts := CommRing.parts with ring
+  have ringR := CommRing.to_ring with ring
+  have hom := matrixEvaluation.hom at R, m, B with ring, guard
+  have homParts := RingHom.parts with hom
+  rw [polynomialRing.carrierOf, polynomialRing.addOf, polynomialRing.zeroOf, polynomialRing.negOf, polynomialRing.mulOf, polynomialRing.oneOf] at homParts
+  have same := squareMatrixRing.nat at R, m with ring
+  have p0 := member
+  rw polynomialRing.carrierOf at p0
+  have base : constantFunction(monomials({0}), R.carrier, R.zero) ∈ cldA.evalAgree(R, m, B)
+    have pr := CommRing.to_ring with (polynomialRing.comm_ring at R, {0} with ring)
+    have zp := Ring.zero_mem at polynomialRing(R, {0}) with pr
+    rw [polynomialRing.zeroOf, polynomialRing.carrierOf] at zp
+    apply cldA.evalAgree.membership.backward
+    refine ⟨zp, ?_⟩
+    have z1 := IsRingHom.zero with homParts
+    have z2 := commutant.zero_value at R, m, B with ring, guard
+    have z3 := cldA.squareMatrixRing.zero at R, m with ring
+    have z4 := cldA.matPolyEval.zero at R, m, B with ring, finite, matrix
+    rw [z1, z2, ← same, z3, z4]
+  have terms : ∀ a ∈ R.carrier, ∀ mono ∈ monomials({0}), polynomialTerm({0}, R.carrier, R.zero, a, mono) ∈ cldA.evalAgree(R, m, B)
+    intros a ha mono hm
+    obtain ⟨kNat, shape⟩ := cldA.monomial.shape at R, mono with ring, hm
+    have zeroR := Ring.zero_mem at R with ringR
+    have t0 := polynomialTerm.member at {0}, R.carrier, R.zero, a, mono with zeroR, ha
+    apply cldA.evalAgree.membership.backward
+    refine ⟨t0, ?_⟩
+    rw shape
+    have e1 := cldA.matrixEvaluation.term at R, m, B, a, mono(0) with ring, matrix, ha
+    have e2 := cldA.matPolyEval.term at R, m, B, a, mono(0) with ring, finite, matrix, ha
+    rw [e1, e2]
+  have sums : ∀ f ∈ cldA.evalAgree(R, m, B), ∀ g ∈ cldA.evalAgree(R, m, B), coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, f, g) ∈ cldA.evalAgree(R, m, B)
+    intros f hf g hg
+    obtain ⟨f0, fe⟩ := cldA.evalAgree.membership.forward with hf
+    obtain ⟨g0, ge⟩ := cldA.evalAgree.membership.forward with hg
+    have s0 := polynomials.add at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, f, g with parts, f0, g0
+    apply cldA.evalAgree.membership.backward
+    refine ⟨s0, ?_⟩
+    have fm : f ∈ Ring.carrier(polynomialRing(R, {0}))
+      rw polynomialRing.carrierOf
+      exact f0
+    have gm : g ∈ Ring.carrier(polynomialRing(R, {0}))
+      rw polynomialRing.carrierOf
+      exact g0
+    have pa := polynomialAdd.apply at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, f, g with parts, f0, g0
+    have ha := IsRingHom.add at matrixEvaluation(R, m, B), polynomials({0}, R.carrier, R.zero), polynomialAdd({0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one), constantFunction(monomials({0}), R.carrier, R.zero), polynomialNeg({0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one), polynomialMul({0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one), polynomialConstant({0}, R.carrier, R.zero, R.one), Ring.carrier(commutant(R, m, B)), Ring.add(commutant(R, m, B)), Ring.zero(commutant(R, m, B)), Ring.neg(commutant(R, m, B)), Ring.mul(commutant(R, m, B)), Ring.one(commutant(R, m, B)), f, g with homParts, f0, g0
+    rw pa at ha
+    have fc := IsRingHom.closed with homParts, f0
+    have gc := IsRingHom.closed with homParts, g0
+    have av := commutant.add_value at R, m, B, matrixEvaluation(R, m, B)(f), matrixEvaluation(R, m, B)(g) with ring, guard, fc, gc
+    have ef := cldA.matPolyEval.add at R, m, B, f, g with ring, finite, matrix, fm, gm
+    have sub := commutant.subset at R, m, B with ring, guard
+    have fS := sub with matrixEvaluation(R, m, B)(f), fc
+    have gS := sub with matrixEvaluation(R, m, B)(g), gc
+    have carrier : Ring.carrier(squareMatrixRing(R, m)) = matrixSpace(R, m, m)
+      unfold squareMatrixRing
+      ring_projections
+    rw [← same, carrier] at fS
+    rw [← same, carrier] at gS
+    have ae := cldA.squareMatrixRing.add_eq at R, m, matrixEvaluation(R, m, B)(f), matrixEvaluation(R, m, B)(g) with ring, fS, gS
+    rw [ha, av, ← same, ae, fe, ge, ef]
+  have inS := polynomials.induction at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, cldA.evalAgree(R, m, B), p with parts, p0, base, terms, sums
+  obtain ⟨_, result⟩ := cldA.evalAgree.membership.forward with inS
+  exact result
+end CldAAgreement
+
+section CldATransport
+variable (R n : Set)
+hypothesis ring : CommRing(R)
+hypothesis finite : Finite(n)
+
+theorem cldA.submatrix.add (n2 e X Y : Set)
+  requires bijective : BijectiveBetween(e, n2, n)
+  requires first : X ∈ matrixSpace(R, n, n)
+  requires second : Y ∈ matrixSpace(R, n, n)
+  shows submatrix(R, n2, n2, matAdd(R, n, n, X, Y), e, e) =
+    matAdd(R, n2, n2, submatrix(R, n2, n2, X, e, e), submatrix(R, n2, n2, Y, e, e))
+proof
+  have eF := Injective.function with (Bijective.injective with bijective)
+  have xy := matAdd.mem_of at R, n, n, X, Y with ring, first, second
+  have sxy := submatrix.mem_of at R, n, n, n2, n2, matAdd(R, n, n, X, Y), e, e with xy, eF, eF
+  have sx := submatrix.mem_of at R, n, n, n2, n2, X, e, e with first, eF, eF
+  have sy := submatrix.mem_of at R, n, n, n2, n2, Y, e, e with second, eF, eF
+  have right := matAdd.mem_of at R, n2, n2, submatrix(R, n2, n2, X, e, e), submatrix(R, n2, n2, Y, e, e) with ring, sx, sy
+  apply (matrixSpace.ext at R, n2, n2, submatrix(R, n2, n2, matAdd(R, n, n, X, Y), e, e), matAdd(R, n2, n2, submatrix(R, n2, n2, X, e, e), submatrix(R, n2, n2, Y, e, e)) with ring, sxy, right).backward
+  intros i hi j hj
+  have ei := FunctionBetween.apply_closed with eF, hi
+  have ej := FunctionBetween.apply_closed with eF, hj
+  have a1 := submatrix.at at R, n, n, n2, n2, matAdd(R, n, n, X, Y), e, e, i, j with xy, eF, eF, hi, hj
+  have a2 := matAdd.at at R, n, n, X, Y, e(i), e(j) with ring, first, second, ei, ej
+  have a3 := matAdd.at at R, n2, n2, submatrix(R, n2, n2, X, e, e), submatrix(R, n2, n2, Y, e, e), i, j with ring, sx, sy, hi, hj
+  have a4 := submatrix.at at R, n, n, n2, n2, X, e, e, i, j with first, eF, eF, hi, hj
+  have a5 := submatrix.at at R, n, n, n2, n2, Y, e, e, i, j with second, eF, eF, hi, hj
+  rw [a1, a2, a3, a4, a5]
+
+theorem cldA.submatrix.smul (n2 e a X : Set)
+  requires bijective : BijectiveBetween(e, n2, n)
+  requires scalar : a ∈ R.carrier
+  requires matrix : X ∈ matrixSpace(R, n, n)
+  shows submatrix(R, n2, n2, matSmul(R, n, n, a, X), e, e) =
+    matSmul(R, n2, n2, a, submatrix(R, n2, n2, X, e, e))
+proof
+  have eF := Injective.function with (Bijective.injective with bijective)
+  have ax := matSmul.mem_of at R, n, n, a, X with ring, scalar, matrix
+  have sax := submatrix.mem_of at R, n, n, n2, n2, matSmul(R, n, n, a, X), e, e with ax, eF, eF
+  have sx := submatrix.mem_of at R, n, n, n2, n2, X, e, e with matrix, eF, eF
+  have right := matSmul.mem_of at R, n2, n2, a, submatrix(R, n2, n2, X, e, e) with ring, scalar, sx
+  apply (matrixSpace.ext at R, n2, n2, submatrix(R, n2, n2, matSmul(R, n, n, a, X), e, e), matSmul(R, n2, n2, a, submatrix(R, n2, n2, X, e, e)) with ring, sax, right).backward
+  intros i hi j hj
+  have ei := FunctionBetween.apply_closed with eF, hi
+  have ej := FunctionBetween.apply_closed with eF, hj
+  have a1 := submatrix.at at R, n, n, n2, n2, matSmul(R, n, n, a, X), e, e, i, j with ax, eF, eF, hi, hj
+  have a2 := matSmul.at at R, n, n, a, X, e(i), e(j) with ring, scalar, matrix, ei, ej
+  have a3 := matSmul.at at R, n2, n2, a, submatrix(R, n2, n2, X, e, e), i, j with ring, scalar, sx, hi, hj
+  have a4 := submatrix.at at R, n, n, n2, n2, X, e, e, i, j with matrix, eF, eF, hi, hj
+  rw [a1, a2, a3, a4]
+
+theorem cldA.submatrix.zero (n2 e : Set)
+  requires bijective : BijectiveBetween(e, n2, n)
+  shows submatrix(R, n2, n2, matZero(R, n, n), e, e) = matZero(R, n2, n2)
+proof
+  have eF := Injective.function with (Bijective.injective with bijective)
+  have z := matZero.mem_of at R, n, n with ring
+  have sz := submatrix.mem_of at R, n, n, n2, n2, matZero(R, n, n), e, e with z, eF, eF
+  have right := matZero.mem_of at R, n2, n2 with ring
+  apply (matrixSpace.ext at R, n2, n2, submatrix(R, n2, n2, matZero(R, n, n), e, e), matZero(R, n2, n2) with ring, sz, right).backward
+  intros i hi j hj
+  have ei := FunctionBetween.apply_closed with eF, hi
+  have ej := FunctionBetween.apply_closed with eF, hj
+  have a1 := submatrix.at at R, n, n, n2, n2, matZero(R, n, n), e, e, i, j with z, eF, eF, hi, hj
+  have a2 := matZero.at at R, n, n, e(i), e(j) with ring, ei, ej
+  have a3 := matZero.at at R, n2, n2, i, j with ring, hi, hj
+  rw [a1, a2, a3]
+
+theorem cldA.submatrix.one (n2 e : Set)
+  requires bijective : BijectiveBetween(e, n2, n)
+  shows submatrix(R, n2, n2, matOne(R, n), e, e) = matOne(R, n2)
+proof
+  have eInj := Bijective.injective with bijective
+  have eF := Injective.function with eInj
+  have o := matOne.mem_of at R, n with ring
+  have so := submatrix.mem_of at R, n, n, n2, n2, matOne(R, n), e, e with o, eF, eF
+  have right := matOne.mem_of at R, n2 with ring
+  apply (matrixSpace.ext at R, n2, n2, submatrix(R, n2, n2, matOne(R, n), e, e), matOne(R, n2) with ring, so, right).backward
+  intros i hi j hj
+  have ei := FunctionBetween.apply_closed with eF, hi
+  have ej := FunctionBetween.apply_closed with eF, hj
+  have a1 := submatrix.at at R, n, n, n2, n2, matOne(R, n), e, e, i, j with o, eF, eF, hi, hj
+  rw a1
+  by_cases same : i = j
+  . have s1 : e(i) = e(j)
+      rw same
+    rw [same]
+    have b1 := matOne.same at R, n, e(j) with ring, ej
+    have b2 := matOne.same at R, n2, j with ring, hj
+    rw [b1, b2]
+  . have s1 : e(i) ≠ e(j)
+      intro equal
+      apply same
+      exact Injective.apply_cancel with eInj, hi, hj, equal
+    have b1 := matOne.other at R, n, e(i), e(j) with ring, ei, ej, s1
+    have b2 := matOne.other at R, n2, i, j with ring, hi, hj, same
+    rw [b1, b2]
+
+theorem cldA.submatrix.pow (n2 e A : Set) (k : Nat)
+  requires finite2 : Finite(n2)
+  requires bijective : BijectiveBetween(e, n2, n)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows submatrix(R, n2, n2, matPow(R, n, A, k), e, e) =
+    matPow(R, n2, submatrix(R, n2, n2, A, e, e), k)
+proof
+  have eF := Injective.function with (Bijective.injective with bijective)
+  induction k
+  | zero =>
+    have z1 : matPow(R, n, A, 0) = matOne(R, n)
+      simp [matPow]
+    have z2 : matPow(R, n2, submatrix(R, n2, n2, A, e, e), 0) = matOne(R, n2)
+      simp [matPow]
+    have o := cldA.submatrix.one at R, n, n2, e with ring, finite, bijective
+    rw [z1, z2, o]
+  | succ(j) using ih =>
+    have s1 : matPow(R, n, A, succ(j)) = matMul(R, n, n, n, matPow(R, n, A, j), A)
+      simp [matPow]
+    have s2 : matPow(R, n2, submatrix(R, n2, n2, A, e, e), succ(j)) = matMul(R, n2, n2, n2, matPow(R, n2, submatrix(R, n2, n2, A, e, e), j), submatrix(R, n2, n2, A, e, e))
+      simp [matPow]
+    have pj := matPow.mem at R, n, A, j with ring, finite, matrix
+    have mul := submatrix.mul at R, n, n, n, n2, n2, n2, matPow(R, n, A, j), A, e, e, e with ring, finite, pj, matrix, eF, bijective, eF
+    rw [s1, s2, ← mul, ih]
+end CldATransport
+
+def cldA.transportAgree (R n n2 A e : Set) : Set :=
+  { p ∈ polynomials({0}, R.carrier, R.zero) |
+    submatrix(R, n2, n2, matPolyEval(R, n, A, p), e, e) =
+      matPolyEval(R, n2, submatrix(R, n2, n2, A, e, e), p) }
+
+section CldATransportEval
+variable (R n : Set)
+hypothesis ring : CommRing(R)
+hypothesis finite : Finite(n)
+
+theorem cldA.submatrix.matPolyEval (n2 e A p : Set)
+  requires finite2 : Finite(n2)
+  requires bijective : BijectiveBetween(e, n2, n)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows submatrix(R, n2, n2, matPolyEval(R, n, A, p), e, e) =
+    matPolyEval(R, n2, submatrix(R, n2, n2, A, e, e), p)
+proof
+  have parts := CommRing.parts with ring
+  have ringR := CommRing.to_ring with ring
+  have eF := Injective.function with (Bijective.injective with bijective)
+  have sA := submatrix.mem_of at R, n, n, n2, n2, A, e, e with matrix, eF, eF
+  have p0 := member
+  rw polynomialRing.carrierOf at p0
+  have base : constantFunction(monomials({0}), R.carrier, R.zero) ∈ cldA.transportAgree(R, n, n2, A, e)
+    have pr := CommRing.to_ring with (polynomialRing.comm_ring at R, {0} with ring)
+    have zp := Ring.zero_mem at polynomialRing(R, {0}) with pr
+    rw [polynomialRing.zeroOf, polynomialRing.carrierOf] at zp
+    apply cldA.transportAgree.membership.backward
+    refine ⟨zp, ?_⟩
+    have z1 := cldA.matPolyEval.zero at R, n, A with ring, finite, matrix
+    have z2 := cldA.matPolyEval.zero at R, n2, submatrix(R, n2, n2, A, e, e) with ring, finite2, sA
+    have z3 := cldA.submatrix.zero at R, n, n2, e with ring, finite, bijective
+    rw [z1, z2, z3]
+  have terms : ∀ a ∈ R.carrier, ∀ mono ∈ monomials({0}), polynomialTerm({0}, R.carrier, R.zero, a, mono) ∈ cldA.transportAgree(R, n, n2, A, e)
+    intros a ha mono hm
+    obtain ⟨kNat, shape⟩ := cldA.monomial.shape at R, mono with ring, hm
+    have zeroR := Ring.zero_mem at R with ringR
+    have t0 := polynomialTerm.member at {0}, R.carrier, R.zero, a, mono with zeroR, ha
+    apply cldA.transportAgree.membership.backward
+    refine ⟨t0, ?_⟩
+    rw shape
+    have e1 := cldA.matPolyEval.term at R, n, A, a, mono(0) with ring, finite, matrix, ha
+    have e2 := cldA.matPolyEval.term at R, n2, submatrix(R, n2, n2, A, e, e), a, mono(0) with ring, finite2, sA, ha
+    have pk := matPow.mem at R, n, A, mono(0) with ring, finite, matrix
+    have e3 := cldA.submatrix.smul at R, n, n2, e, a, matPow(R, n, A, mono(0)) with ring, finite, bijective, ha, pk
+    have e4 := cldA.submatrix.pow at R, n, n2, e, A, mono(0) with ring, finite, finite2, bijective, matrix
+    rw [e1, e2, e3, e4]
+  have sums : ∀ f ∈ cldA.transportAgree(R, n, n2, A, e), ∀ g ∈ cldA.transportAgree(R, n, n2, A, e), coefficientAdd(monomials({0}), R.carrier, R.add, R.zero, R.neg, R.mul, R.one, f, g) ∈ cldA.transportAgree(R, n, n2, A, e)
+    intros f hf g hg
+    obtain ⟨f0, fe⟩ := cldA.transportAgree.membership.forward with hf
+    obtain ⟨g0, ge⟩ := cldA.transportAgree.membership.forward with hg
+    have s0 := polynomials.add at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, f, g with parts, f0, g0
+    apply cldA.transportAgree.membership.backward
+    refine ⟨s0, ?_⟩
+    have fm : f ∈ Ring.carrier(polynomialRing(R, {0}))
+      rw polynomialRing.carrierOf
+      exact f0
+    have gm : g ∈ Ring.carrier(polynomialRing(R, {0}))
+      rw polynomialRing.carrierOf
+      exact g0
+    have a1 := cldA.matPolyEval.add at R, n, A, f, g with ring, finite, matrix, fm, gm
+    have a2 := cldA.matPolyEval.add at R, n2, submatrix(R, n2, n2, A, e, e), f, g with ring, finite2, sA, fm, gm
+    have mf := cldA.matPolyEval.mem at R, n, A, f with ring, finite, matrix, fm
+    have mg := cldA.matPolyEval.mem at R, n, A, g with ring, finite, matrix, gm
+    have a3 := cldA.submatrix.add at R, n, n2, e, matPolyEval(R, n, A, f), matPolyEval(R, n, A, g) with ring, finite, bijective, mf, mg
+    rw [a1, a2, a3, fe, ge]
+  have inS := polynomials.induction at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, cldA.transportAgree(R, n, n2, A, e), p with parts, p0, base, terms, sums
+  obtain ⟨_, result⟩ := cldA.transportAgree.membership.forward with inS
+  exact result
+end CldATransportEval
+
+-- Section: Cayley–Hamilton and evaluation as a ring map
+section CharpolyEvaluation
+variable (R n : Set)
+hypothesis ring : CommRing(R)
+hypothesis finite : Finite(n)
+
+theorem cldA.matPolyEval.mul (A x y : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires memberX : x ∈ Ring.carrier(polynomialRing(R, {0}))
+  requires memberY : y ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyEval(R, n, A, call2(Ring.mul(polynomialRing(R, {0})), x, y)) =
+    matMul(R, n, n, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y))
+proof
+  have count := cardinality.nat at n with finite
+  have finite2 := Finite.natural at cardinality(n)
+  obtain ⟨e, enumeration⟩ := Finite.cardinality_enumeration with finite
+  have eF := Injective.function with (Bijective.injective with enumeration)
+  have matrixB := submatrix.mem_of at R, n, n, cardinality(n), cardinality(n), A, e, e with matrix, eF, eF
+  have guardB := cldA.matrixSpace.cumulus at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e) with ring, matrixB
+  have pr := CommRing.to_ring with (polynomialRing.comm_ring at R, {0} with ring)
+  have xy := Ring.mul_mem at polynomialRing(R, {0}), x, y with pr, memberX, memberY
+  have hom := matrixEvaluation.hom at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e) with ring, guardB
+  have homParts := RingHom.parts with hom
+  have hm := IsRingHom.mul with homParts, memberX, memberY
+  have fx := IsRingHom.closed with homParts, memberX
+  have fy := IsRingHom.closed with homParts, memberY
+  have mv := commutant.mul_value at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), matrixEvaluation(R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e))(x), matrixEvaluation(R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e))(y) with ring, guardB, fx, fy
+  have same := squareMatrixRing.nat at R, cardinality(n) with ring
+  have ux := cldA.matrixEvaluation.matPolyEval at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), x with ring, matrixB, memberX
+  have uy := cldA.matrixEvaluation.matPolyEval at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), y with ring, matrixB, memberY
+  have uxy := cldA.matrixEvaluation.matPolyEval at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), call2(Ring.mul(polynomialRing(R, {0})), x, y) with ring, matrixB, xy
+  have tx := cldA.submatrix.matPolyEval at R, n, cardinality(n), e, A, x with ring, finite, finite2, enumeration, matrix, memberX
+  have ty := cldA.submatrix.matPolyEval at R, n, cardinality(n), e, A, y with ring, finite, finite2, enumeration, matrix, memberY
+  have txy := cldA.submatrix.matPolyEval at R, n, cardinality(n), e, A, call2(Ring.mul(polynomialRing(R, {0})), x, y) with ring, finite, finite2, enumeration, matrix, xy
+  have ex := cldA.matPolyEval.mem at R, n, A, x with ring, finite, matrix, memberX
+  have ey := cldA.matPolyEval.mem at R, n, A, y with ring, finite, matrix, memberY
+  have exy := cldA.matPolyEval.mem at R, n, A, call2(Ring.mul(polynomialRing(R, {0})), x, y) with ring, finite, matrix, xy
+  have bx := cldA.matPolyEval.mem at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), x with ring, finite2, matrixB, memberX
+  have by0 := cldA.matPolyEval.mem at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), y with ring, finite2, matrixB, memberY
+  have me := squareMatrixRing.mul_eq at R, cardinality(n), matPolyEval(R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), x), matPolyEval(R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), y) with ring, finite2, bx, by0
+  have prod := matMul.mem_of at R, n, n, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y) with ring, finite, ex, ey
+  have sm := submatrix.mul at R, n, n, n, cardinality(n), cardinality(n), cardinality(n), matPolyEval(R, n, A, x), matPolyEval(R, n, A, y), e, e, e with ring, finite, ex, ey, eF, enumeration, eF
+  rw [mv, ux, uy, uxy, ← same, me, ← tx, ← ty, sm, ← txy] at hm
+  apply matrixSpace.ext_along at R, n, matPolyEval(R, n, A, call2(Ring.mul(polynomialRing(R, {0})), x, y)), matMul(R, n, n, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y)), e with ring, exy, prod, enumeration
+  intros i hi j hj
+  have a1 := submatrix.at at R, n, n, cardinality(n), cardinality(n), matPolyEval(R, n, A, call2(Ring.mul(polynomialRing(R, {0})), x, y)), e, e, i, j with exy, eF, eF, hi, hj
+  have a2 := submatrix.at at R, n, n, cardinality(n), cardinality(n), matMul(R, n, n, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y)), e, e, i, j with prod, eF, eF, hi, hj
+  rw [← a1, ← a2, hm]
+
+theorem cldA.matPolyEvalMap.relates (A p : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows relates(matPolyEvalMap(R, n, A), p, matPolyEval(R, n, A, p))
+proof
+  have v := cldA.matPolyEval.mem at R, n, A, p with ring, finite, matrix, member
+  unfold relates
+  apply matPolyEvalMap.membership.backward
+  refine ⟨(product.pair with member, v), p, member, rfl⟩
+
+theorem cldA.matPolyEvalMap.function (A : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  shows matPolyEvalMap(R, n, A) : Ring.carrier(polynomialRing(R, {0})) → matrixSpace(R, n, n)
+proof
+  constructor
+    intros q0 hq
+    obtain ⟨bounded, _⟩ := matPolyEvalMap.membership.forward with hq
+    exact bounded
+  . constructor
+      intros z0 first xFirst second xSecond
+      unfold relates at xFirst
+      obtain ⟨_, a1, a1In, firstShape⟩ := matPolyEvalMap.membership.forward with xFirst
+      unfold relates at xSecond
+      obtain ⟨_, a2, a2In, secondShape⟩ := matPolyEvalMap.membership.forward with xSecond
+      obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+      obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+      rw [firstEqual, secondEqual]
+      cc
+    . intros p hp
+      have v := cldA.matPolyEval.mem at R, n, A, p with ring, finite, matrix, hp
+      refine ⟨matPolyEval(R, n, A, p), v, (cldA.matPolyEvalMap.relates at R, n, A, p with ring, finite, matrix, hp)⟩
+
+theorem cldA.matPolyEvalMap.apply (A p : Set)
+  requires matrix : A ∈ matrixSpace(R, n, n)
+  requires member : p ∈ Ring.carrier(polynomialRing(R, {0}))
+  shows matPolyEvalMap(R, n, A)(p) = matPolyEval(R, n, A, p)
+proof
+  have function := cldA.matPolyEvalMap.function at R, n, A with ring, finite, matrix
+  have rel := cldA.matPolyEvalMap.relates at R, n, A, p with ring, finite, matrix, member
+  exact FunctionBetween.apply_value with function, member, rel
+
 -- Matrix.aeval_self_charpoly: Cayley–Hamilton.
 theorem matCharpoly.cayley_hamilton (A : Set)
   requires matrix : A ∈ matrixSpace(R, n, n)
   shows matPolyEval(R, n, A, matCharpoly(R, n, A)) = matZero(R, n, n)
 proof
-  sorry
+  have count := cardinality.nat at n with finite
+  have finite2 := Finite.natural at cardinality(n)
+  obtain ⟨e, enumeration⟩ := Finite.cardinality_enumeration with finite
+  have eF := Injective.function with (Bijective.injective with enumeration)
+  have matrixB := submatrix.mem_of at R, n, n, cardinality(n), cardinality(n), A, e, e with matrix, eF, eF
+  have guardB := cldA.matrixSpace.cumulus at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e) with ring, matrixB
+  have chiIn := matCharpoly.mem at R, n, A with ring, finite, matrix
+  have t := cldA.submatrix.matPolyEval at R, n, cardinality(n), e, A, matCharpoly(R, n, A) with ring, finite, finite2, enumeration, matrix, chiIn
+  have u := cldA.matrixEvaluation.matPolyEval at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e), matCharpoly(R, n, A) with ring, matrixB, chiIn
+  have cp := matCharpoly.enumeration at R, n, A, e with ring, finite, matrix, enumeration
+  have ch := Matrix.cayley_hamilton at R, cardinality(n), submatrix(R, cardinality(n), cardinality(n), A, e, e) with ring, guardB
+  rw ← cp at ch
+  have same := squareMatrixRing.nat at R, cardinality(n) with ring
+  have z := cldA.squareMatrixRing.zero at R, cardinality(n) with ring
+  rw [← same, z, u] at ch
+  have z0 := cldA.submatrix.zero at R, n, cardinality(n), e with ring, finite, enumeration
+  rw [ch, ← z0] at t
+  have ev := cldA.matPolyEval.mem at R, n, A, matCharpoly(R, n, A) with ring, finite, matrix, chiIn
+  have zn := matZero.mem_of at R, n, n with ring
+  apply matrixSpace.ext_along at R, n, matPolyEval(R, n, A, matCharpoly(R, n, A)), matZero(R, n, n), e with ring, ev, zn, enumeration
+  intros i hi j hj
+  have a1 := submatrix.at at R, n, n, cardinality(n), cardinality(n), matPolyEval(R, n, A, matCharpoly(R, n, A)), e, e, i, j with ev, eF, eF, hi, hj
+  have a2 := submatrix.at at R, n, n, cardinality(n), cardinality(n), matZero(R, n, n), e, e, i, j with zn, eF, eF, hi, hj
+  rw [← a1, ← a2, t]
 
 -- p ↦ p(A) is a ring map R[X] → Mₙ(R) sending X to A and the constants to
 -- the scalar matrices (Polynomial.aeval).
@@ -1260,22 +2243,172 @@ theorem matPolyEval.hom (A : Set)
   shows RingHom(matPolyEvalMap(R, n, A), polynomialRing(R, {0}),
     squareMatrixRing(R, n))
 proof
-  sorry
+  have ringR := CommRing.to_ring with ring
+  have parts := CommRing.parts with ring
+  have pr := CommRing.to_ring with (polynomialRing.comm_ring at R, {0} with ring)
+  have sr := squareMatrixRing.ring at R, n with ring, finite
+  have function := cldA.matPolyEvalMap.function at R, n, A with ring, finite, matrix
+  have carrier : Ring.carrier(squareMatrixRing(R, n)) = matrixSpace(R, n, n)
+    unfold squareMatrixRing
+    ring_projections
+  rw ← carrier at function
+  have zeroValue : matPolyEvalMap(R, n, A)(Ring.zero(polynomialRing(R, {0}))) = Ring.zero(squareMatrixRing(R, n))
+    have zp := Ring.zero_mem at polynomialRing(R, {0}) with pr
+    have ap := cldA.matPolyEvalMap.apply at R, n, A, Ring.zero(polynomialRing(R, {0})) with ring, finite, matrix, zp
+    have z := cldA.matPolyEval.zero at R, n, A with ring, finite, matrix
+    have zs := cldA.squareMatrixRing.zero at R, n with ring
+    rw [ap, zs, polynomialRing.zeroOf, z]
+  have oneValue : matPolyEvalMap(R, n, A)(Ring.one(polynomialRing(R, {0}))) = Ring.one(squareMatrixRing(R, n))
+    have op := Ring.one_mem at polynomialRing(R, {0}) with pr
+    have ap := cldA.matPolyEvalMap.apply at R, n, A, Ring.one(polynomialRing(R, {0})) with ring, finite, matrix, op
+    have os := cldA.squareMatrixRing.one at R, n with ring
+    have oneR := Ring.one_mem at R with ringR
+    rw [ap, os, polynomialRing.oneOf]
+    unfold polynomialConstant
+    rw monomialOne.univariate
+    have t := cldA.matPolyEval.term at R, n, A, R.one, 0 with ring, finite, matrix, oneR
+    rw t
+    have z0 : matPow(R, n, A, 0) = matOne(R, n)
+      simp [matPow]
+    rw z0
+    have o := matOne.mem_of at R, n with ring
+    apply (matrixSpace.ext at R, n, n, matSmul(R, n, n, R.one, matOne(R, n)), matOne(R, n) with ring, (matSmul.mem_of at R, n, n, R.one, matOne(R, n) with ring, oneR, o), o).backward
+    intros i hi j hj
+    have a := matSmul.at at R, n, n, R.one, matOne(R, n), i, j with ring, oneR, o, hi, hj
+    have x := matrixSpace.entry_mem with o, hi, hj
+    rw a
+    ring
+  have additive : ∀ x ∈ Ring.carrier(polynomialRing(R, {0})), ∀ y ∈ Ring.carrier(polynomialRing(R, {0})), matPolyEvalMap(R, n, A)(call2(Ring.add(polynomialRing(R, {0})), x, y)) = Ring.add(squareMatrixRing(R, n))(matPolyEvalMap(R, n, A)(x), matPolyEvalMap(R, n, A)(y))
+    intros x hx y hy
+    have xy := Ring.add_mem at polynomialRing(R, {0}), x, y with pr, hx, hy
+    have a1 := cldA.matPolyEvalMap.apply at R, n, A, call2(Ring.add(polynomialRing(R, {0})), x, y) with ring, finite, matrix, xy
+    have a2 := cldA.matPolyEvalMap.apply at R, n, A, x with ring, finite, matrix, hx
+    have a3 := cldA.matPolyEvalMap.apply at R, n, A, y with ring, finite, matrix, hy
+    have x0 := hx
+    rw polynomialRing.carrierOf at x0
+    have y0 := hy
+    rw polynomialRing.carrierOf at y0
+    have pa := polynomialAdd.apply at {0}, R.carrier, R.add, R.zero, R.neg, R.mul, R.one, x, y with parts, x0, y0
+    have ev := cldA.matPolyEval.add at R, n, A, x, y with ring, finite, matrix, hx, hy
+    have mx := cldA.matPolyEval.mem at R, n, A, x with ring, finite, matrix, hx
+    have my := cldA.matPolyEval.mem at R, n, A, y with ring, finite, matrix, hy
+    have ae := cldA.squareMatrixRing.add_eq at R, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y) with ring, mx, my
+    rw [a1, a2, a3, ae, polynomialRing.addOf, pa, ev]
+  have multiplicative : ∀ x ∈ Ring.carrier(polynomialRing(R, {0})), ∀ y ∈ Ring.carrier(polynomialRing(R, {0})), matPolyEvalMap(R, n, A)(call2(Ring.mul(polynomialRing(R, {0})), x, y)) = Ring.mul(squareMatrixRing(R, n))(matPolyEvalMap(R, n, A)(x), matPolyEvalMap(R, n, A)(y))
+    intros x hx y hy
+    have xy := Ring.mul_mem at polynomialRing(R, {0}), x, y with pr, hx, hy
+    have a1 := cldA.matPolyEvalMap.apply at R, n, A, call2(Ring.mul(polynomialRing(R, {0})), x, y) with ring, finite, matrix, xy
+    have a2 := cldA.matPolyEvalMap.apply at R, n, A, x with ring, finite, matrix, hx
+    have a3 := cldA.matPolyEvalMap.apply at R, n, A, y with ring, finite, matrix, hy
+    have ev := cldA.matPolyEval.mul at R, n, A, x, y with ring, finite, matrix, hx, hy
+    have mx := cldA.matPolyEval.mem at R, n, A, x with ring, finite, matrix, hx
+    have my := cldA.matPolyEval.mem at R, n, A, y with ring, finite, matrix, hy
+    have me := squareMatrixRing.mul_eq at R, n, matPolyEval(R, n, A, x), matPolyEval(R, n, A, y) with ring, finite, mx, my
+    rw [a1, a2, a3, me, ev]
+  have negative : ∀ x ∈ Ring.carrier(polynomialRing(R, {0})), matPolyEvalMap(R, n, A)(Ring.neg(polynomialRing(R, {0}))(x)) = Ring.neg(squareMatrixRing(R, n))(matPolyEvalMap(R, n, A)(x))
+    intros x hx
+    have nx := Ring.neg_mem at polynomialRing(R, {0}), x with pr, hx
+    have inv := IsRing.add_inverse_left with (Ring.parts with pr), hx
+    have sum := additive with Ring.neg(polynomialRing(R, {0}))(x), nx, x, hx
+    rw [inv, zeroValue] at sum
+    have a2 := cldA.matPolyEvalMap.apply at R, n, A, x with ring, finite, matrix, hx
+    have a3 := cldA.matPolyEvalMap.apply at R, n, A, Ring.neg(polynomialRing(R, {0}))(x) with ring, finite, matrix, nx
+    have mx := cldA.matPolyEval.mem at R, n, A, x with ring, finite, matrix, hx
+    have mn := cldA.matPolyEval.mem at R, n, A, Ring.neg(polynomialRing(R, {0}))(x) with ring, finite, matrix, nx
+    have ae := cldA.squareMatrixRing.add_eq at R, n, matPolyEval(R, n, A, Ring.neg(polynomialRing(R, {0}))(x)), matPolyEval(R, n, A, x) with ring, mn, mx
+    have zs := cldA.squareMatrixRing.zero at R, n with ring
+    rw [a2, a3, ae, zs] at sum
+    have values : ∀ Y ∈ matrixSpace(R, n, n), matNeg(R, n, n, Y) ∈ matrixSpace(R, n, n)
+      intros Y hY
+      obtain ⟨m1, _⟩ := matNeg.mem_at at R, n, n, Y with ring, hY
+      exact m1
+    have negOf : Ring.neg(squareMatrixRing(R, n)) = matNegation(R, n)
+      unfold squareMatrixRing
+      ring_projections
+    have ga := matNegation.graph_apply at R, n, matPolyEval(R, n, A, x) with values, mx
+    rw [a2, a3, negOf, ga]
+    obtain ⟨negMem, negEntry⟩ := matNeg.mem_at at R, n, n, matPolyEval(R, n, A, x) with ring, mx
+    apply (matrixSpace.ext at R, n, n, matPolyEval(R, n, A, Ring.neg(polynomialRing(R, {0}))(x)), matNeg(R, n, n, matPolyEval(R, n, A, x)) with ring, mn, negMem).backward
+    intros i hi j hj
+    have entry : matAdd(R, n, n, matPolyEval(R, n, A, Ring.neg(polynomialRing(R, {0}))(x)), matPolyEval(R, n, A, x))((i, j)) = matZero(R, n, n)((i, j))
+      rw sum
+    have e1 := matAdd.at at R, n, n, matPolyEval(R, n, A, Ring.neg(polynomialRing(R, {0}))(x)), matPolyEval(R, n, A, x), i, j with ring, mn, mx, hi, hj
+    have e2 := matZero.at at R, n, n, i, j with ring, hi, hj
+    rw [e1, e2] at entry
+    have e3 := negEntry with i, hi, j, hj
+    have u := matrixSpace.entry_mem with mn, hi, hj
+    have v := matrixSpace.entry_mem with mx, hi, hj
+    rw e3
+    linear_combination entry
+  have engine : IsRingHom(matPolyEvalMap(R, n, A), Ring.carrier(polynomialRing(R, {0})), Ring.add(polynomialRing(R, {0})), Ring.zero(polynomialRing(R, {0})), Ring.neg(polynomialRing(R, {0})), Ring.mul(polynomialRing(R, {0})), Ring.one(polynomialRing(R, {0})), Ring.carrier(squareMatrixRing(R, n)), Ring.add(squareMatrixRing(R, n)), Ring.zero(squareMatrixRing(R, n)), Ring.neg(squareMatrixRing(R, n)), Ring.mul(squareMatrixRing(R, n)), Ring.one(squareMatrixRing(R, n)))
+    unfold IsRingHom
+    exact ⟨function, zeroValue, oneValue, negative, additive, multiplicative⟩
+  exact RingHom.of_projections with pr, sr, engine
 
 theorem matPolyEval.variable (A : Set)
   requires matrix : A ∈ matrixSpace(R, n, n)
   shows matPolyEval(R, n, A, X(R, {0}, 0)) = A
 proof
-  sorry
+  have ringR := CommRing.to_ring with ring
+  have oneR := Ring.one_mem at R with ringR
+  have zero : 0 ∈ {0} by simp [singleton.membership]
+  have mv := monomialVariable.member at {0}, 0
+  have one : (1:Nat) ∈ ℕ by typecheck
+  have single := monomials.univariate at 1
+  have shape : monomialVariable({0}, 0) = {(0, 1)}
+    apply monomials.ext at {0}, monomialVariable({0}, 0), {(0, 1)} with mv, single
+    intros i hi
+    rw singleton.membership at hi
+    rw hi
+    have v1 := monomialVariable.same at {0}, 0 with zero
+    have c := constantFunction.univariate at ℕ, 1 with one
+    have v2 := constantFunction.apply at {0}, ℕ, 0, 1 with zero, one
+    rw c at v2
+    rw [v1, v2]
+  rw [X.value]
+  unfold polynomialVariable
+  rw shape
+  have t := cldA.matPolyEval.term at R, n, A, R.one, 1 with ring, finite, matrix, oneR
+  rw t
+  have p1 : matPow(R, n, A, 1) = A
+    have z : matPow(R, n, A, 1) = matMul(R, n, n, n, matPow(R, n, A, 0), A)
+      simp [matPow]
+    have z0 : matPow(R, n, A, 0) = matOne(R, n)
+      simp [matPow]
+    have o := matMul.one_left at R, n, n, A with ring, finite, matrix
+    rw [z, z0, o]
+  rw p1
+  have sm := matSmul.mem_of at R, n, n, R.one, A with ring, oneR, matrix
+  apply (matrixSpace.ext at R, n, n, matSmul(R, n, n, R.one, A), A with ring, sm, matrix).backward
+  intros i hi j hj
+  have a := matSmul.at at R, n, n, R.one, A, i, j with ring, oneR, matrix, hi, hj
+  have x := matrixSpace.entry_mem with matrix, hi, hj
+  rw a
+  ring
 
 theorem matPolyEval.constant (A a : Set)
   requires matrix : A ∈ matrixSpace(R, n, n)
   requires scalar : a ∈ R.carrier
   shows matPolyEval(R, n, A, polynomialConstant(R, {0})(a)) = matScalar(R, n, a)
 proof
-  sorry
+  have ringR := CommRing.to_ring with ring
+  have zeroR := Ring.zero_mem at R with ringR
+  have v := polynomialCoefficients.value at {0}, R.carrier, R.zero, a with zeroR, scalar
+  rw [polynomialConstant.graph, v]
+  unfold polynomialConstant
+  rw monomialOne.univariate
+  have t := cldA.matPolyEval.term at R, n, A, a, 0 with ring, finite, matrix, scalar
+  rw t
+  have z0 : matPow(R, n, A, 0) = matOne(R, n)
+    simp [matPow]
+  rw z0
+  have o := matOne.mem_of at R, n with ring
+  have sc := matScalar.mul at R, n, n, a, matOne(R, n) with ring, finite, scalar, o
+  have sm := matScalar.mem_of at R, n, a with ring, scalar
+  have one := matMul.one_right at R, n, n, matScalar(R, n, a) with ring, finite, sm
+  rw [← sc, one]
 
-end Charpoly
+end CharpolyEvaluation
 
 -- Section: Eigenvalue criteria for matrices over a field
 theorem matEigenvalues.det_criterion (K n A a : Set)
@@ -1383,6 +2516,15 @@ proof
   have e1 := vecSmul.at at R, n, a, v, j with ring, scalar, vector, hj
   have e2 := pointwiseSmul.at at R, n, selfModule(R), a, v, j with selfM, scalar, vS, hj
   rw [e1, e2, selfModule.smul_eq]
+
+-- Finite sets of indices on which eigenvector families are independent
+-- (the induction behind eigenspace.independent).
+def cldA.eigenIndependentSets (M R I f λ : Set) : Set :=
+  { F ∈ 𝒫(I) | ∀ w, (w : F → Module.carrier(M)) →
+    (∀ x ∈ F, w(x) ∈ eigenspace(M, R, f, λ(x)) ∧ w(x) ≠ Module.zero(M)) →
+    ∀ c, (c : F → Ring.carrier(R)) →
+    moduleCombination(M, R, F, c, w) = Module.zero(M) →
+    (∀ x ∈ F, c(x) = Ring.zero(R)) }
 
 -- Section: Laws of eigenspaces
 section Eigen
@@ -1577,6 +2719,198 @@ proof
   have gs := LinearMap.map_smul at R, M, M, g, a, v with ringR, module, module, second
   rw [c, eq, gs]
 
+theorem cldA.moduleCombination.insert (F a c w : Set)
+  requires finite : Finite(F)
+  requires fresh : a ∉ F
+  requires coefficients : c : F ∪ {a} → R.carrier
+  requires vectors : w : F ∪ {a} → M.carrier
+  shows moduleCombination(M, R, F ∪ {a}, c, w) =
+    call2(M.add, moduleCombination(M, R, F, restrict(c, F), restrict(w, F)),
+      call2(M.smul, c(a), w(a)))
+proof
+  have ringR := CommRing.to_ring with ring
+  have sub : F ⊆ F ∪ {a} by simp [Subset, union2.membership]
+  have aIn : a ∈ F ∪ {a} by simp [union2.membership, singleton.membership]
+  have terms := combinationTerms.function at M, R, F ∪ {a}, c, w with module, coefficients, vectors
+  have cF := restrict.domain_function with coefficients, sub
+  have wF := restrict.domain_function with vectors, sub
+  have termsF := combinationTerms.function at M, R, F, restrict(c, F), restrict(w, F) with module, cF, wF
+  have restricted := restrict.domain_function with terms, sub
+  have same : restrict(combinationTerms(M, R, F ∪ {a}, c, w), F) = combinationTerms(M, R, F, restrict(c, F), restrict(w, F))
+    apply FunctionBetween.ext with restricted, termsF
+    intros y hy
+    have yIn := sub with y, hy
+    have r1 := restrict.domain_apply with terms, sub, hy
+    have v1 := combinationTerms.value at M, R, F ∪ {a}, c, w, y with module, coefficients, vectors, yIn
+    have v2 := combinationTerms.value at M, R, F, restrict(c, F), restrict(w, F), y with module, cF, wF, hy
+    have r2 := restrict.domain_apply with coefficients, sub, hy
+    have r3 := restrict.domain_apply with vectors, sub, hy
+    rw [r1, v1, v2, r2, r3]
+  have ins := moduleSum.insert at R, M, F, combinationTerms(M, R, F ∪ {a}, c, w), a with ringR, module, finite, fresh, terms
+  have va := combinationTerms.value at M, R, F ∪ {a}, c, w, a with module, coefficients, vectors, aIn
+  unfold moduleCombination
+  rw [ins, same, va]
+
+theorem cldA.smul.eq_zero (r v : Set)
+  requires field : Field(R)
+  requires scalar : r ∈ R.carrier
+  requires vector : v ∈ M.carrier
+  requires vanishes : call2(M.smul, r, v) = M.zero
+  requires nonzero : v ≠ M.zero
+  shows r = R.zero
+proof
+  have ringR := CommRing.to_ring with ring
+  obtain ⟨_, _, inverses⟩ := Field.parts with field
+  by_contra rNonzero
+  obtain ⟨y, inverse⟩ := inverses with r, scalar, rNonzero
+  obtain ⟨_, yIn, left, _⟩ := inverse
+  have l1 := one_smul at R, M, v with ringR, module, vector
+  have l2 := mul_smul at R, M, y, r, v with ringR, module, yIn, scalar, vector
+  have l3 := smul_zero at R, M, y with ringR, module, yIn
+  rw [left, l1, vanishes, l3] at l2
+  exact nonzero with l2
+
+theorem cldA.eigenspace.shift_value (f a b w : Set)
+  requires linear : LinearMap(f, M, R, M)
+  requires scalarA : a ∈ R.carrier
+  requires scalarB : b ∈ R.carrier
+  requires member : w ∈ eigenspace(M, R, f, b)
+  shows shiftedMap(M, f, a)(w) = call2(M.smul, call2(R.add, b, apply(R.neg, a)), w)
+proof
+  have ringR := CommRing.to_ring with ring
+  obtain ⟨wIn, eq⟩ := eigenspace.membership.forward with member
+  have sv := shiftedMap.apply_of at R, M, f, a, w with ring, module, linear, scalarA, wIn
+  have ns := neg_smul at R, M, a, w with ringR, module, scalarA, wIn
+  have na := Ring.neg_mem at R, a with ringR, scalarA
+  have ad := add_smul at R, M, b, apply(R.neg, a), w with ringR, module, scalarB, na, wIn
+  rw [sv, eq, ← ns, ad]
+
+-- Every finite set of indices carries the independence of eigenvector
+-- families (induction on the finite set, applying f − λ(a)).
+theorem cldA.eigenIndependentSets.finite (f I λ : Set)
+  requires field : Field(R)
+  requires linear : LinearMap(f, M, R, M)
+  requires distinct : InjectiveBetween(λ, I, R.carrier)
+  shows ∀ F, F ⊆ I → Finite(F) → F ∈ cldA.eigenIndependentSets(M, R, I, f, λ)
+proof
+  have ringR := CommRing.to_ring with ring
+  have λF := Injective.function with distinct
+  have zeroR := Ring.zero_mem at R with ringR
+  have zeroM := Module.zero_mem at R, M with ringR, module
+  have base : ∅ ∈ cldA.eigenIndependentSets(M, R, I, f, λ)
+    apply cldA.eigenIndependentSets.membership.backward
+    have e0 : ∅ ∈ 𝒫(I) by simp [powerset.membership, Subset]
+    refine ⟨e0, ?_⟩
+    intros w wF eig c cF comb x hx
+    exfalso
+    exact set.empty with hx
+  have step : ∀ F ⊆ I, Finite(F) → ∀ a ∈ I, a ∉ F → F ∈ cldA.eigenIndependentSets(M, R, I, f, λ) → F ∪ {a} ∈ cldA.eigenIndependentSets(M, R, I, f, λ)
+    intros F FI finF a aI fresh hF
+    obtain ⟨_, ih⟩ := cldA.eigenIndependentSets.membership.forward with hF
+    apply cldA.eigenIndependentSets.membership.backward
+    have sub : F ⊆ F ∪ {a} by simp [Subset, union2.membership]
+    have aIn : a ∈ F ∪ {a} by simp [union2.membership, singleton.membership]
+    have bigger : F ∪ {a} ∈ 𝒫(I)
+      apply powerset.membership.backward
+      intros y hy
+      rw [union2.membership, singleton.membership] at hy
+      cases hy with inF | isA
+      . exact FI with y, inF
+      . rw isA
+        exact aI
+    refine ⟨bigger, ?_⟩
+    intros w wF eig c cF comb
+    have λa := FunctionBetween.apply_closed with λF, aI
+    have g := shiftedMap.linear at R, M, f, λ(a) with ring, module, linear, λa
+    have gF := LinearMap.function_of with g
+    have mapped := LinearMap.map_combination at R, M, M, shiftedMap(M, f, λ(a)), F ∪ {a}, c, w with ringR, module, module, g, (Finite.union with finF, (Finite.singleton at a)), cF, wF
+    have gz := LinearMap.map_zero at R, M, M, shiftedMap(M, f, λ(a)) with ringR, module, module, g
+    rw [comb, gz] at mapped
+    have gwF := compose.function at shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier with wF, gF
+    have ins := cldA.moduleCombination.insert at R, M, F, a, c, compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier) with ring, module, finF, fresh, cF, gwF
+    have ga := compose.apply at shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier, a with wF, gF, aIn
+    obtain ⟨eigA, _⟩ := eig with a, aIn
+    have sva := cldA.eigenspace.shift_value at R, M, f, λ(a), λ(a), w(a) with ring, module, linear, λa, λa, eigA
+    have inv := IsRing.add_inverse_right with (Ring.parts with ringR), λa
+    have wa := FunctionBetween.apply_closed with wF, aIn
+    have zs := zero_smul at R, M, w(a) with ringR, module, wa
+    have ca := FunctionBetween.apply_closed with cF, aIn
+    have sz := smul_zero at R, M, c(a) with ringR, module, ca
+    rw [ga, sva, inv, zs, sz] at ins
+    have cFr := restrict.domain_function with cF, sub
+    have uF := restrict.domain_function with gwF, sub
+    have combU := moduleCombination.mem_of at R, M, F, restrict(c, F), restrict(compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier), F) with ringR, module, finF, cFr, uF
+    have az := Module.add_zero at R, M, moduleCombination(M, R, F, restrict(c, F), restrict(compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier), F)) with ringR, module, combU
+    rw [az, ← mapped] at ins
+    symm at ins
+    have eigU : ∀ y ∈ F, restrict(compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier), F)(y) ∈ eigenspace(M, R, f, λ(y)) ∧ restrict(compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier), F)(y) ≠ M.zero
+      intros y hy
+      have yIn := sub with y, hy
+      have yI := FI with y, hy
+      have λy := FunctionBetween.apply_closed with λF, yI
+      have r := restrict.domain_apply with gwF, sub, hy
+      have gy := compose.apply at shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier, y with wF, gF, yIn
+      obtain ⟨eigY, nzY⟩ := eig with y, yIn
+      have svy := cldA.eigenspace.shift_value at R, M, f, λ(a), λ(y), w(y) with ring, module, linear, λa, λy, eigY
+      rw [r, gy, svy]
+      have na := Ring.neg_mem at R, λ(a) with ringR, λa
+      have d := Ring.add_mem at R, λ(y), apply(R.neg, λ(a)) with ringR, λy, na
+      have subY := eigenspace.submodule at R, M, f, λ(y) with ring, module, linear, λy
+      have inE := SubmoduleOf.smul_mem at R, M, eigenspace(M, R, f, λ(y)), call2(R.add, λ(y), apply(R.neg, λ(a))), w(y) with ringR, module, subY, d, eigY
+      refine ⟨inE, ?_⟩
+      intro vanish
+      have wy := FunctionBetween.apply_closed with wF, yIn
+      have d0 := cldA.smul.eq_zero at R, M, call2(R.add, λ(y), apply(R.neg, λ(a))), w(y) with ring, module, field, d, wy, vanish, nzY
+      have same : λ(y) = λ(a) by linear_combination d0
+      have ya := Injective.apply_cancel with distinct, yI, aI, same
+      apply fresh
+      rw ← ya
+      exact hy
+    have zeroF := ih with restrict(compose(shiftedMap(M, f, λ(a)), w, F ∪ {a}, M.carrier, M.carrier), F), uF, eigU, restrict(c, F), cFr, ins
+    have onF : ∀ y ∈ F, c(y) = R.zero
+      intros y hy
+      have r := restrict.domain_apply with cF, sub, hy
+      have z := zeroF with y, hy
+      rw r at z
+      exact z
+    intros t ht
+    by_cases inF : t ∈ F
+    . exact onF with t, inF
+    . have isA : t = a
+        rw [union2.membership, singleton.membership] at ht
+        cases ht with inF2 | eqA
+        . exfalso
+          exact inF with inF2
+        . exact eqA
+      have wFr := restrict.domain_function with wF, sub
+      have ins2 := cldA.moduleCombination.insert at R, M, F, a, c, w with ring, module, finF, fresh, cF, wF
+      have termsZero : combinationTerms(M, R, F, restrict(c, F), restrict(w, F)) = constantFunction(F, M.carrier, M.zero)
+        have tF := combinationTerms.function at M, R, F, restrict(c, F), restrict(w, F) with module, cFr, wFr
+        have kF := constantFunction.function at F, M.carrier, M.zero with zeroM
+        apply FunctionBetween.ext with tF, kF
+        intros y hy
+        have tv := combinationTerms.value at M, R, F, restrict(c, F), restrict(w, F), y with module, cFr, wFr, hy
+        have r1 := restrict.domain_apply with cF, sub, hy
+        have r2 := restrict.domain_apply with wF, sub, hy
+        have kv := constantFunction.apply at F, M.carrier, y, M.zero with hy, zeroM
+        have wy := FunctionBetween.apply_closed with wF, (sub with y, hy)
+        have zy := zero_smul at R, M, w(y) with ringR, module, wy
+        have cy := onF with y, hy
+        rw [tv, r1, r2, kv, cy, zy]
+      have zc := moduleSum.zero_terms at R, M, F with ringR, module, finF
+      have restZero : moduleCombination(M, R, F, restrict(c, F), restrict(w, F)) = M.zero
+        unfold moduleCombination
+        rw [termsZero, zc]
+      have caw := Module.smul_mem at R, M, c(a), w(a) with ringR, module, ca, wa
+      have za := Module.zero_add at R, M, call2(M.smul, c(a), w(a)) with ringR, module, caw
+      rw [restZero, za, comb] at ins2
+      obtain ⟨_, nzA⟩ := eig with a, aIn
+      symm at ins2
+      have ca0 := cldA.smul.eq_zero at R, M, c(a), w(a) with ring, module, field, ca, wa, ins2, nzA
+      rw isA
+      exact ca0
+  exact Finite.induction at I, cldA.eigenIndependentSets(M, R, I, f, λ) with base, step
+
 -- Module.End.eigenvectors_linearIndependent: over a field (or a domain),
 -- eigenvectors for distinct eigenvalues are independent.
 theorem eigenspace.independent (f I λ v : Set)
@@ -1587,7 +2921,19 @@ theorem eigenspace.independent (f I λ v : Set)
   requires eigen : ∀ i ∈ I, v(i) ∈ eigenspace(M, R, f, λ(i)) ∧ v(i) ≠ M.zero
   shows LinearIndependent(M, R, I, v)
 proof
-  sorry
+  have all := cldA.eigenIndependentSets.finite at R, M, f, I, λ with ring, module, field, linear, distinct
+  unfold LinearIndependent
+  refine ⟨module, vectors, ?_⟩
+  intros J JI finJ c cF comb
+  have JS := all with J, JI, finJ
+  obtain ⟨_, prop⟩ := cldA.eigenIndependentSets.membership.forward with JS
+  have wJ := restrict.domain_function with vectors, JI
+  have eigJ : ∀ x ∈ J, restrict(v, J)(x) ∈ eigenspace(M, R, f, λ(x)) ∧ restrict(v, J)(x) ≠ M.zero
+    intros x hx
+    have r := restrict.domain_apply with vectors, JI, hx
+    rw r
+    exact eigen with x, (JI with x, hx)
+  exact prop with restrict(v, J), wJ, eigJ, c, cF, comb
 
 -- For an endomorphism of a finite free module, the eigenvalues are the
 -- roots of the characteristic polynomial of its matrix in any basis
@@ -1702,6 +3048,128 @@ proof
 
 end Eigen
 
+theorem cldA.listMap.identity (A : Set) (xs : List(A))
+  shows listMap{A}(identity(A), xs) = xs
+proof
+  induction xs
+  | List.nil => simp [listMap]
+  | List.cons(a, tail) using ih =>
+    have element : a ∈ A by assumption
+    have value := identity.apply with element
+    rw [listMap, ih, value]
+    rfl
+
+section CldAHornerRoots
+variable (A add z neg mul one leading : Set)
+notation ring R := (A, add, z, neg, mul, one)
+hypothesis field : IsField(R)
+hypothesis initial : leading ∈ R
+hypothesis nonzero : leading ≠ R[0]
+
+theorem cldA.hornerRoots.card_le (n : Nat) (cs : List(A))
+  requires size : length{A}(cs) = n
+  shows Finite(hornerRoots{A}(add, z, mul, leading, cs)) ∧
+    cardinality(hornerRoots{A}(add, z, mul, leading, cs)) ≤ n
+proof
+  induction n generalizing cs
+  | zero =>
+    intros cs list size
+    have cases := List.cases with list
+    cases cases with empty | cons
+    . rw [empty, hornerRoots.nil]
+      have c0 := cardinality.empty
+      refine ⟨Finite.empty, ?_⟩
+      rw c0
+      arith
+    . obtain ⟨c, coefficient, tail, tailList, shape⟩ := cons
+      rw [shape, length.cons] at size
+      have impossible := Naturals.disjoint.zero.succ at length{A}(tail)
+      exfalso
+      apply impossible
+      symm
+      exact size
+  | succ(k) using ih =>
+    intros cs list size
+    have cases := List.cases with list
+    cases cases with empty | cons
+    . rw [empty, hornerRoots.nil]
+      have c0 := cardinality.empty
+      refine ⟨Finite.empty, ?_⟩
+      rw c0
+      arith
+    . obtain ⟨c, coefficient, tail, tailList, shape⟩ := cons
+      have tailSize : length{A}(tail) = k
+        rw [shape, length.cons] at size
+        exact Naturals.injective.succ with size
+      have alternatives : (∃ a, a ∈ hornerRoots{A}(add, z, mul, leading, cs)) ∨ ¬(∃ a, a ∈ hornerRoots{A}(add, z, mul, leading, cs))
+        tauto
+      cases alternatives with inhabited | emptyRoots
+      . obtain ⟨a, ha⟩ := inhabited
+        rw shape at ha
+        obtain ⟨center, root⟩ := hornerRoots.membership.forward at
+          A, add, z, mul, leading, c :: tail, a with *
+        have ring := IsField.comm_ring with field
+        have quotient := hornerQuotient.closed at A, add, z, neg, mul, one, leading, a, tail with *
+        have quotientLength := hornerQuotient.length at A, add, z, neg, mul, one, leading, a, tail with *
+        have quotientSize : length{A}(hornerQuotient{A}(add, mul, leading, a, tail)) = k by cc
+        obtain ⟨finite, bound⟩ := ih with hornerQuotient{A}(add, mul, leading, a, tail), quotientSize
+        have inserted := Finite.insert at hornerRoots{A}(add, z, mul, leading, hornerQuotient{A}(add, mul, leading, a, tail)), a with finite
+        have subset := hornerRoots.divide at A, add, z, neg, mul, one, leading, a, c, tail with *
+        have insertBound := cardinality.insert_le at hornerRoots{A}(add, z, mul, leading, hornerQuotient{A}(add, mul, leading, a, tail)), a with finite
+        have mono := cardinality.monotone with inserted, subset
+        rw shape
+        refine ⟨(Finite.subset with inserted, subset), ?_⟩
+        arith
+      . have empty : hornerRoots{A}(add, z, mul, leading, cs) = ∅
+          ext x
+          constructor
+          . intro member
+            exfalso
+            apply emptyRoots
+            refine ⟨x, member⟩
+          . intro impossible
+            exfalso
+            exact set.empty with impossible
+        rw empty
+        have c0 := cardinality.empty
+        refine ⟨Finite.empty, ?_⟩
+        rw c0
+        arith
+end CldAHornerRoots
+
+def cldA.nonzeroEigenvectors (K n A a : Set) : Set :=
+  { v ∈ matEigenspace(K, n, A, a) | v ≠ constantFunction(n, Ring.carrier(K), Ring.zero(K)) }
+
+def cldA.eigenvectorChoice (K n A λ c : Set) : Set :=
+  { q ∈ n × functionSpace(n, Ring.carrier(K)) | ∃ i ∈ n,
+    q = (i, c(cldA.nonzeroEigenvectors(K, n, A, λ(i)))) }
+
+theorem cldA.cardinality.singleton (x : Set)
+  shows cardinality({x}) = 1
+proof
+  have fresh : x ∉ ∅
+    intro bad
+    exact set.empty with bad
+  have ins := cardinality.insert at ∅, x with Finite.empty, fresh
+  have same : insert(x, ∅) = {x}
+    ext y
+    constructor
+    . intro hy
+      rw insert.membership at hy
+      cases hy with eq | inE
+      . rw eq
+        exact singleton.self at x
+      . exfalso
+        exact set.empty with inE
+    . intro hy
+      rw singleton.membership at hy
+      rw hy
+      exact insert.self
+  have c0 := cardinality.empty
+  rw [same, c0] at ins
+  rw ins
+  arith
+
 -- Section: Eigenvalues of matrices over a field
 section MatrixEigen
 variable (K n : Set)
@@ -1786,7 +3254,55 @@ theorem matEigenvalues.card_le (A : Set)
   shows Finite(matEigenvalues(K, n, A)) ∧
     cardinality(matEigenvalues(K, n, A)) ≤ cardinality(n)
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := CommRing.parts with comm
+  have fieldParts := Field.parts with field
+  have count := cardinality.nat at n with finite
+  obtain ⟨e, enumeration⟩ := Finite.cardinality_enumeration with finite
+  have eFunction := Injective.function with (Bijective.injective with enumeration)
+  have matrixE := submatrix.mem_of at K, n, n, cardinality(n), cardinality(n), A, e, e with matrix, eFunction, eFunction
+  have ringE : RingMatrix(cardinality(n), K.carrier, submatrix(K, cardinality(n), cardinality(n), A, e, e))
+    unfold RingMatrix
+    exact matrixSpace.function with matrixE
+  have index : 0 ∈ {0} by simp [singleton.membership]
+  have equal := matCharpoly.enumeration at K, n, A, e with comm, finite, matrix, enumeration
+  obtain ⟨cs, list, size, horner⟩ := characteristicPolynomial.monic at {0}, K.carrier, K.add, K.zero, K.neg, K.mul, K.one, 0, cardinality(n), submatrix(K, cardinality(n), cardinality(n), A, e, e) with parts, index, ringE
+  have oneK := Ring.one_mem at K with ringK
+  have values : ∀ x ∈ K.carrier, polyEval(K, matCharpoly(K, n, A), x) = hornerAt{K.carrier}(K.add, K.mul, K.one, x, cs)
+    intros x xIn
+    have assignment := constantFunction.function at {0}, K.carrier, x with xIn
+    have fh := polynomialAt.from_horner at {0}, K.carrier, K.add, K.zero, K.neg, K.mul, K.one, 0, K.one, constantFunction({0}, K.carrier, x), cs with parts, oneK, assignment, index
+    have cx := constantFunction.apply at {0}, K.carrier, 0, x with index, xIn
+    rw cx at fh
+    unfold polyEval
+    rw [evaluationAt.graph, equal, horner, fh]
+  have same : matEigenvalues(K, n, A) = hornerRoots{K.carrier}(K.add, K.zero, K.mul, K.one, cs)
+    ext x
+    constructor
+    . intro hx
+      obtain ⟨xIn, _⟩ := matEigenvalues.membership.forward with hx
+      have root := (matEigenvalues.iff_root at K, n, A, x with field, finite, matrix, xIn).forward with hx
+      have v := values with x, xIn
+      rw v at root
+      apply hornerRoots.membership.backward
+      exact ⟨xIn, root⟩
+    . intro hx
+      obtain ⟨xIn, root⟩ := hornerRoots.membership.forward with hx
+      have v := values with x, xIn
+      rw ← v at root
+      exact (matEigenvalues.iff_root at K, n, A, x with field, finite, matrix, xIn).backward with root
+  have fp := fieldParts
+  obtain ⟨_, nontrivialParts, _⟩ := fp
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have nonzero : K.one ≠ K.zero
+    intro eq
+    apply nontrivial
+    symm
+    exact eq
+  have bound := cldA.hornerRoots.card_le at K.carrier, K.add, K.zero, K.neg, K.mul, K.one, K.one, cardinality(n), cs with fieldParts, oneK, nonzero, size
+  rw same
+  exact bound
 
 -- Over an algebraically closed field every square matrix on a nonempty
 -- index set has an eigenvalue.
@@ -1796,7 +3312,308 @@ theorem matEigenvalues.nonempty (A : Set)
   requires matrix : A ∈ matrixSpace(K, n, n)
   shows ∃ a, a ∈ matEigenvalues(K, n, A)
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have parts := CommRing.parts with comm
+  have count := cardinality.nat at n with finite
+  obtain ⟨e, enumeration⟩ := Finite.cardinality_enumeration with finite
+  have eFunction := Injective.function with (Bijective.injective with enumeration)
+  have matrixE := submatrix.mem_of at K, n, n, cardinality(n), cardinality(n), A, e, e with matrix, eFunction, eFunction
+  have ringE : RingMatrix(cardinality(n), K.carrier, submatrix(K, cardinality(n), cardinality(n), A, e, e))
+    unfold RingMatrix
+    exact matrixSpace.function with matrixE
+  have index : 0 ∈ {0} by simp [singleton.membership]
+  have equal := matCharpoly.enumeration at K, n, A, e with comm, finite, matrix, enumeration
+  obtain ⟨cs, list, size, horner⟩ := characteristicPolynomial.monic at {0}, K.carrier, K.add, K.zero, K.neg, K.mul, K.one, 0, cardinality(n), submatrix(K, cardinality(n), cardinality(n), A, e, e) with parts, index, ringE
+  have nonnil : cs ≠ []
+    intro isNil
+    apply nonempty
+    have s0 := size
+    rw isNil at s0
+    have l0 : cardinality(n) = 0
+      rw ← s0
+      simp [length]
+    exact (cardinality.eq_zero_iff at n with finite).forward with l0
+  have engine := AlgebraicallyClosed.parts with closed
+  obtain ⟨_, roots⟩ := engine
+  obtain ⟨x, xIn, root⟩ := roots with cs, list, nonnil
+  have idF := identity.function at K.carrier
+  have mapped := monicValue.mapped_coefficients at K.carrier, K.carrier, K.add, K.mul, identity(K.carrier), K.one, x, cs with idF
+  rw (cldA.listMap.identity at K.carrier, cs) at mapped
+  rw mapped at root
+  have oneK := Ring.one_mem at K with ringK
+  have assignment := constantFunction.function at {0}, K.carrier, x with xIn
+  have fh := polynomialAt.from_horner at {0}, K.carrier, K.add, K.zero, K.neg, K.mul, K.one, 0, K.one, constantFunction({0}, K.carrier, x), cs with parts, oneK, assignment, index
+  have cx := constantFunction.apply at {0}, K.carrier, 0, x with index, xIn
+  rw cx at fh
+  have value : polyEval(K, matCharpoly(K, n, A), x) = K.zero
+    unfold polyEval
+    rw [evaluationAt.graph, equal, horner, fh, root]
+  have member := (matEigenvalues.iff_root at K, n, A, x with field, finite, matrix, xIn).backward with value
+  exact ⟨x, member⟩
+
+theorem cldA.coordinateModule.finite_dimensional
+  shows FiniteDimensional(coordinateModule(K, n), K) ∧
+    finrank(coordinateModule(K, n), K) = cardinality(n)
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have coord := coordinateModule.module at K, n with ringK
+  have basis := standardBasis.basis at K, n with comm, finite
+  have free : FiniteFreeModule(coordinateModule(K, n), K)
+    unfold FiniteFreeModule
+    exact ⟨n, standardBasis(K, n), finite, basis⟩
+  have fd := FiniteDimensional.of_finite_free with field, coord, free
+  obtain ⟨_, nontrivialParts, _⟩ := Field.parts with field
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have rank := finrank.coordinate at K, coordinateModule(K, n), n with comm, nontrivial, coord, finite
+  exact ⟨fd, rank⟩
+
+theorem cldA.SimpleSpectrum.eigenvectors (A λ : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires simple : SimpleSpectrum(K, n, A, λ)
+  shows ∃ v, (v : n → functionSpace(n, K.carrier)) ∧
+    (∀ i ∈ n, v(i) ∈ matEigenspace(K, n, A, λ(i)) ∧
+      v(i) ≠ constantFunction(n, K.carrier, K.zero))
+proof
+  obtain ⟨c, choice⟩ := SubsetChoice.exists at functionSpace(n, K.carrier)
+  obtain ⟨distinct, eigenvalues⟩ := simple
+  have picks : ∀ i ∈ n, c(cldA.nonzeroEigenvectors(K, n, A, λ(i))) ∈ cldA.nonzeroEigenvectors(K, n, A, λ(i))
+    intros i hi
+    have ev := eigenvalues with i, hi
+    obtain ⟨_, w, hw, nz⟩ := matEigenvalues.membership.forward with ev
+    have sub : cldA.nonzeroEigenvectors(K, n, A, λ(i)) ⊆ functionSpace(n, K.carrier)
+      intros u hu
+      obtain ⟨uE, _⟩ := cldA.nonzeroEigenvectors.membership.forward with hu
+      obtain ⟨uS, _⟩ := matEigenspace.membership.forward with uE
+      exact uS
+    have inhabited : Nonempty(cldA.nonzeroEigenvectors(K, n, A, λ(i)))
+      unfold Nonempty
+      witness w
+      apply cldA.nonzeroEigenvectors.membership.backward
+      exact ⟨hw, nz⟩
+    exact SubsetChoice.member with choice, sub, inhabited
+  have inSpace : ∀ i ∈ n, c(cldA.nonzeroEigenvectors(K, n, A, λ(i))) ∈ functionSpace(n, K.carrier)
+    intros i hi
+    have p := picks with i, hi
+    obtain ⟨uE, _⟩ := cldA.nonzeroEigenvectors.membership.forward with p
+    obtain ⟨uS, _⟩ := matEigenspace.membership.forward with uE
+    exact uS
+  have rel : ∀ i ∈ n, relates(cldA.eigenvectorChoice(K, n, A, λ, c), i, c(cldA.nonzeroEigenvectors(K, n, A, λ(i))))
+    intros i hi
+    unfold relates
+    apply cldA.eigenvectorChoice.membership.backward
+    refine ⟨(product.pair with hi, (inSpace with i, hi)), i, hi, rfl⟩
+  have function : cldA.eigenvectorChoice(K, n, A, λ, c) : n → functionSpace(n, K.carrier)
+    constructor
+      intros q0 hq
+      obtain ⟨bounded, _⟩ := cldA.eigenvectorChoice.membership.forward with hq
+      exact bounded
+    . constructor
+        intros z0 first xFirst second xSecond
+        unfold relates at xFirst
+        obtain ⟨_, a1, a1In, firstShape⟩ := cldA.eigenvectorChoice.membership.forward with xFirst
+        unfold relates at xSecond
+        obtain ⟨_, a2, a2In, secondShape⟩ := cldA.eigenvectorChoice.membership.forward with xSecond
+        obtain ⟨xi, firstEqual⟩ := orderedPair.injective with firstShape
+        obtain ⟨xj, secondEqual⟩ := orderedPair.injective with secondShape
+        rw [firstEqual, secondEqual]
+        cc
+      . intros i hi
+        refine ⟨c(cldA.nonzeroEigenvectors(K, n, A, λ(i))), (inSpace with i, hi), (rel with i, hi)⟩
+  witness cldA.eigenvectorChoice(K, n, A, λ, c)
+  refine ⟨function, ?_⟩
+  intros i hi
+  have value := FunctionBetween.apply_value with function, hi, (rel with i, hi)
+  rw value
+  have p := picks with i, hi
+  obtain ⟨uE, nz⟩ := cldA.nonzeroEigenvectors.membership.forward with p
+  exact ⟨uE, nz⟩
+
+-- With a basis of eigenvectors for distinct eigenvalues, every eigenvector
+-- for λ(i) is a multiple of the basis vector v(i).
+theorem cldA.SimpleSpectrum.line (A λ v i w : Set)
+  requires matrix : A ∈ matrixSpace(K, n, n)
+  requires distinct : InjectiveBetween(λ, n, K.carrier)
+  requires basis : ModuleBasis(coordinateModule(K, n), K, n, v)
+  requires eigen : ∀ j ∈ n, v(j) ∈ matEigenspace(K, n, A, λ(j))
+  requires index : i ∈ n
+  requires member : w ∈ matEigenspace(K, n, A, λ(i))
+  shows ∃ c ∈ K.carrier, w = call2(Module.smul(coordinateModule(K, n)), c, v(i))
+proof
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have coord := coordinateModule.module at K, n with ringK
+  have λF := Injective.function with distinct
+  have λi := FunctionBetween.apply_closed with λF, index
+  have linear := mulVecMap.linear at K, n, n, A with comm, finite, matrix
+  have g := shiftedMap.linear at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i) with comm, coord, linear, λi
+  have gF := LinearMap.function_of with g
+  have basis0 := basis
+  obtain ⟨independent, spans⟩ := basis0
+  have vF := LinearIndependent.family at K, coordinateModule(K, n), n, v with comm, coord, independent
+  have eigM : ∀ j ∈ n, v(j) ∈ eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), λ(j))
+    intros j hj
+    have λj := FunctionBetween.apply_closed with λF, hj
+    have same := matEigenspace.eq_eigenspace at K, n, A, λ(j) with field, finite, matrix, λj
+    have e := eigen with j, hj
+    rw same at e
+    exact e
+  have wE : w ∈ eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), λ(i))
+    have same := matEigenspace.eq_eigenspace at K, n, A, λ(i) with field, finite, matrix, λi
+    rw ← same
+    exact member
+  obtain ⟨wIn, _⟩ := eigenspace.membership.forward with wE
+  have expand := basisCoordinates.combination at K, coordinateModule(K, n), n, v, w with comm, coord, basis, finite, wIn
+  have selected := basisCoordinates.selected at coordinateModule(K, n), K, n, v, w with basis, finite, wIn
+  have dF := functionSpace.mem_iff.forward with selected.left
+  have zeroK := Ring.zero_mem at K with ringK
+  have zeroM := Module.zero_mem at K, coordinateModule(K, n) with ringK, coord
+  have inv := IsRing.add_inverse_right with (Ring.parts with ringK), λi
+  have mapped := LinearMap.map_combination at K, coordinateModule(K, n), coordinateModule(K, n), shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), n, basisCoordinates(coordinateModule(K, n), K, n, v, w), v with ringK, coord, coord, g, finite, dF, vF
+  rw ← expand at mapped
+  have gw := cldA.eigenspace.shift_value at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i), λ(i), w with comm, coord, linear, λi, λi, wE
+  have zw := zero_smul at K, coordinateModule(K, n), w with ringK, coord, wIn
+  rw [gw, inv, zw] at mapped
+  have ex : ∃ F, F = n ∖ {i}
+    exact ⟨n ∖ {i}, rfl⟩
+  obtain ⟨F, hF⟩ := ex
+  have nEq : n = F ∪ {i}
+    rw hF
+    ext y
+    constructor
+    . intro hy
+      rw [union2.membership, difference.membership, singleton.membership]
+      by_cases yi : y = i
+      . right
+        exact yi
+      . left
+        exact ⟨hy, yi⟩
+    . intro hy
+      rw [union2.membership, difference.membership, singleton.membership] at hy
+      cases hy with left | right
+      . exact left.left
+      . rw right
+        exact index
+  have fresh : i ∉ F
+    rw hF
+    intro bad
+    rw [difference.membership, singleton.membership] at bad
+    exact bad.right with rfl
+  have FI : F ⊆ n
+    rw hF
+    exact difference.subset_left at n, {i}
+  have finF := Finite.subset with finite, FI
+  have sub : F ⊆ F ∪ {i} by simp [Subset, union2.membership]
+  have dF2 : basisCoordinates(coordinateModule(K, n), K, n, v, w) : F ∪ {i} → K.carrier
+    rw ← nEq
+    exact dF
+  have gvF := compose.function at shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n)) with vF, gF
+  have gvF2 : compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))) : F ∪ {i} → Module.carrier(coordinateModule(K, n))
+    rw ← nEq
+    exact gvF
+  have vF2 : v : F ∪ {i} → Module.carrier(coordinateModule(K, n))
+    rw ← nEq
+    exact vF
+  have ins := cldA.moduleCombination.insert at K, coordinateModule(K, n), F, i, basisCoordinates(coordinateModule(K, n), K, n, v, w), compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))) with comm, coord, finF, fresh, dF2, gvF2
+  have ce : moduleCombination(coordinateModule(K, n), K, F ∪ {i}, basisCoordinates(coordinateModule(K, n), K, n, v, w), compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n)))) = moduleCombination(coordinateModule(K, n), K, n, basisCoordinates(coordinateModule(K, n), K, n, v, w), compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))))
+    rw ← nEq
+  rw [ce, ← mapped] at ins
+  have gi := compose.apply at shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n)), i with vF, gF, index
+  have vi := FunctionBetween.apply_closed with vF, index
+  have eigI := eigM with i, index
+  have svi := cldA.eigenspace.shift_value at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i), λ(i), v(i) with comm, coord, linear, λi, λi, eigI
+  have zvi := zero_smul at K, coordinateModule(K, n), v(i) with ringK, coord, vi
+  have di := FunctionBetween.apply_closed with dF, index
+  have sz := smul_zero at K, coordinateModule(K, n), basisCoordinates(coordinateModule(K, n), K, n, v, w)(i) with ringK, coord, di
+  rw [gi, svi, inv, zvi, sz] at ins
+  have dFr := restrict.domain_function with dF2, sub
+  have uF := restrict.domain_function with gvF2, sub
+  have finU := Finite.union with finF, (Finite.singleton at i)
+  have combU := moduleCombination.mem_of at K, coordinateModule(K, n), F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))), F) with ringK, coord, finF, dFr, uF
+  have az := Module.add_zero at K, coordinateModule(K, n), moduleCombination(coordinateModule(K, n), K, F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))), F)) with ringK, coord, combU
+  rw az at ins
+  symm at ins
+  obtain ⟨_, nontrivialParts, _⟩ := Field.parts with field
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have eigU : ∀ y ∈ F, restrict(compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))), F)(y) ∈ eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), λ(y)) ∧ restrict(compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))), F)(y) ≠ Module.zero(coordinateModule(K, n))
+    intros y hy
+    have yIn := sub with y, hy
+    have yI := FI with y, hy
+    have λy := FunctionBetween.apply_closed with λF, yI
+    have r := restrict.domain_apply with gvF2, sub, hy
+    have gy := compose.apply at shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n)), y with vF, gF, yI
+    have eigY := eigM with y, yI
+    have nzY := LinearIndependent.ne_zero at K, coordinateModule(K, n), n, v, y with comm, coord, nontrivial, independent, yI
+    have svy := cldA.eigenspace.shift_value at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i), λ(y), v(y) with comm, coord, linear, λi, λy, eigY
+    rw [r, gy, svy]
+    have na := Ring.neg_mem at K, λ(i) with ringK, λi
+    have d := Ring.add_mem at K, λ(y), apply(K.neg, λ(i)) with ringK, λy, na
+    have subY := eigenspace.submodule at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(y) with comm, coord, linear, λy
+    have inE := SubmoduleOf.smul_mem at K, coordinateModule(K, n), eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), λ(y)), call2(K.add, λ(y), apply(K.neg, λ(i))), v(y) with ringK, coord, subY, d, eigY
+    refine ⟨inE, ?_⟩
+    intro vanish
+    have wy := FunctionBetween.apply_closed with vF, yI
+    have d0 := cldA.smul.eq_zero at K, coordinateModule(K, n), call2(K.add, λ(y), apply(K.neg, λ(i))), v(y) with comm, coord, field, d, wy, vanish, nzY
+    have same : λ(y) = λ(i) by linear_combination d0
+    have ya := Injective.apply_cancel with distinct, yI, index, same
+    apply fresh
+    rw ← ya
+    exact hy
+  have all := cldA.eigenIndependentSets.finite at K, coordinateModule(K, n), mulVecMap(K, n, n, A), n, λ with comm, coord, field, linear, distinct
+  have FS := all with F, FI, finF
+  obtain ⟨_, prop⟩ := cldA.eigenIndependentSets.membership.forward with FS
+  have zeroF := prop with restrict(compose(shiftedMap(coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i)), v, n, Module.carrier(coordinateModule(K, n)), Module.carrier(coordinateModule(K, n))), F), uF, eigU, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), dFr, ins
+  have onF : ∀ y ∈ F, basisCoordinates(coordinateModule(K, n), K, n, v, w)(y) = K.zero
+    intros y hy
+    have r := restrict.domain_apply with dF2, sub, hy
+    have z := zeroF with y, hy
+    rw r at z
+    exact z
+  have ins2 := cldA.moduleCombination.insert at K, coordinateModule(K, n), F, i, basisCoordinates(coordinateModule(K, n), K, n, v, w), v with comm, coord, finF, fresh, dF2, vF2
+  have ce2 : moduleCombination(coordinateModule(K, n), K, F ∪ {i}, basisCoordinates(coordinateModule(K, n), K, n, v, w), v) = moduleCombination(coordinateModule(K, n), K, n, basisCoordinates(coordinateModule(K, n), K, n, v, w), v)
+    rw ← nEq
+  rw [ce2, ← expand] at ins2
+  have vFr := restrict.domain_function with vF2, sub
+  have termsZero : combinationTerms(coordinateModule(K, n), K, F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(v, F)) = constantFunction(F, Module.carrier(coordinateModule(K, n)), Module.zero(coordinateModule(K, n)))
+    have tF := combinationTerms.function at coordinateModule(K, n), K, F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(v, F) with coord, dFr, vFr
+    have kF := constantFunction.function at F, Module.carrier(coordinateModule(K, n)), Module.zero(coordinateModule(K, n)) with zeroM
+    apply FunctionBetween.ext with tF, kF
+    intros y hy
+    have tv := combinationTerms.value at coordinateModule(K, n), K, F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(v, F), y with coord, dFr, vFr, hy
+    have r1 := restrict.domain_apply with dF2, sub, hy
+    have r2 := restrict.domain_apply with vF2, sub, hy
+    have kv := constantFunction.apply at F, Module.carrier(coordinateModule(K, n)), y, Module.zero(coordinateModule(K, n)) with hy, zeroM
+    have wy := FunctionBetween.apply_closed with vF, (FI with y, hy)
+    have zy := zero_smul at K, coordinateModule(K, n), v(y) with ringK, coord, wy
+    have cy := onF with y, hy
+    rw [tv, r1, r2, kv, cy, zy]
+  have zc := moduleSum.zero_terms at K, coordinateModule(K, n), F with ringK, coord, finF
+  have restZero : moduleCombination(coordinateModule(K, n), K, F, restrict(basisCoordinates(coordinateModule(K, n), K, n, v, w), F), restrict(v, F)) = Module.zero(coordinateModule(K, n))
+    unfold moduleCombination
+    rw [termsZero, zc]
+  have dv := Module.smul_mem at K, coordinateModule(K, n), basisCoordinates(coordinateModule(K, n), K, n, v, w)(i), v(i) with ringK, coord, di, vi
+  have za := Module.zero_add at K, coordinateModule(K, n), call2(Module.smul(coordinateModule(K, n)), basisCoordinates(coordinateModule(K, n), K, n, v, w)(i), v(i)) with ringK, coord, dv
+  rw [restZero, za] at ins2
+  exact ⟨basisCoordinates(coordinateModule(K, n), K, n, v, w)(i), di, ins2⟩
+
+theorem cldA.matEigenspace.commuting (A B a w : Set)
+  requires matrixA : A ∈ matrixSpace(K, n, n)
+  requires matrixB : B ∈ matrixSpace(K, n, n)
+  requires commute : matMul(K, n, n, n, A, B) = matMul(K, n, n, n, B, A)
+  requires scalar : a ∈ K.carrier
+  requires eigen : w ∈ matEigenspace(K, n, A, a)
+  shows mulVec(K, n, n, B, w) ∈ matEigenspace(K, n, A, a)
+proof
+  have comm := Field.to_comm_ring with field
+  obtain ⟨wS, eq⟩ := matEigenspace.membership.forward with eigen
+  have bw := mulVec.mem at K, n, n, B, w with comm, finite, matrixB, wS
+  apply matEigenspace.membership.backward
+  refine ⟨bw, ?_⟩
+  have m1 := mulVec.mulVec at K, n, n, n, A, B, w with comm, finite, finite, matrixA, matrixB, wS
+  have m2 := mulVec.mulVec at K, n, n, n, B, A, w with comm, finite, finite, matrixB, matrixA, wS
+  have sm := mulVec.smul at K, n, n, B, a, w with comm, finite, matrixB, scalar, wS
+  rw [m1, commute, ← m2, eq, sm]
 
 -- Simple spectrum: |n| distinct eigenvalues make charpoly the product of
 -- the X − λ(i), an eigenvector basis, and A diagonalisable, with
@@ -1814,7 +3631,35 @@ theorem SimpleSpectrum.eigenvector_basis (A λ : Set)
   shows ∃ v, ModuleBasis(coordinateModule(K, n), K, n, v) ∧
     (∀ i ∈ n, v(i) ∈ matEigenspace(K, n, A, λ(i)))
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have coord := coordinateModule.module at K, n with ringK
+  obtain ⟨fd, rank⟩ := cldA.coordinateModule.finite_dimensional at K, n with field, finite
+  obtain ⟨v, vF, eig⟩ := cldA.SimpleSpectrum.eigenvectors at K, n, A, λ with field, finite, matrix, simple
+  have simple0 := simple
+  obtain ⟨distinct, eigenvalues⟩ := simple0
+  have λF := Injective.function with distinct
+  have linear := mulVecMap.linear at K, n, n, A with comm, finite, matrix
+  have carrier := coordinateModule.carrier_space at K, n
+  rw ← carrier at vF
+  have eigM : ∀ i ∈ n, v(i) ∈ eigenspace(coordinateModule(K, n), K, mulVecMap(K, n, n, A), λ(i)) ∧ v(i) ≠ Module.zero(coordinateModule(K, n))
+    intros i hi
+    obtain ⟨e1, e2⟩ := eig with i, hi
+    have λi := FunctionBetween.apply_closed with λF, hi
+    have same := matEigenspace.eq_eigenspace at K, n, A, λ(i) with field, finite, matrix, λi
+    rw same at e1
+    rw coordinateModule.zero_space
+    exact ⟨e1, e2⟩
+  have independent := eigenspace.independent at K, coordinateModule(K, n), mulVecMap(K, n, n, A), n, λ, v with comm, coord, field, linear, distinct, vF, eigM
+  have card : cardinality(n) = finrank(coordinateModule(K, n), K)
+    symm
+    exact rank
+  have basis := LinearIndependent.basis_of_card at K, coordinateModule(K, n), n, v with field, coord, fd, finite, independent, card
+  witness v
+  refine ⟨basis, ?_⟩
+  intros i hi
+  obtain ⟨e1, _⟩ := eig with i, hi
+  exact e1
 
 theorem SimpleSpectrum.diagonalize (A λ : Set)
   requires matrix : A ∈ matrixSpace(K, n, n)
@@ -1842,7 +3687,81 @@ theorem SimpleSpectrum.eigenspace_line (A λ i : Set)
     finrank(submoduleModule(coordinateModule(K, n), K,
       matEigenspace(K, n, A, λ(i))), K) = 1
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have coord := coordinateModule.module at K, n with ringK
+  obtain ⟨_, nontrivialParts, _⟩ := Field.parts with field
+  obtain ⟨_, _, nontrivial⟩ := nontrivialParts
+  have simple0 := simple
+  obtain ⟨distinct, _⟩ := simple0
+  have λF := Injective.function with distinct
+  have λi := FunctionBetween.apply_closed with λF, index
+  obtain ⟨fd, rank⟩ := cldA.coordinateModule.finite_dimensional at K, n with field, finite
+  obtain ⟨u, basis, eigU⟩ := SimpleSpectrum.eigenvector_basis at K, n, A, λ with field, finite, matrix, simple
+  have basis0 := basis
+  obtain ⟨independent, _⟩ := basis0
+  have ui := eigU with i, index
+  have linear := mulVecMap.linear at K, n, n, A with comm, finite, matrix
+  have same := matEigenspace.eq_eigenspace at K, n, A, λ(i) with field, finite, matrix, λi
+  have subE := eigenspace.submodule at K, coordinateModule(K, n), mulVecMap(K, n, n, A), λ(i) with comm, coord, linear, λi
+  rw ← same at subE
+  have nz := LinearIndependent.ne_zero at K, coordinateModule(K, n), n, u, i with comm, coord, nontrivial, independent, index
+  have vF := LinearIndependent.family at K, coordinateModule(K, n), n, u with comm, coord, independent
+  have uIn := FunctionBetween.apply_closed with vF, index
+  have PW : {u(i)} ⊆ matEigenspace(K, n, A, λ(i))
+    intros y hy
+    rw singleton.membership at hy
+    rw hy
+    exact ui
+  have finiteS := Finite.singleton at u(i)
+  have vv := singleton.self at u(i)
+  have single : {u(i)} ⊆ Module.carrier(coordinateModule(K, n))
+    intros x hx
+    have e := singleton.membership.forward with hx
+    rw e
+    exact uIn
+  have idF := identity.function at {u(i)}
+  have idValues : ∀ x ∈ {u(i)}, identity({u(i)})(x) ∈ Module.carrier(coordinateModule(K, n))
+    intros x hx
+    have e := identity.apply at x, {u(i)} with hx
+    rw e
+    exact single with x, hx
+  have idV := FunctionBetween.codomain_of_values with idF, idValues
+  have law := LinearIndependent.finite_iff at K, coordinateModule(K, n), {u(i)}, identity({u(i)}) with comm, coord, finiteS, idV
+  have independentS : LinearIndependent(coordinateModule(K, n), K, {u(i)}, identity({u(i)}))
+    apply law.backward
+    intros c cF zero x hx
+    have xv := singleton.membership.forward with hx
+    rw xv
+    have termsF := combinationTerms.function at coordinateModule(K, n), K, {u(i)}, c, identity({u(i)}) with coord, cF, idV
+    have one := moduleSum.singleton at K, coordinateModule(K, n), u(i), combinationTerms(coordinateModule(K, n), K, {u(i)}, c, identity({u(i)})) with ringK, coord, termsF
+    have t1 := combinationTerms.value at coordinateModule(K, n), K, {u(i)}, c, identity({u(i)}), u(i) with coord, cF, idV, vv
+    have i1 := identity.apply at u(i), {u(i)} with vv
+    unfold moduleCombination at zero
+    rw [one, t1, i1] at zero
+    have cv := FunctionBetween.apply_closed with cF, vv
+    exact cldA.smul.eq_zero at K, coordinateModule(K, n), c(u(i)), u(i) with comm, coord, field, cv, uIn, zero, nz
+  have spanS : moduleSpan(coordinateModule(K, n), K, {u(i)}) = matEigenspace(K, n, A, λ(i))
+    have sp := moduleSpan.singleton at K, coordinateModule(K, n), u(i) with ringK, coord, uIn
+    rw sp
+    ext w
+    constructor
+    . intro hw
+      obtain ⟨_, r, rIn, wr⟩ := scalarMultiples.membership.forward with hw
+      rw wr
+      exact SubmoduleOf.smul_mem at K, coordinateModule(K, n), matEigenspace(K, n, A, λ(i)), r, u(i) with ringK, coord, subE, rIn, ui
+    . intro hw
+      obtain ⟨c, cIn, wc⟩ := cldA.SimpleSpectrum.line at K, n, A, λ, u, i, w with field, finite, matrix, distinct, basis, eigU, index, hw
+      have wM := SubmoduleOf.subset at K, coordinateModule(K, n), matEigenspace(K, n, A, λ(i)) with ringK, coord, subE
+      apply scalarMultiples.membership.backward
+      exact ⟨(wM with w, hw), c, cIn, wc⟩
+  have sbasis := SubmoduleOf.basis_of_span at K, coordinateModule(K, n), matEigenspace(K, n, A, λ(i)), {u(i)} with field, coord, subE, PW, finiteS, independentS, spanS
+  obtain ⟨fdE, _⟩ := SubmoduleOf.finite_dimensional at K, coordinateModule(K, n), matEigenspace(K, n, A, λ(i)) with field, coord, fd, subE
+  have subModule := SubmoduleOf.submodule_module at K, coordinateModule(K, n), matEigenspace(K, n, A, λ(i)) with ringK, coord, subE
+  have fr := finrank.of_basis at K, submoduleModule(coordinateModule(K, n), K, matEigenspace(K, n, A, λ(i))), {u(i)}, identity({u(i)}) with comm, nontrivial, subModule, finiteS, sbasis
+  have c1 := cldA.cardinality.singleton at u(i)
+  rw c1 at fr
+  exact ⟨fdE, fr⟩
 
 -- The trace is the sum and the determinant the product of the
 -- eigenvalues.
@@ -1867,7 +3786,40 @@ theorem SimpleSpectrum.commuting (A B λ i v : Set)
   requires eigen : v ∈ matEigenspace(K, n, A, λ(i))
   shows ∃ b ∈ K.carrier, mulVec(K, n, n, B, v) = vecSmul(K, n, b, v)
 proof
-  sorry
+  have comm := Field.to_comm_ring with field
+  have ringK := CommRing.to_ring with comm
+  have coord := coordinateModule.module at K, n with ringK
+  have simple0 := simple
+  obtain ⟨distinct, _⟩ := simple0
+  have λF := Injective.function with distinct
+  have λi := FunctionBetween.apply_closed with λF, index
+  obtain ⟨u, basis, eigU⟩ := SimpleSpectrum.eigenvector_basis at K, n, A, λ with field, finite, matrixA, simple
+  have ui := eigU with i, index
+  obtain ⟨uS, _⟩ := matEigenspace.membership.forward with ui
+  obtain ⟨vS, _⟩ := matEigenspace.membership.forward with eigen
+  have bu := cldA.matEigenspace.commuting at K, n, A, B, λ(i), u(i) with field, finite, matrixA, matrixB, commute, λi, ui
+  obtain ⟨α, αIn, vα⟩ := cldA.SimpleSpectrum.line at K, n, A, λ, u, i, v with field, finite, matrixA, distinct, basis, eigU, index, eigen
+  obtain ⟨γ, γIn, uγ⟩ := cldA.SimpleSpectrum.line at K, n, A, λ, u, i, mulVec(K, n, n, B, u(i)) with field, finite, matrixA, distinct, basis, eigU, index, bu
+  have e1 := vecSmul.eq_module_smul at K, n, α, u(i) with field, finite, αIn, uS
+  have e2 := vecSmul.eq_module_smul at K, n, γ, u(i) with field, finite, γIn, uS
+  rw ← e1 at vα
+  rw ← e2 at uγ
+  have bv := mulVec.smul at K, n, n, B, α, u(i) with comm, finite, matrixB, αIn, uS
+  witness γ
+  refine ⟨γIn, ?_⟩
+  have carrier := coordinateModule.carrier_space at K, n
+  have uM := uS
+  rw ← carrier at uM
+  have l1 := mul_smul at K, coordinateModule(K, n), α, γ, u(i) with ringK, coord, αIn, γIn, uM
+  have l2 := mul_smul at K, coordinateModule(K, n), γ, α, u(i) with ringK, coord, γIn, αIn, uM
+  have cm : α * γ = γ * α by ring
+  have gu := Module.smul_mem at K, coordinateModule(K, n), γ, u(i) with ringK, coord, γIn, uM
+  have au := Module.smul_mem at K, coordinateModule(K, n), α, u(i) with ringK, coord, αIn, uM
+  rw carrier at gu
+  rw carrier at au
+  have e3 := vecSmul.eq_module_smul at K, n, α, call2(Module.smul(coordinateModule(K, n)), γ, u(i)) with field, finite, αIn, gu
+  have e4 := vecSmul.eq_module_smul at K, n, γ, call2(Module.smul(coordinateModule(K, n)), α, u(i)) with field, finite, γIn, au
+  rw [vα, bv, uγ, e2, e1, e3, e4, ← l1, ← l2, cm]
 
 end MatrixEigen
 
