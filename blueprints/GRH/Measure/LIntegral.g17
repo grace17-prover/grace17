@@ -1374,6 +1374,21 @@ proof
       exact EnnLe.zero with lM
   exact EnnLe.antisymmetric with upper, lower
 
+-- The indicator c · 1_S maps into [0, ∞].
+theorem cldCIndicatorOn.values (X S c : Set)
+  requires member : c ∈ ennreal
+  shows EnnValued(X, indicatorOn(MeasurableSpace.carrier(X), S, c, realZero))
+proof
+  unfold EnnValued
+  unfold MapsInto
+  intros x hx
+  obtain ⟨a1, a2⟩ := indicatorOn.apply at MeasurableSpace.carrier(X), S, c, realZero, x with hx
+  by_cases xs : x ∈ S
+  . rw a1 with xs
+    exact member
+  . rw a2 with xs
+    exact ennreal.zero_member
+
 -- Mathlib's lintegral_indicator_le / lintegral_indicator_const_le for a
 -- non-measurable set: ∫⁻ c · 1_A ≤ c · μ(A) with μ(A) the outer value.
 theorem lintegral.indicator_const_le (X μ A c : Set)
@@ -1383,7 +1398,30 @@ theorem lintegral.indicator_const_le (X μ A c : Set)
   shows EnnLe(lintegral(X, μ, indicatorOn(MeasurableSpace.carrier(X), A, c, realZero)),
     ennMul(c, measureOf(X, μ, A)))
 proof
-  sorry
+  obtain ⟨B, hB, AB, eB⟩ := measureOf.hull with measure, inside
+  have mB : MeasurableSet(X, B)
+    unfold MeasurableSet
+    exact hB
+  have vA := cldCIndicatorOn.values at X, A, c with member
+  have vB := cldCIndicatorOn.values at X, B, c with member
+  have le : ∀ x ∈ MeasurableSpace.carrier(X), EnnLe(indicatorOn(MeasurableSpace.carrier(X), A, c, realZero)(x), indicatorOn(MeasurableSpace.carrier(X), B, c, realZero)(x))
+    intros x hx
+    obtain ⟨a1, a2⟩ := indicatorOn.apply at MeasurableSpace.carrier(X), A, c, realZero, x with hx
+    obtain ⟨b1, b2⟩ := indicatorOn.apply at MeasurableSpace.carrier(X), B, c, realZero, x with hx
+    by_cases xa : x ∈ A
+    . have xb := AB with x, xa
+      rw [a1 with xa, b1 with xb]
+      exact EnnLe.reflexive with member
+    . rw a2 with xa
+      by_cases xb : x ∈ B
+      . rw b1 with xb
+        exact EnnLe.zero with member
+      . rw b2 with xb
+        exact EnnLe.reflexive with ennreal.zero_member
+  have m := lintegral.mono with measure, vA, vB, le
+  rw lintegral.indicator_const with measure, mB, member at m
+  rw eB at m
+  exact m
 
 -- Bounds by constants (Mathlib's lintegral_le_const... and iInf_le_lintegral
 -- in the form used: a bound c on f gives ∫⁻ f ≤ c · μ(X)).
@@ -7499,16 +7537,367 @@ proof
   have m2 := setLIntegral.mono with measure, set, valuesG, valuesF, le2
   exact EnnLe.antisymmetric with m1, m2
 
--- Mathlib's lintegral_iUnion: over a disjoint sequence of measurable sets.
-theorem setLIntegral.sequence_union (X μ f S : Set)
+-- ∫⁻_{A ∪ B} f ≤ ∫⁻_A f + ∫⁻_B f, piece by piece on every partition.
+theorem cldCSetLIntegral.union_le (X μ f A B : Set)
+  requires measure : Measure(X, μ)
+  requires values : EnnValued(X, f)
+  requires setA : MeasurableSet(X, A)
+  requires setB : MeasurableSet(X, B)
+  requires disjoint : Disjoint(A, B)
+  shows EnnLe(setLIntegral(X, μ, f, A ∪ B),
+    ennAdd(setLIntegral(X, μ, f, A), setLIntegral(X, μ, f, B)))
+proof
+  have space := Measure.space with measure
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    unfold EnnValued at values
+    unfold MapsInto at values
+    exact values
+  have setU := MeasurableSet.union with space, setA, setB
+  have rA := restrictMeasure.measure with measure, setA
+  have rB := restrictMeasure.measure with measure, setB
+  have rU := restrictMeasure.measure with measure, setU
+  have mA := lintegral.member at X, restrictMeasure(X, μ, A), f with rA
+  have mB := lintegral.member at X, restrictMeasure(X, μ, B), f with rB
+  unfold setLIntegral
+  apply lintegral.le_of_all with (ennAdd.member with mA, mB)
+  intros P partition
+  obtain ⟨sA, tA⟩ := lowerSum.lint_member with rA, partition, vF
+  obtain ⟨sB, tB⟩ := lowerSum.lint_member with rB, partition, vF
+  have split : ∀ C ∈ P, partitionTerms(restrictMeasure(X, μ, A ∪ B), f, P)(C) = ennAdd(partitionTerms(restrictMeasure(X, μ, A), f, P)(C), partitionTerms(restrictMeasure(X, μ, B), f, P)(C))
+    intros C hC
+    have pc := MeasurablePartition.pieces with space, partition, hC
+    rw partitionTerms.apply at restrictMeasure(X, μ, A ∪ B), f, _, _ with hC
+    rw partitionTerms.apply at restrictMeasure(X, μ, A), f, _, _ with hC
+    rw partitionTerms.apply at restrictMeasure(X, μ, B), f, _, _ with hC
+    rw restrictMeasure.apply with measure, setU, pc.left
+    rw restrictMeasure.apply with measure, setA, pc.left
+    rw restrictMeasure.apply with measure, setB, pc.left
+    have cA := MeasurableSet.inter with space, pc.left, setA
+    have cB := MeasurableSet.inter with space, pc.left, setB
+    have same : C ∩ (A ∪ B) = (C ∩ A) ∪ (C ∩ B)
+      ext x
+      constructor
+      . intro h
+        simp at h
+        simp [h]
+      . intro h
+        simp at h
+        simp [h]
+    have dj : Disjoint(C ∩ A, C ∩ B)
+      apply Disjoint.iff.backward
+      intros x hx hx2
+      have d2 := Disjoint.iff.forward with disjoint
+      simp at hx
+      simp at hx2
+      exact d2 with x, hx.right, hx2.right
+    rw same
+    rw Measure.union_disjoint with measure, cA, cB, dj
+    have vC : ∀ x ∈ C, f(x) ∈ ennreal
+      intros x hx
+      exact vF with x, (pc.right with x, hx)
+    have i := ennInfOn.member with vC
+    rw ennMul.add_right with i, (Measure.member with measure, cA), (Measure.member with measure, cB)
+  have finP := partition
+  obtain ⟨fin, rest⟩ := finP
+  have eq := ennFiniteSum.lint_add with fin, tA, tB, split
+  unfold lowerSum
+  rw eq
+  have uA := lintegral.upper at X, restrictMeasure(X, μ, A), f, P with partition, sA
+  have uB := lintegral.upper at X, restrictMeasure(X, μ, B), f, P with partition, sB
+  unfold lowerSum at uA
+  unfold lowerSum at uB
+  exact ennAdd.mono with uA, uB
+
+-- The indicator f · 1_S of a map into [0, ∞] maps into [0, ∞].
+theorem cldCEnnIndicatorOn.values (X S f : Set)
+  requires values : EnnValued(X, f)
+  shows EnnValued(X, ennIndicatorOn(MeasurableSpace.carrier(X), S, f))
+proof
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    unfold EnnValued at values
+    unfold MapsInto at values
+    exact values
+  unfold EnnValued
+  unfold MapsInto
+  intros x hx
+  obtain ⟨a1, a2⟩ := ennIndicatorOn.lint_apply at MeasurableSpace.carrier(X), S, f, x with hx
+  by_cases xs : x ∈ S
+  . rw a1 with xs
+    exact vF with x, hx
+  . rw a2 with xs
+    exact ennreal.zero_member
+
+-- ∫⁻_A f + ∫⁻_B f ≤ ∫⁻_{A ∪ B} f, by superadditivity of the integral.
+theorem cldCSetLIntegral.union_ge (X μ f A B : Set)
+  requires measure : Measure(X, μ)
+  requires values : EnnValued(X, f)
+  requires setA : MeasurableSet(X, A)
+  requires setB : MeasurableSet(X, B)
+  requires disjoint : Disjoint(A, B)
+  shows EnnLe(ennAdd(setLIntegral(X, μ, f, A), setLIntegral(X, μ, f, B)),
+    setLIntegral(X, μ, f, A ∪ B))
+proof
+  have space := Measure.space with measure
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    unfold EnnValued at values
+    unfold MapsInto at values
+    exact values
+  have setU := MeasurableSet.union with space, setA, setB
+  rw ← lintegral.indicator with measure, values, setA
+  rw ← lintegral.indicator with measure, values, setB
+  rw ← lintegral.indicator with measure, values, setU
+  have iA := cldCEnnIndicatorOn.values at X, A, f with values
+  have iB := cldCEnnIndicatorOn.values at X, B, f with values
+  have d2 := Disjoint.iff.forward with disjoint
+  have sum : ∀ x ∈ MeasurableSpace.carrier(X), ennIndicatorOn(MeasurableSpace.carrier(X), A ∪ B, f)(x) = ennAdd(ennIndicatorOn(MeasurableSpace.carrier(X), A, f)(x), ennIndicatorOn(MeasurableSpace.carrier(X), B, f)(x))
+    intros x hx
+    obtain ⟨u1, u2⟩ := ennIndicatorOn.lint_apply at MeasurableSpace.carrier(X), A ∪ B, f, x with hx
+    obtain ⟨a1, a2⟩ := ennIndicatorOn.lint_apply at MeasurableSpace.carrier(X), A, f, x with hx
+    obtain ⟨b1, b2⟩ := ennIndicatorOn.lint_apply at MeasurableSpace.carrier(X), B, f, x with hx
+    have fx := vF with x, hx
+    by_cases xa : x ∈ A
+    . have xu : x ∈ A ∪ B
+        simp [xa]
+      have xb : x ∉ B
+        exact d2 with x, xa
+      rw [u1 with xu, a1 with xa, b2 with xb]
+      rw ennAdd.zero with fx
+    . by_cases xb : x ∈ B
+      . have xu : x ∈ A ∪ B
+          simp [xb]
+        rw [u1 with xu, a2 with xa, b1 with xb]
+        rw ennAdd.comm with ennreal.zero_member, fx
+        rw ennAdd.zero with fx
+      . have xu : x ∉ A ∪ B
+          simp [xa, xb]
+        rw [u2 with xu, a2 with xa, b2 with xb]
+        rw ennAdd.zero with ennreal.zero_member
+  exact lintegral.lint_add_ge with measure, iA, iB, sum
+
+-- Pieces of a sequence cut down to C, and the rows n ↦ (inf_C f) · μ(C ∩ S(n))
+-- of a partition P, used to compare a lower sum with a sum of lower sums.
+def cldCInterSeq (C S : Set) : Set := { (n, C ∩ S(n)) | n ∈ ℕ }
+def cldCRow (μ f S C : Set) : Set := { (n, ennMul(ennInfOn(f, C), μ(C ∩ S(n)))) | n ∈ ℕ }
+def cldCRows (μ f S P : Set) : Set := { (C, cldCRow(μ, f, S, C)) | C ∈ P }
+
+theorem cldCInterSeq.apply (C S n : Set)
+  requires member : n ∈ ℕ
+  shows cldCInterSeq(C, S)(n) = C ∩ S(n)
+proof
+  have edge : (n, C ∩ S(n)) ∈ cldCInterSeq(C, S)
+    apply cldCInterSeq.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ cldCInterSeq(C, S), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k0, hk, pEq⟩ := cldCInterSeq.membership.forward with hp
+    rw ← pEq
+    exact ⟨k0, C ∩ S(k0), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ cldCInterSeq(C, S) → (a, c) ∈ cldCInterSeq(C, S) → b = c
+    intros a b c hb hc
+    obtain ⟨k0, hk, bEq⟩ := cldCInterSeq.membership.forward with hb
+    obtain ⟨m0, hm, cEq⟩ := cldCInterSeq.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem cldCRow.apply (μ f S C n : Set)
+  requires member : n ∈ ℕ
+  shows cldCRow(μ, f, S, C)(n) = ennMul(ennInfOn(f, C), μ(C ∩ S(n)))
+proof
+  have edge : (n, ennMul(ennInfOn(f, C), μ(C ∩ S(n)))) ∈ cldCRow(μ, f, S, C)
+    apply cldCRow.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ cldCRow(μ, f, S, C), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k0, hk, pEq⟩ := cldCRow.membership.forward with hp
+    rw ← pEq
+    exact ⟨k0, ennMul(ennInfOn(f, C), μ(C ∩ S(k0))), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ cldCRow(μ, f, S, C) → (a, c) ∈ cldCRow(μ, f, S, C) → b = c
+    intros a b c hb hc
+    obtain ⟨k0, hk, bEq⟩ := cldCRow.membership.forward with hb
+    obtain ⟨m0, hm, cEq⟩ := cldCRow.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem cldCRows.apply (μ f S P C : Set)
+  requires member : C ∈ P
+  shows cldCRows(μ, f, S, P)(C) = cldCRow(μ, f, S, C)
+proof
+  have edge : (C, cldCRow(μ, f, S, C)) ∈ cldCRows(μ, f, S, P)
+    apply cldCRows.membership.backward
+    exact ⟨C, member, rfl⟩
+  have pairs : ∀ p ∈ cldCRows(μ, f, S, P), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k0, hk, pEq⟩ := cldCRows.membership.forward with hp
+    rw ← pEq
+    exact ⟨k0, cldCRow(μ, f, S, k0), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ cldCRows(μ, f, S, P) → (a, c) ∈ cldCRows(μ, f, S, P) → b = c
+    intros a b c hb hc
+    obtain ⟨k0, hk, bEq⟩ := cldCRows.membership.forward with hb
+    obtain ⟨m0, hm, cEq⟩ := cldCRows.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem cldCSetLIntegralSequence.apply (X μ f S n : Set)
+  requires member : n ∈ ℕ
+  shows setLIntegralSequence(X, μ, f, S)(n) = setLIntegral(X, μ, f, S(n))
+proof
+  have edge : (n, setLIntegral(X, μ, f, S(n))) ∈ setLIntegralSequence(X, μ, f, S)
+    apply setLIntegralSequence.membership.backward
+    exact ⟨n, member, rfl⟩
+  have pairs : ∀ p ∈ setLIntegralSequence(X, μ, f, S), ∃ a, ∃ b, p = (a, b)
+    intros p hp
+    obtain ⟨k0, hk, pEq⟩ := setLIntegralSequence.membership.forward with hp
+    rw ← pEq
+    exact ⟨k0, setLIntegral(X, μ, f, S(k0)), rfl⟩
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ setLIntegralSequence(X, μ, f, S) → (a, c) ∈ setLIntegralSequence(X, μ, f, S) → b = c
+    intros a b c hb hc
+    obtain ⟨k0, hk, bEq⟩ := setLIntegralSequence.membership.forward with hb
+    obtain ⟨m0, hm, cEq⟩ := setLIntegralSequence.membership.forward with hc
+    obtain ⟨ka, bb⟩ := orderedPair.injective with bEq
+    obtain ⟨ma, cc⟩ := orderedPair.injective with cEq
+    rw [← bb, ← cc, ka, ← ma]
+  exact pairGraph.apply with pairs, functional, edge
+
+theorem cldCInterSeq.union (C S : Set)
+  shows sequenceUnion(cldCInterSeq(C, S)) = C ∩ sequenceUnion(S)
+proof
+  ext x
+  constructor
+  . intro h
+    unfold sequenceUnion at h
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+    obtain ⟨m, hm, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    rw cldCInterSeq.apply with hm at xE
+    obtain ⟨xC, xS⟩ := intersection.membership.forward with xE
+    have inV : S(m) ∈ valuesOn(S, ℕ) := valuesOn.membership.backward with ⟨m, hm, rfl⟩
+    have xU : x ∈ sequenceUnion(S)
+      unfold sequenceUnion
+      exact union.membership.backward with ⟨S(m), inV, xS⟩
+    exact intersection.membership.backward with xC, xU
+  . intro h
+    obtain ⟨xC, xU⟩ := intersection.membership.forward with h
+    unfold sequenceUnion at xU
+    obtain ⟨E, EIn, xE⟩ := union.membership.forward with xU
+    obtain ⟨m, hm, e⟩ := valuesOn.membership.forward with EIn
+    rw ← e at xE
+    have xI : x ∈ cldCInterSeq(C, S)(m)
+      rw cldCInterSeq.apply with hm
+      exact intersection.membership.backward with xC, xE
+    have inV : cldCInterSeq(C, S)(m) ∈ valuesOn(cldCInterSeq(C, S), ℕ) := valuesOn.membership.backward with ⟨m, hm, rfl⟩
+    unfold sequenceUnion
+    exact union.membership.backward with ⟨cldCInterSeq(C, S)(m), inV, xI⟩
+
+-- Over a finite set F of indices of a disjoint sequence, the union is
+-- measurable and Σ_{n ∈ F} ∫⁻_{S(n)} f ≤ ∫⁻ over the union.
+theorem cldCSetLIntegral.finite_union_ge (X μ f S F : Set)
   requires measure : Measure(X, μ)
   requires values : EnnValued(X, f)
   requires sets : ∀ n ∈ ℕ, MeasurableSet(X, S(n))
   requires disjoint : PairwiseDisjointSequence(S)
-  shows setLIntegral(X, μ, f, sequenceUnion(S)) =
-    ennTsum(setLIntegralSequence(X, μ, f, S), ℕ)
+  requires finite : Finite(F)
+  requires inside : F ⊆ ℕ
+  shows MeasurableSet(X, ⋃(valuesOn(S, F))) ∧
+    EnnLe(ennFiniteSum(setLIntegralSequence(X, μ, f, S), F),
+      setLIntegral(X, μ, f, ⋃(valuesOn(S, F))))
 proof
-  sorry
+  have space := Measure.space with measure
+  have seqV : ∀ n ∈ ℕ, setLIntegralSequence(X, μ, f, S)(n) ∈ ennreal
+    intros n hn
+    rw cldCSetLIntegralSequence.apply with hn
+    unfold setLIntegral
+    exact lintegral.member_any
+  induction finite with H a
+  | empty =>
+    have e : ⋃(valuesOn(S, ∅)) = ∅
+      ext x
+      constructor
+      . intro h
+        obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+        obtain ⟨m, hm, e⟩ := valuesOn.membership.forward with EIn
+        simp at hm
+      . intro h
+        simp at h
+    rw e
+    rw ennFiniteSum.empty
+    have me := MeasurableSet.empty with space
+    have z := EnnLe.zero with (lintegral.member_any at X, restrictMeasure(X, μ, ∅), f)
+    unfold setLIntegral
+    exact ⟨me, z⟩
+  | insert using ih =>
+    have aN := aMember
+    obtain ⟨mH, leH⟩ := ih
+    have eU : ⋃(valuesOn(S, H ∪ {a})) = ⋃(valuesOn(S, H)) ∪ S(a)
+      ext x
+      constructor
+      . intro h
+        obtain ⟨E, EIn, xE⟩ := union.membership.forward with h
+        obtain ⟨m, hm, e1⟩ := valuesOn.membership.forward with EIn
+        rw ← e1 at xE
+        have c := union2.membership.forward with hm
+        cases c with mH2 | ma
+        . have inV : S(m) ∈ valuesOn(S, H) := valuesOn.membership.backward with ⟨m, mH2, rfl⟩
+          have xu : x ∈ ⋃(valuesOn(S, H)) := union.membership.backward with ⟨S(m), inV, xE⟩
+          simp [xu]
+        . simp at ma
+          rw ma at xE
+          simp [xE]
+      . intro h
+        have c := union2.membership.forward with h
+        cases c with xu | xa
+        . obtain ⟨E, EIn, xE⟩ := union.membership.forward with xu
+          obtain ⟨m, hm, e1⟩ := valuesOn.membership.forward with EIn
+          have mI : m ∈ H ∪ {a} by simp [hm]
+          have inV : E ∈ valuesOn(S, H ∪ {a}) := valuesOn.membership.backward with ⟨m, mI, e1⟩
+          exact union.membership.backward with ⟨E, inV, xE⟩
+        . have aI : a ∈ H ∪ {a} by simp
+          have inV : S(a) ∈ valuesOn(S, H ∪ {a}) := valuesOn.membership.backward with ⟨a, aI, rfl⟩
+          exact union.membership.backward with ⟨S(a), inV, xa⟩
+    rw eU
+    have sa := sets with a, aN
+    have mU := MeasurableSet.union with space, mH, sa
+    have dj : Disjoint(⋃(valuesOn(S, H)), S(a))
+      apply Disjoint.iff.backward
+      intros x hx hxa
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with hx
+      obtain ⟨m, hm, e1⟩ := valuesOn.membership.forward with EIn
+      rw ← e1 at xE
+      have mN := HSubset with m, hm
+      have ne : m ≠ a
+        intro ma
+        apply aFresh
+        rw ← ma
+        exact hm
+      have d := disjoint with m, mN, a, aN, ne
+      have d2 := Disjoint.iff.forward with d
+      exact d2 with x, xE, hxa
+    have hv : ∀ j ∈ H ∪ {a}, setLIntegralSequence(X, μ, f, S)(j) ∈ ennreal
+      intros j hj
+      have c := union2.membership.forward with hj
+      cases c with jH | ja
+      . exact seqV with j, (HSubset with j, jH)
+      . simp at ja
+        rw ja
+        exact seqV with a, aN
+    rw ennFiniteSum.insert with HFinite, hv, aFresh
+    rw cldCSetLIntegralSequence.apply with aN
+    have ge := cldCSetLIntegral.union_ge with measure, values, mH, sa, dj
+    have sM : setLIntegral(X, μ, f, S(a)) ∈ ennreal
+      unfold setLIntegral
+      exact lintegral.member_any
+    have l1 := ennAdd.mono with leH, (EnnLe.reflexive with sM)
+    have hv2 : ∀ j ∈ H, setLIntegralSequence(X, μ, f, S)(j) ∈ ennreal
+      intros j hj
+      exact seqV with j, (HSubset with j, hj)
+    have m1 := ennFiniteSum.member with HFinite, hv2
+    have l2 := EnnLe.transitive with l1, ge
+    exact ⟨mU, l2⟩
 
 -- Mathlib's lintegral_iUnion_le without disjointness.
 theorem setLIntegral.sequence_union_le (X μ f S : Set)
@@ -7518,7 +7907,137 @@ theorem setLIntegral.sequence_union_le (X μ f S : Set)
   shows EnnLe(setLIntegral(X, μ, f, sequenceUnion(S)),
     ennTsum(setLIntegralSequence(X, μ, f, S), ℕ))
 proof
-  sorry
+  have space := Measure.space with measure
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    unfold EnnValued at values
+    unfold MapsInto at values
+    exact values
+  have setU := MeasurableSet.sequence_union with space, sets
+  have rU := restrictMeasure.measure with measure, setU
+  have seqV : ∀ n ∈ ℕ, setLIntegralSequence(X, μ, f, S)(n) ∈ ennreal
+    intros n hn
+    rw cldCSetLIntegralSequence.apply with hn
+    unfold setLIntegral
+    exact lintegral.member_any
+  have tM := ennTsum.member with seqV
+  unfold setLIntegral
+  apply lintegral.le_of_all with tM
+  intros P partition
+  have p2 := partition
+  obtain ⟨fin, rest⟩ := p2
+  have rowV : ∀ C ∈ P, ∀ n ∈ ℕ, cldCRows(μ, f, S, P)(C)(n) ∈ ennreal
+    intros C hC n hn
+    rw cldCRows.apply with hC
+    rw cldCRow.apply with hn
+    have pc := MeasurablePartition.pieces with space, partition, hC
+    have cn := MeasurableSet.inter with space, pc.left, (sets with n, hn)
+    have vC : ∀ x ∈ C, f(x) ∈ ennreal
+      intros x hx
+      exact vF with x, (pc.right with x, hx)
+    have i := ennInfOn.member with vC
+    exact ennMul.member with i, (Measure.member with measure, cn)
+  have sumV : ∀ C ∈ P, ennSumsOf(cldCRows(μ, f, S, P), P, ℕ)(C) ∈ ennreal
+    intros C hC
+    rw ennSumsOf.apply with hC
+    exact ennTsum.member with (rowV with C, hC)
+  have step1 : EnnLe(lowerSum(restrictMeasure(X, μ, sequenceUnion(S)), f, P), ennFiniteSum(ennSumsOf(cldCRows(μ, f, S, P), P, ℕ), P))
+    apply lowerSum.le_terms with rU, partition, vF, sumV
+    intros C hC
+    have pc := MeasurablePartition.pieces with space, partition, hC
+    have vC : ∀ x ∈ C, f(x) ∈ ennreal
+      intros x hx
+      exact vF with x, (pc.right with x, hx)
+    have i := ennInfOn.member with vC
+    rw ennSumsOf.apply with hC
+    rw cldCRows.apply with hC
+    rw restrictMeasure.apply with measure, setU, pc.left
+    have isets : ∀ n ∈ ℕ, MeasurableSet(X, cldCInterSeq(C, S)(n))
+      intros n hn
+      rw cldCInterSeq.apply with hn
+      exact MeasurableSet.inter with space, pc.left, (sets with n, hn)
+    have tv : ∀ n ∈ ℕ, measureSequence(μ, cldCInterSeq(C, S))(n) ∈ ennreal
+      intros n hn
+      rw measureSequence.apply with hn
+      exact Measure.member with measure, (isets with n, hn)
+    have prod : ∀ n ∈ ℕ, cldCRow(μ, f, S, C)(n) = ennMul(ennInfOn(f, C), measureSequence(μ, cldCInterSeq(C, S))(n))
+      intros n hn
+      rw cldCRow.apply with hn
+      rw measureSequence.apply with hn
+      rw cldCInterSeq.apply with hn
+    rw ennTsum.mul_left with tv, i, prod
+    have sl := Measure.sequence_union_le with measure, isets
+    rw cldCInterSeq.union at sl
+    exact ennMul.mono with (EnnLe.reflexive with i), sl
+  have step2 : ennFiniteSum(ennSumsOf(cldCRows(μ, f, S, P), P, ℕ), P) = ennTsum(ennColumnSums(cldCRows(μ, f, S, P), P, ℕ), ℕ)
+    rw ← ennTsum.finite with fin, sumV
+    exact ennTsum.comm_finite with fin, rowV
+  have famV : ∀ n ∈ ℕ, ∀ C ∈ P, familyAt(cldCRows(μ, f, S, P), P, n)(C) ∈ ennreal
+    intros n hn C hC
+    rw familyAt.apply with hC
+    exact rowV with C, hC, n, hn
+  have colV : ∀ n ∈ ℕ, ennColumnSums(cldCRows(μ, f, S, P), P, ℕ)(n) ∈ ennreal
+    intros n hn
+    rw ennColumnSums.apply with hn
+    exact ennTsum.member with (famV with n, hn)
+  have step3 : EnnLe(ennTsum(ennColumnSums(cldCRows(μ, f, S, P), P, ℕ), ℕ), ennTsum(setLIntegralSequence(X, μ, f, S), ℕ))
+    apply ennTsum.mono with colV, seqV
+    intros n hn
+    rw ennColumnSums.apply with hn
+    rw cldCSetLIntegralSequence.apply with hn
+    rw ennTsum.finite with fin, (famV with n, hn)
+    have rn := restrictMeasure.measure with measure, (sets with n, hn)
+    obtain ⟨sn, tn⟩ := lowerSum.lint_member with rn, partition, vF
+    have up := lintegral.upper at X, restrictMeasure(X, μ, S(n)), f, P with partition, sn
+    have same : ennFiniteSum(familyAt(cldCRows(μ, f, S, P), P, n), P) = lowerSum(restrictMeasure(X, μ, S(n)), f, P)
+      unfold lowerSum
+      apply ennFiniteSum.congr
+      intros C hC
+      have pc := MeasurablePartition.pieces with space, partition, hC
+      rw familyAt.apply with hC
+      rw cldCRows.apply with hC
+      rw cldCRow.apply with hn
+      rw partitionTerms.apply at restrictMeasure(X, μ, S(n)), f, _, _ with hC
+      rw restrictMeasure.apply with measure, (sets with n, hn), pc.left
+    rw same
+    unfold setLIntegral
+    exact up
+  rw step2 at step1
+  exact EnnLe.transitive with step1, step3
+
+-- Mathlib's lintegral_iUnion: over a disjoint sequence of measurable sets.
+theorem setLIntegral.sequence_union (X μ f S : Set)
+  requires measure : Measure(X, μ)
+  requires values : EnnValued(X, f)
+  requires sets : ∀ n ∈ ℕ, MeasurableSet(X, S(n))
+  requires disjoint : PairwiseDisjointSequence(S)
+  shows setLIntegral(X, μ, f, sequenceUnion(S)) =
+    ennTsum(setLIntegralSequence(X, μ, f, S), ℕ)
+proof
+  have l1 := setLIntegral.sequence_union_le with measure, values, sets
+  have seqV : ∀ n ∈ ℕ, setLIntegralSequence(X, μ, f, S)(n) ∈ ennreal
+    intros n hn
+    rw cldCSetLIntegralSequence.apply with hn
+    unfold setLIntegral
+    exact lintegral.member_any
+  have sM : setLIntegral(X, μ, f, sequenceUnion(S)) ∈ ennreal
+    unfold setLIntegral
+    exact lintegral.member_any
+  have l2 : EnnLe(ennTsum(setLIntegralSequence(X, μ, f, S), ℕ), setLIntegral(X, μ, f, sequenceUnion(S)))
+    apply ennTsum.least with seqV, sM
+    intros F hF
+    obtain ⟨FP, Ffin⟩ := finiteSubsets.membership.forward with hF
+    have FN := (powerset.membership_iff at F, ℕ).forward with FP
+    obtain ⟨mF, leF⟩ := cldCSetLIntegral.finite_union_ge with measure, values, sets, disjoint, Ffin, FN
+    have sub : ⋃(valuesOn(S, F)) ⊆ sequenceUnion(S)
+      intros x hx
+      obtain ⟨E, EIn, xE⟩ := union.membership.forward with hx
+      obtain ⟨m, hm, e1⟩ := valuesOn.membership.forward with EIn
+      have inV : E ∈ valuesOn(S, ℕ) := valuesOn.membership.backward with ⟨m, (FN with m, hm), e1⟩
+      unfold sequenceUnion
+      exact union.membership.backward with ⟨E, inV, xE⟩
+    have ms := setLIntegral.mono_set with measure, values, sub
+    exact EnnLe.transitive with leF, ms
+  exact EnnLe.antisymmetric with l1, l2
 
 -- Mathlib's lintegral_union and lintegral_add_compl.
 theorem setLIntegral.union (X μ f A B : Set)
@@ -7530,7 +8049,9 @@ theorem setLIntegral.union (X μ f A B : Set)
   shows setLIntegral(X, μ, f, A ∪ B) =
     ennAdd(setLIntegral(X, μ, f, A), setLIntegral(X, μ, f, B))
 proof
-  sorry
+  have l1 := cldCSetLIntegral.union_le with measure, values, setA, setB, disjoint
+  have l2 := cldCSetLIntegral.union_ge with measure, values, setA, setB, disjoint
+  exact EnnLe.antisymmetric with l1, l2
 
 theorem setLIntegral.add_compl (X μ f A : Set)
   requires measure : Measure(X, μ)
@@ -7539,7 +8060,32 @@ theorem setLIntegral.add_compl (X μ f A : Set)
   shows ennAdd(setLIntegral(X, μ, f, A),
       setLIntegral(X, μ, f, MeasurableSpace.carrier(X) ∖ A)) = lintegral(X, μ, f)
 proof
-  sorry
+  have space := Measure.space with measure
+  have u := MeasurableSet.univ with space
+  have setC := MeasurableSet.diff with space, u, set
+  have AX := MeasurableSet.subset with space, set
+  have dj : Disjoint(A, MeasurableSpace.carrier(X) ∖ A)
+    apply Disjoint.iff.backward
+    intros x hx hx2
+    simp at hx2
+    obtain ⟨c1, c2⟩ := hx2
+    apply c2
+    exact hx
+  rw ← setLIntegral.union with measure, values, set, setC, dj
+  have same : A ∪ (MeasurableSpace.carrier(X) ∖ A) = MeasurableSpace.carrier(X)
+    ext x
+    constructor
+    . intro h
+      simp at h
+      cases h with xa | xc
+      . exact AX with x, xa
+      . exact xc.left
+    . intro h
+      by_cases xa : x ∈ A
+      . simp [xa]
+      . simp [h, xa]
+  rw same
+  exact setLIntegral.whole with measure
 
 -- Mathlib's setLIntegral_eq_of_support_subset.
 theorem setLIntegral.eq_of_support (X μ f A : Set)
@@ -7644,6 +8190,49 @@ proof
     exact gen
   exact EnnLe.antisymmetric with l1, l2
 
+-- The constant c ∈ [0, ∞] on the carrier is measurable.
+theorem cldCMeasurable.enn_const (X c : Set)
+  requires space : MeasurableSpace(X)
+  requires member : c ∈ ennreal
+  shows Measurable(constantOn(MeasurableSpace.carrier(X), c), X, ennMeasurableSpace)
+proof
+  have es := ennMeasurableSpace.space
+  have cm : c ∈ MeasurableSpace.carrier(ennMeasurableSpace)
+    rw ennMeasurableSpace.carrier
+    exact member
+  have k : ∀ x ∈ MeasurableSpace.carrier(X), constantOn(MeasurableSpace.carrier(X), c)(x) = c
+    intros x hx
+    exact constantOn.apply with hx
+  exact Measurable.constant with space, es, cm, k
+
+-- A lower sum against c · μ is c times the lower sum against μ.
+theorem cldCLowerSum.smul (X μ c f P : Set)
+  requires measure : Measure(X, μ)
+  requires member : c ∈ ennreal
+  requires values : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+  requires partition : MeasurablePartition(X, P)
+  shows lowerSum(smulMeasure(c, X, μ), f, P) = ennMul(c, lowerSum(μ, f, P))
+proof
+  have space := Measure.space with measure
+  have p2 := partition
+  obtain ⟨fin, rest⟩ := p2
+  obtain ⟨sM, tM⟩ := lowerSum.lint_member with measure, partition, values
+  unfold lowerSum
+  apply ennFiniteSum.mul_left with fin, tM, member
+  intros C hC
+  have pc := MeasurablePartition.pieces with space, partition, hC
+  have vC : ∀ x ∈ C, f(x) ∈ ennreal
+    intros x hx
+    exact values with x, (pc.right with x, hx)
+  have i := ennInfOn.member with vC
+  have mC := Measure.member with measure, pc.left
+  rw partitionTerms.apply at smulMeasure(c, X, μ), f, _, _ with hC
+  rw partitionTerms.apply at μ, f, _, _ with hC
+  rw smulMeasure.apply with measure, member, pc.left
+  rw ← ennMul.assoc with i, member, mC
+  rw ennMul.comm with i, member
+  exact ennMul.assoc with member, i, mC
+
 -- Mathlib's setLIntegral_pos_iff: for measurable f, ∫⁻_A f > 0 exactly
 -- when f is positive on a part of A of positive measure.
 theorem setLIntegral.pos_iff (X μ f A : Set)
@@ -7653,7 +8242,79 @@ theorem setLIntegral.pos_iff (X μ f A : Set)
   shows setLIntegral(X, μ, f, A) ≠ realZero ↔
     μ(A ∩ ennGtSet(f, MeasurableSpace.carrier(X), realZero)) ≠ realZero
 proof
-  sorry
+  have space := Measure.space with measure
+  have rA := restrictMeasure.measure with measure, set
+  have zm := ennreal.zero_member
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    intros x hx
+    have m := Measurable.maps with measurable, hx
+    rw ennMeasurableSpace.carrier at m
+    exact m
+  have mG := MeasurableSet.lint_gt with measurable, zm
+  have toG : MeasurableSpace.carrier(X) ∖ equalizer(f, constantOn(MeasurableSpace.carrier(X), realZero), MeasurableSpace.carrier(X)) ⊆ ennGtSet(f, MeasurableSpace.carrier(X), realZero)
+    intros x hx
+    obtain ⟨xX, xq⟩ := difference.membership.forward with hx
+    unfold ennGtSet
+    refine ⟨xX, ?_⟩
+    intro le
+    apply xq
+    have eq := EnnLe.antisymmetric with le, (EnnLe.zero with (vF with x, xX))
+    apply equalizer.membership.backward
+    refine ⟨xX, ?_⟩
+    rw constantOn.apply with xX
+    exact eq
+  have fromG : ennGtSet(f, MeasurableSpace.carrier(X), realZero) ⊆ MeasurableSpace.carrier(X) ∖ equalizer(f, constantOn(MeasurableSpace.carrier(X), realZero), MeasurableSpace.carrier(X))
+    intros x hx
+    unfold ennGtSet at hx
+    obtain ⟨xX, n⟩ := hx
+    apply difference.membership.backward
+    refine ⟨xX, ?_⟩
+    intro xq
+    obtain ⟨xX2, e⟩ := equalizer.membership.forward with xq
+    rw constantOn.apply with xX at e
+    apply n
+    rw e
+    exact EnnLe.reflexive with zm
+  have AG := MeasurableSet.inter with space, set, mG
+  constructor
+  . intro ne
+    intro z
+    apply ne
+    unfold setLIntegral
+    apply (lintegral.eq_zero_iff with rA, measurable).backward
+    unfold AEEqual
+    unfold AlmostEverywhere
+    unfold NullSet
+    have gS := mG
+    unfold MeasurableSet at gS
+    have v : restrictMeasure(X, μ, A)(ennGtSet(f, MeasurableSpace.carrier(X), realZero)) = realZero
+      rw restrictMeasure.apply with measure, set, mG
+      have c := intersection.commutative at ennGtSet(f, MeasurableSpace.carrier(X), realZero), A
+      rw c
+      exact z
+    exact ⟨ennGtSet(f, MeasurableSpace.carrier(X), realZero), gS, toG, v⟩
+  . intro ne
+    intro z
+    apply ne
+    unfold setLIntegral at z
+    have ae := (lintegral.eq_zero_iff with rA, measurable).forward with z
+    unfold AEEqual at ae
+    unfold AlmostEverywhere at ae
+    unfold NullSet at ae
+    obtain ⟨B, hB, sub, zB⟩ := ae
+    have mBs : MeasurableSet(X, B)
+      unfold MeasurableSet
+      exact hB
+    rw restrictMeasure.apply with measure, set, mBs at zB
+    have BA := MeasurableSet.inter with space, mBs, set
+    have inc : A ∩ ennGtSet(f, MeasurableSpace.carrier(X), realZero) ⊆ B ∩ A
+      intros x hx
+      obtain ⟨xA, xG⟩ := intersection.membership.forward with hx
+      have xB := sub with x, (fromG with x, xG)
+      exact intersection.membership.backward with xB, xA
+    have le := Measure.mono with measure, AG, BA, inc
+    rw zB at le
+    exact EnnLe.antisymmetric with le, (EnnLe.zero with (Measure.member with measure, AG))
 
 -- Section: Change of measure
 -- Mathlib's lintegral_map: integrating against a push-forward.
@@ -7710,7 +8371,38 @@ theorem lintegral.smul_measure (X μ c f : Set)
   requires values : EnnValued(X, f)
   shows lintegral(X, smulMeasure(c, X, μ), f) = ennMul(c, lintegral(X, μ, f))
 proof
-  sorry
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    unfold EnnValued at values
+    unfold MapsInto at values
+    exact values
+  have lM := lintegral.member at X, μ, f with measure
+  have sM := lintegral.member_any at X, smulMeasure(c, X, μ), f
+  have l1 : EnnLe(lintegral(X, smulMeasure(c, X, μ), f), ennMul(c, lintegral(X, μ, f)))
+    apply lintegral.le_of_all with (ennMul.member with member, lM)
+    intros P partition
+    rw cldCLowerSum.smul with measure, member, vF, partition
+    obtain ⟨pM, tM⟩ := lowerSum.lint_member with measure, partition, vF
+    have up := lintegral.upper at X, μ, f, P with partition, pM
+    exact ennMul.mono with (EnnLe.reflexive with member), up
+  have inside : lowerSums(X, μ, f) ⊆ ennreal
+    intros s hs
+    obtain ⟨sM2, rest⟩ := lowerSums.membership.forward with hs
+    exact sM2
+  have bound : ∀ s ∈ lowerSums(X, μ, f), EnnLe(ennMul(c, s), lintegral(X, smulMeasure(c, X, μ), f))
+    intros s hs
+    obtain ⟨sM2, P, PP, partP, e⟩ := lowerSums.membership.forward with hs
+    rw e
+    rw ← cldCLowerSum.smul with measure, member, vF, partP
+    obtain ⟨pM, tM⟩ := lowerSum.lint_member with measure, partP, vF
+    have m2 := ennMul.member with member, pM
+    rw ← cldCLowerSum.smul with measure, member, vF, partP at m2
+    exact lintegral.upper with partP, m2
+  have r := ennMul.lint_sup_le with inside, member, sM, bound
+  have l2 : EnnLe(ennMul(c, lintegral(X, μ, f)), lintegral(X, smulMeasure(c, X, μ), f))
+    unfold lintegral at r
+    unfold lintegral
+    exact r
+  exact EnnLe.antisymmetric with l1, l2
 
 theorem lintegral.sum_measure (X m f : Set)
   requires measures : ∀ n ∈ ℕ, Measure(X, m(n))
@@ -7727,7 +8419,81 @@ theorem lintegral.dirac (X a f : Set)
   requires measurable : Measurable(f, X, ennMeasurableSpace)
   shows lintegral(X, diracMeasure(X, a), f) = f(a)
 proof
-  sorry
+  have prob := diracMeasure.probability with space, member
+  obtain ⟨dm, d1⟩ := prob
+  have vF : ∀ x ∈ MeasurableSpace.carrier(X), f(x) ∈ ennreal
+    intros x hx
+    have m := Measurable.maps with measurable, hx
+    rw ennMeasurableSpace.carrier at m
+    exact m
+  have values : EnnValued(X, f)
+    unfold EnnValued
+    unfold MapsInto
+    exact vF
+  have fa := vF with a, member
+  have cv : EnnValued(X, constantOn(MeasurableSpace.carrier(X), f(a)))
+    unfold EnnValued
+    unfold MapsInto
+    intros x hx
+    rw constantOn.apply with hx
+    exact fa
+  have mGe := MeasurableSet.lint_ge with measurable, fa
+  have mGt := MeasurableSet.lint_gt with measurable, fa
+  have mE := MeasurableSet.diff with space, mGe, mGt
+  have u := MeasurableSet.univ with space
+  have mB := MeasurableSet.diff with space, u, mE
+  have ae : AEEqual(X, diracMeasure(X, a), f, constantOn(MeasurableSpace.carrier(X), f(a)))
+    unfold AEEqual
+    unfold AlmostEverywhere
+    unfold NullSet
+    have bS := mB
+    unfold MeasurableSet at bS
+    have sub : MeasurableSpace.carrier(X) ∖ equalizer(f, constantOn(MeasurableSpace.carrier(X), f(a)), MeasurableSpace.carrier(X)) ⊆ MeasurableSpace.carrier(X) ∖ (ennGeSet(f, MeasurableSpace.carrier(X), f(a)) ∖ ennGtSet(f, MeasurableSpace.carrier(X), f(a)))
+      intros x hx
+      obtain ⟨xX, xq⟩ := difference.membership.forward with hx
+      apply difference.membership.backward
+      refine ⟨xX, ?_⟩
+      intro xE
+      apply xq
+      obtain ⟨xGe, xGt⟩ := difference.membership.forward with xE
+      unfold ennGeSet at xGe
+      obtain ⟨xX2, le1⟩ := xGe
+      have le2 : EnnLe(f(x), f(a))
+        by_contra n
+        apply xGt
+        unfold ennGtSet
+        exact ⟨xX, n⟩
+      have eq := EnnLe.antisymmetric with le2, le1
+      apply equalizer.membership.backward
+      refine ⟨xX, ?_⟩
+      rw constantOn.apply with xX
+      exact eq
+    have aE : a ∈ ennGeSet(f, MeasurableSpace.carrier(X), f(a)) ∖ ennGtSet(f, MeasurableSpace.carrier(X), f(a))
+      apply difference.membership.backward
+      constructor
+      . unfold ennGeSet
+        exact ⟨member, EnnLe.reflexive with fa⟩
+      . intro h
+        unfold ennGtSet at h
+        obtain ⟨aX, n⟩ := h
+        apply n
+        exact EnnLe.reflexive with fa
+    have aB : a ∉ MeasurableSpace.carrier(X) ∖ (ennGeSet(f, MeasurableSpace.carrier(X), f(a)) ∖ ennGtSet(f, MeasurableSpace.carrier(X), f(a)))
+      intro h
+      obtain ⟨aX, aN⟩ := difference.membership.forward with h
+      apply aN
+      exact aE
+    obtain ⟨v1, v2⟩ := diracMeasure.value at X, a, _ with bS
+    exact ⟨MeasurableSpace.carrier(X) ∖ (ennGeSet(f, MeasurableSpace.carrier(X), f(a)) ∖ ennGtSet(f, MeasurableSpace.carrier(X), f(a))), bS, sub, v2 with aB⟩
+  rw lintegral.congr_ae with dm, values, cv, ae
+  rw lintegral.const with dm, fa
+  rw d1
+  have one : realOne ∈ ennreal
+    have oR : realOne ∈ ℝ by typecheck
+    have o0 : realZero ≤ realOne by linarith
+    exact ennreal.of_real with oR, o0
+  rw ennMul.comm with fa, one
+  exact ennMul.one with fa
 
 theorem lintegral.zero_measure (X f : Set)
   requires space : MeasurableSpace(X)
@@ -7956,7 +8722,39 @@ theorem withDensity.indicator_one (X μ A : Set)
   shows withDensity(X, μ, indicatorOn(MeasurableSpace.carrier(X), A, realOne, realZero)) =
     restrictMeasure(X, μ, A)
 proof
-  sorry
+  have space := Measure.space with measure
+  have one : realOne ∈ ennreal
+    have oR : realOne ∈ ℝ by typecheck
+    have o0 : realZero ≤ realOne by linarith
+    exact ennreal.of_real with oR, o0
+  have cm := cldCMeasurable.enn_const with space, one
+  have im := Measurable.lint_indicator with cm, set
+  have agree : ∀ x ∈ MeasurableSpace.carrier(X), ennIndicatorOn(MeasurableSpace.carrier(X), A, constantOn(MeasurableSpace.carrier(X), realOne))(x) = indicatorOn(MeasurableSpace.carrier(X), A, realOne, realZero)(x)
+    intros x hx
+    obtain ⟨a1, a2⟩ := ennIndicatorOn.lint_apply at MeasurableSpace.carrier(X), A, constantOn(MeasurableSpace.carrier(X), realOne), x with hx
+    obtain ⟨b1, b2⟩ := indicatorOn.apply at MeasurableSpace.carrier(X), A, realOne, realZero, x with hx
+    by_cases xa : x ∈ A
+    . rw [a1 with xa, b1 with xa]
+      exact constantOn.apply with hx
+    . rw [a2 with xa, b2 with xa]
+  have meas := Measurable.congr with im, agree
+  have wm := withDensity.measure with measure, meas
+  have rm := restrictMeasure.measure with measure, set
+  apply Measure.ext with wm, rm
+  intros S hS
+  have mS : MeasurableSet(X, S)
+    unfold MeasurableSet
+    exact hS
+  rw withDensity.lint_apply with hS
+  unfold setLIntegral
+  have rS := restrictMeasure.measure with measure, mS
+  rw lintegral.indicator_const with rS, set, one
+  rw restrictMeasure.apply with measure, mS, set
+  rw restrictMeasure.apply with measure, set, mS
+  have AS := MeasurableSet.inter with space, set, mS
+  rw ennMul.one with (Measure.member with measure, AS)
+  have c := intersection.commutative at A, S
+  rw c
 
 -- Mathlib's isFiniteMeasure_withDensity.
 theorem withDensity.finite (X μ f : Set)
@@ -8032,7 +8830,32 @@ theorem Measure.ext_of_lintegral (X μ ν : Set)
     lintegral(X, μ, f) = lintegral(X, ν, f)
   shows μ = ν
 proof
-  sorry
+  have space := Measure.space with first
+  have one : realOne ∈ ennreal
+    have oR : realOne ∈ ℝ by typecheck
+    have o0 : realZero ≤ realOne by linarith
+    exact ennreal.of_real with oR, o0
+  have cm := cldCMeasurable.enn_const with space, one
+  have cv : EnnValued(X, constantOn(MeasurableSpace.carrier(X), realOne))
+    unfold EnnValued
+    unfold MapsInto
+    intros x hx
+    rw constantOn.apply with hx
+    exact one
+  apply Measure.ext with first, second
+  intros S hS
+  have mS : MeasurableSet(X, S)
+    unfold MeasurableSet
+    exact hS
+  have im := Measurable.lint_indicator with cm, mS
+  have e := agree with ennIndicatorOn(MeasurableSpace.carrier(X), S, constantOn(MeasurableSpace.carrier(X), realOne)), im
+  rw lintegral.indicator with first, cv, mS at e
+  rw lintegral.indicator with second, cv, mS at e
+  rw setLIntegral.const with first, mS, one at e
+  rw setLIntegral.const with second, mS, one at e
+  rw ennMul.one with (Measure.member with first, mS) at e
+  rw ennMul.one with (Measure.member with second, mS) at e
+  exact e
 
 -- Mathlib's ae_eq_of_forall_setLIntegral_eq_of_sigmaFinite.
 theorem AEEqual.of_setLIntegral (X μ f g : Set)
