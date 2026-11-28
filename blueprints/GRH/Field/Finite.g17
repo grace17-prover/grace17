@@ -1033,6 +1033,245 @@ proof
   rw eta
   exact Field.of_parts with isField
 
+-- Helpers: the binomial theorem in a commutative ring, through the
+-- partial sums Σ_{j<m} C(n, j) xʲ yⁿ⁻ʲ, and the binomial law in
+-- prime characteristic.
+def tkJBinomTerm (R x y : Set, n j : Nat) : Set :=
+  call2(Ring.mul(R), call2(Ring.mul(R), natCast(R, choose(n, j)), Ring.pow(R, x, j)),
+    Ring.pow(R, y, n - j))
+
+def tkJBinomSum (R x y : Set, n m : Nat) → Set
+  | R, x, y, n, zero => Ring.zero(R)
+  | R, x, y, n, succ(j) => call2(Ring.add(R), tkJBinomSum(R, x, y, n, j), tkJBinomTerm(R, x, y, n, j))
+
+theorem tkJ.choose.prime_middle (p j : Nat)
+  requires prime : Prime(p)
+  requires positive : 0 < j
+  requires below : j < p
+  shows p ∣ p choose j
+proof
+  obtain ⟨i, iNat, jShape⟩ := Less.exists_add_one with positive
+  obtain ⟨n, nNat, pShape⟩ := Less.exists_add_one with below
+  have zeroAdd : 0 + i + 1 = i + 1 by ring
+  rw zeroAdd at jShape
+  have absorbed := choose.absorption_at at j + n, i
+  have rowShape : j + n + 1 = p
+    rw pShape
+    ring
+  have row : (i + 1) * (p choose (i + 1)) = p * ((j + n) choose i)
+    rw ← rowShape
+    exact absorbed
+  rw ← jShape at row
+  have cNat := choose.natural at j + n, i
+  have product : p ∣ j * (p choose j)
+    witness (j + n) choose i
+    rw row
+    rfl
+  have split := Prime.divides_mul with prime, product
+  cases split with dividesJ | dividesEntry
+  . exfalso
+    have jNonzero : j ≠ 0
+      intro zero
+      rw zero at positive
+      exact Less.irreflexive at 0 with positive
+    have bound := divides.le with dividesJ, jNonzero
+    have strict := LessEqual.transitive_Less with bound, below
+    exact Less.irreflexive with strict
+  . exact dividesEntry
+
+section tkJBinomial
+variable (R : Set)
+hypothesis comm : CommRing(R)
+
+theorem tkJ.binom.term_mem (x y : R) (n j : Nat)
+  shows tkJBinomTerm(R, x, y, n, j) ∈ R.carrier
+proof
+  have ring := CommRing.to_ring with comm
+  have cNat := choose.natural at n, j
+  have cIn := tkJ.natCast.mem at R, choose(n, j) with ring
+  unfold tkJBinomTerm
+  typecheck
+
+theorem tkJ.binom.sum_succ (x y : R) (n j : Nat)
+  shows tkJBinomSum(R, x, y, n, j + 1) = tkJBinomSum(R, x, y, n, j) + tkJBinomTerm(R, x, y, n, j)
+proof
+  have shift := add.right_one at j with *
+  rw shift
+  simp [tkJBinomSum]
+
+theorem tkJ.binom.sum_mem (x y : R) (n m : Nat)
+  shows tkJBinomSum(R, x, y, n, m) ∈ R.carrier
+proof
+  induction m
+  | zero =>
+    simp [tkJBinomSum]
+    typecheck
+  | succ(k) using ih =>
+    have shift := add.right_one at k with *
+    rw ← shift
+    rw (tkJ.binom.sum_succ at R, x, y, n, k with comm)
+    have t := tkJ.binom.term_mem at R, x, y, n, k with comm
+    typecheck
+
+theorem tkJ.binom.term_zero (x y : R) (n : Nat)
+  shows tkJBinomTerm(R, x, y, n, 0) = y ^ n
+proof
+  have ring := CommRing.to_ring with comm
+  unfold tkJBinomTerm
+  rw [choose.zero_right, (tkJ.natCast.one at R with ring), sub.zero_right]
+  rw (Ring.pow_zero at R, x with ring)
+  ring
+
+theorem tkJ.binom.term_above (x y : R) (n : Nat)
+  shows tkJBinomTerm(R, x, y, n, n + 1) = R[0]
+proof
+  have le : n ≤ n by arith
+  have v := choose.vanishes at n, n with le
+  have shift := add.right_one at n with *
+  rw ← shift at v
+  unfold tkJBinomTerm
+  rw [v, tkJ.natCast.zero]
+  ring
+
+theorem tkJ.binom.term_succ (x y : R) (n j : Nat)
+  shows tkJBinomTerm(R, x, y, n + 1, j + 1) =
+    x * tkJBinomTerm(R, x, y, n, j) + y * tkJBinomTerm(R, x, y, n, j + 1)
+proof
+  have ring := CommRing.to_ring with comm
+  have c1Nat := choose.natural at n, j
+  have c2Nat := choose.natural at n, j + 1
+  have cAdd : choose(n + 1, j + 1) = choose(n, j) + choose(n, j + 1)
+    rw [(add.right_one at n), (add.right_one at j)]
+    exact choose.succ_succ at n, j
+  have subShift : (n + 1) - (j + 1) = n - j
+    rw [(add.right_one at n), (add.right_one at j)]
+    exact sub.succ_succ at n, j
+  have xs := Ring.pow_succ at R, x, j with ring
+  have c1In := tkJ.natCast.mem at R, choose(n, j) with ring
+  have c2In := tkJ.natCast.mem at R, choose(n, j + 1) with ring
+  unfold tkJBinomTerm
+  rw [cAdd, subShift, (tkJ.natCast.add at R, choose(n, j), choose(n, j + 1) with ring), xs]
+  by_cases below : j < n
+  . have nNat : Nat(n) by typecheck
+    have sh := sub.succ_of_Less at j
+    have e1 := sh with n, nNat, below
+    have e2 : n - j = (n - (j + 1)) + 1
+      rw [e1, (add.right_one at j)]
+      have sNat : Nat(n - succ(j)) by typecheck
+      symm
+      exact add.right_one at n - succ(j)
+    rw e2
+    rw (Ring.pow_succ at R, y, n - (j + 1) with ring)
+    ring
+  . have le : n ≤ j by arith
+    have v := choose.vanishes at n, j with le
+    rw (add.right_one at j)
+    rw [v, tkJ.natCast.zero]
+    ring
+
+theorem tkJ.binom.pascal (x y : R) (n m : Nat)
+  shows tkJBinomSum(R, x, y, n + 1, m + 1) =
+    x * tkJBinomSum(R, x, y, n, m) + y * tkJBinomSum(R, x, y, n, m + 1)
+proof
+  have ring := CommRing.to_ring with comm
+  induction m
+  | zero =>
+    rw [(tkJ.binom.sum_succ at R, x, y, n + 1, 0 with comm), (tkJ.binom.sum_succ at R, x, y, n, 0 with comm)]
+    simp [tkJBinomSum]
+    rw [(tkJ.binom.term_zero at R, x, y, n + 1 with comm), (tkJ.binom.term_zero at R, x, y, n with comm)]
+    rw (Ring.pow_succ at R, y, n with ring)
+    ring
+  | succ(k) using ih =>
+    have shift := add.right_one at k with *
+    rw ← shift
+    rw (tkJ.binom.sum_succ at R, x, y, n + 1, k + 1 with comm)
+    rw ih
+    rw (tkJ.binom.term_succ at R, x, y, n, k with comm)
+    rw [(tkJ.binom.sum_succ at R, x, y, n, k + 1 with comm), (tkJ.binom.sum_succ at R, x, y, n, k with comm)]
+    have s1 := tkJ.binom.sum_mem at R, x, y, n, k with comm
+    have t1 := tkJ.binom.term_mem at R, x, y, n, k with comm
+    have t2 := tkJ.binom.term_mem at R, x, y, n, k + 1 with comm
+    ring
+
+theorem tkJ.binom.theorem (x y : R) (n : Nat)
+  shows (x + y) ^ n = tkJBinomSum(R, x, y, n, n + 1)
+proof
+  have ring := CommRing.to_ring with comm
+  induction n
+  | zero =>
+    rw (Ring.pow_zero at R, x + y with ring)
+    rw (tkJ.binom.sum_succ at R, x, y, 0, 0 with comm)
+    rw (tkJ.binom.term_zero at R, x, y, 0 with comm)
+    rw (Ring.pow_zero at R, y with ring)
+    simp [tkJBinomSum]
+    ring
+  | succ(k) using ih =>
+    have shift := add.right_one at k with *
+    rw ← shift
+    rw (Ring.pow_succ at R, x + y, k with ring)
+    rw ih
+    rw (tkJ.binom.pascal at R, x, y, k, k + 1 with comm)
+    rw (tkJ.binom.sum_succ at R, x, y, k, k + 1 with comm)
+    rw (tkJ.binom.term_above at R, x, y, k with comm)
+    have s1 := tkJ.binom.sum_mem at R, x, y, k, k + 1 with comm
+    ring
+
+theorem tkJ.binom.prime_partial (x y : R) (p m : Nat)
+  requires prime : Prime(p)
+  requires vanishes : natCast(R, p) = R[0]
+  shows 0 < m → m ≤ p → tkJBinomSum(R, x, y, p, m) = y ^ p
+proof
+  have ring := CommRing.to_ring with comm
+  induction m
+  | zero =>
+    intros pos le
+    exfalso
+    arith
+  | succ(k) using ih =>
+    intros pos le
+    have shift := add.right_one at k with *
+    rw ← shift
+    rw (tkJ.binom.sum_succ at R, x, y, p, k with comm)
+    by_cases k0 : k = 0
+    . rw k0
+      simp [tkJBinomSum]
+      rw (tkJ.binom.term_zero at R, x, y, p with comm)
+      ring
+    . have kPos : 0 < k by arith
+      have kLe : k ≤ p by arith
+      have kLt : k < p by arith
+      rw (ih with kPos, kLe)
+      have d := tkJ.choose.prime_middle at p, k with prime, kPos, kLt
+      obtain ⟨c, cNat, ce⟩ := d
+      have tz : tkJBinomTerm(R, x, y, p, k) = R[0]
+        unfold tkJBinomTerm
+        rw ← ce
+        rw (tkJ.natCast.mul_vanish at R, p, c with ring, vanishes)
+        ring
+      rw tz
+      ring
+
+theorem tkJ.binom.freshman (x y : R) (p : Nat)
+  requires prime : Prime(p)
+  requires vanishes : natCast(R, p) = R[0]
+  shows (x + y) ^ p = x ^ p + y ^ p
+proof
+  have ring := CommRing.to_ring with comm
+  have gt := Prime.greater_than_one at p with prime
+  have pPos : 0 < p by arith
+  have pLe : p ≤ p by arith
+  have pN : p ∈ ℕ by typecheck
+  rw (tkJ.binom.theorem at R, x, y, p with comm)
+  rw (tkJ.binom.sum_succ at R, x, y, p, p with comm)
+  have part := tkJ.binom.prime_partial at R, x, y, p, p with comm, prime, vanishes
+  rw (part with pPos, pLe)
+  unfold tkJBinomTerm
+  rw [choose.diagonal, (tkJ.natCast.one at R with ring), sub.self]
+  rw (Ring.pow_zero at R, y with ring)
+  ring
+
+end tkJBinomial
+
 -- Section: ℤ/nℤ
 section ZModLaws
 variable (n : Nat)
@@ -1812,7 +2051,23 @@ theorem CharP.add_pow (p n : Nat) (x y : Set)
   shows Ring.pow(R, call2(Ring.add(R), x, y), p ^ n) =
     call2(Ring.add(R), Ring.pow(R, x, p ^ n), Ring.pow(R, y, p ^ n))
 proof
-  sorry
+  have ring := CommRing.to_ring with comm
+  have vanishes := CharP.cast_eq_zero at R, p with comm, char
+  induction n
+  | zero =>
+    rw pow.zero
+    have sIn : call2(Ring.add(R), x, y) ∈ Ring.carrier(R) by typecheck
+    rw [(Ring.pow_one at R, call2(Ring.add(R), x, y) with ring, sIn), (Ring.pow_one at R, x with ring, first), (Ring.pow_one at R, y with ring, second)]
+  | succ(k) using ih =>
+    have shift := add.right_one at k with *
+    rw ← shift
+    rw (pow.succ_right at p, k)
+    have sIn : call2(Ring.add(R), x, y) ∈ Ring.carrier(R) by typecheck
+    rw [(Ring.pow_mul at R, call2(Ring.add(R), x, y), p ^ k, p with ring, sIn), (Ring.pow_mul at R, x, p ^ k, p with ring, first), (Ring.pow_mul at R, y, p ^ k, p with ring, second)]
+    rw ih
+    have xk : Ring.pow(R, x, p ^ k) ∈ Ring.carrier(R) by typecheck
+    have yk : Ring.pow(R, y, p ^ k) ∈ Ring.carrier(R) by typecheck
+    exact tkJ.binom.freshman at R, Ring.pow(R, x, p ^ k), Ring.pow(R, y, p ^ k), p with comm, xk, yk, prime, vanishes
 
 theorem CharP.sub_pow (p n : Nat) (x y : Set)
   requires char : CharP(R, p)
@@ -1822,7 +2077,15 @@ theorem CharP.sub_pow (p n : Nat) (x y : Set)
   shows Ring.pow(R, Ring.sub(R, x, y), p ^ n) =
     Ring.sub(R, Ring.pow(R, x, p ^ n), Ring.pow(R, y, p ^ n))
 proof
-  sorry
+  have ring := CommRing.to_ring with comm
+  have dIn : Ring.sub(R, x, y) ∈ Ring.carrier(R) by typecheck
+  have e := CharP.add_pow at R, p, n, Ring.sub(R, x, y), y with comm, char, prime, dIn, second
+  have back : call2(Ring.add(R), Ring.sub(R, x, y), y) = x by ring
+  rw back at e
+  have dq : Ring.pow(R, Ring.sub(R, x, y), p ^ n) ∈ Ring.carrier(R) by typecheck
+  have yq : Ring.pow(R, y, p ^ n) ∈ Ring.carrier(R) by typecheck
+  rw e
+  ring
 
 -- sum_pow_char_pow: (Σ xᵢ)^(p^n) = Σ xᵢ^(p^n) over a finite index set.
 theorem CharP.sum_pow (V w : Set) (p n : Nat)
