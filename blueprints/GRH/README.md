@@ -361,7 +361,7 @@ graph TD
 | GRH.Padic.Valuation | 63 | 8 | 55 |
 | GRH.Padic.Cp | 33 | 1 | 32 |
 | GRH.Algebra.Flat | 31 | 1 | 30 |
-| GRH.Category.Basic | 119 | 0 | 119 |
+| GRH.Category.Basic | 179 | 121 | 58 |
 | GRH.General.PadicPlace | 4 | 1 | 3 |
 | GRH.Adelic.CuspForms | 24 | 17 | 7 |
 | GRH.Bernoulli | 176 | 176 | 0 |
@@ -405,7 +405,7 @@ graph TD
 | GRH.Weil.RealData | 13 | 0 | 13 |
 | GRH.Weil.Operators | 9 | 0 | 9 |
 | GRH.CM.Reciprocity | 2 | 0 | 2 |
-| GRH.Category.Abelian | 45 | 1 | 44 |
+| GRH.Category.Abelian | 46 | 11 | 35 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
 | GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
@@ -461,10 +461,10 @@ graph TD
 | GRH.Statements | 7 | 6 | 1 |
 | GRH.Proof.Main | 13 | 11 | 2 |
 | GRH.Proof.Seesaw.LatticeAndTorsionDefs | 0 | 0 | 0 |
-| GRH.Scheme.Basic | 63 | 7 | 56 |
+| GRH.Scheme.Basic | 63 | 12 | 51 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **9937** | **7732** | **2205** |
 <!-- /blueprint-status -->
