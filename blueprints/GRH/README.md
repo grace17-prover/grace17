@@ -357,9 +357,9 @@ graph TD
 | GRH.NumberField.Adeles | 30 | 1 | 29 |
 | GRH.Adelic.Adeles | 26 | 2 | 24 |
 | GRH.Adelic.QuotientMeasure | 13 | 0 | 13 |
-| GRH.Padic.Numbers | 76 | 5 | 71 |
-| GRH.Padic.Valuation | 63 | 8 | 55 |
-| GRH.Padic.Cp | 33 | 1 | 32 |
+| GRH.Padic.Numbers | 85 | 36 | 49 |
+| GRH.Padic.Valuation | 148 | 135 | 13 |
+| GRH.Padic.Cp | 35 | 13 | 22 |
 | GRH.Algebra.Flat | 31 | 1 | 30 |
 | GRH.Category.Basic | 119 | 0 | 119 |
 | GRH.General.PadicPlace | 4 | 1 | 3 |
@@ -416,8 +416,8 @@ graph TD
 | GRH.GLn.WeightRep | 6 | 0 | 6 |
 | GRH.GLn.Branching | 7 | 0 | 7 |
 | GRH.GLn.Dual | 3 | 0 | 3 |
-| GRH.Padic.Witt | 40 | 3 | 37 |
-| GRH.Padic.Tilt | 36 | 2 | 34 |
+| GRH.Padic.Witt | 48 | 15 | 33 |
+| GRH.Padic.Tilt | 39 | 9 | 30 |
 | GRH.Proof.Endgame.PrimeError | 11 | 8 | 3 |
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 14 | 5 | 9 |
@@ -466,5 +466,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **9983** | **7785** | **2198** |
 <!-- /blueprint-status -->
