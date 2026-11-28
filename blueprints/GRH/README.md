@@ -372,7 +372,7 @@ graph TD
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.Gamma | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 493 | 493 | 0 |
-| GRH.LSeries.Dirichlet | 145 | 134 | 11 |
+| GRH.LSeries.Dirichlet | 158 | 150 | 8 |
 | GRH.LSeries.Completed | 77 | 45 | 32 |
 | GRH.LSeries.NonVanishing | 81 | 80 | 1 |
 | GRH.Calculus.Analytic | 94 | 89 | 5 |
@@ -382,10 +382,11 @@ graph TD
 | GRH.Analytic.Background | 8 | 4 | 4 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Analytic.Legendre | 17 | 17 | 0 |
+| GRH.Analytic.TkKQuadraticResidues | 4 | 4 | 0 |
 | GRH.Analytic.LandauTools | 12 | 12 | 0 |
 | GRH.Analytic.LandauMoments | 89 | 89 | 0 |
 | GRH.Analytic.LandauCore | 11 | 11 | 0 |
-| GRH.Analytic.Landau | 21 | 16 | 5 |
+| GRH.Analytic.Landau | 22 | 20 | 2 |
 | GRH.Analytic.PolyaVinogradov | 2 | 0 | 2 |
 | GRH.Analytic.Theta | 14 | 0 | 14 |
 | GRH.Analytic.Primes | 3 | 0 | 3 |
@@ -418,7 +419,7 @@ graph TD
 | GRH.GLn.Dual | 3 | 0 | 3 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
-| GRH.Proof.Endgame.PrimeError | 11 | 8 | 3 |
+| GRH.Proof.Endgame.PrimeError | 11 | 9 | 2 |
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 14 | 5 | 9 |
 | GRH.Proof.Curve.PeriodDefs | 9 | 7 | 2 |
@@ -466,5 +467,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **9894** | **7621** | **2273** |
 <!-- /blueprint-status -->
