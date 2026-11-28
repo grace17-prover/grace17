@@ -1,0 +1,552 @@
+-- Exponents, U-operators and spherical vectors at pro-p Iwahori level for
+-- GL_N over a non-archimedean local field: twisted conjugacy in I₁tI₁,
+-- the quadratic relation, an injective strictly dominant U_t, exponents
+-- and their invariance, the degree of I₁tI₁, Satake's formula in stages
+-- for the partial Hecke operators T^r_j, sorting exponents and producing
+-- them from eigenvectors in unitary representations, eigenspaces of the
+-- line-stabilising parahoric, exponents of depth-zero types induced from
+-- determinant characters, and Tadić's strings of Satake parameters (the
+-- chain lemma).
+-- Source: grh-compact/src/Lib/LocalGL/Iwahori/IwahoriConjugation.lean
+-- (iwahoriDoubleCoset, diagGL_mem_proIwahori, exists_twisted_conj_diag),
+-- Lib/LocalGL/Iwahori/IwahoriInjective.lean
+-- (mem_proIwahori_iff_blockParahoric, quadratic_relation,
+-- exists_iwahoriHeckeHom_injective, IsExponent.apply_compactMean,
+-- IsExponent.apply_proIwahori, IsExponent.apply_diagGL_unit),
+-- Lib/LocalGL/Iwahori/HeckeCounts.lean (iwahoriDegree,
+-- hecke_dominant_eq_iwahoriDegree_smul, partialCosets, partialHecke,
+-- partialHecke_zero_eq_heckeGL, partialHecke_top_eq_zero,
+-- partialHecke_zero_right, IsExponent.apply_partialHecke),
+-- Lib/LocalGL/Iwahori/SortedExponents.lean (IsExponent.exists_sorted,
+-- IsIwahoriEigen.exists_isExponent, exists_sorted_of_type),
+-- Lib/LocalGL/Iwahori/HeckeOnLineStabiliser.lean (exists_clear_first_row,
+-- parahoricEigenspace, heckeCoset_mem_parahoricEigenspace),
+-- Lib/LocalGL/Iwahori/ExponentOfLabel.lean (exists_sorted_of_detChar),
+-- Lib/LocalGL/Tadic/ChainLemma.lean
+-- (IsExponent.eq_zero_of_eq_zero_on_spherical, HasRootString,
+-- chain_lemma, isRoot_string_of_norm).
+-- Not stated: the internal lemmas map_mem_proIwahori_iff_of_isEquiv,
+-- eventually_v_mul_pow_le_one, eventually_pow_mul_mem_dominantTorus,
+-- mem_blockParahoric, conj_monomial_mem_blockParahoric,
+-- transvectionGL_apply_permGL_inv, proIwahori_le_blockParahoric,
+-- swap_mul_transvectionGL, exists_swap_conj_mem_proIwahori,
+-- IsExponent.apply_monomial_translate, coe_normAbsChar_locField,
+-- heckeCoset_mulSingle_zero_eq, mul_mem_partialCosets_iff,
+-- hasFiniteCosets_partialCosets, partialHecke_mem_levelSpace,
+-- partialHecke_hyperplane_count and partialHecke_dual.
+-- Encoding as in GRH.LocalGL.PadicGL. The source's E_w (LocField w) is a
+-- local field (F, ord); its statements are stated for every local field.
+-- A family θ of characters of Fˣ is a function i ↦ θ_i, each θ_i a
+-- multiplicative function Fˣ → ℂ∖{0}; StrictMono (v ∘ t) says
+-- ord t_i > ord t_j for i < j. The elementary symmetric function
+-- e_j(y_r, …, y_(N−1)) is the sum over the j-element subsets of
+-- {r, …, N − 1}.
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.Iwahori
+import GRH.LocalGL.PadicGL
+import GRH.LocalGL.Green
+
+section Iwahori
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- A smooth representation of GL_N(F) on a complex module W.
+predicate SmoothSetting (F ord N W π : Set) :=
+  csLGLocalField(F, ord) ∧ N ∈ ℕ ∧ csLGSmoothRep(F, ord, N, W, π)
+
+-- The I₁-fixed vectors and the vectors fixed by GL_N(𝒪).
+def iwahoriFixed (F ord N W π : Set) : Set :=
+  fixedSpace(csLGGL(F, N), csLGProIwahori(F, ord, N), W, π)
+
+def sphericalVectors (F ord N W π : Set) : Set :=
+  fixedSpace(csLGGL(F, N), csLGIntGL(F, ord, N), W, π)
+
+-- iwahoriDoubleCoset t = I₁ diag(t) I₁.
+def iwahoriDoubleCoset (F ord N t : Set) : Set :=
+  csLGDoubleCoset(F, N, csLGProIwahori(F, ord, N), csLGDiagGL(F, N, t))
+
+-- t is strictly dominant: ord t_i > ord t_j for i < j.
+predicate StrictlyDominant (F ord N t : Set) :=
+  t ∈ csLGTorus(F, N) ∧
+  ∀ i ∈ N, ∀ j ∈ N, (i:N) < (j:N) → realInt(ord(t(j))) < realInt(ord(t(i)))
+
+-- t has unit entries (v(t_i) = 1).
+predicate UnitFamily (F ord N t : Set) :=
+  t ∈ csLGTorus(F, N) ∧ ∀ i ∈ N, ord(t(i)) = integerOfNat((0:N))
+
+-- The entrywise image σ(g).
+def entrywise (F N σ g : Set) : Set := matMap(F, N, N, σ, g)
+
+-- A family of characters θ_i of Fˣ.
+predicate UnitCharFamily (F N θ : Set) :=
+  ∀ i ∈ N, FunctionBetween(θ(i), csLGNonzero(F), complexCarrier ∖ {complexZero}) ∧
+    ∀ x ∈ csLGNonzero(F), ∀ y ∈ csLGNonzero(F),
+      θ(i)(call2(Ring.mul(F), x, y)) = ℂ[θ(i)(x) * θ(i)(y)]
+
+-- θ∘σ for a permutation σ of N.
+def charFamilyComp (N θ σ : Set) : Set := { (i, θ(σ(i))) | i ∈ N }
+
+-- The permutations of N.
+def permutationsOf (N : Set) : Set := { σ ∈ functionSpace(N, N) | BijectiveBetween(σ, N, N) }
+
+-- The transposition (a b) of N.
+def swapValue (N a b i : Set) : Set :=
+  ⋃({ c ∈ N | (i = a ∧ c = b) ∨ (i = b ∧ c = a) ∨ (i ≠ a ∧ i ≠ b ∧ c = i) })
+
+def swapPerm (N a b : Set) : Set := { (i, swapValue(N, a, b, i)) | i ∈ N }
+
+-- |θ_{σ(i)}(ϖ)| is non-increasing in i.
+predicate SortedAt (N θ σ ϖ : Set) :=
+  ∀ i ∈ N, ∀ j ∈ N, (i:N) ≤ (j:N) →
+    complexAbs(θ(σ(j))(ϖ)) ≤ complexAbs(θ(σ(i))(ϖ))
+
+-- The identity permutation.
+def idPerm (N : Set) : Set := identity(N)
+
+-- Section: Twisted conjugacy
+-- diagGL_mem_proIwahori: diag(t) ∈ I₁ iff t_i ≡ 1 mod 𝔭 for all i.
+theorem csLGDiagGL.mem_proIwahori (F ord N t : Set)
+  requires local : csLGLocalField(F, ord)
+  requires natural : N ∈ ℕ
+  requires ht : t ∈ csLGTorus(F, N)
+  shows csLGDiagGL(F, N, t) ∈ csLGProIwahori(F, ord, N) ↔
+    ∀ i ∈ N, Ring.sub(F, t(i), Ring.one(F)) ∈ csLGMaximal(F, ord)
+proof
+  sorry
+
+-- exists_twisted_conj_diag (Görtz–Haines–Kottwitz–Reuman): for σ an
+-- isometric ring endomorphism of F, onto on GL_N(F), and t strictly
+-- dominant, every g ∈ I₁tI₁ has k⁻¹ g σ(k) = diag(t d) with k ∈ I₁ and
+-- diag d ∈ I₁.
+theorem iwahoriDoubleCoset.twisted_conj_diag (F ord N σ t g : Set)
+  requires local : csLGLocalField(F, ord)
+  requires natural : N ∈ ℕ
+  requires hom : RingHom(σ, F, F)
+  requires isometric : ∀ x ∈ csLGNonzero(F), ord(σ(x)) = ord(x)
+  requires onto : ∀ h ∈ invertibleMatrices(F, N), ∃ k ∈ invertibleMatrices(F, N),
+    entrywise(F, N, σ, k) = h
+  requires dominant : StrictlyDominant(F, ord, N, t)
+  requires hg : g ∈ iwahoriDoubleCoset(F, ord, N, t)
+  shows ∃ k ∈ csLGProIwahori(F, ord, N), ∃ d ∈ csLGTorus(F, N),
+    csLGDiagGL(F, N, d) ∈ csLGProIwahori(F, ord, N) ∧
+    matMul(F, N, N, N, matMul(F, N, N, N, csLGInv(F, N, k), g), entrywise(F, N, σ, k)) =
+      csLGDiagGL(F, N, csLGTorusMul(F, N, t, d))
+proof
+  sorry
+
+-- Section: Exponents
+-- mem_proIwahori_iff_blockParahoric: I₁ is the parahoric of the identity
+-- level with diagonal ≡ 1.
+theorem csLGProIwahori.block_parahoric (F ord N g : Set)
+  requires local : csLGLocalField(F, ord)
+  requires natural : N ∈ ℕ
+  shows g ∈ csLGProIwahori(F, ord, N) ↔
+    g ∈ csLGBlockParahoric(F, ord, N, identity(ℕ)) ∧
+    ∀ i ∈ N, Ring.sub(F, g(i, i), Ring.one(F)) ∈ csLGMaximal(F, ord)
+proof
+  sorry
+
+-- quadratic_relation: for b = a + 1, s = π(permGL (a b)), φ linear and
+-- I₁-invariant, x fixed by 1 + 𝒪E_{ba}, and φ(π(diag t)x) = c for the
+-- t = (−u⁻¹ at a, u at b, 1 elsewhere), u a unit:
+-- q φ(s compactMean I₁ x) = φ(s x) + (q − 1) c.
+def quadraticValue (F a b u i : Set) : Set :=
+  ⋃({ c ∈ Ring.carrier(F) | (i = a ∧ c = Ring.neg(F)(ringInverse(F, u))) ∨
+    (i = b ∧ c = u) ∨ (i ≠ a ∧ i ≠ b ∧ c = Ring.one(F)) })
+
+def quadraticTorus (F N a b u : Set) : Set := { (i, quadraticValue(F, a, b, u, i)) | i ∈ N }
+
+theorem quadratic_relation (F ord N W π W2 φ x a b c : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires ha : a ∈ N
+  requires adjacent : b = succ(a) ∧ b ∈ N
+  requires hφ : LinearMap(φ, W, complexRing, W2)
+  requires hx : x ∈ Module.carrier(W)
+  requires hc : c ∈ Module.carrier(W2)
+  requires invariant : ∀ k ∈ csLGProIwahori(F, ord, N), ∀ z ∈ Module.carrier(W),
+    φ(π(k)(z)) = φ(z)
+  requires fixed : ∀ e ∈ csLGInt(F, ord), π(csLGTransvectionGL(F, N, b, a, e))(x) = x
+  requires value : ∀ u ∈ csLGNonzero(F), ord(u) = integerOfNat((0:N)) →
+    φ(π(csLGDiagGL(F, N, quadraticTorus(F, N, a, b, u)))(x)) = c
+  shows Module.smul(W2)(csLGNat(csLGResidueOrder(F, ord)),
+      φ(π(csLGPermGL(F, N, swapPerm(N, a, b)))(csLGCompactMean(F, ord, N, W, π,
+        csLGProIwahori(F, ord, N), x)))) =
+    call2(Module.add(W2), φ(π(csLGPermGL(F, N, swapPerm(N, a, b)))(x)),
+      Module.smul(W2)(ℂ[csLGNat(csLGResidueOrder(F, ord)) - complexOne], c))
+proof
+  sorry
+
+-- exists_iwahoriHeckeHom_injective: some strictly dominant t has U_t
+-- injective on the I₁-fixed vectors.
+theorem csLGUOp.injective_some (F ord N W π : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  shows ∃ t, StrictlyDominant(F, ord, N, t) ∧
+    ∀ x ∈ iwahoriFixed(F, ord, N, W, π), ∀ y ∈ iwahoriFixed(F, ord, N, W, π),
+      csLGUOp(F, ord, N, W, π, t, x) = csLGUOp(F, ord, N, W, π, t, y) → x = y
+proof
+  sorry
+
+-- IsExponent.apply_compactMean, IsExponent.apply_proIwahori and
+-- IsExponent.apply_diagGL_unit: an exponent (ξ, l) is invariant under the
+-- mean over I₁ and under I₁, and l(π(diag t) z) = ξ(t) l(z) for t with
+-- unit entries.
+theorem csLGIsExponent.invariance (F ord N W π ξ l z : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires exponent : csLGIsExponent(F, ord, N, W, π, ξ, l)
+  requires hz : z ∈ Module.carrier(W)
+  shows l(csLGCompactMean(F, ord, N, W, π, csLGProIwahori(F, ord, N), z)) = l(z) ∧
+    (∀ k ∈ csLGProIwahori(F, ord, N), l(π(k)(z)) = l(z)) ∧
+    (∀ t, UnitFamily(F, ord, N, t) → l(π(csLGDiagGL(F, N, t))(z)) = ℂ[ξ(t) * l(z)])
+proof
+  sorry
+
+-- Section: Hecke counts
+-- iwahoriDegree t = Π_{i<j} ‖t_j / t_i‖ (i < j is i ∈ j, N a natural).
+def increasingPairs (N : Set) : Set := { q ∈ N × N | fst(q) ∈ snd(q) }
+
+def iwahoriDegreeTerms (F ord N t : Set) : Set :=
+  { (p, complexOfReal(csLGNormAbs(F, ord, call2(Ring.mul(F), t(snd(p)), ringInverse(F, t(fst(p))))))) |
+    p ∈ increasingPairs(N) }
+
+def iwahoriDegree (F ord N t : Set) : Set :=
+  csLGProduct(increasingPairs(N), iwahoriDegreeTerms(F, ord, N, t))
+
+-- hecke_dominant_eq_iwahoriDegree_smul: for t dominant and x fixed by
+-- I₁, the Hecke operator of I₁tI₁ is iwahoriDegree(t) U_t.
+theorem heckeCoset.dominant (F ord N W π t x : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires dominant : t ∈ csLGDominantTorus(F, ord, N)
+  requires hx : x ∈ iwahoriFixed(F, ord, N, W, π)
+  shows csLGHeckeCoset(F, N, W, π, csLGProIwahori(F, ord, N), csLGDiagGL(F, N, t), x) =
+    Module.smul(W)(iwahoriDegree(F, ord, N, t), csLGUOp(F, ord, N, W, π, t, x))
+proof
+  sorry
+
+-- partialCosets r j: the g in basicDoubleCoset j whose inverse has its
+-- first r columns integral; partialHecke r j = T^r_j.
+def partialCosets (F ord N r j : Set) : Set :=
+  { g ∈ csLGBasicDoubleCoset(F, ord, N, j) | ∀ b ∈ N, ∀ a ∈ N, b ∈ r →
+    csLGInv(F, N, g)(a, b) ∈ csLGInt(F, ord) }
+
+def partialHecke (F ord N W π r j x : Set) : Set :=
+  heckeFun(csLGGL(F, N), csLGIntGL(F, ord, N), complexRing, W, π,
+    csLGIndicator(F, N, partialCosets(F, ord, N, r, j)), x)
+
+-- partialHecke_zero_eq_heckeGL, partialHecke_top_eq_zero and
+-- partialHecke_zero_right: T⁰_j = T_j, T^N_(j+1) = 0, T^r_0 x = x for x
+-- spherical.
+theorem partialHecke.boundary (F ord N W π j x : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires hj : j ∈ ℕ
+  requires hx : x ∈ sphericalVectors(F, ord, N, W, π)
+  shows partialHecke(F, ord, N, W, π, (0:N), j, x) = csLGHeckeGL(F, ord, N, W, π, j, x) ∧
+    partialHecke(F, ord, N, W, π, N, succ(j), x) = Module.zero(W) ∧
+    ∀ r ∈ succ(N), partialHecke(F, ord, N, W, π, r, (0:N), x) = x
+proof
+  sorry
+
+-- e_j(y_r, …, y_(N−1)): the sum over j-element subsets S of {r, …, N−1} of
+-- Π_{i ∈ S} y_i.
+def tailSubsets (N r j : Set) : Set :=
+  { S ∈ 𝒫(N ∖ r) | cardinality(S) = j }
+
+def subsetProductTerms (y S : Set) : Set := { (i, y(i)) | i ∈ S }
+
+def elemSymTerms (N y r j : Set) : Set :=
+  { (S, csLGProduct(S, subsetProductTerms(y, S))) | S ∈ tailSubsets(N, r, j) }
+
+def elemSymTail (N y r j : Set) : Set := csLGSum(tailSubsets(N, r, j), elemSymTerms(N, y, r, j))
+
+def uniformiserValues (N θ ϖ : Set) : Set := { (i, θ(i)(ϖ)) | i ∈ N }
+
+-- IsExponent.apply_partialHecke (Satake in stages): for an exponent
+-- (torusChar θ, l), x spherical and r ≤ N,
+-- l(T^r_j x) = e_j(θ_r(ϖ), …, θ_(N−1)(ϖ)) q^(−j(j−1)/2) l(x).
+theorem csLGIsExponent.partialHecke (F ord N W π θ l x ϖ r j : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires family : UnitCharFamily(F, N, θ)
+  requires exponent : csLGIsExponent(F, ord, N, W, π, csLGTorusChar(F, ord, N, θ), l)
+  requires hx : x ∈ sphericalVectors(F, ord, N, W, π)
+  requires hr : r ∈ succ(N)
+  requires hj : j ∈ ℕ
+  shows l(partialHecke(F, ord, N, W, π, r, j, x)) =
+    ℂ[complexDiv(elemSymTail(N, uniformiserValues(N, θ, ϖ), r, j),
+      csLGHalfPow(csLGResidueOrder(F, ord), j)) * l(x)]
+proof
+  sorry
+
+-- Section: Sorted exponents
+-- IsExponent.exists_sorted: let I₁ fix x, units act on x by τ, and each
+-- permutation preserving the coordinates of τ act on x by a scalar. An
+-- exponent (torusChar θ, l) with l(x) ≠ 0 gives σ and an exponent
+-- (torusChar (θ∘σ), l′) with l′(π(σ⁻¹)x) ≠ 0 and |θ_σ(i)(ϖ)| non-increasing.
+predicate TypeData (F ord N W π x τ : Set) :=
+  x ∈ iwahoriFixed(F, ord, N, W, π) ∧
+  (∀ t, csLGDiagGL(F, N, t) ∈ csLGIntGL(F, ord, N) → t ∈ csLGTorus(F, N) →
+    π(csLGDiagGL(F, N, t))(x) = Module.smul(W)(τ(t), x)) ∧
+  (∀ σ ∈ permutationsOf(N),
+    (∀ i ∈ N, ∀ ε ∈ csLGNonzero(F), ord(ε) = integerOfNat((0:N)) →
+      τ(csLGMulSingle(F, N, i, ε)) = τ(csLGMulSingle(F, N, σ(i), ε))) →
+    ∃ c ∈ complexCarrier, π(csLGPermGL(F, N, σ))(x) = Module.smul(W)(c, x))
+
+theorem csLGIsExponent.exists_sorted (F ord N W π x τ θ l ϖ : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires typeData : TypeData(F, ord, N, W, π, x, τ)
+  requires family : UnitCharFamily(F, N, θ)
+  requires exponent : csLGIsExponent(F, ord, N, W, π, csLGTorusChar(F, ord, N, θ), l)
+  requires nonzero : l(x) ≠ complexZero
+  shows ∃ σ ∈ permutationsOf(N),
+    (∃ l2, csLGIsExponent(F, ord, N, W, π, csLGTorusChar(F, ord, N, charFamilyComp(N, θ, σ)), l2) ∧
+      l2(π(csLGPermGL(F, N, converse(σ, N, N)))(x)) ≠ complexZero) ∧
+    SortedAt(N, θ, σ, ϖ)
+proof
+  sorry
+
+-- IsIwahoriEigen.exists_isExponent: in a unitary smooth representation
+-- with finite-dimensional I₁-invariants in the span V_x of the translates
+-- of x, a ξ-eigenvector of the U_t in V_x gives an exponent (ξ, B(w, ·))
+-- with w ∈ V_x, B(w, w) ≠ 0.
+predicate FiniteIwahoriInvariants (F ord N W π x : Set) :=
+  FiniteDimensional(submoduleModule(W, complexRing,
+    csLGCyclicSpan(F, N, W, π, x) ∩ iwahoriFixed(F, ord, N, W, π)), complexRing)
+
+theorem csLGIsIwahoriEigen.exponent (F ord N W π B x ξ y : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires unitary : csLGIsUnitary(F, N, W, π, B)
+  requires hx : x ∈ Module.carrier(W)
+  requires finite : FiniteIwahoriInvariants(F, ord, N, W, π, x)
+  requires eigen : csLGIsIwahoriEigen(F, ord, N, W, π, ξ, y)
+  requires hy : y ∈ csLGCyclicSpan(F, N, W, π, x)
+  shows ∃ w ∈ csLGCyclicSpan(F, N, W, π, x), B(w)(w) ≠ complexZero ∧
+    csLGIsExponent(F, ord, N, W, π, ξ, B(w))
+proof
+  sorry
+
+-- exists_sorted_of_type: for ρ unitary, x ≠ 0 and τ as above, some
+-- exponent (torusChar θ, l) has l(x) ≠ 0 and θ_i = τ_i on units, and V_x
+-- holds an eigenvector for θ∘σ with |θ_σ(i)(ϖ)| non-increasing.
+theorem exists_sorted_of_type (F ord N W π B x τ ϖ : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires unitary : csLGIsUnitary(F, N, W, π, B)
+  requires typeData : TypeData(F, ord, N, W, π, x, τ)
+  requires finite : FiniteIwahoriInvariants(F, ord, N, W, π, x)
+  requires nonzero : x ≠ Module.zero(W)
+  shows ∃ θ, UnitCharFamily(F, N, θ) ∧
+    (∃ l, csLGIsExponent(F, ord, N, W, π, csLGTorusChar(F, ord, N, θ), l) ∧ l(x) ≠ complexZero) ∧
+    (∀ i ∈ N, ∀ ε ∈ csLGNonzero(F), ord(ε) = integerOfNat((0:N)) →
+      θ(i)(ε) = τ(csLGMulSingle(F, N, i, ε))) ∧
+    ∃ σ ∈ permutationsOf(N), SortedAt(N, θ, σ, ϖ) ∧
+      ∃ y ∈ csLGCyclicSpan(F, N, W, π, x),
+        csLGIsIwahoriEigen(F, ord, N, W, π, csLGTorusChar(F, ord, N, charFamilyComp(N, θ, σ)), y)
+proof
+  sorry
+
+-- Section: The line stabiliser
+-- exists_clear_first_row: for g in the parahoric of min(1, ·) (first
+-- column ≡ 0 mod 𝔭 below the diagonal), some u ∈ I₁ makes the first row
+-- of ug vanish off the diagonal.
+def minOneValue (i : Set) : Set :=
+  ⋃({ c ∈ ℕ | (i = (0:N) ∧ c = (0:N)) ∨ (i ≠ (0:N) ∧ c = (1:N)) })
+
+def minOneLevel : Set := { (i, minOneValue(i)) | i ∈ ℕ }
+
+theorem csLGBlockParahoric.clear_first_row (F ord N g : Set)
+  requires local : csLGLocalField(F, ord)
+  requires natural : N ∈ ℕ
+  requires positive : (0:N) < (N:N)
+  requires hg : g ∈ csLGBlockParahoric(F, ord, N, minOneLevel)
+  shows ∃ u ∈ csLGProIwahori(F, ord, N), ∀ j ∈ N, j ≠ (0:N) →
+    matMul(F, N, N, N, u, g)((0:N), j) = Ring.zero(F)
+proof
+  sorry
+
+-- parahoricEigenspace f c: the I₁-fixed vectors on which each k in the
+-- parahoric of f acts by the scalar c(k).
+def parahoricEigenspace (F ord N W π f c : Set) : Set :=
+  { z ∈ iwahoriFixed(F, ord, N, W, π) |
+    ∀ k ∈ csLGBlockParahoric(F, ord, N, f), π(k)(z) = Module.smul(W)(c(k), z) }
+
+def topLeftChar (F N χ : Set) : Set := { (k, χ(k((0:N), (0:N)))) | k ∈ invertibleMatrices(F, N) }
+
+-- heckeCoset_mem_parahoricEigenspace: the I₁-Hecke operator of
+-- diag(ϖ, 1, …, 1) preserves the vectors on which the line-stabilising
+-- parahoric acts by χ of the top left entry.
+theorem heckeCoset.parahoric_eigenspace (F ord N W π ϖ χ y : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires positive : (0:N) < (N:N)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires hy : y ∈ parahoricEigenspace(F, ord, N, W, π, minOneLevel, topLeftChar(F, N, χ))
+  shows csLGHeckeCoset(F, N, W, π, csLGProIwahori(F, ord, N),
+      csLGDiagGL(F, N, csLGMulSingle(F, N, (0:N), ϖ)), y) ∈
+    parahoricEigenspace(F, ord, N, W, π, minOneLevel, topLeftChar(F, N, χ))
+proof
+  sorry
+
+-- Section: Spherical vectors and strings
+-- IsExponent.eq_zero_of_eq_zero_on_spherical: an exponent
+-- (torusChar θ, l), θ unramified with |θ_i(ϖ)| non-increasing, vanishing on
+-- the spherical vectors, vanishes.
+theorem csLGIsExponent.spherical (F ord N W π θ l ϖ x : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires family : UnitCharFamily(F, N, θ)
+  requires exponent : csLGIsExponent(F, ord, N, W, π, csLGTorusChar(F, ord, N, θ), l)
+  requires unramified : ∀ y ∈ csLGNonzero(F), ord(y) = integerOfNat((0:N)) →
+    ∀ i ∈ N, θ(i)(y) = complexOne
+  requires sorted : SortedAt(N, θ, idPerm(N), ϖ)
+  requires vanishes : ∀ y ∈ sphericalVectors(F, ord, N, W, π), l(y) = complexZero
+  requires hx : x ∈ Module.carrier(W)
+  shows l(x) = complexZero
+proof
+  sorry
+
+-- HasRootString P e q d t: P(dX) = (X − 1)(X − q)⋯(X − q^(t−1)) S with S ∣ e.
+def stringFactorTerms (q t : Set) : Set :=
+  { (i, polyXSubC(complexRing, csLGNat(pow(q, i)))) | i ∈ t }
+
+def stringProduct (q t : Set) : Set :=
+  finiteRingProduct(t, uniPolys(complexRing), Ring.add(polyRing(complexRing)),
+    Ring.zero(polyRing(complexRing)), Ring.neg(polyRing(complexRing)),
+    Ring.mul(polyRing(complexRing)), Ring.one(polyRing(complexRing)), stringFactorTerms(q, t))
+
+def dilate (P d : Set) : Set :=
+  polyComp(complexRing, P, call2(Ring.mul(polyRing(complexRing)), polyC(complexRing, d),
+    polyX(complexRing)))
+
+predicate HasRootString (P e q d t : Set) :=
+  ∃ S ∈ uniPolys(complexRing), RingDvd(polyRing(complexRing), S, e) ∧
+    dilate(P, d) = call2(Ring.mul(polyRing(complexRing)), stringProduct(q, t), S)
+
+-- The spherical eigenvector data of the chain lemma: x ≠ 0 spherical in
+-- a unitary smooth representation, T_j x = t_j x, and P its Hecke
+-- polynomial.
+predicate SphericalEigen (F ord N W π B x t P : Set) :=
+  SmoothSetting(F, ord, N, W, π) ∧ (0:N) < (N:N) ∧ csLGIsUnitary(F, N, W, π, B) ∧
+  x ∈ sphericalVectors(F, ord, N, W, π) ∧ x ≠ Module.zero(W) ∧
+  P = csLGHeckePoly(csLGResidueOrder(F, ord), N, t) ∧
+  ∀ j ∈ ℕ, csLGHeckeGL(F, ord, N, W, π, j, x) = Module.smul(W)(t(j), x)
+
+-- U = the I₁-Hecke operator of diag(ϖ, 1, …, 1), and Q(U) y for a complex
+-- polynomial Q.
+def lineUOp (F ord N W π ϖ y : Set) : Set :=
+  csLGHeckeCoset(F, N, W, π, csLGProIwahori(F, ord, N),
+    csLGDiagGL(F, N, csLGMulSingle(F, N, (0:N), ϖ)), y)
+
+def lineUPow (F ord N W π ϖ y : Set, k : Nat) → Set
+  | F, ord, N, W, π, ϖ, y, zero => y
+  | F, ord, N, W, π, ϖ, y, succ(k) => lineUOp(F, ord, N, W, π, ϖ, lineUPow(F, ord, N, W, π, ϖ, y, k))
+
+def lineUPolyTerms (F ord N W π ϖ Q y : Set) : Set :=
+  { (k, Module.smul(W)(polyCoeff(Q, k), lineUPow(F, ord, N, W, π, ϖ, y, k))) |
+    k ∈ succ(polyNatDegree(complexRing, Q)) }
+
+def lineUPoly (F ord N W π ϖ Q y : Set) : Set :=
+  moduleSum(W, succ(polyNatDegree(complexRing, Q)), lineUPolyTerms(F, ord, N, W, π, ϖ, Q, y))
+
+-- chain_lemma (Tadić; Bernstein): a root c of P with P(qc) ≠ 0 has
+-- |c|² ≥ q^(N−2); and if P(d⁻¹X) has the string of length k + 1 times a
+-- divisor of R, then x ⊥ ((X − q^k) R)(dU) y for I₁-fixed y.
+theorem chain_lemma (F ord N W π B x t P ϖ : Set)
+  requires eigen : SphericalEigen(F, ord, N, W, π, B, x, t, P)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  shows (∀ c ∈ complexCarrier, PolyIsRoot(complexRing, P, c) →
+      ¬PolyIsRoot(complexRing, P, ℂ[csLGNat(csLGResidueOrder(F, ord)) * c]) →
+      realNat(pow(csLGResidueOrder(F, ord), sub(N, 2))) ≤ R[complexAbs(c) * complexAbs(c)]) ∧
+    ∀ d ∈ complexCarrier, d ≠ complexZero → ∀ k ∈ ℕ, ∀ Rp ∈ uniPolys(complexRing),
+      HasRootString(P, Rp, csLGResidueOrder(F, ord), complexInv(d), succ(k)) →
+      ∀ y ∈ iwahoriFixed(F, ord, N, W, π),
+        B(x)(lineUPoly(F, ord, N, W, π, ϖ, dilate(call2(Ring.mul(polyRing(complexRing)),
+          polyXSubC(complexRing, csLGNat(pow(csLGResidueOrder(F, ord), k))), Rp), d), y)) =
+          complexZero
+proof
+  sorry
+
+-- isRoot_string_of_norm: if P(c) = 0 and |c|² q^k = q^N, then c, cq, …,
+-- cq^(k−1) are roots of P.
+theorem isRoot_string_of_norm (F ord N W π B x t P c k : Set)
+  requires eigen : SphericalEigen(F, ord, N, W, π, B, x, t, P)
+  requires root : PolyIsRoot(complexRing, P, c)
+  requires hk : k ∈ ℕ
+  requires norm : R[complexAbs(c) * complexAbs(c) * realNat(pow(csLGResidueOrder(F, ord), k))] =
+    realNat(pow(csLGResidueOrder(F, ord), N))
+  shows ∀ i ∈ k, PolyIsRoot(complexRing, P, ℂ[c * csLGNat(pow(csLGResidueOrder(F, ord), i))])
+proof
+  sorry
+
+-- Section: Depth-zero types from determinant characters
+-- The residue field k = 𝒪/𝔭 as a ring record and the reduction 𝒪 → k,
+-- applied entrywise to GL_N(𝒪).
+def residueRing (F ord : Set) : Set :=
+  quotientRing(subringRing(F, csLGInt(F, ord)), csLGMaximal(F, ord))
+
+def reduceEntry (F ord x : Set) : Set :=
+  quotientMk(subringRing(F, csLGInt(F, ord)), csLGMaximal(F, ord))(x)
+
+def reduceMatrix (F ord N g : Set) : Set := { (q, reduceEntry(F, ord, g(q))) | q ∈ N × N }
+
+-- Y = Π_a (χ_a∘det in dimension m_a), a Hall product over k.
+def detCharFactors (F ord r χ m : Set) : Set :=
+  { (a, rankPart(residueRing(F, ord), m(a), detChar(residueRing(F, ord), χ(a)))) | a ∈ r }
+
+def detCharProduct (F ord r χ m : Set) : Set :=
+  finiteRingProduct(r, hallFunctions(residueRing(F, ord)), hallAddGraph(residueRing(F, ord)),
+    hallZero(residueRing(F, ord)), hallNegGraph(residueRing(F, ord)),
+    hallMulGraph(residueRing(F, ord)), hallOne(residueRing(F, ord)), detCharFactors(F, ord, r, χ, m))
+
+-- Σ_g conj Y(g) π(s(g)) x over g ∈ GL_N(k), s a section of the reduction.
+def typeProjectionTerms (F ord N W π r χ m s x : Set) : Set :=
+  { (g, Module.smul(W)(complexConj(detCharProduct(F, ord, r, χ, m)((N, g))), π(s(g))(x))) |
+    g ∈ invertibleMatrices(residueRing(F, ord), N) }
+
+def typeProjection (F ord N W π r χ m s x : Set) : Set :=
+  moduleSum(W, invertibleMatrices(residueRing(F, ord), N), typeProjectionTerms(F, ord, N, W, π, r, χ, m, s, x))
+
+-- Π_i (X − θ_i(t)) and Π_a (X − χ_a(t̄))^(m_a) over ℂ.
+def complexPolyProduct (I w : Set) : Set :=
+  finiteRingProduct(I, uniPolys(complexRing), Ring.add(polyRing(complexRing)),
+    Ring.zero(polyRing(complexRing)), Ring.neg(polyRing(complexRing)),
+    Ring.mul(polyRing(complexRing)), Ring.one(polyRing(complexRing)), w)
+
+def satakeFactors (N θ t : Set) : Set := { (i, polyXSubC(complexRing, θ(i)(t))) | i ∈ N }
+
+def typeFactors (F ord r χ m t : Set) : Set :=
+  { (a, Ring.pow(polyRing(complexRing), polyXSubC(complexRing, χ(a)(reduceEntry(F, ord, t))), m(a))) |
+    a ∈ r }
+
+-- exists_sorted_of_detChar: for ρ smooth unitary with finite-dimensional
+-- I₁-invariants in cyclic spans, distinct characters χ_a of k with
+-- Σ m_a = N, x fixed by 1 + 𝔭M_N(𝒪) and Σ_g conj Y(g) π(s g) x ≠ 0, the
+-- translates of x span an Iwahori eigenvector for torusChar θ with
+-- |θ_i(ϖ)| non-increasing and θ_i = χ_a on units m_a times.
+theorem exists_sorted_of_detChar (F ord N W π B x ϖ r χ m s : Set)
+  requires setting : SmoothSetting(F, ord, N, W, π)
+  requires uniformiser : csLGUniformiser(F, ord, ϖ)
+  requires unitary : csLGIsUnitary(F, N, W, π, B)
+  requires finite : ∀ z ∈ Module.carrier(W), FiniteIwahoriInvariants(F, ord, N, W, π, z)
+  requires hr : r ∈ ℕ
+  requires characters : ∀ a ∈ r, MulChar(residueRing(F, ord), complexRing, χ(a))
+  requires distinct : ∀ a ∈ r, ∀ b ∈ r, χ(a) = χ(b) → a = b
+  requires hm : (m : r → ℕ)
+  requires total : natSum(r, m) = N
+  requires fixed : x ∈ fixedSpace(csLGGL(F, N), csLGCongruenceGL(F, ord, N, (1:N)), W, π)
+  requires section : ∀ g ∈ invertibleMatrices(residueRing(F, ord), N),
+    s(g) ∈ csLGIntGL(F, ord, N) ∧ reduceMatrix(F, ord, N, s(g)) = g
+  requires nonzero : typeProjection(F, ord, N, W, π, r, χ, m, s, x) ≠ Module.zero(W)
+  shows ∃ y ∈ csLGCyclicSpan(F, N, W, π, x), ∃ θ, UnitCharFamily(F, N, θ) ∧
+    csLGIsIwahoriEigen(F, ord, N, W, π, csLGTorusChar(F, ord, N, θ), y) ∧
+    SortedAt(N, θ, idPerm(N), ϖ) ∧
+    ∀ t ∈ csLGNonzero(F), ord(t) = integerOfNat((0:N)) →
+      complexPolyProduct(N, satakeFactors(N, θ, t)) = complexPolyProduct(r, typeFactors(F, ord, r, χ, m, t))
+proof
+  sorry
+
+end Iwahori
