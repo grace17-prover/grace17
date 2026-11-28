@@ -1,0 +1,584 @@
+-- The finite ideles of a number field K: the units (𝔸_f K)ˣ with their
+-- topology (the units topology, through u ↦ (u, u⁻¹)), the principal
+-- ideles of Kˣ, the local idele placing x ∈ K_vˣ at v, the component at v,
+-- the ideles that are units outside a set S, uniformisers, totally
+-- positive elements, the module |a|_f of a finite idele, and the
+-- characters of the finite ideles with open kernel; ideles and ideals
+-- and the class group, S-units and Dirichlet's S-unit theorem; the norm
+-- 𝔸_f L → 𝔸_f K of an extension and the local norm.
+-- Source: grh-compact/src/Lib/ClassField/HeckeL/EulerProduct.lean
+-- (principalIdele, locIdele, finIdeleIncl, ideleAt, idelesUnitOff,
+-- IsTotallyPositive, eventually_unramified and the lemmas on ideles),
+-- Lib/ClassField/Places/AdeleNorm.lean (exists_idele_divisor_hom,
+-- exists_idele_classGroup_hom, pow_classNumber_mem_principal_sup,
+-- exists_sup_idelesUnitOff_eq_top, finiteIndex_idele_subgroup_of_isOpen,
+-- exists_valuation_eq_exp_mul, the S-unit theorem, adeleNorm,
+-- localNorm), with Lib/Adelic/Adeles/CoprimeValuation.lean (uniformizer)
+-- and Lib/Adelic/Adeles/AdelicModulus.lean (finIdeleAbs).
+-- Encoding. A finite idele is an element of ringUnits(𝔸_f K), a function
+-- on the finite places w with a(w) ∈ K_w. The source's chosen
+-- uniformiser at each place (CoprimeValuation.lean, uniformizer) is a
+-- parameter: a uniformiser family ϖ with ord_w(ϖ_w) = 1 at every w
+-- (UniformizerFamily); statements hold for every such family. The
+-- source's subgroups of (𝔸_f K)ˣ are subsets closed under the group
+-- operations (Subgroup of finIdeleGroup(K)). A character with values in
+-- ℂˣ is a group homomorphism to the units of ℂ (complexUnitGroup).
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.Ideles
+import GRH.Adelic.Adeles
+import Grace.Cumulus.Algebra.Group.Generated
+
+section Ideles
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: The finite idele group
+-- (𝔸f K)ˣ: the units of the finite adeles, as a set and as a group.
+def finIdeleUnits (K : Set) : Set := ringUnits(finiteAdeleRing(K))
+
+def finIdeleGroup (K : Set) : Set := unitGroup(finiteAdeleRing(K))
+
+-- The units topology of (𝔸f K)ˣ (Mathlib's Units.topologicalSpace): the
+-- topology induced by u ↦ (u, u⁻¹) into 𝔸f K × 𝔸f K. It is finer than the
+-- topology of 𝔸f K; Ôˣ is open and compact in it.
+def unitGraphPoint (K u : Set) : Set := (u, finInv(K, u))
+
+def unitGraphPreimage (K W : Set) : Set :=
+  { u ∈ finIdeleUnits(K) | unitGraphPoint(K, u) ∈ W }
+
+def finIdeleOpens (K : Set) : Set :=
+  { unitGraphPreimage(K, W) |
+    W ∈ TopologicalSpace.opens(productSpace(finiteAdeleSpace(K), finiteAdeleSpace(K))) }
+
+def finIdeleSpace (K : Set) : Set :=
+  TopologicalSpace.mk(finIdeleUnits(K), finIdeleOpens(K))
+
+-- A subgroup of the finite ideles that is open (Subgroup.IsOpen).
+predicate OpenIdeleSubgroup (K H : Set) :=
+  Subgroup(H, finIdeleGroup(K)) ∧ H ∈ finIdeleOpens(K)
+
+-- Section: Principal, local and S-ideles
+-- The nonzero elements of K (Kˣ) and of K_v (K_vˣ).
+def fieldUnits (K : Set) : Set := ringUnits(K)
+
+def locUnits (K v : Set) : Set := ringUnits(adicCompletionField(K, v))
+
+-- EulerProduct.lean, principalIdele: Kˣ → (𝔸f K)ˣ, x ↦ (x)_v; and its
+-- image, the principal finite ideles.
+def principalIdele (K x : Set) : Set := finOf(K, x)
+
+def principalIdeles (K : Set) : Set := { principalIdele(K, x) | x ∈ fieldUnits(K) }
+
+-- EulerProduct.lean, locIdele v: K_vˣ → (𝔸f K)ˣ, the idele with component
+-- x at v and 1 at every other finite place.
+def locIdeleValue (K v x u : Set) : Set :=
+  ⋃({ z ∈ Ring.carrier(adicCompletionField(K, u)) |
+    (u = v ∧ z = x) ∨ (u ≠ v ∧ z = Ring.one(adicCompletionField(K, u))) })
+
+def locIdele (K v x : Set) : Set := { (u, locIdeleValue(K, v, x, u)) | u ∈ finPlaces(K) }
+
+-- EulerProduct.lean, ideleAt v: the component a_v ∈ K_vˣ of a finite
+-- idele.
+def ideleAt (K v a : Set) : Set := a(v)
+
+def ideleAtMap (K v : Set) : Set := { (a, ideleAt(K, v, a)) | a ∈ finIdeleUnits(K) }
+
+-- EulerProduct.lean, idelesUnitOff S: the finite ideles whose component
+-- at every place outside S is a unit of 𝓞_v.
+def idelesUnitOff (K S : Set) : Set :=
+  { a ∈ finIdeleUnits(K) | ∀ v ∈ finPlaces(K), v ∉ S → a(v) ∈ completionUnitsIn(K, v) }
+
+-- Ôˣ: the integral ideles with integral inverse.
+def integralUnitIdeles (K : Set) : Set :=
+  { a ∈ finIdeleUnits(K) | a ∈ finInt(K) ∧ finInv(K, a) ∈ finInt(K) }
+
+-- The product H₁ ⊔ H₂ = H₁H₂ of two subgroups of the (commutative) idele
+-- group.
+def ideleSubgroupProduct (K H1 H2 : Set) : Set :=
+  { finMul(K, fst(p), snd(p)) | p ∈ H1 × H2 }
+
+-- CoprimeValuation.lean, uniformizer: a family ϖ of uniformisers,
+-- ϖ_v ∈ K_v with ord_v(ϖ_v) = 1 at every finite place v (the source
+-- chooses one; here any family).
+def locFieldCarriers (K : Set) : Set :=
+  { Ring.carrier(adicCompletionField(K, v)) | v ∈ finPlaces(K) }
+
+predicate UniformizerFamily (K ϖ : Set) :=
+  FunctionBetween(ϖ, finPlaces(K), ⋃(locFieldCarriers(K))) ∧
+  (∀ v ∈ finPlaces(K), ϖ(v) ∈ locUnits(K, v) ∧ completionOrder(K, v, ϖ(v)) = integerOne)
+
+-- EulerProduct.lean, IsTotallyPositive: φ(x) > 0 for every real embedding
+-- φ of K (an embedding into ℂ with real values).
+predicate IsTotallyPositive (K x : Set) :=
+  x ∈ Ring.carrier(K) ∧
+  ∀ σ ∈ complexEmbeddings(K), RealEmbedding(K, σ) → realZero < complexRe(σ(x))
+
+def totallyPositiveUnits (K : Set) : Set :=
+  { x ∈ fieldUnits(K) | IsTotallyPositive(K, x) }
+
+def totallyPositiveIdeles (K : Set) : Set :=
+  { principalIdele(K, x) | x ∈ totallyPositiveUnits(K) }
+
+-- Section: The module of a finite idele
+-- AdelicModulus.lean, finIdeleAbs: |a|_f = ∏_v q_v^{−ord_v(a_v)}, the
+-- product over the finitely many v at which a_v is not a unit.
+def ideleModuleFactors (K a : Set) : Set :=
+  { (v, realRpow(realNat(placeNorm(K, v)),
+      R[-(realInt(completionOrder(K, v, a(v))))])) | v ∈ nonUnitPrimes(K, a) }
+
+def finIdeleAbs (K a : Set) : Set :=
+  finiteRingProduct(nonUnitPrimes(K, a), ℝ, realAdd, realZero, realNeg, realMul,
+    realOne, ideleModuleFactors(K, a))
+
+-- Section: Characters of the finite ideles
+-- ℂˣ as a group.
+def complexUnitGroup : Set := unitGroup(complexRing)
+
+-- A homomorphism ψ : (𝔸f K)ˣ →* ℂˣ, and one with open kernel.
+predicate IdeleCharacter (K ψ : Set) := GroupHom(ψ, finIdeleGroup(K), complexUnitGroup)
+
+def ideleCharKernel (K ψ : Set) : Set :=
+  kernel(ψ, finIdeleGroup(K), complexUnitGroup)
+
+predicate OpenKernelCharacter (K ψ : Set) :=
+  IdeleCharacter(K, ψ) ∧ ideleCharKernel(K, ψ) ∈ finIdeleOpens(K)
+
+-- HeckeContinuation.lean, CharUnramifiedAt ψ v: ψ is trivial on the local
+-- units at v.
+predicate CharUnramifiedAt (K ψ v : Set) :=
+  ∀ x ∈ locUnits(K, v), x ∈ completionUnitsIn(K, v) → ψ(locIdele(K, v, x)) = complexOne
+
+def ramifiedPlacesOf (K ψ : Set) : Set :=
+  { v ∈ finPlaces(K) | ¬CharUnramifiedAt(K, ψ, v) }
+
+-- Section: S-units
+-- AdeleNorm.lean, S.unit K: the x ∈ Kˣ with ord_v(x) = 0 at every finite
+-- v ∉ S.
+def sUnits (K S : Set) : Set :=
+  { x ∈ fieldUnits(K) | ∀ v ∈ finPlaces(K), v ∉ S →
+      adicCompletionEmbedding(K, v)(x) ∈ completionUnitsIn(K, v) }
+
+-- The S-units as a group under multiplication.
+def sUnitGroup (K S : Set) : Set :=
+  Group.mk(sUnits(K, S), restrict(Ring.mul(K), sUnits(K, S) × sUnits(K, S)),
+    Ring.one(K), restrict(unitInverseMap(K), sUnits(K, S)))
+
+-- x^e for a unit x of a ring and an integer e, and ∏_{i∈r} u_i^{e_i}.
+def unitZpow (R x e : Set) : Set :=
+  ⋃({ y ∈ Ring.carrier(R) | ∃ n ∈ ℕ,
+    (e = integerOfNat(n) ∧ y = Ring.pow(R, x, n)) ∨
+    (e = integerNegValue(integerOfNat(n)) ∧ y = Ring.pow(R, ringInverse(R, x), n)) })
+
+def unitZpowFactors (R r u e : Set) : Set := { (i, unitZpow(R, u(i), e(i))) | i ∈ r }
+
+def unitZpowProduct (R r u e : Set) : Set :=
+  finiteRingProduct(r, Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R),
+    Ring.mul(R), Ring.one(R), unitZpowFactors(R, r, u, e))
+
+-- Section: The adelic norm
+-- AdeleNorm.lean, adeleNorm K L: for an extension f : K → L of number
+-- fields, the algebra norm of the 𝔸f K-algebra 𝔸f L (structure map
+-- adeleMap f).
+def finAdeleAlgebra (K L f : Set) : Set :=
+  Algebra.mk(finiteAdeleRing(K), finiteAdeleRing(L), adeleMap(K, L, f))
+
+def adeleNorm (K L f y : Set) : Set := algebraNorm(finAdeleAlgebra(K, L, f), y)
+
+def adeleNormMap (K L f : Set) : Set := { (y, adeleNorm(K, L, f, y)) | y ∈ finAdeles(L) }
+
+-- The finite place of K below a finite place w of L (FinPlace.below):
+-- the prime of 𝓞_K of the a with f(a) ∈ w.
+def placeBelow (K L f w : Set) : Set :=
+  { a ∈ ringOfIntegers(K) | f(a) ∈ w }
+
+-- AdeleNorm.lean, localNorm K w: L_wˣ → K_vˣ for v below w, the
+-- v-component of the adelic norm of the local idele at w.
+def localNorm (K L f w y : Set) : Set :=
+  adeleNorm(K, L, f, locIdele(L, w, y))(placeBelow(K, L, f, w))
+
+-- The conjugates σ(y) of a finite adele of L, σ ∈ Gal(L/K).
+def adeleConjugates (K L f y : Set) : Set :=
+  { (σ, adeleMap(L, L, σ)(y)) | σ ∈ algebraAutomorphisms(Algebra.mk(K, L, f)) }
+
+-- Section: Ideles and ideals
+-- The divisor of a finite idele: the nonzero fractional ideal ∏ v^{ord_v}
+-- (exists_idele_divisor_hom), described by its multiplicities.
+predicate IdeleDivisor (K a I : Set) :=
+  I ∈ nonzeroFractionalIdeals(ringOfIntegersInclusion(K)) ∧
+  ∀ v ∈ finPlaces(K),
+    fractionalCount(ringOfIntegersInclusion(K), v, I) = completionOrder(K, v, a(v))
+
+end Ideles
+
+-- Section: Basic facts on finite ideles
+section IdeleFacts
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+variable (K : Set)
+hypothesis numberField : NumberField(K)
+
+-- The finite ideles form a commutative topological group.
+theorem finIdeleGroup.topological_group
+  shows AbelianGroup(finIdeleGroup(K)) ∧ TopologicalSpace(finIdeleSpace(K)) ∧
+    TopologicalGroup(finIdeleGroup(K), finIdeleSpace(K))
+proof
+  sorry
+
+-- principalIdele is an injective homomorphism Kˣ → (𝔸f K)ˣ.
+theorem principalIdele.hom (x y : Set)
+  requires first : x ∈ fieldUnits(K)
+  requires second : y ∈ fieldUnits(K)
+  shows principalIdele(K, x) ∈ finIdeleUnits(K) ∧
+    principalIdele(K, call2(Ring.mul(K), x, y)) =
+      finMul(K, principalIdele(K, x), principalIdele(K, y))
+proof
+  sorry
+
+theorem principalIdele.injective (x y : Set)
+  requires first : x ∈ fieldUnits(K)
+  requires second : y ∈ fieldUnits(K)
+  requires equal : principalIdele(K, x) = principalIdele(K, y)
+  shows x = y
+proof
+  sorry
+
+-- locIdele v is a homomorphism K_vˣ → (𝔸f K)ˣ; locIdele_same,
+-- locIdele_of_ne, ideleAt_locIdele.
+theorem locIdele.hom (v x y : Set)
+  requires place : v ∈ finPlaces(K)
+  requires first : x ∈ locUnits(K, v)
+  requires second : y ∈ locUnits(K, v)
+  shows locIdele(K, v, x) ∈ finIdeleUnits(K) ∧
+    locIdele(K, v, call2(Ring.mul(adicCompletionField(K, v)), x, y)) =
+      finMul(K, locIdele(K, v, x), locIdele(K, v, y))
+proof
+  sorry
+
+theorem locIdele.same (v x : Set)
+  requires place : v ∈ finPlaces(K)
+  requires unit : x ∈ locUnits(K, v)
+  shows ideleAt(K, v, locIdele(K, v, x)) = x
+proof
+  sorry
+
+theorem locIdele.of_ne (v w x : Set)
+  requires place : v ∈ finPlaces(K)
+  requires other : w ∈ finPlaces(K)
+  requires distinct : w ≠ v
+  requires unit : x ∈ locUnits(K, v)
+  shows ideleAt(K, w, locIdele(K, v, x)) = Ring.one(adicCompletionField(K, w))
+proof
+  sorry
+
+-- continuous_ideleAt: a ↦ a_v is continuous into K_v.
+theorem ideleAt.continuous (v : Set)
+  requires place : v ∈ finPlaces(K)
+  shows ideleAtMap(K, v) : finIdeleSpace(K) ⇒ adicCompletionSpace(K, v)
+proof
+  sorry
+
+-- finite_idele_val_ne_one: a finite idele is a unit at almost every
+-- place.
+theorem finIdele.almost_unit (a : Set)
+  requires idele : a ∈ finIdeleUnits(K)
+  shows Finite(nonUnitPrimes(K, a))
+proof
+  sorry
+
+-- coe_idelesUnitOff_empty, isOpen_idelesUnitOff,
+-- isCompact_idelesUnitOff_empty: idelesUnitOff ∅ is Ôˣ, open and
+-- compact, and each idelesUnitOff S is an open subgroup.
+theorem idelesUnitOff.empty_eq
+  shows idelesUnitOff(K, ∅) = integralUnitIdeles(K)
+proof
+  sorry
+
+theorem idelesUnitOff.open_subgroup (S : Set)
+  requires places : S ⊆ finPlaces(K)
+  shows OpenIdeleSubgroup(K, idelesUnitOff(K, S))
+proof
+  sorry
+
+theorem idelesUnitOff.compact_empty
+  shows Compact(finIdeleSpace(K), idelesUnitOff(K, ∅))
+proof
+  sorry
+
+theorem idelesUnitOff.mono (S T : Set)
+  requires subset : S ⊆ T
+  shows idelesUnitOff(K, S) ⊆ idelesUnitOff(K, T)
+proof
+  sorry
+
+-- principalIdele_mem_idelesUnitOff.
+theorem principalIdele.mem_idelesUnitOff_iff (S x : Set)
+  requires unit : x ∈ fieldUnits(K)
+  shows principalIdele(K, x) ∈ idelesUnitOff(K, S) ↔ x ∈ sUnits(K, S)
+proof
+  sorry
+
+-- locIdele_mem_idelesUnitOff.
+theorem locIdele.mem_idelesUnitOff (S v x : Set)
+  requires place : v ∈ finPlaces(K)
+  requires unit : x ∈ completionUnitsIn(K, v)
+  requires local : x ∈ locUnits(K, v)
+  shows locIdele(K, v, x) ∈ idelesUnitOff(K, S)
+proof
+  sorry
+
+-- mem_of_locIdele_mem: a closed subgroup containing every local
+-- component locIdele v (a_v) of a contains a.
+theorem ideleSubgroup.mem_of_locIdele_mem (H a : Set)
+  requires subgroup : Subgroup(H, finIdeleGroup(K))
+  requires closed : Closed(finIdeleSpace(K), H)
+  requires idele : a ∈ finIdeleUnits(K)
+  requires local : ∀ v ∈ finPlaces(K), locIdele(K, v, ideleAt(K, v, a)) ∈ H
+  shows a ∈ H
+proof
+  sorry
+
+-- exists_finset_cover_mulSupport_ideleAt: outside an open U ∋ 1, the
+-- units Ôˣ are covered by finitely many {a | a_v ≠ 1}.
+theorem idelesUnitOff.finite_cover (U : Set)
+  requires open : U ∈ finIdeleOpens(K)
+  requires one : finOne(K) ∈ U
+  shows ∃ T ∈ 𝒫(finPlaces(K)), Finite(T) ∧
+    (∀ a ∈ idelesUnitOff(K, ∅), a ∉ U →
+      (∃ v ∈ T, ideleAt(K, v, a) ≠ Ring.one(adicCompletionField(K, v))))
+proof
+  sorry
+
+-- eventually_unramified: a character with open kernel is trivial on the
+-- local units at all but finitely many places.
+theorem OpenKernelCharacter.eventually_unramified (ψ : Set)
+  requires character : OpenKernelCharacter(K, ψ)
+  shows Finite(ramifiedPlacesOf(K, ψ))
+proof
+  sorry
+
+-- Uniformiser families exist (v_uniformizer).
+theorem UniformizerFamily.exists
+  shows ∃ ϖ, UniformizerFamily(K, ϖ)
+proof
+  sorry
+
+-- AdelicModulus.lean, finIdeleAbs_principalIdele (the finite product
+-- formula): |x|_f = |N_{K/ℚ}(x)|⁻¹; the module is positive and
+-- multiplicative.
+theorem finIdeleAbs.principal (x : Set)
+  requires unit : x ∈ fieldUnits(K)
+  shows finIdeleAbs(K, principalIdele(K, x)) =
+    realInv(realAbs(ratCastMap(realRing)(fieldNorm(K, x))))
+proof
+  sorry
+
+theorem finIdeleAbs.mul (a b : Set)
+  requires first : a ∈ finIdeleUnits(K)
+  requires second : b ∈ finIdeleUnits(K)
+  shows finIdeleAbs(K, finMul(K, a, b)) = R[finIdeleAbs(K, a) * finIdeleAbs(K, b)] ∧
+    realZero < finIdeleAbs(K, a)
+proof
+  sorry
+
+end IdeleFacts
+
+-- Section: Ideles, ideals and the class group
+section IdeleClasses
+variable (K : Set)
+hypothesis numberField : NumberField(K)
+
+-- exists_idele_divisor_hom: every finite idele has a unique divisor; it is
+-- (x) on the principal idele of x.
+theorem IdeleDivisor.exists_unique (a : Set)
+  requires idele : a ∈ finIdeleUnits(K)
+  shows (∃ I, IdeleDivisor(K, a, I)) ∧
+    (∀ I, ∀ J, IdeleDivisor(K, a, I) → IdeleDivisor(K, a, J) → I = J)
+proof
+  sorry
+
+theorem IdeleDivisor.principal (x : Set)
+  requires unit : x ∈ fieldUnits(K)
+  shows IdeleDivisor(K, principalIdele(K, x), spanSingleton(ringOfIntegersInclusion(K), x))
+proof
+  sorry
+
+-- exists_idele_classGroup_hom: the divisor induces (𝔸f K)ˣ/(Kˣ Ôˣ) ≅ the
+-- class group: a ∈ Kˣ Ôˣ exactly when its divisor is principal, and every
+-- nonzero fractional ideal is a divisor.
+theorem IdeleDivisor.class_kernel (a I : Set)
+  requires idele : a ∈ finIdeleUnits(K)
+  requires divisor : IdeleDivisor(K, a, I)
+  shows a ∈ ideleSubgroupProduct(K, principalIdeles(K), idelesUnitOff(K, ∅)) ↔
+    (∃ x ∈ fieldUnits(K), I = spanSingleton(ringOfIntegersInclusion(K), x))
+proof
+  sorry
+
+theorem IdeleDivisor.surjective (I : Set)
+  requires ideal : I ∈ nonzeroFractionalIdeals(ringOfIntegersInclusion(K))
+  shows ∃ a ∈ finIdeleUnits(K), IdeleDivisor(K, a, I)
+proof
+  sorry
+
+-- pow_classNumber_mem_principal_sup: a^h ∈ Kˣ Ôˣ, h the class number.
+theorem finIdele.pow_classNumber (a : Set)
+  requires idele : a ∈ finIdeleUnits(K)
+  shows Ring.pow(finiteAdeleRing(K), a, classNumber(K)) ∈
+    ideleSubgroupProduct(K, principalIdeles(K), idelesUnitOff(K, ∅))
+proof
+  sorry
+
+-- exists_valuation_eq_of_mem_sup: a ∈ Kˣ·(units off S) has some x ∈ Kˣ
+-- with ord_w(x) = ord_w(a_w) at every w ∉ S.
+theorem finIdele.exists_valuation_eq (S a : Set)
+  requires member : a ∈ ideleSubgroupProduct(K, principalIdeles(K), idelesUnitOff(K, S))
+  shows ∃ x ∈ fieldUnits(K), ∀ w ∈ finPlaces(K), w ∉ S →
+    completionOrder(K, w, adicCompletionEmbedding(K, w)(x)) = completionOrder(K, w, a(w))
+proof
+  sorry
+
+-- exists_sup_idelesUnitOff_eq_top: for finite R, R′ there is a finite
+-- S ⊇ R with S ∩ R′ ⊆ R and Kˣ·(units off S) = (𝔸f K)ˣ.
+theorem idelesUnitOff.exists_generating (R R2 : Set)
+  requires places : R ⊆ finPlaces(K)
+  requires finite : Finite(R)
+  requires finite2 : Finite(R2)
+  shows ∃ S ∈ 𝒫(finPlaces(K)), Finite(S) ∧ R ⊆ S ∧ S ∩ R2 ⊆ R ∧
+    ideleSubgroupProduct(K, principalIdeles(K), idelesUnitOff(K, S)) = finIdeleUnits(K)
+proof
+  sorry
+
+-- finiteIndex_idele_subgroup_of_isOpen: an open subgroup containing the
+-- principal ideles of the totally positive elements has finite index.
+theorem OpenIdeleSubgroup.finite_index (H : Set)
+  requires open : OpenIdeleSubgroup(K, H)
+  requires positive : totallyPositiveIdeles(K) ⊆ H
+  shows Finite(leftCosets(finIdeleGroup(K), H))
+proof
+  sorry
+
+-- exists_valuation_eq_exp_mul: for finite S there is h ≥ 1 such that
+-- every exponent vector h·d on S is the order vector of an S-unit.
+theorem sUnits.exists_orders (S : Set)
+  requires places : S ⊆ finPlaces(K)
+  requires finite : Finite(S)
+  shows ∃ h ∈ ℕ, h ≠ 0 ∧ (∀ d, FunctionBetween(d, S, ℤ) →
+    (∃ x ∈ sUnits(K, S), ∀ v ∈ S,
+      completionOrder(K, v, adicCompletionEmbedding(K, v)(x)) =
+        integerMul(integerOfNat(h), d(v))))
+proof
+  sorry
+
+-- SUnit.dirichlet_unit_theorem: the S-units are finitely generated of
+-- rank |S| + #(infinite places) − 1: they are generated by finitely many
+-- elements, and for r with r + 1 = |S| + #places some r multiplicatively
+-- independent S-units generate them up to torsion.
+theorem sUnits.dirichlet (S : Set)
+  requires places : S ⊆ finPlaces(K)
+  requires finite : Finite(S)
+  shows (∃ F ∈ 𝒫(sUnits(K, S)), Finite(F) ∧
+      generatedSubgroup(sUnitGroup(K, S), F) = sUnits(K, S)) ∧
+    (∃ r ∈ ℕ, r + 1 = cardinality(S) + cardinality(infinitePlaces(K)) ∧
+      (∃ u, FunctionBetween(u, r, sUnits(K, S)) ∧
+        (∀ x ∈ sUnits(K, S), ∃ m ∈ ℕ, m ≠ 0 ∧
+          Ring.pow(K, x, m) ∈ generatedSubgroup(sUnitGroup(K, S),
+            functionImage(u, r, sUnits(K, S)))) ∧
+        (∀ e, FunctionBetween(e, r, ℤ) → unitZpowProduct(K, r, u, e) = Ring.one(K) →
+          (∀ i ∈ r, e(i) = integerZero))))
+proof
+  sorry
+
+end IdeleClasses
+
+-- Section: The adelic norm
+section AdeleNorm
+variable (K L f : Set)
+hypothesis numberK : NumberField(K)
+hypothesis numberL : NumberField(L)
+hypothesis hom : RingHom(f, K, L)
+
+-- instance Free, Module.Finite: 𝔸f L is a finite free 𝔸f K-algebra.
+theorem finAdeleAlgebra.finite_free
+  shows FiniteFreeAlgebra(finAdeleAlgebra(K, L, f))
+proof
+  sorry
+
+-- continuous_adeleNorm.
+theorem adeleNorm.continuous
+  shows adeleNormMap(K, L, f) : finiteAdeleSpace(L) ⇒ finiteAdeleSpace(K)
+proof
+  sorry
+
+theorem adeleNorm.mul (x y : Set)
+  requires first : x ∈ finAdeles(L)
+  requires second : y ∈ finAdeles(L)
+  shows adeleNorm(K, L, f, finMul(L, x, y)) =
+    finMul(K, adeleNorm(K, L, f, x), adeleNorm(K, L, f, y))
+proof
+  sorry
+
+-- adeleNorm_algebraMap: on L the adelic norm is the field norm.
+theorem adeleNorm.of_field (x : Set)
+  requires member : x ∈ Ring.carrier(L)
+  shows adeleNorm(K, L, f, finOf(L, x)) = finOf(K, algebraNorm(Algebra.mk(K, L, f), x))
+proof
+  sorry
+
+-- adeleNorm_finAdeleIncl: N(a) = a^{[L:K]} for a ∈ 𝔸f K.
+theorem adeleNorm.of_base (a : Set)
+  requires member : a ∈ finAdeles(K)
+  shows adeleNorm(K, L, f, adeleMap(K, L, f)(a)) =
+    Ring.pow(finiteAdeleRing(K), a, extensionDegree(Algebra.mk(K, L, f)))
+proof
+  sorry
+
+-- adeleNorm_mem_Ohat: the norm of an integral adele is integral;
+-- v_adeleNorm_eq_one: the norm of a unit idele is a unit everywhere.
+theorem adeleNorm.integral (y : Set)
+  requires integral : y ∈ finInt(L)
+  shows adeleNorm(K, L, f, y) ∈ finInt(K)
+proof
+  sorry
+
+theorem adeleNorm.unit (y : Set)
+  requires unit : y ∈ idelesUnitOff(L, ∅)
+  shows adeleNorm(K, L, f, y) ∈ idelesUnitOff(K, ∅)
+proof
+  sorry
+
+-- adeleNorm_locIdele: the norm of the local idele of y at w is the local
+-- idele, at the place below w, of the local norm of y.
+theorem adeleNorm.locIdele (w y : Set)
+  requires place : w ∈ finPlaces(L)
+  requires unit : y ∈ locUnits(L, w)
+  shows placeBelow(K, L, f, w) ∈ finPlaces(K) ∧
+    adeleNorm(K, L, f, locIdele(L, w, y)) =
+      locIdele(K, placeBelow(K, L, f, w), localNorm(K, L, f, w, y))
+proof
+  sorry
+
+-- map_adeleNorm_principalIdele (Global/AlbertBrauerHasseNoether.lean):
+-- the norm of a principal idele is the principal idele of the norm.
+theorem adeleNorm.principal (x : Set)
+  requires unit : x ∈ fieldUnits(L)
+  shows adeleNorm(K, L, f, principalIdele(L, x)) =
+    principalIdele(K, algebraNorm(Algebra.mk(K, L, f), x))
+proof
+  sorry
+
+-- finAdeleIncl_adeleNorm: for L/K Galois, N(y) viewed in 𝔸f L is the
+-- product of the conjugates σ(y), σ ∈ Gal(L/K).
+theorem adeleNorm.prod_conjugates (y : Set)
+  requires galois : GaloisExtension(Algebra.mk(K, L, f))
+  requires member : y ∈ finAdeles(L)
+  shows adeleMap(K, L, f)(adeleNorm(K, L, f, y)) =
+    finiteRingProduct(algebraAutomorphisms(Algebra.mk(K, L, f)), finAdeles(L),
+      Ring.add(finiteAdeleRing(L)), finZero(L), Ring.neg(finiteAdeleRing(L)),
+      Ring.mul(finiteAdeleRing(L)), finOne(L), adeleConjugates(K, L, f, y))
+proof
+  sorry
+
+end AdeleNorm
