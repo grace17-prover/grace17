@@ -370,13 +370,13 @@ graph TD
 | GRH.LFunction | 229 | 229 | 0 |
 | GRH.Gamma | 229 | 229 | 0 |
 | GRH.FunctionalEquation | 493 | 493 | 0 |
-| GRH.LSeries.Dirichlet | 141 | 120 | 21 |
-| GRH.LSeries.Completed | 77 | 40 | 37 |
-| GRH.LSeries.NonVanishing | 73 | 63 | 10 |
+| GRH.LSeries.Dirichlet | 145 | 134 | 11 |
+| GRH.LSeries.Completed | 77 | 45 | 32 |
+| GRH.LSeries.NonVanishing | 81 | 80 | 1 |
 | GRH.Calculus.Analytic | 72 | 65 | 7 |
-| GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
+| GRH.LSeries.VonMangoldt | 67 | 58 | 9 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
-| GRH.LSeries.Values | 32 | 13 | 19 |
+| GRH.LSeries.Values | 33 | 19 | 14 |
 | GRH.Analytic.Background | 8 | 4 | 4 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Analytic.Legendre | 17 | 17 | 0 |
@@ -435,5 +435,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9288** | **7002** | **2286** |
+| **total** | **9303** | **7052** | **2251** |
 <!-- /blueprint-status -->
