@@ -344,7 +344,7 @@ graph TD
 | GRH.NumberField.CM | 23 | 0 | 23 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 91 | 70 | 21 |
-| GRH.Measure.Spaces | 225 | 174 | 51 |
+| GRH.Measure.Spaces | 225 | 176 | 49 |
 | GRH.Measure.Lebesgue | 131 | 89 | 42 |
 | GRH.Measure.LIntegral | 187 | 164 | 23 |
 | GRH.Holomorphic | 515 | 515 | 0 |
@@ -380,7 +380,10 @@ graph TD
 | GRH.Analytic.Background | 8 | 4 | 4 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Analytic.Legendre | 17 | 17 | 0 |
-| GRH.Analytic.Landau | 20 | 14 | 6 |
+| GRH.Analytic.LandauTools | 12 | 12 | 0 |
+| GRH.Analytic.LandauMoments | 89 | 89 | 0 |
+| GRH.Analytic.LandauCore | 11 | 11 | 0 |
+| GRH.Analytic.Landau | 21 | 16 | 5 |
 | GRH.Analytic.PolyaVinogradov | 2 | 0 | 2 |
 | GRH.Analytic.Theta | 14 | 0 | 14 |
 | GRH.Analytic.Primes | 3 | 0 | 3 |
@@ -432,5 +435,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9175** | **6886** | **2289** |
+| **total** | **9288** | **7002** | **2286** |
 <!-- /blueprint-status -->
