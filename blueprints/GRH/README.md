@@ -310,15 +310,15 @@ graph TD
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 180 | 160 | 20 |
 | GRH.Matrix.Determinant | 168 | 165 | 3 |
-| GRH.Algebra.Divisibility | 106 | 104 | 2 |
-| GRH.Algebra.Ideals | 174 | 145 | 29 |
-| GRH.Algebra.Localization | 84 | 71 | 13 |
-| GRH.Algebra.LocalRings | 47 | 34 | 13 |
+| GRH.Algebra.Divisibility | 108 | 108 | 0 |
+| GRH.Algebra.Ideals | 182 | 164 | 18 |
+| GRH.Algebra.Localization | 88 | 88 | 0 |
+| GRH.Algebra.LocalRings | 48 | 41 | 7 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
-| GRH.Polynomial.Univariate | 139 | 134 | 5 |
+| GRH.Polynomial.Univariate | 145 | 143 | 2 |
 | GRH.Linear.Dual | 81 | 81 | 0 |
 | GRH.Linear.Tensor | 214 | 206 | 8 |
-| GRH.Polynomial.Multivariate | 79 | 57 | 22 |
+| GRH.Polynomial.Multivariate | 81 | 64 | 17 |
 | GRH.Algebra.Finiteness | 101 | 68 | 33 |
 | GRH.Algebra.Integral | 61 | 50 | 11 |
 | GRH.Algebra.DVR | 51 | 42 | 9 |
@@ -344,7 +344,7 @@ graph TD
 | GRH.NumberField.CM | 23 | 0 | 23 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 91 | 70 | 21 |
-| GRH.Measure.Spaces | 225 | 174 | 51 |
+| GRH.Measure.Spaces | 225 | 176 | 49 |
 | GRH.Measure.Lebesgue | 131 | 89 | 42 |
 | GRH.Measure.LIntegral | 187 | 164 | 23 |
 | GRH.Holomorphic | 515 | 515 | 0 |
@@ -380,7 +380,10 @@ graph TD
 | GRH.Analytic.Background | 8 | 4 | 4 |
 | GRH.Proof.Forward | 2 | 2 | 0 |
 | GRH.Analytic.Legendre | 17 | 17 | 0 |
-| GRH.Analytic.Landau | 20 | 14 | 6 |
+| GRH.Analytic.LandauTools | 12 | 12 | 0 |
+| GRH.Analytic.LandauMoments | 89 | 89 | 0 |
+| GRH.Analytic.LandauCore | 11 | 11 | 0 |
+| GRH.Analytic.Landau | 21 | 15 | 6 |
 | GRH.Analytic.PolyaVinogradov | 2 | 0 | 2 |
 | GRH.Analytic.Theta | 14 | 0 | 14 |
 | GRH.Analytic.Primes | 3 | 0 | 3 |
@@ -422,5 +425,5 @@ graph TD
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Operators | 9 | 0 | 9 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9098** | **6794** | **2304** |
+| **total** | **9234** | **6972** | **2262** |
 <!-- /blueprint-status -->
