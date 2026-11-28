@@ -147,17 +147,6 @@ valuation subrings and Galois hulls, p-adic completion and ultrapowers over
 square-zero extensions, rings of locally constant functions, and bounded
 filtered colimits.
 
-The values of the region's functors need room above 𝒰. The canonical free
-cover of a functor and its injective envelope are a sum and a product
-indexed by the whole site, which leave V(ω·2) and every V(ω·n). Spaces and
-coefficients therefore take values in a second stage V(θ), where θ is the
-Hartogs ordinal of V(ω·2), the least ordinal that does not inject into it.
-Under ZFC θ is the successor cardinal of |V(ω·2)| = ℶ_ω, so it is regular,
-and V(θ) is closed under unions of families indexed by subsets of V(ω·2).
-V(θ) plays the part of Lean's `Type 1`; like V(ω·2) it is a set that ZFC
-proves exists, so the functor categories on 𝒰 and their Ext groups are
-sets, and no large cardinal enters (`GRH.Category`, `GRH.Scheme`).
-
 Writing the region over 𝒰 asks for a few changes to the Lean text: the
 continuity condition ranges over diagrams of bounded size, as every use of
 it already does; the ω-branching index type of the test envelopes is
@@ -286,9 +275,8 @@ graph TD
 - A definition that needs a choice of parameter (the order K of the
   Euler–Maclaurin expansion) makes it explicitly and proves independence,
   rather than choosing it with a selector.
-- No theorem takes a large cardinal hypothesis: the universe-polymorphic
-  parts of the source are written over the sets 𝒰 ⊆ V(ω·2) and V(θ)
-  (Universes above), and the axiom audit would show any reliance.
+- Theorems that need universes take `TarskiGrothendieck()` as a section
+  hypothesis, never as an axiom; the audit shows where it is relied on.
 - Statements of layer 5 keep the source's names where they read well, so
   the Lean text can be followed beside the port, and say in a comment which
   source declaration they correspond to.
@@ -305,13 +293,13 @@ graph TD
 <!-- blueprint-status -->
 | module | theorems | proved | admitted |
 |---|---:|---:|---:|
-| GRH.Linear.Modules | 313 | 313 | 0 |
+| GRH.Linear.Modules | 315 | 315 | 0 |
 | GRH.Linear.Dimension | 130 | 125 | 5 |
 | GRH.Matrix.Basic | 239 | 239 | 0 |
 | GRH.Linear.Exterior | 180 | 160 | 20 |
-| GRH.Matrix.Determinant | 164 | 163 | 1 |
-| GRH.Algebra.Divisibility | 108 | 106 | 2 |
-| GRH.Algebra.Ideals | 171 | 144 | 27 |
+| GRH.Matrix.Determinant | 168 | 165 | 3 |
+| GRH.Algebra.Divisibility | 106 | 104 | 2 |
+| GRH.Algebra.Ideals | 174 | 145 | 29 |
 | GRH.Algebra.Localization | 84 | 71 | 13 |
 | GRH.Algebra.LocalRings | 47 | 34 | 13 |
 | GRH.Matrix.Spectral | 72 | 56 | 16 |
@@ -326,35 +314,35 @@ graph TD
 | GRH.Algebra.Flat | 31 | 1 | 30 |
 | GRH.Bernoulli | 176 | 176 | 0 |
 | GRH.Exp | 217 | 217 | 0 |
-| GRH.Trig | 132 | 132 | 0 |
+| GRH.Trig | 128 | 128 | 0 |
 | GRH.Log | 108 | 108 | 0 |
 | GRH.Holomorphic | 515 | 515 | 0 |
-| GRH.Integral | 154 | 154 | 0 |
+| GRH.Integral | 153 | 153 | 0 |
 | GRH.Topology.Filters | 116 | 116 | 0 |
 | GRH.Topology.Compactness | 100 | 91 | 9 |
 | GRH.Topology.Groups | 62 | 39 | 23 |
 | GRH.Topology.Sums | 138 | 137 | 1 |
-| GRH.Normed.Groups | 118 | 110 | 8 |
+| GRH.Normed.Groups | 130 | 111 | 19 |
 | GRH.Calculus.Analytic | 40 | 5 | 35 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
-| GRH.Normed.InnerProduct | 90 | 70 | 20 |
-| GRH.Calculus.Frechet | 70 | 55 | 15 |
+| GRH.Normed.InnerProduct | 91 | 70 | 21 |
+| GRH.Calculus.Frechet | 71 | 55 | 16 |
 | GRH.Category.Basic | 119 | 0 | 119 |
 | GRH.Category.Abelian | 45 | 1 | 44 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Field.Galois | 79 | 1 | 78 |
-| GRH.Matrix.Groups | 92 | 82 | 10 |
-| GRH.Field.Finite | 62 | 2 | 60 |
+| GRH.Matrix.Groups | 91 | 81 | 10 |
+| GRH.Field.Finite | 65 | 3 | 62 |
 | GRH.Cyclotomy.RootsOfUnity | 45 | 1 | 44 |
 | GRH.Field.InfiniteGalois | 22 | 0 | 22 |
 | GRH.Cyclotomy.Fields | 21 | 1 | 20 |
 | GRH.EulerMaclaurin | 51 | 51 | 0 |
 | GRH.Hurwitz | 198 | 198 | 0 |
 | GRH.Gamma | 229 | 229 | 0 |
-| GRH.Zeta | 98 | 98 | 0 |
+| GRH.Zeta | 97 | 97 | 0 |
 | GRH.DirichletCharacter | 188 | 188 | 0 |
 | GRH.LFunction | 229 | 229 | 0 |
-| GRH.FunctionalEquation | 494 | 494 | 0 |
+| GRH.FunctionalEquation | 493 | 493 | 0 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
 | GRH.Fourier.FiniteAbelian | 29 | 2 | 27 |
 | GRH.Measure.Spaces | 225 | 174 | 51 |
@@ -372,21 +360,21 @@ graph TD
 | GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
-| GRH.NumberField.Basic | 65 | 1 | 64 |
-| GRH.NumberField.Dedekind | 95 | 5 | 90 |
+| GRH.NumberField.Basic | 63 | 0 | 63 |
+| GRH.NumberField.Dedekind | 92 | 4 | 88 |
 | GRH.NumberField.Discriminant | 25 | 1 | 24 |
 | GRH.NumberField.Places | 56 | 4 | 52 |
 | GRH.NumberField.Adeles | 30 | 1 | 29 |
 | GRH.NumberField.CM | 23 | 0 | 23 |
-| GRH.Padic.Numbers | 88 | 6 | 82 |
+| GRH.Padic.Numbers | 76 | 5 | 71 |
 | GRH.Padic.Valuation | 63 | 8 | 55 |
 | GRH.Padic.Cp | 33 | 1 | 32 |
-| GRH.Padic.Witt | 43 | 4 | 39 |
+| GRH.Padic.Witt | 40 | 3 | 37 |
 | GRH.Padic.Tilt | 36 | 2 | 34 |
 | GRH.Polynomial.PowerSeries | 71 | 1 | 70 |
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Statements | 7 | 6 | 1 |
-| **total** | **8642** | **6603** | **2039** |
+| **total** | **8638** | **6596** | **2042** |
 <!-- /blueprint-status -->
