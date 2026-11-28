@@ -1,0 +1,294 @@
+-- Hilbert 90 at a congruence level: twisted norms, ring endomorphisms
+-- acting tamely at a level m, profinite rings, Galois descent at a prime,
+-- Hilbert 90 for GLₙ and for units over Artinian or profinite rings,
+-- surjectivity of the norm on units, orthonormal frames fixed by an
+-- involutive twist, and Hilbert 90 for the unitary group at a level.
+-- Source: grh-compact/src/Lib/GaloisRep/Hilbert90/TameDescent.lean
+-- (isFixedPt_prod_range, iterate_mul_apply, isTameAtLevel_gal,
+-- isTameAtLevel_one, IsTameAtLevel.of_skew, isFixedPt_norm,
+-- isProfiniteRing_intAdeles, IsProfiniteRing.of_retract,
+-- IsProfiniteRing.of_addEquiv_pi, IsProfiniteRing.eqLocus,
+-- IsTameAtLevel.of_map, exists_smul_mem_span_fixedPoints, hilbert90_gl,
+-- hilbert90_unit, exists_norm), Hilbert90/UnitaryHilbert90.lean
+-- (exists_fixed_orthonormal_frame, unitary_hilbert90_at_level); with the
+-- definitions twistedNorm, IsTameAtLevel and IsProfiniteRing of
+-- Lib/General/Groups/ValuationPair.lean, stated here as STAND-INs.
+-- Encoding. Rings are Cumulus rings; σ : R → R a ring endomorphism, σ^i
+-- its i-th iterate. The source's IsProfiniteRing asks for unique limits
+-- along Mathlib's hyperfilter on ℕ, a chosen nonprincipal ultrafilter;
+-- here the condition is asked of every nonprincipal ultrafilter on ℕ,
+-- which selects nothing and holds for the rings the proof uses.
+-- Matrices over R with an involution ⋆ (the source's StarRing) take the
+-- involution as a parameter; m • Y is matSmul.
+-- Part of the GRH blueprint (layer 4, Lib/GaloisRep).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.GaloisRep.Hilbert90
+import GRH.Adelic.Adeles
+import GRH.Matrix.Groups
+import GRH.Topology.Filters
+
+section Hilbert90
+
+-- Section: Iterates and twisted norms
+-- The n-th iterate τ^[n](x).
+def csGRIterate (τ x : Set, n : Nat) → Set
+  | τ, x, zero => x
+  | τ, x, succ(k) => τ(csGRIterate(τ, x, k))
+
+-- STAND-IN for General/Groups/ValuationPair.lean, twistedNorm τ p δ: the
+-- product δ · τ(δ) ⋯ τ^{p−1}(δ) for the multiplication mul with unit one.
+def csGRTwistedNorm (mul one τ δ : Set, p : Nat) → Set
+  | mul, one, τ, δ, zero => one
+  | mul, one, τ, δ, succ(k) => call2(mul, csGRTwistedNorm(mul, one, τ, δ, k), csGRIterate(τ, δ, k))
+
+-- The ring norm x σ(x) ⋯ σ^{p−1}(x) and the trace Σ_{i<p} σ^i(e).
+def ringTwistedNorm (R σ x : Set, p : Nat) : Set :=
+  csGRTwistedNorm(Ring.mul(R), Ring.one(R), σ, x, p)
+
+def ringTwistedTraceTerms (R σ e : Set, p : Nat) : Set :=
+  { (i, csGRIterate(σ, e, i)) | i ∈ p }
+
+def ringTwistedTrace (R σ e : Set, p : Nat) : Set :=
+  finiteRingSum(p, Ring.carrier(R), Ring.add(R), Ring.zero(R), Ring.neg(R), Ring.mul(R),
+    Ring.one(R), ringTwistedTraceTerms(R, σ, e, p))
+
+-- Section: Tame endomorphisms and profinite rings
+-- STAND-IN for General/Groups/ValuationPair.lean, IsTameAtLevel σ p m:
+-- σ(m) = m, some e has Σ_{i<p} σ^i(e) ≡ 1 mod m, σ^p = 1, p > 0, and for
+-- 0 < i < p every prime ideal modulo which σ^i is the identity contains m.
+predicate IsTameAtLevel (R σ : Set, p : Nat, m : Set) :=
+  CommRing(R) ∧ RingHom(σ, R, R) ∧ m ∈ Ring.carrier(R) ∧ σ(m) = m ∧
+  (∃ e ∈ Ring.carrier(R), RingDvd(R, m, Ring.sub(R, ringTwistedTrace(R, σ, e, p), Ring.one(R)))) ∧
+  (∀ x ∈ Ring.carrier(R), csGRIterate(σ, x, p) = x) ∧ 0 < p ∧
+  (∀ i ∈ p, 0 < i → (∀ P, PrimeIdeal(R, P) →
+    (∀ x ∈ Ring.carrier(R), Ring.sub(R, csGRIterate(σ, x, i), x) ∈ P) → m ∈ P))
+
+-- A nonprincipal ultrafilter on ℕ.
+predicate NonprincipalUltrafilter (U : Set) :=
+  IsFilter(ℕ, U) ∧ ∅ ∉ U ∧ (∀ A, A ⊆ ℕ → A ∈ U ∨ ℕ ∖ A ∈ U) ∧ (∀ F, Finite(F) → ℕ ∖ F ∈ U)
+
+-- The indices N at which M divides x(N) − L.
+def congruentIndices (R x L M : Set) : Set :=
+  { N ∈ ℕ | RingDvd(R, natCast(R, M), Ring.sub(R, x(N), L)) }
+
+-- STAND-IN for General/Groups/ValuationPair.lean, IsProfiniteRing R: every
+-- sequence has a unique limit along a nonprincipal ultrafilter, for the
+-- topology of the ideals M R, M a nonzero natural.
+predicate IsProfiniteRing (R : Set) :=
+  CommRing(R) ∧ (∀ U, NonprincipalUltrafilter(U) →
+    (∀ x, FunctionBetween(x, ℕ, Ring.carrier(R)) →
+      (∃ L ∈ Ring.carrier(R), (∀ M ∈ ℕ, M ≠ 0 → congruentIndices(R, x, L, M) ∈ U) ∧
+        (∀ L2 ∈ Ring.carrier(R), (∀ M ∈ ℕ, M ≠ 0 → congruentIndices(R, x, L2, M) ∈ U) →
+          L2 = L))))
+
+-- The ring Ô of integral finite adeles.
+def intAdeleRing (E : Set) : Set := subringRing(finiteAdeleRing(E), finInt(E))
+
+-- The subring fixed by σ (RingHom.eqLocus σ 1).
+def fixedSubring (R σ : Set) : Set := { x ∈ Ring.carrier(R) | σ(x) = x }
+
+-- Section: Facts
+-- TameDescent.lean, isTameAtLevel_gal: an automorphism σ of finite order
+-- p of a field L with Gal(L/K) finite is tame at level 1.
+theorem IsTameAtLevel.gal (E σ : Set, p : Nat)
+  requires finite : FiniteExtension(E)
+  requires galois : GaloisExtension(E)
+  requires automorphism : σ ∈ algebraAutomorphisms(E)
+  requires order : groupPow(galoisGroup(E), σ, p) = identity(algebraCarrier(E))
+  requires least : ∀ i ∈ p, 0 < i → groupPow(galoisGroup(E), σ, i) ≠ identity(algebraCarrier(E))
+  requires positive : 0 < p
+  shows IsTameAtLevel(Algebra.ring(E), σ, p, Ring.one(Algebra.ring(E)))
+proof
+  sorry
+
+-- TameDescent.lean, isTameAtLevel_one: the identity is tame with p = 1.
+theorem IsTameAtLevel.one (R m : Set)
+  requires ring : CommRing(R)
+  requires member : m ∈ Ring.carrier(R)
+  shows IsTameAtLevel(R, identity(Ring.carrier(R)), 1, m)
+proof
+  sorry
+
+-- TameDescent.lean, IsTameAtLevel.of_skew: σ² = 1, x − σ(x) a unit and
+-- σ(m) = m give tameness at m with p = 2.
+theorem IsTameAtLevel.of_skew (R σ x m : Set)
+  requires ring : CommRing(R)
+  requires hom : RingHom(σ, R, R)
+  requires involution : ∀ y ∈ Ring.carrier(R), σ(σ(y)) = y
+  requires member : x ∈ Ring.carrier(R)
+  requires unit : Ring.sub(R, x, σ(x)) ∈ ringUnits(R)
+  requires level : m ∈ Ring.carrier(R)
+  requires fixed : σ(m) = m
+  shows IsTameAtLevel(R, σ, 2, m)
+proof
+  sorry
+
+-- TameDescent.lean, isFixedPt_norm: σ^p = 1 makes the norm σ-fixed.
+theorem ringTwistedNorm.fixed (R σ x : Set, p : Nat)
+  requires ring : CommRing(R)
+  requires hom : RingHom(σ, R, R)
+  requires order : ∀ y ∈ Ring.carrier(R), csGRIterate(σ, y, p) = y
+  requires member : x ∈ Ring.carrier(R)
+  shows σ(ringTwistedNorm(R, σ, x, p)) = ringTwistedNorm(R, σ, x, p)
+proof
+  sorry
+
+-- TameDescent.lean, isProfiniteRing_intAdeles: Ô is profinite.
+theorem IsProfiniteRing.intAdeles (E : Set)
+  requires number : NumberField(E)
+  shows IsProfiniteRing(intAdeleRing(E))
+proof
+  sorry
+
+-- TameDescent.lean, IsProfiniteRing.of_retract: an additive retract of a
+-- profinite ring that is a ring is profinite.
+theorem IsProfiniteRing.of_retract (R B i r : Set)
+  requires profinite : IsProfiniteRing(R)
+  requires ring : CommRing(B)
+  requires homI : GroupHom(i, Ring.additive(B), Ring.additive(R))
+  requires homR : GroupHom(r, Ring.additive(R), Ring.additive(B))
+  requires retract : ∀ x ∈ Ring.carrier(B), r(i(x)) = x
+  shows IsProfiniteRing(B)
+proof
+  sorry
+
+-- TameDescent.lean, IsProfiniteRing.eqLocus: if σ is tame at level 0 on a
+-- profinite ring, the fixed subring is profinite.
+theorem IsProfiniteRing.fixed_subring (R σ : Set, p : Nat)
+  requires profinite : IsProfiniteRing(R)
+  requires tame : IsTameAtLevel(R, σ, p, Ring.zero(R))
+  shows IsProfiniteRing(subringRing(R, fixedSubring(R, σ)))
+proof
+  sorry
+
+-- TameDescent.lean, IsTameAtLevel.of_map: tameness transports along a ring
+-- homomorphism f with f ∘ σ = θ ∘ f, when θ^p = 1.
+theorem IsTameAtLevel.of_map (R B σ θ f m : Set, p : Nat)
+  requires tame : IsTameAtLevel(R, σ, p, m)
+  requires ring : CommRing(B)
+  requires homθ : RingHom(θ, B, B)
+  requires hom : RingHom(f, R, B)
+  requires semiconj : ∀ x ∈ Ring.carrier(R), f(σ(x)) = θ(f(x))
+  requires order : ∀ y ∈ Ring.carrier(B), csGRIterate(θ, y, p) = y
+  shows IsTameAtLevel(B, θ, p, f(m))
+proof
+  sorry
+
+-- TameDescent.lean, exists_smul_mem_span_fixedPoints (Galois descent at a
+-- prime): for σ tame at m, τ σ-semilinear on the R-module V with τ^p = 1,
+-- and a prime P ∌ m, some r ∉ P multiplies V into the span of the τ-fixed
+-- vectors.
+def semilinearFixed (V τ : Set) : Set := { v ∈ Module.carrier(V) | τ(v) = v }
+
+theorem exists_smul_mem_span_fixed (R σ m V τ P : Set, p : Nat)
+  requires tame : IsTameAtLevel(R, σ, p, m)
+  requires module : Module(V, R)
+  requires additive : FunctionBetween(τ, Module.carrier(V), Module.carrier(V))
+  requires semilinear : ∀ a ∈ Ring.carrier(R), ∀ v ∈ Module.carrier(V), ∀ w ∈ Module.carrier(V),
+    τ(call2(Module.add(V), Module.smul(V)(a, v), w)) =
+      call2(Module.add(V), Module.smul(V)(σ(a), τ(v)), τ(w))
+  requires order : ∀ v ∈ Module.carrier(V), csGRIterate(τ, v, p) = v
+  requires prime : PrimeIdeal(R, P)
+  requires outside : m ∉ P
+  shows ∃ r ∈ Ring.carrier(R), r ∉ P ∧ (∀ v ∈ Module.carrier(V),
+    Module.smul(V)(r, v) ∈ moduleSpan(V, R, semilinearFixed(V, τ)))
+proof
+  sorry
+
+-- TameDescent.lean, hilbert90_gl (Hilbert 90 for GLₙ at level m): over R
+-- Artinian or profinite, with σ tame at m, every invertible c = 1 + mY
+-- with c σ(c) ⋯ σ^{p−1}(c) = 1 (σ entrywise) is k σ(k)⁻¹ for an invertible
+-- k = 1 + mW: c σ(k) = k.
+def matEntrywise (R n σ : Set) : Set :=
+  { (A, matMap(R, n, n, σ, A)) | A ∈ matrixSpace(R, n, n) }
+
+theorem hilbert90_gl (R σ m n c Y : Set, p : Nat)
+  requires rings : ArtinianRing(R) ∨ IsProfiniteRing(R)
+  requires tame : IsTameAtLevel(R, σ, p, m)
+  requires finite : Finite(n)
+  requires invertible : c ∈ invertibleMatrices(R, n)
+  requires matrix : Y ∈ matrixSpace(R, n, n)
+  requires level : c = matAdd(R, n, n, matOne(R, n), matSmul(R, n, n, m, Y))
+  requires norm : csGRTwistedNorm(matMultiplication(R, n), matOne(R, n), matEntrywise(R, n, σ),
+    c, p) = matOne(R, n)
+  shows ∃ k ∈ invertibleMatrices(R, n), ∃ W ∈ matrixSpace(R, n, n),
+    matMul(R, n, n, n, c, matMap(R, n, n, σ, k)) = k ∧
+    k = matAdd(R, n, n, matOne(R, n), matSmul(R, n, n, m, W))
+proof
+  sorry
+
+-- TameDescent.lean, hilbert90_unit: a unit x ≡ 1 mod m of norm 1 is
+-- g/σ(g) for a unit g ≡ 1 mod m.
+theorem hilbert90_unit (R σ m x : Set, p : Nat)
+  requires rings : ArtinianRing(R) ∨ IsProfiniteRing(R)
+  requires tame : IsTameAtLevel(R, σ, p, m)
+  requires unit : x ∈ ringUnits(R)
+  requires level : RingDvd(R, m, Ring.sub(R, x, Ring.one(R)))
+  requires norm : ringTwistedNorm(R, σ, x, p) = Ring.one(R)
+  shows ∃ g ∈ ringUnits(R), RingDvd(R, m, Ring.sub(R, g, Ring.one(R))) ∧
+    call2(Ring.mul(R), x, σ(g)) = g
+proof
+  sorry
+
+-- TameDescent.lean, exists_norm: over R finite or profinite, every σ-fixed
+-- unit x ≡ 1 mod m is the norm of a unit z with z, z⁻¹ ≡ 1 mod m.
+theorem exists_norm (R σ m x : Set, p : Nat)
+  requires rings : Finite(Ring.carrier(R)) ∨ IsProfiniteRing(R)
+  requires tame : IsTameAtLevel(R, σ, p, m)
+  requires unit : x ∈ ringUnits(R)
+  requires fixed : σ(x) = x
+  requires level : RingDvd(R, m, Ring.sub(R, x, Ring.one(R)))
+  shows ∃ z ∈ ringUnits(R), RingDvd(R, m, Ring.sub(R, z, Ring.one(R))) ∧
+    RingDvd(R, m, Ring.sub(R, ringInverse(R, z), Ring.one(R))) ∧
+    ringTwistedNorm(R, σ, z, p) = x
+proof
+  sorry
+
+-- Section: Unitary Hilbert 90
+-- The hypotheses of UnitaryHilbert90.lean on (O, ⋆, τ): O profinite, ⋆ an
+-- involution, τ^p = 1 commuting with ⋆ and tame at level 0, and c
+-- τ-fixed with c − c⋆ a unit.
+predicate UnitaryDescentSetting (O star τ c : Set, p : Nat) :=
+  IsProfiniteRing(O) ∧ RingInvolution(star, O) ∧ IsTameAtLevel(O, τ, p, Ring.zero(O)) ∧
+  (∀ x ∈ Ring.carrier(O), τ(star(x)) = star(τ(x))) ∧ c ∈ Ring.carrier(O) ∧ τ(c) = c ∧
+  Ring.sub(O, c, star(c)) ∈ ringUnits(O)
+
+-- UnitaryHilbert90.lean, exists_fixed_orthonormal_frame: every invertible
+-- τ-fixed hermitian Y has a τ-fixed g = 1 + W(Y − 1) with gᴴ Y g = 1.
+theorem exists_fixed_orthonormal_frame (O star τ c n Y : Set, p : Nat)
+  requires setting : UnitaryDescentSetting(O, star, τ, c, p)
+  requires finite : Finite(n)
+  requires invertible : Y ∈ invertibleMatrices(O, n)
+  requires hermitian : conjTranspose(O, star, n, n, Y) = Y
+  requires fixed : matMap(O, n, n, τ, Y) = Y
+  shows ∃ g ∈ matrixSpace(O, n, n), ∃ W ∈ matrixSpace(O, n, n),
+    g = matAdd(O, n, n, matOne(O, n), matMul(O, n, n, n, W,
+      matAdd(O, n, n, Y, matNeg(O, n, n, matOne(O, n))))) ∧
+    matMap(O, n, n, τ, g) = g ∧
+    matMul(O, n, n, n, matMul(O, n, n, n, conjTranspose(O, star, n, n, g), Y), g) = matOne(O, n)
+proof
+  sorry
+
+-- UnitaryHilbert90.lean, unitary_hilbert90_at_level: with m⋆ = m and τ
+-- tame at m, a unitary s = 1 + mY of twisted norm 1 is g τ(g)⁻¹ with g
+-- unitary and g = 1 + mW: s τ(g) = g.
+theorem unitary_hilbert90_at_level (O star τ c n m s Y : Set, p : Nat)
+  requires setting : UnitaryDescentSetting(O, star, τ, c, p)
+  requires finite : Finite(n)
+  requires selfAdjoint : star(m) = m
+  requires tame : IsTameAtLevel(O, τ, p, m)
+  requires unitary : s ∈ unitaryMatrices(O, star, n)
+  requires matrix : Y ∈ matrixSpace(O, n, n)
+  requires level : s = matAdd(O, n, n, matOne(O, n), matSmul(O, n, n, m, Y))
+  requires norm : csGRTwistedNorm(matMultiplication(O, n), matOne(O, n), matEntrywise(O, n, τ),
+    s, p) = matOne(O, n)
+  shows ∃ g ∈ unitaryMatrices(O, star, n), ∃ W ∈ matrixSpace(O, n, n),
+    matMul(O, n, n, n, s, matMap(O, n, n, τ, g)) = g ∧
+    g = matAdd(O, n, n, matOne(O, n), matSmul(O, n, n, m, W))
+proof
+  sorry
+
+end Hilbert90
