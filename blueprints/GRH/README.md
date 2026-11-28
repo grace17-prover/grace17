@@ -344,16 +344,16 @@ graph TD
 | GRH.NumberField.CM | 23 | 0 | 23 |
 | GRH.Normed.Spaces | 62 | 55 | 7 |
 | GRH.Normed.InnerProduct | 91 | 70 | 21 |
-| GRH.Measure.Spaces | 225 | 177 | 48 |
-| GRH.Measure.Lebesgue | 132 | 93 | 39 |
-| GRH.Measure.LIntegral | 199 | 186 | 13 |
+| GRH.Measure.Spaces | 342 | 330 | 12 |
+| GRH.Measure.Lebesgue | 137 | 100 | 37 |
+| GRH.Measure.LIntegral | 199 | 187 | 12 |
 | GRH.Holomorphic | 515 | 515 | 0 |
 | GRH.Integral | 153 | 153 | 0 |
-| GRH.Measure.Bochner | 181 | 145 | 36 |
-| GRH.Measure.Product | 42 | 0 | 42 |
+| GRH.Measure.Bochner | 181 | 146 | 35 |
+| GRH.Measure.Product | 43 | 5 | 38 |
 | GRH.Calculus.Frechet | 71 | 55 | 16 |
 | GRH.Measure.ChangeOfVariables | 30 | 0 | 30 |
-| GRH.Measure.Haar | 56 | 0 | 56 |
+| GRH.Measure.Haar | 56 | 3 | 53 |
 | GRH.NumberField.Adeles | 30 | 1 | 29 |
 | GRH.Adelic.Adeles | 26 | 2 | 24 |
 | GRH.Adelic.QuotientMeasure | 13 | 0 | 13 |
@@ -466,5 +466,5 @@ graph TD
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
 | GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **9999** | **7766** | **2233** |
 <!-- /blueprint-status -->
