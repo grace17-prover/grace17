@@ -68,28 +68,6 @@ function ruleVisible(rule: TypeRule, visibility: ScopeVisibility | undefined): b
   return visibility === undefined || rule.origin === undefined || visibility.declaration(rule.origin);
 }
 
-// The visible rules of a bucket, counted once per scope. Buckets only grow,
-// and a bucket's arrivals are logged in the order they came, so a count is
-// extended by the rules that arrived since it was taken.
-const visibleRuleCounts = new WeakMap<readonly TypeRule[], WeakMap<ScopeVisibility, { readonly length: number; readonly count: number }>>();
-const bucketArrivals = new WeakMap<readonly TypeRule[], TypeRule[]>();
-function visibleRuleCount(rules: readonly TypeRule[], visibility: ScopeVisibility | undefined): number {
-  if (visibility === undefined) return rules.length;
-  let byVisibility = visibleRuleCounts.get(rules);
-  if (!byVisibility) { byVisibility = new WeakMap(); visibleRuleCounts.set(rules, byVisibility); }
-  const cached = byVisibility.get(visibility);
-  if (cached && cached.length === rules.length) return cached.count;
-  const arrivals = bucketArrivals.get(rules);
-  const extend = cached !== undefined && arrivals !== undefined && arrivals.length === rules.length;
-  let count = extend ? cached.count : 0;
-  const scanned = extend ? arrivals : rules;
-  for (let index = extend ? cached.length : 0; index < scanned.length; index += 1) {
-    if (ruleVisible(scanned[index]!, visibility)) count += 1;
-  }
-  byVisibility.set(visibility, { length: rules.length, count });
-  return count;
-}
-
 // Rules are immutable once indexed. Reuse their pattern-variable sets and
 // rigid-argument counts across candidate matching and refinement contexts.
 const ruleVariableSets = new WeakMap<TypeRule, ReadonlySet<string>>();
@@ -805,10 +783,13 @@ function prepareRuleProver(
   const exhaustedQueries = new GoalTable<string>();
   const outputMemo = new Map<string, InstanceSynthesisResult | false>();
   const active = new GoalTable<true>();
+  // A registered-instance search counts every candidate it scans; a
+  // refinement search counts only the rules whose conclusion matches a goal,
+  // a few per goal, so its attempts are fewer and its default smaller.
   const limits = {
     maximumDepth: configuredLimits.maximumDepth ?? 64,
     maximumGoals: configuredLimits.maximumGoals ?? 4096,
-    maximumRuleAttempts: configuredLimits.maximumRuleAttempts ?? 100_000,
+    maximumRuleAttempts: configuredLimits.maximumRuleAttempts ?? (rejectAmbiguity ? 100_000 : 8192),
   };
   const counters = {
     goalsVisited: 0, memoHits: 0, rulesConsidered: 0,
@@ -885,8 +866,8 @@ function prepareRuleProver(
       }
     }
     if (!rejectAmbiguity && !refinementTermsFit(wantedArguments)) { exhausted = true; return undefined; }
-    if (!rejectAmbiguity && (depth > 256 || counters.goalsVisited >= 4096 ||
-      counters.rulesConsidered >= 100_000)) { exhausted = true; return undefined; }
+    if (!rejectAmbiguity && (depth > 256 || counters.goalsVisited >= limits.maximumGoals ||
+      counters.rulesConsidered >= limits.maximumRuleAttempts)) { exhausted = true; return undefined; }
     if (active.get(key)) return undefined;
     counters.goalsVisited += 1;
     counters.maximumDepth = Math.max(counters.maximumDepth, depth);
@@ -986,23 +967,26 @@ function prepareRuleProver(
         }
       }
       const solutions: { readonly name: string; readonly proof: Proof }[] = [];
-      const bucket = rulesByPredicate.get(wantedPredicate) ?? [];
-      const candidates = orderedCandidates(candidateRules?.(wantedPredicate, wantedArguments) ?? bucket);
-      // The rules the head index leaves out would have been scanned and
-      // rejected; charging them keeps the search budget, and so the point at
-      // which a search gives up, the same as a full scan's. Only the rules
-      // the scope sees are charged: the rules of modules it does not import
-      // must not spend its budget.
-      if (!rejectAmbiguity) counters.rulesConsidered += Math.max(0, visibleRuleCount(bucket, visibility) - candidates.length);
+      const candidates = orderedCandidates(candidateRules?.(wantedPredicate, wantedArguments) ??
+        rulesByPredicate.get(wantedPredicate) ?? []);
+      // A refinement goal is charged only for the rules whose conclusion
+      // matches it: the rules the head index leaves out, and those it admits
+      // whose conclusion has another shape, are rejected without a search
+      // and cost nothing. So the point at which a search gives up depends on
+      // the rules that could prove its goals, and not on how many unrelated
+      // rules the scope's imports bring.
       for (const rule of [...(localRules.get(wantedPredicate) ?? []), ...candidates]) {
-        if (!rejectAmbiguity && counters.rulesConsidered >= 100_000) { exhausted = true; return undefined; }
-        counters.rulesConsidered += 1;
-        enforce("maximumRuleAttempts", counters.rulesConsidered);
+        if (!rejectAmbiguity && counters.rulesConsidered >= limits.maximumRuleAttempts) { exhausted = true; return undefined; }
+        if (rejectAmbiguity) {
+          counters.rulesConsidered += 1;
+          enforce("maximumRuleAttempts", counters.rulesConsidered);
+        }
         const matched = new Map<string, Term>();
         const variables = ruleVariables(rule);
         if (rule.arguments.length !== wantedArguments.length ||
             !rule.arguments.every((argument, index) =>
               matchTerm(argument, wantedArguments[index]!, variables, matched))) continue;
+        if (!rejectAmbiguity) counters.rulesConsidered += 1;
         let found = false;
         for (const substitution of bindRuleVariables(rule, matched, variables, depth)) {
           // Relieve premises before allocating losing candidates' certificates.
@@ -1089,7 +1073,8 @@ function prepareRuleProver(
     counters.goalsVisited += 1;
     enforce("maximumGoals", counters.goalsVisited);
 
-    if (!rejectAmbiguity && (counters.goalsVisited >= 4096 || counters.rulesConsidered >= 100_000)) return [];
+    if (!rejectAmbiguity && (counters.goalsVisited >= limits.maximumGoals ||
+      counters.rulesConsidered >= limits.maximumRuleAttempts)) return [];
     const direct = [...(localPredicates.get(wantedPredicate)?.values() ?? [])].filter(item => item.formula.tag === "pred" &&
       item.formula.args.length === wantedArguments.length &&
       wantedArguments.every((argument, index) => argument === undefined ||
@@ -1108,13 +1093,16 @@ function prepareRuleProver(
     const solutions: InstanceSynthesisResult[] = [];
     for (const rule of selectRules(candidateRules?.(wantedPredicate, wantedArguments) ??
       rulesByPredicate.get(wantedPredicate) ?? [])) {
-      counters.rulesConsidered += 1;
-      enforce("maximumRuleAttempts", counters.rulesConsidered);
+      if (rejectAmbiguity) {
+        counters.rulesConsidered += 1;
+        enforce("maximumRuleAttempts", counters.rulesConsidered);
+      }
       if (rule.arguments.length !== wantedArguments.length) continue;
       const matched = new Map<string, Term>();
       const variables = ruleVariables(rule);
       if (!wantedArguments.every((argument, index) => argument === undefined ||
         matchTerm(rule.arguments[index]!, argument, variables, matched))) continue;
+      if (!rejectAmbiguity) counters.rulesConsidered += 1;
       for (const substitution of bindRuleVariables(rule, matched, variables, depth)) {
         const concrete = rule.arguments.map(argument => instantiateRuleTerm(argument, substitution));
         if (concrete.some(argument => argument === undefined)) continue;
@@ -1397,7 +1385,7 @@ function typeIndex(kernel: Kernel): TypeIndex {
       return;
     }
     index!.byName.set(rule.name, rule);
-    // Insert at the sorted position, and log the arrival for the visible-rule counts.
+    // Insert at the sorted position.
     let bucket = index!.byPredicate.get(rule.predicate) as TypeRule[] | undefined;
     if (!bucket) { bucket = []; index!.byPredicate.set(rule.predicate, bucket); }
     let low = 0;
@@ -1406,10 +1394,7 @@ function typeIndex(kernel: Kernel): TypeIndex {
       const middle = (low + high) >> 1;
       if (bucket[middle]!.name.localeCompare(rule.name) < 0) low = middle + 1; else high = middle;
     }
-    let arrivals = bucketArrivals.get(bucket);
-    if (!arrivals) { arrivals = [...bucket]; bucketArrivals.set(bucket, arrivals); }
     bucket.splice(low, 0, rule);
-    arrivals.push(rule);
     indexRuleHeads(index!.heads, rule);
   };
   const add = (name: string, proof: Proof, origin: string): void => {
