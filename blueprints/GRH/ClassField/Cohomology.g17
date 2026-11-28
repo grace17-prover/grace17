@@ -1,0 +1,529 @@
+-- Galois cohomology in degrees ≤ 2 for discrete modules of a profinite
+-- group Γ: invariants, restriction of H², equivariant maps and short
+-- exact sequences and their counts, divisibility of Ωˣ; biadditive
+-- pairings and annihilators, the cup product of 1-cocycles and its
+-- antisymmetry, the Cartier dual Hom(M, Ωˣ); characters of cyclic
+-- quotients, Shapiro's lemma (degrees 0, 1 and injectivity in degree 2),
+-- corestriction ∘ restriction = index, Hilbert's Theorem 90, Kummer
+-- cocycles and their cup product as a cyclic class; Tate's index formula
+-- for norms in a cyclic extension of prime degree, the index of n-th powers
+-- in a local field, and the characterisation of cyclic classes: a class
+-- split by the kernel of χ is a symbol (χ, w), and (χ, w) = 0 exactly
+-- when w is a norm.
+-- Source: grh-compact/src/Lib/ClassField/GaloisCohomology/DiscreteUnits.lean
+-- (DiscreteModule, H0, resH2, Hom, IsShortExact, IsShortExact.card_eq_mul,
+-- DiscreteUnits.exists_nsmul), CupProduct.lean (unitsModule,
+-- pairingAnnihilator, card_pairingAnnihilator_mul_card, cupProduct,
+-- cupProduct_flip, cartierDual, evalCup), SylowReduction.lean
+-- (QZChar.comap, QZChar.exists_ker_eq_of_isCyclic, shapiro_H0,
+-- shapiro_H1, shapiroH2_injective, index_smul_eq_zero_of_resH2,
+-- resH2_cyclicClass_eq_zero, kummer_cup_eq_neg_cyclicClass,
+-- hilbert90_unitsRep, exists_kummer_cocycle), CyclicNorm.lean
+-- (cokerKerIndex_local_units, tate_index_formula_norm,
+-- QZChar.cyclicClass_spec, cyclicClass_eq_zero_iff_norm). Part of:
+-- "Galois cohomology in degrees ≤ 2: Shapiro, Hilbert 90, Kummer, symbols,
+-- Herbrand quotient (known result; see
+-- Lib.ClassField.GaloisCohomology.CyclicNorm)."
+-- Encoding. As in GRH.ClassField.Galois, a discrete Γ-module is an abelian
+-- group record M with an action (DiscreteGModule), written
+-- multiplicatively; the source's R-module structure is not carried (its
+-- uses here are ℤ-linear, and the counts are of groups). H⁰ is the set of
+-- fixed points. Restriction to a subgroup U is pairMapH2 along the
+-- inclusion of U. The source's cokerKerIndex (#(Y/lY)/#Y[l]) is stated
+-- multiplied out: #(Y/lY) = q·#Y[l]. The module of functions Γ/U → M is
+-- funModule; Shapiro's map restricts to U and evaluates at the trivial
+-- coset U. Not stated: exists_primitive_relation, the trivialised
+-- cocycles (trivialisedCocycles and their counts and corestriction),
+-- Hom.card_eq_card_comap_mul_card_map, HoldsCorestrictions, resH2_swap,
+-- mem_of_prime_step, shapiro corestriction identities beyond
+-- index_smul_eq_zero_of_resH2, and TameCocycles.lean (local cocycles of a
+-- representation ρ : Gal(Ω/E) → GLₙ(O), which need Lib/GaloisRep).
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.Cohomology
+import GRH.ClassField.Galois
+
+section Cohomology
+
+-- Section: Invariants, restriction, equivariant maps
+-- DiscreteUnits.lean, H0: the Γ-fixed elements.
+def H0 (G M act : Set) : Set := fixedPoints(act, G, Group.carrier(M))
+
+-- The action restricted to a subgroup U, and U with its subspace
+-- topology.
+def restrictAction (U M act : Set) : Set := restrict(act, U × Group.carrier(M))
+
+-- DiscreteUnits.lean, resH2: H²(Γ, M) → H²(U, M), along the inclusion.
+def resH2 (G X M act U : Set) : Set :=
+  pairMapH2(G, X, M, act, subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act),
+    identity(U), identity(Group.carrier(M)))
+
+-- DiscreteUnits.lean, Hom: Γ-equivariant homomorphisms M → N.
+predicate EquivariantHom (G M act N act2 u : Set) :=
+  GroupHom(u, M, N) ∧
+  (∀ g ∈ Group.carrier(G), ∀ m ∈ Group.carrier(M), u(act(g, m)) = act2(g, u(m)))
+
+-- DiscreteUnits.lean, IsShortExact ι π: ι injective, π surjective,
+-- ker π = im ι.
+predicate IsShortExact (M N P ι π : Set) :=
+  InjectiveBetween(ι, Group.carrier(M), Group.carrier(N)) ∧
+  functionImage(π, Group.carrier(N), Group.carrier(P)) = Group.carrier(P) ∧
+  kernel(π, N, P) = functionImage(ι, Group.carrier(M), Group.carrier(N))
+
+-- Hom.mapH2: the map on H² of an equivariant u.
+def mapH2 (G X M act N act2 u : Set) : Set :=
+  pairMapH2(G, X, M, act, G, X, N, act2, identity(Group.carrier(G)), u)
+
+-- The n-th power map of a group.
+def groupPowSet (M : Set, n : Nat) : Set := { groupPow(M, m, n) | m ∈ Group.carrier(M) }
+
+-- The units of Ω, written as a group, with Γ acting.
+def omegaUnits (W : Set) : Set := unitGroup(W)
+
+-- Section: Pairings and the cup product
+-- CupProduct.lean, pairingAnnihilator b L: the y with b(x, y) = 1 for all
+-- x ∈ L (the pairing written multiplicatively into C), and the left
+-- kernel of b.
+def pairingAnnihilator (B C b L : Set) : Set :=
+  { y ∈ Group.carrier(B) | ∀ x ∈ L, b(x, y) = Group.one(C) }
+
+def pairingLeftKernel (A B C b : Set) : Set :=
+  { x ∈ Group.carrier(A) | ∀ y ∈ Group.carrier(B), b(x, y) = Group.one(C) }
+
+-- b : A × B → C biadditive.
+predicate Biadditive (A B C b : Set) :=
+  FunctionBetween(b, Group.carrier(A) × Group.carrier(B), Group.carrier(C)) ∧
+  (∀ x ∈ Group.carrier(A), ∀ x2 ∈ Group.carrier(A), ∀ y ∈ Group.carrier(B),
+    b(Group.mul(A)(x, x2), y) = Group.mul(C)(b(x, y), b(x2, y))) ∧
+  (∀ x ∈ Group.carrier(A), ∀ y ∈ Group.carrier(B), ∀ y2 ∈ Group.carrier(B),
+    b(x, Group.mul(B)(y, y2)) = Group.mul(C)(b(x, y), b(x, y2)))
+
+-- An equivariant pairing b : M × N → W: b(gm, gn) = g b(m, n).
+predicate EquivariantPairing (G M actM N actN W actW b : Set) :=
+  Biadditive(M, N, W, b) ∧
+  (∀ g ∈ Group.carrier(G), ∀ m ∈ Group.carrier(M), ∀ n ∈ Group.carrier(N),
+    b(actM(g, m), actN(g, n)) = actW(g, b(m, n)))
+
+-- CupProduct.lean, cupProduct: the class of (g, h) ↦ b(x(g), g·y(h)).
+def cupCocycle (G actN b x y : Set) : Set :=
+  { (q, b(x(fst(q)), actN(fst(q), y(snd(q))))) | q ∈ Group.carrier(G) × Group.carrier(G) }
+
+def cupProduct (G X W actW actN b x y : Set) : Set :=
+  h2Class(G, X, W, actW, cupCocycle(G, actN, b, x, y))
+
+-- The flipped pairing (n, m) ↦ b(m, n).
+def flipPairing (M N b : Set) : Set :=
+  { (q, b(snd(q), fst(q))) | q ∈ Group.carrier(N) × Group.carrier(M) }
+
+-- CupProduct.lean, cartierDual: M* = Hom(M, Ωˣ) with (g f)(m) = g f(g⁻¹ m),
+-- and the evaluation pairing.
+def dualCarrier (M W : Set) : Set :=
+  { f ∈ functionSpace(Group.carrier(M), ringUnits(W)) | GroupHom(f, M, unitGroup(W)) }
+
+def dualProduct (M W f h : Set) : Set :=
+  { (m, call2(Ring.mul(W), f(m), h(m))) | m ∈ Group.carrier(M) }
+
+def dualMul (M W : Set) : Set :=
+  { (p, dualProduct(M, W, fst(p), snd(p))) | p ∈ dualCarrier(M, W) × dualCarrier(M, W) }
+
+def dualInvValue (M W f : Set) : Set := { (m, ringInverse(W, f(m))) | m ∈ Group.carrier(M) }
+
+def dualInv (M W : Set) : Set := { (f, dualInvValue(M, W, f)) | f ∈ dualCarrier(M, W) }
+
+def dualOne (M W : Set) : Set := { (m, Ring.one(W)) | m ∈ Group.carrier(M) }
+
+def cartierDual (M W : Set) : Set :=
+  Group.mk(dualCarrier(M, W), dualMul(M, W), dualOne(M, W), dualInv(M, W))
+
+def dualActValue (G ρ M act W g f : Set) : Set :=
+  { (m, ρ(g)(f(act(Group.inv(G)(g), m)))) | m ∈ Group.carrier(M) }
+
+def cartierDualAction (G ρ M act W : Set) : Set :=
+  { (p, dualActValue(G, ρ, M, act, W, fst(p), snd(p))) |
+    p ∈ Group.carrier(G) × dualCarrier(M, W) }
+
+def evalPairing (M W : Set) : Set :=
+  { (q, fst(q)(snd(q))) | q ∈ dualCarrier(M, W) × Group.carrier(M) }
+
+-- Section: Characters, Shapiro, corestriction
+-- SylowReduction.lean, QZChar.comap: χ ↦ χ ∘ φ.
+def qzCharComap (H φ χ : Set) : Set := { (h, χ(φ(h))) | h ∈ Group.carrier(H) }
+
+-- DiscreteUnits.lean, funModule: functions f : Γ/U → M with
+-- (g f)(x) = g·f(g⁻¹x).
+def cosetCarrier (G U : Set) : Set := leftCosets(G, U)
+
+def cosetAct (G U g c : Set) : Set :=
+  ⋃({ d ∈ cosetCarrier(G, U) | ∃ h ∈ c, d = leftCoset(G, Group.mul(G)(g, h), U) })
+
+def funMul (G U M f h : Set) : Set :=
+  { (c, Group.mul(M)(f(c), h(c))) | c ∈ cosetCarrier(G, U) }
+
+def funModuleCarrier (G U M : Set) : Set :=
+  functionSpace(cosetCarrier(G, U), Group.carrier(M))
+
+def funModuleMul (G U M : Set) : Set :=
+  { (p, funMul(G, U, M, fst(p), snd(p))) | p ∈ funModuleCarrier(G, U, M) × funModuleCarrier(G, U, M) }
+
+def funInv (G U M f : Set) : Set := { (c, Group.inv(M)(f(c))) | c ∈ cosetCarrier(G, U) }
+
+def funModuleInv (G U M : Set) : Set :=
+  { (f, funInv(G, U, M, f)) | f ∈ funModuleCarrier(G, U, M) }
+
+def funOne (G U M : Set) : Set := { (c, Group.one(M)) | c ∈ cosetCarrier(G, U) }
+
+def funModule (G U M : Set) : Set :=
+  Group.mk(funModuleCarrier(G, U, M), funModuleMul(G, U, M), funOne(G, U, M), funModuleInv(G, U, M))
+
+def funActValue (G U act g f : Set) : Set :=
+  { (c, act(g, f(cosetAct(G, U, Group.inv(G)(g), c)))) | c ∈ cosetCarrier(G, U) }
+
+def funModuleAction (G U M act : Set) : Set :=
+  { (p, funActValue(G, U, act, fst(p), snd(p))) | p ∈ Group.carrier(G) × funModuleCarrier(G, U, M) }
+
+-- The value at the trivial coset U, and Shapiro's maps: restrict to U,
+-- evaluate at U (shapiroZ1, shapiroH2).
+def atTrivialCoset (U f : Set) : Set := f(U)
+
+def shapiroCochain2 (U f : Set) : Set := { (q, f(q)(U)) | q ∈ U × U }
+
+def shapiroH2 (G X U M act : Set) : Set :=
+  { (h2Class(G, X, funModule(G, U, M), funModuleAction(G, U, M, act), f),
+      h2Class(subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act),
+        shapiroCochain2(U, f))) |
+    f ∈ Z2(G, X, funModule(G, U, M), funModuleAction(G, U, M, act)) }
+
+-- Section: Kummer theory
+-- The n-th roots of unity of Ω and the image ζ^k of k ∈ ℤ/n.
+def kummerRoots (W : Set, n : Nat) : Set := rootsOfUnity(W, n)
+
+-- A continuous homomorphism Γ → ℤ/n (a 1-cocycle for the trivial action
+-- on ℤ/n).
+def zmodTrivialAction (G : Set, n : Nat) : Set :=
+  { (p, snd(p)) | p ∈ Group.carrier(G) × Ring.carrier(zmod(n)) }
+
+def zmodChars (G X : Set, n : Nat) : Set :=
+  Z1(G, X, Ring.additive(zmod(n)), zmodTrivialAction(G, n))
+
+-- ℤ/n → ℚ/ℤ, k ↦ k/n, and the ℚ/ℤ-character ξ/n of ξ : Γ → ℤ/n.
+def zmodToQZ (n : Nat, k : Set) : Set := qzMk(rationalClass(zmodVal(n, k), 0, n))
+
+def zmodCharToQZ (G ξ : Set, n : Nat) : Set := { (g, zmodToQZ(n, ξ(g))) | g ∈ Group.carrier(G) }
+
+-- The Kummer 2-cocycle (g, h) ↦ (g a/a)^{ξ(h)}.
+def kummerCocycle (G ρ W a ξ : Set, n : Nat) : Set :=
+  { (q, Ring.pow(W, call2(Ring.mul(W), ρ(fst(q))(a), ringInverse(W, a)), zmodVal(n, ξ(snd(q))))) |
+    q ∈ Group.carrier(G) × Group.carrier(G) }
+
+-- Section: Norms
+-- The norm group N_{L/K}(U) of a subgroup U ⊆ Lˣ, its intersection
+-- with Kˣ, and the l-torsion and l-th powers of a group.
+def normImage (F U : Set) : Set := { algebraNorm(F, y) | y ∈ U }
+
+def torsionOf (Y : Set, l : Nat) : Set := { y ∈ Group.carrier(Y) | groupPow(Y, y, l) = Group.one(Y) }
+
+def powerQuotientCard (Y : Set, l : Nat) : Set :=
+  cardinality(leftCosets(Y, groupPowSet(Y, l)))
+
+-- The subgroup U ⊆ Lˣ as a group.
+def unitSubgroupGroup (L U : Set) : Set := subgroupGroup(unitGroup(L), U)
+
+-- The norms from the field L (a K-algebra F) to K, in Kˣ.
+def fieldNormGroup (F : Set) : Set := normImage(F, ringUnits(Algebra.ring(F)))
+
+-- The integers O/lO of a local field (A ∩ K modulo l).
+def congruentModNat (E A : Set, l : Nat) : Set :=
+  { p ∈ valRingBelow(E, A) × valRingBelow(E, A) | ∃ c ∈ valRingBelow(E, A),
+    Ring.sub(Algebra.base(E), fst(p), snd(p)) =
+      call2(Ring.mul(Algebra.base(E)), natCast(Algebra.base(E), l), c) }
+
+def localIntegersModCard (E A : Set, l : Nat) : Set :=
+  cardinality(valRingBelow(E, A) ⧸ congruentModNat(E, A, l))
+
+-- U ∩ Kˣ for U ⊆ Lˣ.
+def unitsBelow (F U : Set) : Set := { x ∈ ringUnits(Algebra.base(F)) | Algebra.map(F)(x) ∈ U }
+
+end Cohomology
+
+-- Section: Discrete modules
+section DiscreteModules
+variable (G X M act : Set)
+hypothesis module : DiscreteGModule(G, X, M, act)
+
+-- H⁰ is a subgroup; H² is an abelian group and resH2 a homomorphism.
+theorem H0.subgroup
+  shows Subgroup(H0(G, M, act), M)
+proof
+  sorry
+
+theorem resH2.hom (U : Set)
+  requires subgroup : Subgroup(U, G)
+  shows AbelianGroup(H2(G, X, M, act)) ∧
+    GroupHom(resH2(G, X, M, act, U), H2(G, X, M, act),
+      H2(subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act)))
+proof
+  sorry
+
+-- IsShortExact.card_eq_mul: #N = #M · #P.
+theorem IsShortExact.card (N P ι π : Set)
+  requires exact : IsShortExact(M, N, P, ι, π)
+  requires finite : Finite(Group.carrier(N))
+  requires homι : GroupHom(ι, M, N)
+  requires homπ : GroupHom(π, N, P)
+  shows order(N) = mul(order(M), order(P))
+proof
+  sorry
+
+-- cupProduct_flip: y ∪ x for the flipped pairing is −(x ∪ y).
+theorem cupProduct.flip (N actN W actW b x y : Set)
+  requires moduleN : DiscreteGModule(G, X, N, actN)
+  requires moduleW : DiscreteGModule(G, X, W, actW)
+  requires pairing : EquivariantPairing(G, M, act, N, actN, W, actW, b)
+  requires first : x ∈ Z1(G, X, M, act)
+  requires second : y ∈ Z1(G, X, N, actN)
+  shows cupProduct(G, X, W, actW, act, flipPairing(M, N, b), y, x) =
+    Group.inv(H2(G, X, W, actW))(cupProduct(G, X, W, actW, actN, b, x, y))
+proof
+  sorry
+
+-- shapiro_H0: every Γ-equivariant function Γ/U → M is gU ↦ g·y for a
+-- U-invariant y; shapiro_H1 and shapiroH2_injective.
+theorem shapiro.H0 (U F : Set)
+  requires open : OpenSubgroup(U, G, X)
+  requires invariant : F ∈ H0(funModule(G, U, M), funModuleAction(G, U, M, act), G)
+  shows ∃ y ∈ H0(subgroupGroup(G, U), M, restrictAction(U, M, act)),
+    ∀ g ∈ Group.carrier(G), F(leftCoset(G, g, U)) = act(g, y)
+proof
+  sorry
+
+theorem shapiro.H1 (U F m : Set)
+  requires open : OpenSubgroup(U, G, X)
+  requires cocycle : F ∈ Z1(G, X, funModule(G, U, M), funModuleAction(G, U, M, act))
+  requires element : m ∈ Group.carrier(M)
+  requires trivial : ∀ u ∈ U, F(u)(U) = Group.mul(M)(act(u, m), Group.inv(M)(m))
+  shows ∃ n ∈ funModuleCarrier(G, U, M), ∀ g ∈ Group.carrier(G),
+    F(g) = funMul(G, U, M, funModuleAction(G, U, M, act)(g, n), funInv(G, U, M, n))
+proof
+  sorry
+
+theorem shapiro.H2_injective (U : Set)
+  requires open : OpenSubgroup(U, G, X)
+  requires compact : Compact(X)
+  shows InjectiveBetween(shapiroH2(G, X, U, M, act),
+    Group.carrier(H2(G, X, funModule(G, U, M), funModuleAction(G, U, M, act))),
+    Group.carrier(H2(subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act))))
+proof
+  sorry
+
+-- index_smul_eq_zero_of_resH2: a class that dies on an open U is killed
+-- by [Γ : U].
+theorem resH2.index_kills (U x : Set)
+  requires open : OpenSubgroup(U, G, X)
+  requires compact : Compact(X)
+  requires class : x ∈ Group.carrier(H2(G, X, M, act))
+  requires dies : resH2(G, X, M, act, U)(x) =
+    Group.one(H2(subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act)))
+  shows groupPow(H2(G, X, M, act), x, index(G, U)) = Group.one(H2(G, X, M, act))
+proof
+  sorry
+
+-- resH2_cyclicClass_eq_zero: if w = r^k is invariant, (χ, w) dies on every
+-- subgroup U fixing r on which kχ vanishes.
+theorem resH2.cyclic_class_zero (U χ r : Set, k : Nat)
+  requires subgroup : Subgroup(U, G)
+  requires character : χ ∈ qzChars(G, X)
+  requires element : r ∈ Group.carrier(M)
+  requires invariant : groupPow(M, r, k) ∈ H0(G, M, act)
+  requires fixes : ∀ g ∈ U, act(g, r) = r ∧ groupPow(qzGroup, χ(g), k) = Group.one(qzGroup)
+  shows resH2(G, X, M, act, U)(cyclicClass(G, X, M, act, χ, groupPow(M, r, k))) =
+    Group.one(H2(subgroupGroup(G, U), subspace(X, U), M, restrictAction(U, M, act)))
+proof
+  sorry
+
+end DiscreteModules
+
+-- Section: Pairings
+section Pairings
+
+-- card_pairingAnnihilator_mul_card: for b : A × B → C ≅ ℚ/ℤ biadditive
+-- with A, B finite and L ≤ A, #L^⊥ · #L = #B · #(L ∩ left kernel).
+theorem pairingAnnihilator.card (A B C b L e : Set)
+  requires groups : AbelianGroup(A) ∧ AbelianGroup(B) ∧ AbelianGroup(C)
+  requires finite : Finite(Group.carrier(A)) ∧ Finite(Group.carrier(B))
+  requires iso : GroupIso(e, qzGroup, C)
+  requires pairing : Biadditive(A, B, C, b)
+  requires subgroup : Subgroup(L, A)
+  shows mul(cardinality(pairingAnnihilator(B, C, b, L)), cardinality(L)) =
+    mul(order(B), cardinality(pairingLeftKernel(A, B, C, b) ∩ L))
+proof
+  sorry
+
+-- QZChar.exists_ker_eq_of_isCyclic: an open normal U with Γ/U cyclic is
+-- the kernel of a character.
+theorem qzChars.of_cyclic_quotient (G X U : Set)
+  requires profinite : ProfiniteGroup(G, X)
+  requires open : OpenSubgroup(U, G, X)
+  requires normal : NormalSubgroup(U, G)
+  requires cyclic : ∃ c ∈ Group.carrier(G), ∀ g ∈ Group.carrier(G), ∃ n ∈ ℕ,
+    leftCoset(G, g, U) = leftCoset(G, groupPow(G, c, n), U)
+  shows ∃ χ ∈ qzChars(G, X), qzCharKernel(G, χ) = U
+proof
+  sorry
+
+end Pairings
+
+-- Section: Galois cohomology of Ωˣ
+section UnitsCohomology
+variable (G X ρ E : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+
+-- unitsModule: Ωˣ is a discrete Γ-module.
+theorem unitsAction.discrete_module
+  shows DiscreteGModule(G, X, omegaUnits(Algebra.ring(E)), unitsAction(G, ρ, Algebra.ring(E)))
+proof
+  sorry
+
+-- DiscreteUnits.exists_nsmul: Ωˣ is divisible when Ω is algebraically
+-- closed.
+theorem omegaUnits.divisible (x : Set, n : Nat)
+  requires closed : AlgebraicallyClosed(Algebra.ring(E))
+  requires unit : x ∈ ringUnits(Algebra.ring(E))
+  requires nonzero : n ≠ 0
+  shows ∃ y ∈ ringUnits(Algebra.ring(E)), Ring.pow(Algebra.ring(E), y, n) = x
+proof
+  sorry
+
+-- The Cartier dual of a finite discrete module is a discrete module.
+theorem cartierDual.discrete_module (M act : Set)
+  requires module : DiscreteGModule(G, X, M, act)
+  requires finite : Finite(Group.carrier(M))
+  shows DiscreteGModule(G, X, cartierDual(M, Algebra.ring(E)),
+    cartierDualAction(G, ρ, M, act, Algebra.ring(E))) ∧
+    EquivariantPairing(G, cartierDual(M, Algebra.ring(E)),
+      cartierDualAction(G, ρ, M, act, Algebra.ring(E)), M, act, omegaUnits(Algebra.ring(E)),
+      unitsAction(G, ρ, Algebra.ring(E)), evalPairing(M, Algebra.ring(E)))
+proof
+  sorry
+
+-- hilbert90_unitsRep: every continuous 1-cocycle Γ → Ωˣ is g ↦ g m/m.
+theorem hilbert_ninety (f : Set)
+  requires cocycle : f ∈ Z1(G, X, omegaUnits(Algebra.ring(E)), unitsAction(G, ρ, Algebra.ring(E)))
+  shows ∃ m ∈ ringUnits(Algebra.ring(E)), ∀ g ∈ Group.carrier(G),
+    f(g) = call2(Ring.mul(Algebra.ring(E)), ρ(g)(m), ringInverse(Algebra.ring(E), m))
+proof
+  sorry
+
+-- exists_kummer_cocycle: if Γ fixes the n-th roots of unity, ζ is a
+-- primitive one and x ∈ Ωˣ is invariant, there are a with aⁿ = x and a
+-- continuous ξ : Γ → ℤ/n with g b/b = ζ^{ξ(g)} for every b with bⁿ = x.
+theorem kummer_cocycle (ζ x : Set, n : Nat)
+  requires closed : AlgebraicallyClosed(Algebra.ring(E))
+  requires characteristic : CharP(Algebra.ring(E), 0)
+  requires positive : 0 < n
+  requires primitive : IsPrimitiveRoot(Algebra.ring(E), ζ, n)
+  requires roots : ∀ g ∈ Group.carrier(G), ρ(g)(ζ) = ζ
+  requires invariant : x ∈ invariantUnits(G, ρ, Algebra.ring(E))
+  shows ∃ a ∈ ringUnits(Algebra.ring(E)), ∃ ξ ∈ zmodChars(G, X, n),
+    Ring.pow(Algebra.ring(E), a, n) = x ∧
+    (∀ b ∈ ringUnits(Algebra.ring(E)), Ring.pow(Algebra.ring(E), b, n) = x →
+      (∀ g ∈ Group.carrier(G), call2(Ring.mul(Algebra.ring(E)), ρ(g)(b),
+        ringInverse(Algebra.ring(E), b)) = Ring.pow(Algebra.ring(E), ζ, zmodVal(n, ξ(g)))))
+proof
+  sorry
+
+-- kummer_cup_eq_neg_cyclicClass: for w invariant, aⁿ = w and ξ : Γ → ℤ/n,
+-- the class of (g, h) ↦ (g a/a)^{ξ(h)} is −(ξ/n, w).
+theorem kummer_cup (a w ξ : Set, n : Nat)
+  requires positive : 0 < n
+  requires invariant : w ∈ invariantUnits(G, ρ, Algebra.ring(E))
+  requires root : a ∈ ringUnits(Algebra.ring(E))
+  requires power : Ring.pow(Algebra.ring(E), a, n) = w
+  requires character : ξ ∈ zmodChars(G, X, n)
+  shows h2Class(G, X, omegaUnits(Algebra.ring(E)), unitsAction(G, ρ, Algebra.ring(E)),
+      kummerCocycle(G, ρ, Algebra.ring(E), a, ξ, n)) =
+    Group.inv(unitsH2(G, X, ρ, Algebra.ring(E)))(
+      unitsCyclicClass(G, X, ρ, Algebra.ring(E), zmodCharToQZ(G, ξ, n), w))
+proof
+  sorry
+
+-- QZChar.cyclicClass_spec: let χ have open kernel U and L the fixed field
+-- of U. A class of H²(Γ, Ωˣ) dies on U exactly when it is a symbol (χ, w)
+-- with w ∈ Kˣ; and (χ, w) = 0 exactly when w is a norm from L
+-- (cyclicClass_eq_zero_iff_norm).
+theorem qzChars.cyclic_class_spec (χ α : Set)
+  requires closed : AlgebraicallyClosed(Algebra.ring(E))
+  requires character : χ ∈ qzChars(G, X)
+  requires class : α ∈ Group.carrier(unitsH2(G, X, ρ, Algebra.ring(E)))
+  shows resH2(G, X, omegaUnits(Algebra.ring(E)), unitsAction(G, ρ, Algebra.ring(E)),
+      qzCharKernel(G, χ))(α) =
+      Group.one(H2(subgroupGroup(G, qzCharKernel(G, χ)), subspace(X, qzCharKernel(G, χ)),
+        omegaUnits(Algebra.ring(E)),
+        restrictAction(qzCharKernel(G, χ), omegaUnits(Algebra.ring(E)),
+          unitsAction(G, ρ, Algebra.ring(E))))) ↔
+    (∃ w ∈ ringUnits(Algebra.base(E)),
+      α = unitsCyclicClass(G, X, ρ, Algebra.ring(E), χ, Algebra.map(E)(w)))
+proof
+  sorry
+
+theorem qzChars.cyclic_class_zero_iff_norm (χ w : Set)
+  requires closed : AlgebraicallyClosed(Algebra.ring(E))
+  requires character : χ ∈ qzChars(G, X)
+  requires unit : w ∈ ringUnits(Algebra.base(E))
+  shows unitsCyclicClass(G, X, ρ, Algebra.ring(E), χ, Algebra.map(E)(w)) =
+      Group.one(unitsH2(G, X, ρ, Algebra.ring(E))) ↔
+    (∃ z ∈ ringUnits(Algebra.ring(E)), z ∈ fixedFieldOf(G, ρ, E, qzCharKernel(G, χ)) ∧
+      algebraNorm(subextension(E, fixedFieldOf(G, ρ, E, qzCharKernel(G, χ))), z) =
+        Algebra.map(E)(w))
+proof
+  sorry
+
+end UnitsCohomology
+
+-- Section: Norm indices
+section NormIndices
+
+-- tate_index_formula_norm: L/K Galois of prime degree l, U ⊆ Lˣ
+-- Galois-stable, V = U ∩ Kˣ, and g z/z ∈ U for all g only if z ∈ Kˣ U.
+-- With q_A = #(A/A^l)/#A[l] (finite, q_V ≠ 0):
+-- [V : N U]^{l−1} q_U = q_V^l, stated multiplied out.
+theorem tate_index_formula_norm (F U V : Set, l : Nat)
+  requires galois : GaloisExtension(F)
+  requires finite : FiniteExtension(F)
+  requires prime : Prime(l)
+  requires degree : extensionDegree(F) = l
+  requires subgroup : Subgroup(U, unitGroup(Algebra.ring(F)))
+  requires below : V = unitsBelow(F, U)
+  requires stable : ∀ σ ∈ algebraAutomorphisms(F), ∀ y ∈ U, σ(y) ∈ U
+  requires hilbert : ∀ z ∈ ringUnits(Algebra.ring(F)),
+    (∀ σ ∈ algebraAutomorphisms(F), call2(Ring.mul(Algebra.ring(F)), σ(z),
+      ringInverse(Algebra.ring(F), z)) ∈ U) →
+    (∃ x ∈ ringUnits(Algebra.base(F)), call2(Ring.mul(Algebra.ring(F)), Algebra.map(F)(x),
+      ringInverse(Algebra.ring(F), z)) ∈ U)
+  requires finiteV : Finite(torsionOf(unitSubgroupGroup(Algebra.base(F), V), l)) ∧
+    Finite(leftCosets(unitSubgroupGroup(Algebra.base(F), V),
+      groupPowSet(unitSubgroupGroup(Algebra.base(F), V), l)))
+  shows mul(pow(cardinality(leftCosets(unitSubgroupGroup(Algebra.base(F), V),
+        normImage(F, U))), l - 1),
+      mul(powerQuotientCard(unitSubgroupGroup(Algebra.ring(F), U), l),
+        pow(cardinality(torsionOf(unitSubgroupGroup(Algebra.base(F), V), l)), l))) =
+    mul(pow(powerQuotientCard(unitSubgroupGroup(Algebra.base(F), V), l), l),
+      cardinality(torsionOf(unitSubgroupGroup(Algebra.ring(F), U), l)))
+proof
+  sorry
+
+-- cokerKerIndex_local_units: for a local field L with integers O and
+-- l ≥ 1, #(Lˣ/Lˣˡ) = l · #(O/l) · #Lˣ[l], all finite.
+theorem local_units.power_index (G X ρ E A : Set, l : Nat)
+  requires local : IsLocalGalois(G, X, ρ, E, A)
+  requires positive : 0 < l
+  shows Finite(leftCosets(unitGroup(Algebra.base(E)), groupPowSet(unitGroup(Algebra.base(E)), l))) ∧
+    powerQuotientCard(unitGroup(Algebra.base(E)), l) =
+      mul(mul(l, localIntegersModCard(E, A, l)),
+        cardinality(torsionOf(unitGroup(Algebra.base(E)), l)))
+proof
+  sorry
+
+end NormIndices
