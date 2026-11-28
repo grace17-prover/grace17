@@ -389,7 +389,8 @@ graph TD
 | GRH.Proof.Forward.Jets | 0 | 0 | 0 |
 | GRH.Proof.Data.Different | 13 | 5 | 8 |
 | GRH.Proof.Data.AdmissibleData | 29 | 18 | 11 |
-| GRH.Proof.Endgame.OneSidedCriterion | 1 | 0 | 1 |
+| GRH.Proof.Endgame.CriterionTools | 2 | 0 | 2 |
+| GRH.Proof.Endgame.OneSidedCriterion | 1 | 1 | 0 |
 | GRH.Proof.Data.Magnitudes | 11 | 0 | 11 |
 | GRH.Proof.Seesaw.IndexTypes | 3 | 0 | 3 |
 | GRH.Proof.Forward.Automorphic | 6 | 6 | 0 |
@@ -402,5 +403,5 @@ graph TD
 | GRH.Scheme.Basic | 63 | 7 | 56 |
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
-| **total** | **8729** | **6638** | **2091** |
+| **total** | **8731** | **6639** | **2092** |
 <!-- /blueprint-status -->
