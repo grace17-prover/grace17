@@ -1,0 +1,160 @@
+-- Voronoi's congruence for power sums twisted by a Dirichlet character,
+-- the trivial zeros of Dirichlet L-functions at the negative integers, the
+-- integrality of N^n (n + 1)! B_n(X/N), and one nonzero integer of bounded
+-- size divisible by all the Stickelberger elements.
+-- Source: grh-compact/src/Lib/Cyclotomic/Voronoi/StickelbergerInteger.lean
+-- (smul_bernoulli_mem_lifts, IsStickelbergerBound,
+-- LFunction_neg_nat_eq_zero_iff, voronoi_congruence,
+-- exists_isStickelbergerBound).
+-- Not stated: Nat.ModEq.coprime_of_modEq_one (a ≡ 1 mod b gives
+-- gcd(a, b) = 1, elementary).
+-- Encoding. A Dirichlet character modulo N with values in a commutative
+-- ring O (Mathlib's DirichletCharacter O N, a multiplicative character of
+-- ℤ/N) is read, as layer 1 reads the complex ones (GRH.DirichletCharacter),
+-- on the integers: an N-periodic multiplicative function ℤ → O with
+-- ψ(1) = 1 vanishing off the integers prime to N. The complex characters
+-- are layer 1's. The floor ⌊a/b⌋ of naturals is csLGNatDiv. The source's
+-- Polynomial.bernoulli n is layer 1's bernoulliPolynomial n, a function on
+-- ℝ; membership of N^n (n + 1)! B_n(X/N) in ℤ[X] is the existence of
+-- integer coefficients giving its values. The quantifier over all
+-- commutative domains O of characteristic zero in a universe-0 type is a
+-- quantifier over all sets O with those properties.
+-- Part of the GRH blueprint (layer 4, Lib/Cyclotomic, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Cyclotomic.Voronoi
+import GRH.Characters.Mul
+import GRH.Bernoulli
+
+section Voronoi
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- ⌊a/b⌋ for naturals a and b ≥ 1.
+def csLGNatDiv (a b : Set) : Set :=
+  ⋃({ q ∈ ℕ | mul(q, b) ≤ (a:N) ∧ (a:N) < mul(succ(q), b) })
+
+-- An integer read in a ring.
+def intIn (O a : Set) : Set := intCastHom(O)(a)
+
+-- A natural read in a ring.
+def natIn (O n : Set) : Set := intCastHom(O)(integerOfNat(n))
+
+-- Mathlib's DirichletCharacter O N, read on ℤ.
+predicate RingDirichletCharacter (O N ψ : Set) :=
+  CommRing(O) ∧ FunctionBetween(ψ, ℤ, Ring.carrier(O)) ∧
+  (∀ a ∈ ℤ, ψ(integerAddValue(a, integerOfNat(N))) = ψ(a)) ∧
+  ψ(integerOne) = Ring.one(O) ∧
+  (∀ a ∈ ℤ, ∀ b ∈ ℤ, ψ(integerMulValue(a, b)) = call2(Ring.mul(O), ψ(a), ψ(b))) ∧
+  (∀ a ∈ ℤ, ¬IntegerCoprime(a, integerOfNat(N)) → ψ(a) = Ring.zero(O))
+
+-- A commutative domain of characteristic zero.
+predicate CharZeroDomain (O : Set) :=
+  IntegralDomain(O) ∧ ∀ n ∈ ℕ, n ≠ (0:N) → natIn(O, n) ≠ Ring.zero(O)
+
+-- Sums Σ_{a < M} w(a) in O.
+def ringSumBelow (O M w : Set) : Set :=
+  finiteRingSum(M, Ring.carrier(O), Ring.add(O), Ring.zero(O), Ring.neg(O), Ring.mul(O),
+    Ring.one(O), w)
+
+-- The Stickelberger sum Σ_{a < Nm} ⌊ca/(Nm)⌋ a^e ψ(a).
+def stickelbergerTerms (O N e ψ m c : Set) : Set :=
+  { (a, call2(Ring.mul(O), natIn(O, csLGNatDiv(mul(c, a), mul(N, m))),
+      call2(Ring.mul(O), Ring.pow(O, natIn(O, a), e), ψ(integerOfNat(a))))) | a ∈ mul(N, m) }
+
+def stickelbergerSum (O N e ψ m c : Set) : Set :=
+  ringSumBelow(O, mul(N, m), stickelbergerTerms(O, N, e, ψ, m, c))
+
+-- (−1)^e ψ(−1) = −1: ψ(−1) = −(−1)^e.
+predicate OddTwist (O e ψ : Set) :=
+  ψ(integerNegValue(integerOne)) = Ring.neg(O)(Ring.pow(O, Ring.neg(O)(Ring.one(O)), e))
+
+-- IsStickelbergerBound N e X: every prime l has some c ≡ 1 mod N, l ∤ c,
+-- with (c^e − 1)(c^(e+1) − 1) ∣ X; and for c ≡ 1 mod N and ψ modulo N into
+-- a domain O of characteristic zero with ψ(−1) = −(−1)^e, one w in O has
+-- (c^(e+1) − 1) X ≡ 2w Σ_{a<Nm} ⌊ca/(Nm)⌋ a^e ψ(a) mod m for every m ≥ 1
+-- prime to c.
+predicate IsStickelbergerBound (N e X : Set) :=
+  (∀ l ∈ ℕ, Prime(l) → ∃ c ∈ ℕ, c % N = 1 % N ∧ IntegerCoprime(integerOfNat(l), integerOfNat(c)) ∧
+    mul(sub(pow(c, e), 1), sub(pow(c, succ(e)), 1)) ∣ X) ∧
+  (∀ c ∈ ℕ, c % N = 1 % N → ∀ O, CharZeroDomain(O) → ∀ ψ, RingDirichletCharacter(O, N, ψ) →
+    OddTwist(O, e, ψ) → ∃ w ∈ Ring.carrier(O), ∀ m ∈ ℕ, m ≠ (0:N) → IntegerCoprime(integerOfNat(m), integerOfNat(c)) →
+      RingDvd(O, natIn(O, m), Ring.sub(O,
+        call2(Ring.mul(O), natIn(O, sub(pow(c, succ(e)), 1)), natIn(O, X)),
+        call2(Ring.mul(O), call2(Ring.mul(O), natIn(O, 2), w), stickelbergerSum(O, N, e, ψ, m, c)))))
+
+-- Section: Bernoulli polynomials
+-- smul_bernoulli_mem_lifts: N^n (n + 1)! B_n(X/N) has integer
+-- coefficients.
+def integerPolyTerms (n c x : Set) : Set :=
+  { (k, R[realInt(c(k)) * realPow(x, k)]) | k ∈ succ(n) }
+
+theorem bernoulliPolynomial.integral_scaled (n N : Set)
+  requires hn : n ∈ ℕ
+  requires hN : N ∈ ℕ
+  requires positive : N ≠ (0:N)
+  shows ∃ c ∈ functionSpace(succ(n), ℤ), ∀ x ∈ ℝ,
+    R[realNat(factorial(succ(n))) * realNat(pow(N, n)) * bernoulliPolynomial(n, R[x / realNat(N)])] =
+      realPartialSum(integerPolyTerms(n, c, x), succ(n))
+proof
+  sorry
+
+-- Section: Trivial zeros
+-- LFunction_neg_nat_eq_zero_iff: for χ modulo N ≥ 1, not necessarily
+-- primitive, and e ≥ 1, L(−e, χ) = 0 exactly when χ(−1) = (−1)^e.
+theorem LFunction.neg_nat_zero_iff (N : Nat, χ e : Set)
+  requires positive : 0 < N
+  requires character : DirichletCharacter(N, χ)
+  requires he : e ∈ ℕ
+  requires nonzero : e ≠ (0:N)
+  shows LFunction(N, χ, complexOfReal(R[-realNat(e)])) = complexZero ↔
+    χ(integerNegValue(integerOne)) = Ring.pow(complexRing, ℂ[-complexOne], e)
+proof
+  sorry
+
+-- Section: Voronoi's congruence
+-- voronoi_congruence: for f = Nm, c ≡ 1 mod N prime to m,
+-- f² ∣ (c^(e+1) − 1) Σ_{t<f} χ(t) t^(e+1) − (e + 1) c^e f Σ_{t<f} ⌊ct/f⌋ χ(t) t^e.
+def powerSumTerms (O χ f e : Set) : Set :=
+  { (t, call2(Ring.mul(O), χ(integerOfNat(t)), Ring.pow(O, natIn(O, t), succ(e)))) | t ∈ f }
+
+def floorSumTerms (O χ f e c : Set) : Set :=
+  { (t, call2(Ring.mul(O), natIn(O, csLGNatDiv(mul(c, t), f)),
+      call2(Ring.mul(O), χ(integerOfNat(t)), Ring.pow(O, natIn(O, t), e)))) | t ∈ f }
+
+theorem voronoi_congruence (O N e χ f m c : Set)
+  requires ring : CommRing(O)
+  requires hN : N ∈ ℕ
+  requires positiveN : N ≠ (0:N)
+  requires character : RingDirichletCharacter(O, N, χ)
+  requires he : e ∈ ℕ
+  requires hm : m ∈ ℕ
+  requires hc : c ∈ ℕ
+  requires level : f = mul(N, m)
+  requires positiveF : f ≠ (0:N)
+  requires coprime : IntegerCoprime(integerOfNat(m), integerOfNat(c))
+  requires congruent : c % N = 1 % N
+  shows RingDvd(O, Ring.pow(O, natIn(O, f), 2), Ring.sub(O,
+    call2(Ring.mul(O), natIn(O, sub(pow(c, succ(e)), 1)), ringSumBelow(O, f, powerSumTerms(O, χ, f, e))),
+    call2(Ring.mul(O), natIn(O, mul(mul(succ(e), pow(c, e)), f)),
+      ringSumBelow(O, f, floorSumTerms(O, χ, f, e, c)))))
+proof
+  sorry
+
+-- exists_isStickelbergerBound: for N, e ≥ 1 some integer
+-- 1 ≤ X ≤ 2^((N+e+3)^6) satisfies IsStickelbergerBound N e X.
+theorem exists_isStickelbergerBound (N e : Set)
+  requires hN : N ∈ ℕ
+  requires positiveN : N ≠ (0:N)
+  requires he : e ∈ ℕ
+  requires positiveE : e ≠ (0:N)
+  shows ∃ X ∈ ℕ, X ≠ (0:N) ∧ (X:N) ≤ pow(2, pow(add(add(N, e), 3), 6)) ∧
+    IsStickelbergerBound(N, e, X)
+proof
+  sorry
+
+end Voronoi
