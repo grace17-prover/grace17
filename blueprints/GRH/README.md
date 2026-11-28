@@ -408,12 +408,27 @@ graph TD
 | GRH.Category.Abelian | 45 | 1 | 44 |
 | GRH.Category.Ext | 39 | 1 | 38 |
 | GRH.Characters.Mul | 36 | 0 | 36 |
-| GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
-| GRH.Fourier.Euclidean | 26 | 0 | 26 |
-| GRH.Fourier.Torus | 21 | 0 | 21 |
+| GRH.ClassField.Ideles | 40 | 0 | 40 |
 | GRH.GLn.Tableaux | 0 | 0 | 0 |
 | GRH.GLn.SchurModule | 21 | 0 | 21 |
 | GRH.GLn.WeightRep | 6 | 0 | 6 |
+| GRH.Proof.Forward.Characters | 0 | 0 | 0 |
+| GRH.ClassField.HeckeL | 24 | 0 | 24 |
+| GRH.ClassField.AlgebraicHecke | 2 | 0 | 2 |
+| GRH.ClassField.Galois | 53 | 1 | 52 |
+| GRH.ClassField.LocalArtin | 18 | 0 | 18 |
+| GRH.ClassField.HeckeCharacter | 26 | 0 | 26 |
+| GRH.Weil.Projections | 7 | 0 | 7 |
+| GRH.ClassField.SplittingChar | 22 | 0 | 22 |
+| GRH.ClassField.Global | 31 | 0 | 31 |
+| GRH.ClassField.Cohomology | 21 | 0 | 21 |
+| GRH.ClassField.Chebotarev | 19 | 0 | 19 |
+| GRH.ClassField.LocalDuality | 16 | 0 | 16 |
+| GRH.ClassField.Places | 25 | 0 | 25 |
+| GRH.ClassField.TameCharacters | 6 | 0 | 6 |
+| GRH.Fourier.FiniteAbelian | 30 | 6 | 24 |
+| GRH.Fourier.Euclidean | 26 | 0 | 26 |
+| GRH.Fourier.Torus | 21 | 0 | 21 |
 | GRH.GLn.Branching | 7 | 0 | 7 |
 | GRH.GLn.Dual | 3 | 0 | 3 |
 | GRH.Padic.Witt | 40 | 3 | 37 |
@@ -425,7 +440,6 @@ graph TD
 | GRH.Proof.Curve.ConjugateGenerator | 3 | 0 | 3 |
 | GRH.Proof.Data.AdmissibleData | 30 | 19 | 11 |
 | GRH.Proof.Data.Magnitudes | 11 | 0 | 11 |
-| GRH.Proof.Forward.Characters | 0 | 0 | 0 |
 | GRH.Proof.Seesaw.IndexTypes | 29 | 21 | 8 |
 | GRH.Proof.Curve.LiveSum | 1 | 0 | 1 |
 | GRH.Proof.Seesaw.GradingsOfY | 0 | 0 | 0 |
@@ -465,6 +479,5 @@ graph TD
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
-| GRH.Weil.Projections | 7 | 0 | 7 |
-| **total** | **9876** | **7596** | **2280** |
+| **total** | **10179** | **7597** | **2582** |
 <!-- /blueprint-status -->
