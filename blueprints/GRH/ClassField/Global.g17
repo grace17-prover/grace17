@@ -1,0 +1,575 @@
+-- Global class field theory over a number field K with Γ acting on Ω/K:
+-- efg = n, B. H. Neumann's covering lemma, prime densities of ray
+-- characters and the second inequality; splitting of places in a
+-- subfield fixed by a decomposition group; the local symbols χ ∘ Art_v
+-- on decomposition and inertia groups, their value on Kˣ when χ is
+-- unramified; the global Artin map (continuity, local ideles, norm
+-- compatibility, local norms in its kernel); Albert–Brauer–Hasse–Noether;
+-- Artin reciprocity on principal ideles (cyclotomic case, the general
+-- law, the sign law); surjectivity of the Artin map, cyclic extensions
+-- and their characters, Hasse's norm theorem, the norm index; the class
+-- field theory of a CM extension.
+-- Source: grh-compact/src/Lib/ClassField/Global/AlbertBrauerHasseNoether.lean
+-- (FinPlace.ncard_above_mul_ef_eq_finrank, exists_mul_prod_eq_one,
+-- exists_hasPrimeDensity_ray_char, second_inequality,
+-- IsPlaceOver.ncard_above_mul_relIndex, IsPlaceOver.split_completely,
+-- IsPlaceOver.range_abelianLift_artinAt,
+-- IsPlaceOver.artinAt_trivial_iff_decompGroup_le,
+-- IsPlaceOver.artinAt_units_trivial_iff_unramified,
+-- IsPlaceOver.abelianLift_artinAt_of_unramified,
+-- QZChar.eventually_artinAt_eq_one, continuous_artinMap,
+-- artinMap_locIdele, artinMap_adeleNorm, adeleNorm_mem_closure,
+-- abelianLift_artinAt_of_mem_closure,
+-- exists_localNorm_of_abelianLift_artinAt, albert_brauer_hasse_noether),
+-- Global/ArtinReciprocity.lean (artin_reciprocity_cyclotomic,
+-- artin_reciprocity, char_artinMap_principalIdele_eq_one,
+-- artinMap_principalIdele, char_artinMap_principalIdele_eq_one_iff),
+-- Global/NormTheorems.lean (artinMap_surjective, exists_char_of_isCyclic,
+-- hasse_norm, index_ker_char_artinMap, char_artinMap_eq_one_iff),
+-- Global/CMNorms.lean (finAdeleIncl_adeleNorm_eq_mul_star,
+-- bijective_cmType_restrict, exists_eq_principalIdele_mul_norm).
+-- Encoding. Γ acting on Ω/K is (G, X, ρ, E) as in GRH.ClassField.Galois;
+-- the global Artin map and the local symbols are the stand-ins
+-- csCFArtinMap and csCFArtinAt of GRH.ClassField.LocalArtin. A number
+-- field L with K ⊆ L ⊆ Ω (the source's EmbeddedNumberField L with
+-- IsScalarTower K L Ω) is an intermediate field F of Ω/K, read as the
+-- field intermediateRing(E, F) with K → L the structure map of E; "U acts
+-- as Gal(Ω/L)" is IsProGalois of U over F. The source's chosen
+-- uniformisers are a UniformizerFamily ϖ. A character of the quotient of
+-- the finite ideles by W is a multiplicative ℂ-valued character trivial
+-- on W. In the CM statement the infinite places of L are indexed by a CM
+-- type Φ, signs are ±1 on Φ with an even number of −1, and positivity of
+-- a complex number is "real and positive". relIndex_mul_index_sup (a
+-- lemma on indices in abelian groups) is not stated.
+-- Part of the GRH blueprint (layer 4, Lib/ClassField, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.ClassField.Global
+import GRH.ClassField.LocalArtin
+import GRH.ClassField.SplittingChar
+
+section GlobalDefs
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+
+-- The finite places of L above the place v of K (FinPlace.below).
+def finPlacesAbove (K L f v : Set) : Set := { u ∈ finPlaces(L) | placeBelow(K, L, f, u) = v }
+
+-- An intermediate field F of Ω/K as a field.
+def intermediateRing (E F : Set) : Set := subringRing(Algebra.ring(E), F)
+
+-- A multiplicative character G → ℂ of a group (a monoid hom to ℂ).
+predicate ComplexMulChar (G ψ : Set) :=
+  Group(G) ∧ FunctionBetween(ψ, Group.carrier(G), complexCarrier) ∧
+  ψ(Group.one(G)) = complexOne ∧
+  (∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G), ψ(Group.mul(G)(x, y)) = ℂ[ψ(x) * ψ(y)])
+
+def charFamilyAt (c T x : Set) : Set := { (i, c(i)(x)) | i ∈ T }
+
+-- The family v ↦ f(ϖ_v) of a character f of the finite ideles.
+def rayCharFamily (K f ϖ : Set) : Set := { (v, f(locIdele(K, v, ϖ(v)))) | v ∈ finPlaces(K) }
+
+-- The places v of prime norm with ϖ_v / a ∈ W.
+def rayCosetPlaces (K ϖ W a : Set) : Set :=
+  { v ∈ primeNormPlaces(K) | finMul(K, locIdele(K, v, ϖ(v)), finInv(K, a)) ∈ W }
+
+-- The values χ(Art_v x), x ∈ K_vˣ, and χ(g), g ∈ D_A.
+def artinCharValues (G X ρ E χ v : Set) : Set :=
+  { abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v, x)) | x ∈ locUnits(Algebra.base(E), v) }
+
+def charImage (χ D : Set) : Set := { χ(g) | g ∈ D }
+
+-- The closure in K_v of the norms from L: {ι_v(N_{L/K} z) | z ∈ L}.
+def localNormValues (K L f v : Set) : Set :=
+  { adicCompletionEmbedding(K, v)(algebraNorm(Algebra.mk(K, L, f), z)) | z ∈ Ring.carrier(L) }
+
+def localNormClosure (K L f v : Set) : Set :=
+  closure(adicCompletionSpace(K, v), localNormValues(K, L, f, v))
+
+-- The kernel of cycCharMod q and of a ↦ χ(Art a).
+def cycCharModKernel (G ρ W : Set, q : Nat) : Set :=
+  { g ∈ Group.carrier(G) | cycCharMod(G, ρ, W, q)(g) = Ring.one(zmod(q)) }
+
+def artinCharKernel (G X ρ E χ : Set) : Set :=
+  { a ∈ finIdeleUnits(Algebra.base(E)) |
+    abelianLift(G, X, χ, csCFArtinMap(G, X, ρ, E)(a)) = Group.one(qzGroup) }
+
+-- The image of the Artin map.
+def artinMapImage (G X ρ E : Set) : Set :=
+  functionImage(csCFArtinMap(G, X, ρ, E), finIdeleUnits(Algebra.base(E)),
+    Group.carrier(topAbelianization(G, X)))
+
+-- Σ ∘ restriction Φ → Hom(K⁺, ℂ) of a CM type.
+def cmTypeRestrict (L Φ : Set) : Set := { (σ, restrict(σ, maximalRealSubfield(L))) | σ ∈ Φ }
+
+-- The embeddings σ ∈ Φ with sign −1 under s, and the values σ(a), σ ∈ Φ.
+def negativeSigns (Φ s : Set) : Set := { σ ∈ Φ | s(σ) = integerNegValue(integerOne) }
+
+def phiValuesOf (Φ a : Set) : Set := { (σ, σ(a)) | σ ∈ Φ }
+
+end GlobalDefs
+
+-- Section: Places in extensions and prime densities
+section Density
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (K L f : Set)
+hypothesis numberK : NumberField(K)
+hypothesis numberL : NumberField(L)
+hypothesis hom : RingHom(f, K, L)
+
+-- FinPlace.ncard_above_mul_ef_eq_finrank: for L/K Galois and w a place
+-- of L over v, #{u over v} · e(w) f(w) = [L : K].
+theorem finPlacesAbove.card_mul_ef (w : Set)
+  requires galois : GaloisExtension(Algebra.mk(K, L, f))
+  requires place : w ∈ finPlaces(L)
+  shows (cardinality(finPlacesAbove(K, L, f, placeBelow(K, L, f, w))):N) *
+      ((ramificationIndex(ringOfIntegersMap(f, K), ringOfIntegersRing(L),
+          placeBelow(K, L, f, w), w):N) *
+        (inertiaDegree(ringOfIntegersMap(f, K), ringOfIntegersRing(K), ringOfIntegersRing(L),
+          placeBelow(K, L, f, w), w):N)) =
+    (extensionDegree(Algebra.mk(K, L, f)):N)
+proof
+  sorry
+
+-- second_inequality: for L/K Galois and an open subgroup W of the finite
+-- ideles of K containing the totally positive principal ideles and the
+-- norms from L, [(𝔸f K)ˣ : W] ≤ [L : K], and every coset contains ϖ_v for
+-- infinitely many v of prime norm.
+theorem second_inequality (W ϖ : Set)
+  requires galois : GaloisExtension(Algebra.mk(K, L, f))
+  requires open : OpenIdeleSubgroup(K, W)
+  requires positive : totallyPositiveIdeles(K) ⊆ W
+  requires norms : ∀ y ∈ finIdeleUnits(L), adeleNorm(K, L, f, y) ∈ W
+  requires uniformisers : UniformizerFamily(K, ϖ)
+  shows Finite(leftCosets(finIdeleGroup(K), W)) ∧
+    (index(finIdeleGroup(K), W):N) ≤ (extensionDegree(Algebra.mk(K, L, f)):N) ∧
+    (∀ a ∈ finIdeleUnits(K), Infinite(rayCosetPlaces(K, ϖ, W, a)))
+proof
+  sorry
+
+-- adeleNorm_mem_closure: each component of the norm of a finite adele is
+-- a limit of norms from L.
+theorem adeleNorm.mem_closure (y v : Set)
+  requires adele : y ∈ finAdeles(L)
+  requires place : v ∈ finPlaces(K)
+  shows adeleNorm(K, L, f, y)(v) ∈ localNormClosure(K, L, f, v)
+proof
+  sorry
+
+end Density
+
+section RayCharacters
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (K : Set)
+hypothesis numberK : NumberField(K)
+
+-- exists_mul_prod_eq_one (B. H. Neumann): if ψ(x) = 1 whenever no c_i(x)
+-- is −1, then ψ ∏_{i∈T} c_i = 1 for some T.
+theorem exists_mul_prod_eq_one (G ψ c ι : Set)
+  requires finite : Finite(ι)
+  requires character : ComplexMulChar(G, ψ)
+  requires characters : ∀ i ∈ ι, ComplexMulChar(G, c(i))
+  requires covering : ∀ x ∈ Group.carrier(G),
+    (∀ i ∈ ι, c(i)(x) ≠ complexNeg(complexOne)) → ψ(x) = complexOne
+  shows ∃ T ∈ 𝒫(ι), ∀ x ∈ Group.carrier(G),
+    ℂ[ψ(x) * charProduct(T, charFamilyAt(c, T, x))] = complexOne
+proof
+  sorry
+
+-- exists_hasPrimeDensity_ray_char: for W open containing the totally
+-- positive principal ideles and f a character trivial on W, v ↦ f(ϖ_v) has
+-- prime density 1 − m (f trivial) or −m (otherwise), some m ∈ ℕ.
+theorem exists_hasPrimeDensity_ray_char (W f ϖ : Set)
+  requires open : OpenIdeleSubgroup(K, W)
+  requires positive : totallyPositiveIdeles(K) ⊆ W
+  requires character : ComplexMulChar(finIdeleGroup(K), f)
+  requires trivialOn : ∀ a ∈ W, f(a) = complexOne
+  requires uniformisers : UniformizerFamily(K, ϖ)
+  shows ∃ m ∈ ℕ,
+    ((∀ a ∈ finIdeleUnits(K), f(a) = complexOne) →
+      HasPrimeDensity(K, rayCharFamily(K, f, ϖ), ℂ[complexOne - complexOfReal(realNat(m))])) ∧
+    (¬(∀ a ∈ finIdeleUnits(K), f(a) = complexOne) →
+      HasPrimeDensity(K, rayCharFamily(K, f, ϖ), ℂ[complexZero - complexOfReal(realNat(m))]))
+proof
+  sorry
+
+end RayCharacters
+
+-- Section: Decomposition groups and the local symbols
+section Decomposition
+variable (G X ρ E v A : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis place : v ∈ finPlaces(Algebra.base(E))
+hypothesis over : IsPlaceOver(E, A, v)
+
+-- IsPlaceOver.ncard_above_mul_relIndex: for L ⊆ Ω finite Galois over K
+-- with Gal(Ω/L) = U, #{u over v} · [D_A : D_A ∩ U] = [L : K].
+theorem IsPlaceOver.card_above_mul_relIndex (F U : Set)
+  requires intermediate : IntermediateField(E, F)
+  requires galoisL : GaloisExtension(subextension(E, F))
+  requires finite : FiniteExtension(subextension(E, F))
+  requires open : OpenSubgroup(U, G, X)
+  requires galoisU : IsProGalois(subgroupGroup(G, U), subspace(X, U), restrict(ρ, U),
+    overExtension(E, F))
+  shows (cardinality(finPlacesAbove(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), v)):N) *
+      (index(decompSubgroup(G, ρ, Algebra.ring(E), A), U ∩ decompGroup(G, ρ, Algebra.ring(E), A)):N) =
+    (extensionDegree(subextension(E, F)):N)
+proof
+  sorry
+
+-- IsPlaceOver.split_completely: if Gal(Ω/L) contains D_A, every place u
+-- of L over v has the norm of v and is moved by every σ ≠ 1 in Gal(L/K).
+theorem IsPlaceOver.split_completely (F U u : Set)
+  requires intermediate : IntermediateField(E, F)
+  requires galoisL : GaloisExtension(subextension(E, F))
+  requires finite : FiniteExtension(subextension(E, F))
+  requires open : OpenSubgroup(U, G, X)
+  requires galoisU : IsProGalois(subgroupGroup(G, U), subspace(X, U), restrict(ρ, U),
+    overExtension(E, F))
+  requires decomposition : decompGroup(G, ρ, Algebra.ring(E), A) ⊆ U
+  requires above : u ∈ finPlacesAbove(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), v)
+  shows placeNorm(intermediateRing(E, F), u) = placeNorm(Algebra.base(E), v) ∧
+    (∀ σ ∈ algebraAutomorphisms(subextension(E, F)), σ ≠ identity(F) →
+      placeBelow(intermediateRing(E, F), intermediateRing(E, F), σ, u) ≠ u)
+proof
+  sorry
+
+-- IsPlaceOver.range_abelianLift_artinAt: χ(Art_v(K_vˣ)) = χ(D_A); and
+-- the trivial and unramified cases
+-- (artinAt_trivial_iff_decompGroup_le,
+-- artinAt_units_trivial_iff_unramified).
+theorem IsPlaceOver.range_abelianLift_artinAt (χ : Set)
+  requires character : χ ∈ qzChars(G, X)
+  shows artinCharValues(G, X, ρ, E, χ, v) = charImage(χ, decompGroup(G, ρ, Algebra.ring(E), A))
+proof
+  sorry
+
+theorem IsPlaceOver.artinAt_trivial_iff (χ : Set)
+  requires character : χ ∈ qzChars(G, X)
+  shows (∀ x ∈ locUnits(Algebra.base(E), v),
+      abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v, x)) = Group.one(qzGroup)) ↔
+    decompGroup(G, ρ, Algebra.ring(E), A) ⊆ qzCharKernel(G, χ)
+proof
+  sorry
+
+theorem IsPlaceOver.artinAt_units_trivial_iff (χ : Set)
+  requires character : χ ∈ qzChars(G, X)
+  shows (∀ x ∈ locUnits(Algebra.base(E), v), x ∈ completionUnitsIn(Algebra.base(E), v) →
+      abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v, x)) = Group.one(qzGroup)) ↔
+    inertiaGroup(G, ρ, Algebra.ring(E), A) ⊆ qzCharKernel(G, χ)
+proof
+  sorry
+
+-- IsPlaceOver.abelianLift_artinAt_of_unramified: for χ unramified at A
+-- and φ an arithmetic Frobenius, χ(Art_v x) = −ord_v(x) χ(φ) on Kˣ.
+theorem IsPlaceOver.abelianLift_artinAt_of_unramified (χ φ x : Set)
+  requires character : χ ∈ qzChars(G, X)
+  requires unramified : inertiaGroup(G, ρ, Algebra.ring(E), A) ⊆ qzCharKernel(G, χ)
+  requires frobenius : IsFrob(G, ρ, Algebra.ring(E), A, placeNorm(Algebra.base(E), v), φ)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  shows abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v,
+      ideleAt(Algebra.base(E), v, principalIdele(Algebra.base(E), x)))) =
+    groupZpow(qzGroup, χ(φ), integerNegValue(completionOrder(Algebra.base(E), v,
+      adicCompletionEmbedding(Algebra.base(E), v)(x))))
+proof
+  sorry
+
+end Decomposition
+
+-- Section: The global Artin map
+section ArtinMap
+variable (G X ρ E : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+
+-- QZChar.eventually_artinAt_eq_one: near 1, a finite idele is a unit
+-- idele with χ(Art_v a_v) = 0 at every v.
+theorem qzChars.eventually_artinAt_trivial (χ : Set)
+  requires character : χ ∈ qzChars(G, X)
+  shows ∃ U ∈ finIdeleOpens(Algebra.base(E)), finOne(Algebra.base(E)) ∈ U ∧
+    (∀ a ∈ U, a ∈ idelesUnitOff(Algebra.base(E), ∅) ∧
+      (∀ v ∈ finPlaces(Algebra.base(E)),
+        abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v, ideleAt(Algebra.base(E), v, a))) =
+          Group.one(qzGroup)))
+proof
+  sorry
+
+-- continuous_artinMap, artinMap_locIdele.
+theorem csCFArtinMap.continuous
+  shows csCFArtinMap(G, X, ρ, E) : finIdeleSpace(Algebra.base(E)) ⇒ abelianizationSpace(G, X)
+proof
+  sorry
+
+theorem csCFArtinMap.locIdele (v x : Set)
+  requires place : v ∈ finPlaces(Algebra.base(E))
+  requires unit : x ∈ locUnits(Algebra.base(E), v)
+  shows csCFArtinMap(G, X, ρ, E)(locIdele(Algebra.base(E), v, x)) = csCFArtinAt(G, X, ρ, E, v, x)
+proof
+  sorry
+
+-- artinMap_adeleNorm: for K → L (P), Γ′ = (H, Y, σ2, F) acting on Ω/L and
+-- j : Ω → Ω with j ∘ ι_K = ι_L ∘ P, if Art_L y is the class of g′ and
+-- j g = g′ j, then Art_K of the norm of y is the class of g.
+theorem csCFArtinMap.adeleNorm (H Y σ2 F P j y g g2 : Set)
+  requires galois2 : IsProGalois(H, Y, σ2, F)
+  requires numberField2 : NumberField(Algebra.base(F))
+  requires sameClosure : Algebra.ring(F) = Algebra.ring(E)
+  requires base : RingHom(P, Algebra.base(E), Algebra.base(F))
+  requires embedding : RingHom(j, Algebra.ring(E), Algebra.ring(E))
+  requires tower : ∀ x ∈ Ring.carrier(Algebra.base(E)), j(Algebra.map(E)(x)) = Algebra.map(F)(P(x))
+  requires idele : y ∈ finIdeleUnits(Algebra.base(F))
+  requires member : g ∈ Group.carrier(G)
+  requires member2 : g2 ∈ Group.carrier(H)
+  requires symbol : csCFArtinMap(H, Y, σ2, F)(y) = abelianClass(H, Y, g2)
+  requires compatible : ∀ z ∈ algebraCarrier(E), j(ρ(g)(z)) = σ2(g2)(j(z))
+  shows csCFArtinMap(G, X, ρ, E)(adeleNorm(Algebra.base(E), Algebra.base(F), P, y)) =
+    abelianClass(G, X, g)
+proof
+  sorry
+
+-- artinMap_surjective (NormTheorems.lean): for Γ = Gal(Ω/K) the Artin
+-- map is onto Γ^ab.
+theorem csCFArtinMap.surjective
+  shows artinMapImage(galoisGroup(E), krullTopology(E), identity(algebraAutomorphisms(E)), E) =
+    Group.carrier(topAbelianization(galoisGroup(E), krullTopology(E)))
+proof
+  sorry
+
+-- albert_brauer_hasse_noether: a class α ∈ H²(Γ, Ωˣ) vanishing on every
+-- decomposition group at a finite place and on an open subgroup
+-- containing all complex conjugations is zero.
+theorem albert_brauer_hasse_noether (α U : Set)
+  requires class : α ∈ Group.carrier(unitsH2(G, X, ρ, Algebra.ring(E)))
+  requires local : ∀ A ∈ closurePlaces(Algebra.ring(E)), ∀ v ∈ finPlaces(Algebra.base(E)),
+    IsPlaceOver(E, A, v) →
+      csCFUnitsResH2(G, X, ρ, Algebra.ring(E), decompGroup(G, ρ, Algebra.ring(E), A))(α) =
+        Group.one(unitsH2(decompSubgroup(G, ρ, Algebra.ring(E), A),
+          decompSpace(G, X, ρ, Algebra.ring(E), A), decompAction(G, ρ, Algebra.ring(E), A),
+          Algebra.ring(E)))
+  requires open : OpenSubgroup(U, G, X)
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → c ∈ U
+  requires restricted : csCFUnitsResH2(G, X, ρ, Algebra.ring(E), U)(α) =
+    Group.one(unitsH2(subgroupGroup(G, U), subspace(X, U), restrict(ρ, U), Algebra.ring(E)))
+  shows α = Group.one(unitsH2(G, X, ρ, Algebra.ring(E)))
+proof
+  sorry
+
+end ArtinMap
+
+-- Section: Characters cutting out a subfield
+section CutOut
+variable (G X ρ E χ F : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis character : χ ∈ qzChars(G, X)
+hypothesis intermediate : IntermediateField(E, F)
+hypothesis cutOut : IsProGalois(subgroupGroup(G, qzCharKernel(G, χ)),
+  subspace(X, qzCharKernel(G, χ)), restrict(ρ, qzCharKernel(G, χ)), overExtension(E, F))
+
+-- abelianLift_artinAt_of_mem_closure: for L cut out by χ, χ vanishes on
+-- Art_v(u) when u is a limit of norms from L.
+theorem abelianLift_artinAt.of_mem_closure (v u : Set)
+  requires place : v ∈ finPlaces(Algebra.base(E))
+  requires unit : u ∈ locUnits(Algebra.base(E), v)
+  requires limit : u ∈ localNormClosure(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), v)
+  shows abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E, v, u)) = Group.one(qzGroup)
+proof
+  sorry
+
+-- exists_localNorm_of_abelianLift_artinAt: if χ(Art_v x) = 0 then x is a
+-- local norm from L_w, w over v.
+theorem abelianLift_artinAt.exists_localNorm (w x : Set)
+  requires place : w ∈ finPlaces(intermediateRing(E, F))
+  requires unit : x ∈ locUnits(Algebra.base(E),
+    placeBelow(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), w))
+  requires trivial : abelianLift(G, X, χ, csCFArtinAt(G, X, ρ, E,
+    placeBelow(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), w), x)) = Group.one(qzGroup)
+  shows ∃ y ∈ locUnits(intermediateRing(E, F), w),
+    localNorm(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), w, y) = x
+proof
+  sorry
+
+-- index_ker_char_artinMap and char_artinMap_eq_one_iff (NormTheorems.lean):
+-- for L/K Galois cut out by χ, the kernel of χ ∘ Art has index [L : K]
+-- and is Kˣ₊ · N(𝔸f Lˣ).
+theorem artinCharKernel.index
+  requires galoisL : GaloisExtension(subextension(E, F))
+  shows index(finIdeleGroup(Algebra.base(E)), artinCharKernel(G, X, ρ, E, χ)) =
+    extensionDegree(subextension(E, F))
+proof
+  sorry
+
+theorem artinCharKernel.mem_iff (a : Set)
+  requires galoisL : GaloisExtension(subextension(E, F))
+  requires idele : a ∈ finIdeleUnits(Algebra.base(E))
+  shows a ∈ artinCharKernel(G, X, ρ, E, χ) ↔
+    (∃ x ∈ totallyPositiveUnits(Algebra.base(E)), ∃ y ∈ finIdeleUnits(intermediateRing(E, F)),
+      a = finMul(Algebra.base(E), principalIdele(Algebra.base(E), x),
+        adeleNorm(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), y)))
+proof
+  sorry
+
+end CutOut
+
+-- Section: Cyclic extensions and Hasse's norm theorem
+section Cyclic
+variable (E F : Set)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis qbarLike : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis galoisOmega : GaloisExtension(E)
+hypothesis intermediate : IntermediateField(E, F)
+hypothesis galoisL : GaloisExtension(subextension(E, F))
+hypothesis finite : FiniteExtension(subextension(E, F))
+hypothesis cyclic : CyclicGroup(galoisGroup(subextension(E, F)))
+
+-- exists_char_of_isCyclic: a cyclic L/K is cut out by a character of
+-- Gal(Ω/K).
+theorem exists_char_of_cyclic
+  shows ∃ χ ∈ qzChars(galoisGroup(E), krullTopology(E)),
+    IsProGalois(subgroupGroup(galoisGroup(E), qzCharKernel(galoisGroup(E), χ)),
+      subspace(krullTopology(E), qzCharKernel(galoisGroup(E), χ)),
+      restrict(identity(algebraAutomorphisms(E)), qzCharKernel(galoisGroup(E), χ)),
+      overExtension(E, F))
+proof
+  sorry
+
+-- hasse_norm: a totally positive x ∈ K that is a local norm at every
+-- finite place is a norm from L.
+theorem hasse_norm (x : Set)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  requires local : ∀ v ∈ finPlaces(Algebra.base(E)),
+    adicCompletionEmbedding(Algebra.base(E), v)(x) ∈
+      localNormClosure(Algebra.base(E), intermediateRing(E, F), Algebra.map(E), v)
+  requires positive : IsTotallyPositive(Algebra.base(E), x)
+  shows ∃ z ∈ fieldUnits(intermediateRing(E, F)),
+    algebraNorm(Algebra.mk(Algebra.base(E), intermediateRing(E, F), Algebra.map(E)), z) = x
+proof
+  sorry
+
+end Cyclic
+
+-- Section: Artin reciprocity on principal ideles
+section Reciprocity
+variable (G X ρ E : Set)
+hypothesis galois : IsProGalois(G, X, ρ, E)
+hypothesis numberField : NumberField(Algebra.base(E))
+hypothesis closed : AlgebraicallyClosed(Algebra.ring(E))
+hypothesis characteristic : CharP(Algebra.ring(E), 0)
+
+-- artin_reciprocity_cyclotomic: for q an odd prime, some χ has the kernel
+-- of cycCharMod q and χ(Art x) = 0 exactly when N_{K/ℚ} x > 0.
+theorem artin_reciprocity_cyclotomic (q : Nat)
+  requires prime : Prime(q)
+  requires odd : 2 < q
+  shows ∃ χ ∈ qzChars(G, X), qzCharKernel(G, χ) = cycCharModKernel(G, ρ, Algebra.ring(E), q) ∧
+    (∀ x ∈ fieldUnits(Algebra.base(E)),
+      abelianLift(G, X, χ, csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), x))) =
+          Group.one(qzGroup) ↔
+        relates(rationalLess, rationalZero, fieldNorm(Algebra.base(E), x)))
+proof
+  sorry
+
+-- artin_reciprocity: if δξ ∪ x restricts to zero on an open subgroup
+-- containing every complex conjugation, ξ kills Art of the principal
+-- idele of x.
+theorem artin_reciprocity (ξ x U : Set)
+  requires character : ξ ∈ qzChars(G, X)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  requires open : OpenSubgroup(U, G, X)
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → c ∈ U
+  requires restricted : csCFUnitsResH2(G, X, ρ, Algebra.ring(E), U)(
+      unitsCyclicClass(G, X, ρ, Algebra.ring(E), ξ, Algebra.map(E)(x))) =
+    Group.one(unitsH2(subgroupGroup(G, U), subspace(X, U), restrict(ρ, U), Algebra.ring(E)))
+  shows abelianLift(G, X, ξ, csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), x))) =
+    Group.one(qzGroup)
+proof
+  sorry
+
+-- char_artinMap_principalIdele_eq_one: χ trivial on complex conjugations
+-- kills Art(Kˣ).
+theorem artin_reciprocity.of_conj_trivial (χ x : Set)
+  requires character : χ ∈ qzChars(G, X)
+  requires unit : x ∈ fieldUnits(Algebra.base(E))
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → χ(c) = Group.one(qzGroup)
+  shows abelianLift(G, X, χ, csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), x))) =
+    Group.one(qzGroup)
+proof
+  sorry
+
+-- artinMap_principalIdele: Art kills the totally positive principal
+-- ideles.
+theorem csCFArtinMap.principal_positive (x : Set)
+  requires positive : x ∈ totallyPositiveUnits(Algebra.base(E))
+  shows csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), x)) =
+    Group.one(topAbelianization(G, X))
+proof
+  sorry
+
+-- char_artinMap_principalIdele_eq_one_iff (sign law): for χ nontrivial on
+-- every complex conjugation, χ(Art b) = 0 iff N_{K/ℚ} b > 0.
+theorem artin_reciprocity.sign_law (χ b : Set)
+  requires character : χ ∈ qzChars(G, X)
+  requires conjugations : ∀ c, IsComplexConj(G, ρ, Algebra.ring(E), c) → χ(c) ≠ Group.one(qzGroup)
+  requires unit : b ∈ fieldUnits(Algebra.base(E))
+  shows abelianLift(G, X, χ, csCFArtinMap(G, X, ρ, E)(principalIdele(Algebra.base(E), b))) =
+      Group.one(qzGroup) ↔
+    relates(rationalLess, rationalZero, fieldNorm(Algebra.base(E), b))
+proof
+  sorry
+
+end Reciprocity
+
+-- Section: CM extensions
+section CMNorms
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+variable (L Φ : Set)
+hypothesis cmType : CMType(L, Φ)
+
+-- finAdeleIncl_adeleNorm_eq_mul_star: N_{L/L⁺}(y) = y ȳ in 𝔸f L.
+theorem cmNorm.eq_mul_star (y : Set)
+  requires adele : y ∈ finAdeles(L)
+  shows adeleMap(maximalRealSubfieldRing(L), L, Algebra.map(realSubfieldAlgebra(L)))(
+      adeleNorm(maximalRealSubfieldRing(L), L, Algebra.map(realSubfieldAlgebra(L)), y)) =
+    finMul(L, y, finStar(L)(y))
+proof
+  sorry
+
+-- bijective_cmType_restrict: Φ ≅ Hom(L⁺, ℂ) by restriction.
+theorem cmTypeRestrict.bijective
+  shows BijectiveBetween(cmTypeRestrict(L, Φ), Φ, complexEmbeddings(maximalRealSubfieldRing(L)))
+proof
+  sorry
+
+-- exists_eq_principalIdele_mul_norm: (1) a conjugation-invariant finite
+-- idele t is x z z̄ with x ∈ Lˣ, and when t = 1 with x of any prescribed
+-- signs s on Φ of product 1; (2) for a ∈ L⁺ˣ with a z z̄ = 1, ∏_Φ σ(a) > 0;
+-- (3) a splitting character is −1 at the uniformiser of every w = w̄.
+theorem cm.exists_eq_principalIdele_mul_norm
+  shows (∀ t ∈ finIdeleUnits(L), finStar(L)(t) = t →
+      (∀ s, FunctionBetween(s, Φ, { integerOne, integerNegValue(integerOne) }) →
+        Even(cardinality(negativeSigns(Φ, s))) →
+        (∃ x ∈ fieldUnits(L), ∃ z ∈ finIdeleUnits(L),
+          (t = finOne(L) → (∀ σ ∈ Φ, complexIm(σ(x)) = realZero ∧
+            ((s(σ) = integerOne → realZero < complexRe(σ(x))) ∧
+             (s(σ) ≠ integerOne → complexRe(σ(x)) < realZero)))) ∧
+          t = finMul(L, principalIdele(L, x), finMul(L, z, finStar(L)(z)))))) ∧
+    (∀ a ∈ fieldUnits(L), ∀ z ∈ finIdeleUnits(L), cmConjugation(L)(a) = a →
+      finMul(L, principalIdele(L, a), finMul(L, z, finStar(L)(z))) = finOne(L) →
+      complexIm(charProduct(Φ, phiValuesOf(Φ, a))) = realZero ∧
+        realZero < complexRe(charProduct(Φ, phiValuesOf(Φ, a)))) ∧
+    (∀ υ, ∀ ϖ, CMSplittingChar(L, Φ, υ) → UniformizerFamily(L, ϖ) →
+      (∀ w ∈ finPlaces(L), conjugatePlace(L, w) = w →
+        heckeAtUnif(L, Φ, υ, ϖ, w) = complexNeg(complexOne)))
+proof
+  sorry
+
+end CMNorms
