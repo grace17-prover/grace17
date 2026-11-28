@@ -1,0 +1,686 @@
+-- The Legendre symbol (·/d) of a prime d as a Dirichlet character modulo
+-- d: its three values, periodicity, multiplicativity through Euler's
+-- criterion, and its vanishing exactly on the multiples of d; hence the
+-- quadratic twist ξ·(·/d) is a Dirichlet character modulo N d.
+-- Source: grh-compact/src/Lib/General/NumberTheory/QuadField.lean (chiK, a
+-- DirichletCharacter by its type; quadTwist), with Mathlib's
+-- legendreSym.mul.
+-- Part of the GRH blueprint (layer 4, Lib/Analytic).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Analytic.Legendre
+import GRH.Proof.Forward
+import Grace.Cumulus.NumberTheory.EulerCriterion
+import Grace.Cumulus.NumberTheory.IntegerPrime
+
+-- Section: Euler's criterion for products
+-- p ∤ u w when p ∤ u and p ∤ w.
+theorem Prime.not_divides_mul (p u w : Nat)
+  requires prime : Prime(p)
+  requires notU : ¬(p ∣ u)
+  requires notW : ¬(p ∣ w)
+  shows ¬(p ∣ (u * w))
+proof
+  intro divides
+  have split := Prime.divides_mul with prime, divides
+  cases split with left | right
+  . exact notU with left
+  . exact notW with right
+
+-- Euler's criterion as congruences: u is a residue modulo p = 2h + 1
+-- exactly when u^h ≡ 1, and a non-residue exactly when u^h + 1 ≡ 0.
+theorem euler.residue_congruent (u p h : Nat)
+  requires prime : Prime(p)
+  requires odd : p = 2 * h + 1
+  requires notDivides : ¬(p ∣ u)
+  shows (QuadraticResidue(u, p) ↔ CongruentMod(u ^ h, 1, p)) ∧
+    (¬QuadraticResidue(u, p) ↔ CongruentMod(u ^ h + 1, 0, p))
+proof
+  have two := Prime.two_le with prime
+  have oneBelow : 1 < p by arith
+  have zeroBelow : 0 < p by arith
+  have oneMod := mod.of_less at p, 1 with oneBelow
+  have zeroMod := mod.of_less at p, 0 with zeroBelow
+  have criterion := euler.criterion with prime, odd, notDivides
+  have nonresidue := euler.nonresidue_iff with prime, odd, notDivides
+  constructor
+  . constructor
+    . intro residue
+      have power := criterion.forward with residue
+      unfold CongruentMod
+      rw [power, oneMod]
+    . intro congruent
+      unfold CongruentMod at congruent
+      rw oneMod at congruent
+      exact criterion.backward with congruent
+  . constructor
+    . intro notResidue
+      have power := nonresidue.forward with notResidue
+      unfold CongruentMod
+      rw [power, zeroMod]
+    . intro congruent
+      unfold CongruentMod at congruent
+      rw zeroMod at congruent
+      exact nonresidue.backward with congruent
+
+-- A residue times a non-residue is a non-residue.
+theorem QuadraticResidue.mul_nonresidue (u w p h : Nat)
+  requires prime : Prime(p)
+  requires odd : p = 2 * h + 1
+  requires notU : ¬(p ∣ u)
+  requires notW : ¬(p ∣ w)
+  requires residue : QuadraticResidue(u, p)
+  requires nonresidue : ¬QuadraticResidue(w, p)
+  shows ¬QuadraticResidue(u * w, p)
+proof
+  have notUY := Prime.not_divides_mul with prime, notU, notW
+  have eulerU := euler.residue_congruent with prime, odd, notU
+  have eulerW := euler.residue_congruent with prime, odd, notW
+  have eulerUW := euler.residue_congruent with prime, odd, notUY
+  have uPower := eulerU.left.forward with residue
+  intro product
+  have xwPower := eulerUW.left.forward with product
+  have split := pow.mul_base at u, w, h
+  rw split at xwPower
+  have scaled := CongruentMod.mul_right at u ^ h, 1, w ^ h, p with uPower
+  have one : 1 * w ^ h = w ^ h by ring
+  rw one at scaled
+  have back := CongruentMod.symmetric with scaled
+  have wPower := CongruentMod.transitive with back, xwPower
+  have wResidue := eulerW.left.backward with wPower
+  exact nonresidue with wResidue
+
+-- A product of two non-residues is a residue.
+theorem QuadraticResidue.mul_two_nonresidues (u w p h : Nat)
+  requires prime : Prime(p)
+  requires odd : p = 2 * h + 1
+  requires notU : ¬(p ∣ u)
+  requires notW : ¬(p ∣ w)
+  requires nonresidueU : ¬QuadraticResidue(u, p)
+  requires nonresidueW : ¬QuadraticResidue(w, p)
+  shows QuadraticResidue(u * w, p)
+proof
+  have notUY := Prime.not_divides_mul with prime, notU, notW
+  have eulerU := euler.residue_congruent with prime, odd, notU
+  have eulerW := euler.residue_congruent with prime, odd, notW
+  have eulerUW := euler.residue_congruent with prime, odd, notUY
+  have uPower := eulerU.right.forward with nonresidueU
+  have wPower := eulerW.right.forward with nonresidueW
+  -- u^h w^h + w^h ≡ 0, and u^h w^h + w^h + 1 ≡ u^h w^h.
+  have first := CongruentMod.mul_right at u ^ h + 1, 0, w ^ h, p with uPower
+  have firstShape : (u ^ h + 1) * w ^ h = u ^ h * w ^ h + w ^ h by ring
+  have zeroShape : 0 * w ^ h = 0 by ring
+  rw [firstShape, zeroShape] at first
+  have plusOne := CongruentMod.add_right at u ^ h * w ^ h + w ^ h, 0, 1, p with
+    first
+  have second := CongruentMod.add_left at w ^ h + 1, 0, u ^ h * w ^ h, p with
+    wPower
+  have secondShape : u ^ h * w ^ h + (w ^ h + 1) = u ^ h * w ^ h + w ^ h + 1 by
+    ring
+  have zeroRight : u ^ h * w ^ h + 0 = u ^ h * w ^ h by ring
+  have zeroOne : 0 + 1 = 1 by ring
+  rw [secondShape, zeroRight] at second
+  rw zeroOne at plusOne
+  have back := CongruentMod.symmetric with second
+  have product := CongruentMod.transitive with back, plusOne
+  have split := pow.mul_base at u, w, h
+  rw ← split at product
+  exact eulerUW.left.backward with product
+
+section Legendre
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- n is a square modulo d.
+predicate IntegerSquareMod (d : Nat, n : Set) :=
+  ∃ x ∈ ℤ, IntegerCongruent(integerOfNat(d), integerMulValue(x, x), n)
+
+-- Section: The three values
+theorem legendreSign.of_divides (d : Nat, n : Set)
+  requires divides : IntegerCongruent(integerOfNat(d), n, integerZero)
+  shows legendreSign(d, n) = realZero
+proof
+  have zeroReal : realZero ∈ ℝ by typecheck
+  unfold legendreSign
+  apply union.of_unique
+  . refine ⟨zeroReal, ?_⟩
+    left
+    exact ⟨divides, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨_, yValue⟩ | ⟨notDivides, _⟩ | ⟨notDivides, _⟩
+    . exact yValue
+    . exfalso
+      exact notDivides with divides
+    . exfalso
+      exact notDivides with divides
+
+theorem legendreSign.of_square (d : Nat, n : Set)
+  requires notDivides : ¬IntegerCongruent(integerOfNat(d), n, integerZero)
+  requires square : IntegerSquareMod(d, n)
+  shows legendreSign(d, n) = realOne
+proof
+  have oneReal : realOne ∈ ℝ by typecheck
+  unfold IntegerSquareMod at square
+  unfold legendreSign
+  apply union.of_unique
+  . refine ⟨oneReal, ?_⟩
+    right
+    left
+    exact ⟨notDivides, square, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨divides, _⟩ | ⟨_, _, yValue⟩ | ⟨_, notSquare, _⟩
+    . exfalso
+      exact notDivides with divides
+    . exact yValue
+    . exfalso
+      exact notSquare with square
+
+theorem legendreSign.of_not_square (d : Nat, n : Set)
+  requires notDivides : ¬IntegerCongruent(integerOfNat(d), n, integerZero)
+  requires notSquare : ¬IntegerSquareMod(d, n)
+  shows legendreSign(d, n) = R[-1]
+proof
+  have value : R[-1] ∈ ℝ by typecheck
+  have natD : Nat(d) by assumption
+  unfold IntegerSquareMod at notSquare
+  have bare : ¬(∃ x ∈ ℤ,
+      IntegerCongruent(integerOfNat(d), integerMulValue(x, x), n)) by
+    intro exists
+    exact notSquare with ⟨natD, exists⟩
+  unfold legendreSign
+  apply union.of_unique
+  . refine ⟨value, ?_⟩
+    right
+    right
+    exact ⟨notDivides, bare, rfl⟩
+  . intros y hy
+    obtain ⟨_, alternatives⟩ := hy
+    rcases alternatives with ⟨divides, _⟩ | ⟨_, square, _⟩ | ⟨_, _, yValue⟩
+    . exfalso
+      exact notDivides with divides
+    . exfalso
+      exact bare with square
+    . exact yValue
+
+-- The symbol is a real number.
+theorem legendreSign.real (d : Nat, n : Set)
+  shows legendreSign(d, n) ∈ ℝ
+proof
+  by_cases divides : IntegerCongruent(integerOfNat(d), n, integerZero)
+  . rw (legendreSign.of_divides with divides)
+    typecheck
+  . by_cases square : IntegerSquareMod(d, n)
+    . rw (legendreSign.of_square with divides, square)
+      typecheck
+    . rw (legendreSign.of_not_square with divides, square)
+      typecheck
+
+-- Section: Periodicity
+-- Integers congruent modulo d have the same symbol.
+theorem legendreSign.congruent (d : Nat, a b : Set)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  requires congruent : IntegerCongruent(integerOfNat(d), a, b)
+  shows legendreSign(d, a) = legendreSign(d, b)
+proof
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  have zeroInteger : integerZero ∈ ℤ by typecheck
+  have back := IntegerCongruent.symmetric with congruent
+  have dividesIff : IntegerCongruent(integerOfNat(d), a, integerZero) ↔
+      IntegerCongruent(integerOfNat(d), b, integerZero) by
+    constructor
+    . intro left
+      exact IntegerCongruent.transitive with back, left
+    . intro right
+      exact IntegerCongruent.transitive with congruent, right
+  have squareIff : IntegerSquareMod(d, a) ↔ IntegerSquareMod(d, b) by
+    constructor
+    . intro left
+      obtain ⟨x, hx, square⟩ := left
+      have moved := IntegerCongruent.transitive with square, congruent
+      unfold IntegerSquareMod
+      exact ⟨x, hx, moved⟩
+    . intro right
+      obtain ⟨x, hx, square⟩ := right
+      have moved := IntegerCongruent.transitive with square, back
+      unfold IntegerSquareMod
+      exact ⟨x, hx, moved⟩
+  by_cases divides : IntegerCongruent(integerOfNat(d), a, integerZero)
+  . have dividesB := dividesIff.forward with divides
+    rw [(legendreSign.of_divides with divides),
+      (legendreSign.of_divides with dividesB)]
+  . have notB : ¬IntegerCongruent(integerOfNat(d), b, integerZero) by
+      intro dividesB
+      exact divides with (dividesIff.backward with dividesB)
+    by_cases square : IntegerSquareMod(d, a)
+    . have squareB := squareIff.forward with square
+      rw [(legendreSign.of_square with divides, square),
+        (legendreSign.of_square with notB, squareB)]
+    . have notSquareB : ¬IntegerSquareMod(d, b) by
+        intro squareB
+        exact square with (squareIff.backward with squareB)
+      rw [(legendreSign.of_not_square with divides, square),
+        (legendreSign.of_not_square with notB, notSquareB)]
+
+-- Section: Divisibility by a prime
+-- An integer is prime to the prime d or divisible by it.
+theorem Prime.integer_coprime_or_divides (d : Nat, a : Set)
+  requires prime : Prime(d)
+  requires integer : a ∈ ℤ
+  shows IntegerCoprime(a, integerOfNat(d)) ∨ IntegerDivides(integerOfNat(d), a)
+proof
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  have gNat := integerGCD.natural at a, integerOfNat(d)
+  have left := integerGCD.divides_left at a, integerOfNat(d)
+  have right := integerGCD.divides_right at a, integerOfNat(d)
+  have rightNat := IntegerDivides.ofNat_iff.forward with right
+  have two := Prime.two_le with prime
+  have dNonzero : d ≠ (0:N) by arith
+  have below := divides.le with rightNat, dNonzero
+  by_cases equal : integerGCD(a, integerOfNat(d)) = d
+  . right
+    rw equal at left
+    exact left
+  . left
+    have less : integerGCD(a, integerOfNat(d)) < d by arith
+    have natD : Nat(d) by assumption
+    have memberIf := membership.of_Less at integerGCD(a, integerOfNat(d)), d with gNat, natD
+    have member := memberIf with less
+    unfold IntegerCoprime
+    exact Prime.divisor with prime, gNat, member, rightNat
+
+-- Section: Multiplicativity
+-- n is a square modulo d exactly when its residue is a quadratic residue.
+theorem IntegerSquareMod.iff_residue (d : Nat, n : Set)
+  requires positive : (0:N) < d
+  requires integer : n ∈ ℤ
+  shows IntegerSquareMod(d, n) ↔ QuadraticResidue(integerMod(n, d), d)
+proof
+  have rNat := integerMod.natural at n, d with positive
+  have toResidue := integerMod.congruent at n, d with positive
+  constructor
+  . intro square
+    obtain ⟨t, ht, congruent⟩ := square
+    have sNat := integerMod.natural at t, d with positive
+    have tResidue := integerMod.congruent at t, d with positive
+    have product := IntegerCongruent.mul with tResidue, tResidue
+    have back := IntegerCongruent.symmetric with product
+    have first := IntegerCongruent.transitive with back, congruent
+    have second := IntegerCongruent.transitive with first, toResidue
+    rw ← integerOfNat.mul at second
+    have natural := IntegerCongruent.ofNat_iff.forward with second
+    exact QuadraticResidue.intro with natural
+  . intro residue
+    obtain ⟨s, sNat, congruent⟩ := residue
+    have lifted := IntegerCongruent.ofNat_iff.backward with congruent
+    rw integerOfNat.mul at lifted
+    have back := IntegerCongruent.symmetric with toResidue
+    have chain := IntegerCongruent.transitive with lifted, back
+    have sInteger : integerOfNat(s) ∈ ℤ by typecheck
+    unfold IntegerSquareMod
+    exact ⟨integerOfNat(s), sInteger, chain⟩
+
+-- The residue of an integer not divisible by d is not divisible by d.
+theorem integerMod.not_divides (d : Nat, n : Set)
+  requires positive : (0:N) < d
+  requires integer : n ∈ ℤ
+  requires notDivides : ¬IntegerCongruent(integerOfNat(d), n, integerZero)
+  shows ¬(d ∣ integerMod(n, d))
+proof
+  have rNat := integerMod.natural at n, d with positive
+  have below := integerMod.below at n, d with positive
+  intro divides
+  by_cases zero : integerMod(n, d) = (0:N)
+  . have dividesN := (integerMod.zero_iff at n, d with positive).forward with
+      zero
+    have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+    have congruent := (IntegerCongruent.zero_right_iff at integerOfNat(d),
+      n).backward with dividesN
+    exact notDivides with congruent
+  . have le := divides.le with divides, zero
+    arith
+
+-- Modulo 2 every integer prime to 2 is a square.
+theorem IntegerSquareMod.of_two (n : Set)
+  requires integer : n ∈ ℤ
+  requires notDivides : ¬IntegerCongruent(integerOfNat(2), n, integerZero)
+  shows IntegerSquareMod(2, n)
+proof
+  have positive : (0:N) < 2 by arith
+  have notResidueDivides := integerMod.not_divides with positive, integer,
+    notDivides
+  have below := integerMod.below at n, 2 with positive
+  have rNat := integerMod.natural at n, 2 with positive
+  have one : integerMod(n, 2) = (1:N) by
+    by_cases zero : integerMod(n, 2) = (0:N)
+    . exfalso
+      rw zero at notResidueDivides
+      have dividesZero := divides.zero at 2
+      exact notResidueDivides with dividesZero
+    . arith
+  have residue : QuadraticResidue((1:N), (2:N)) by
+    have congruent : CongruentMod((1:N) * (1:N), (1:N), (2:N)) by
+      unfold CongruentMod
+      arith
+    exact QuadraticResidue.intro at (1:N), (2:N), (1:N) with congruent
+  have iff := IntegerSquareMod.iff_residue with positive, integer
+  rw one at iff
+  exact iff.backward with residue
+
+-- Mathlib's legendreSym.mul: (ab/d) = (a/d)(b/d).
+theorem legendreSign.mul (d : Nat, a b : Set)
+  requires prime : Prime(d)
+  requires aInteger : a ∈ ℤ
+  requires bInteger : b ∈ ℤ
+  shows legendreSign(d, integerMulValue(a, b)) =
+    R[legendreSign(d, a) * legendreSign(d, b)]
+proof
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  have zeroInteger : integerZero ∈ ℤ by typecheck
+  have abInteger : integerMulValue(a, b) ∈ ℤ by typecheck
+  have aReal := legendreSign.real at d, a
+  have bReal := legendreSign.real at d, b
+  by_cases divA : IntegerCongruent(integerOfNat(d), a, integerZero)
+  . have product := IntegerCongruent.mul_right at integerOfNat(d), a,
+      integerZero, b with divA
+    have zeroTimes : integerMulValue(integerZero, b) = integerZero by ring
+    rw zeroTimes at product
+    rw [(legendreSign.of_divides with product),
+      (legendreSign.of_divides with divA)]
+    ring
+  by_cases divB : IntegerCongruent(integerOfNat(d), b, integerZero)
+  . have product := IntegerCongruent.mul_left at integerOfNat(d), b,
+      integerZero, a with divB
+    have timesZero : integerMulValue(a, integerZero) = integerZero by ring
+    rw timesZero at product
+    rw [(legendreSign.of_divides with product),
+      (legendreSign.of_divides with divB)]
+    ring
+  have divAB : ¬IntegerCongruent(integerOfNat(d), integerMulValue(a, b),
+      integerZero) by
+    intro congruent
+    have divides := (IntegerCongruent.zero_right_iff at integerOfNat(d),
+      integerMulValue(a, b)).forward with congruent
+    have split := Prime.integer_divides_mul with prime, divides
+    cases split with left | right
+    . exact divA with ((IntegerCongruent.zero_right_iff at integerOfNat(d),
+        a).backward with left)
+    . exact divB with ((IntegerCongruent.zero_right_iff at integerOfNat(d),
+        b).backward with right)
+  have two := Prime.two_le with prime
+  have positive : (0:N) < d by arith
+  have squareA := IntegerSquareMod.iff_residue with positive, aInteger
+  have squareB := IntegerSquareMod.iff_residue with positive, bInteger
+  have squareAB := IntegerSquareMod.iff_residue with positive, abInteger
+  have notA := integerMod.not_divides with positive, aInteger, divA
+  have notB := integerMod.not_divides with positive, bInteger, divB
+  -- The residue of a b is that of the product of the residues.
+  have aNat := integerMod.natural at a, d with positive
+  have bNat := integerMod.natural at b, d with positive
+  have abNat := integerMod.natural at integerMulValue(a, b), d with positive
+  have aResidue := integerMod.congruent at a, d with positive
+  have bResidue := integerMod.congruent at b, d with positive
+  have abResidue := integerMod.congruent at integerMulValue(a, b), d with
+    positive
+  have product := IntegerCongruent.mul with aResidue, bResidue
+  rw ← integerOfNat.mul at product
+  have back := IntegerCongruent.symmetric with abResidue
+  have chain := IntegerCongruent.transitive with back, product
+  have residues := IntegerCongruent.ofNat_iff.forward with chain
+  have residuesBack := CongruentMod.symmetric with residues
+  have twoOrOdd := Prime.two_or_odd_half with prime
+  cases twoOrOdd with isTwo | isOdd
+  -- Modulo 2 all three are squares.
+  . rw isTwo at divA
+    rw isTwo at divB
+    rw isTwo at divAB
+    have sqA := IntegerSquareMod.of_two with aInteger, divA
+    have sqB := IntegerSquareMod.of_two with bInteger, divB
+    have sqAB := IntegerSquareMod.of_two with abInteger, divAB
+    rw [isTwo, (legendreSign.of_square with divAB, sqAB),
+      (legendreSign.of_square with divA, sqA),
+      (legendreSign.of_square with divB, sqB)]
+    ring
+  obtain ⟨h, hNat, odd⟩ := isOdd
+  by_cases qa : IntegerSquareMod(d, a)
+  . have ra := squareA.forward with qa
+    by_cases qb : IntegerSquareMod(d, b)
+    . have rb := squareB.forward with qb
+      have rab := QuadraticResidue.mul with ra, rb
+      have moved := QuadraticResidue.of_congruent with residuesBack, rab
+      have qab := squareAB.backward with moved
+      rw [(legendreSign.of_square with divAB, qab),
+        (legendreSign.of_square with divA, qa),
+        (legendreSign.of_square with divB, qb)]
+      ring
+    . have nb : ¬QuadraticResidue(integerMod(b, d), d) by
+        intro rb
+        exact qb with (squareB.backward with rb)
+      have nab := QuadraticResidue.mul_nonresidue with prime, odd, notA, notB,
+        ra, nb
+      have qab : ¬IntegerSquareMod(d, integerMulValue(a, b)) by
+        intro sq
+        have rab := squareAB.forward with sq
+        exact nab with (QuadraticResidue.of_congruent with residues, rab)
+      rw [(legendreSign.of_not_square with divAB, qab),
+        (legendreSign.of_square with divA, qa),
+        (legendreSign.of_not_square with divB, qb)]
+      ring
+  . have na : ¬QuadraticResidue(integerMod(a, d), d) by
+      intro ra
+      exact qa with (squareA.backward with ra)
+    by_cases qb : IntegerSquareMod(d, b)
+    . have rb := squareB.forward with qb
+      have nba := QuadraticResidue.mul_nonresidue with prime, odd, notB, notA,
+        rb, na
+      have swap : integerMod(b, d) * integerMod(a, d) =
+        integerMod(a, d) * integerMod(b, d) by ring
+      rw swap at nba
+      have qab : ¬IntegerSquareMod(d, integerMulValue(a, b)) by
+        intro sq
+        have rab := squareAB.forward with sq
+        exact nba with (QuadraticResidue.of_congruent with residues, rab)
+      rw [(legendreSign.of_not_square with divAB, qab),
+        (legendreSign.of_not_square with divA, qa),
+        (legendreSign.of_square with divB, qb)]
+      ring
+    . have nb : ¬QuadraticResidue(integerMod(b, d), d) by
+        intro rb
+        exact qb with (squareB.backward with rb)
+      have rab := QuadraticResidue.mul_two_nonresidues with prime, odd, notA,
+        notB, na, nb
+      have moved := QuadraticResidue.of_congruent with residuesBack, rab
+      have qab := squareAB.backward with moved
+      rw [(legendreSign.of_square with divAB, qab),
+        (legendreSign.of_not_square with divA, qa),
+        (legendreSign.of_not_square with divB, qb)]
+      ring
+
+-- Section: The twisted character
+-- n ↦ ξ(n)(n/d) takes its displayed value.
+theorem legendreTwistValues.apply (ξ : Set, d : Nat, n : Set)
+  requires integer : n ∈ ℤ
+  shows legendreTwistValues(ξ, d)(n) =
+    ℂ[ξ(n) * complexOfReal(legendreSign(d, n))]
+proof
+  have shape : ∀ p ∈ legendreTwistValues(ξ, d), ∃ a ∈ ℤ, ∃ b, p = (a, b) by
+    intros p hp
+    simp [legendreTwistValues] at hp
+    obtain ⟨m, mIn, eq⟩ := hp
+    rw ← eq
+    exact ⟨m, mIn, ℂ[ξ(m) * complexOfReal(legendreSign(d, m))], rfl⟩
+  have total : ∀ a ∈ ℤ, ∃ b, (a, b) ∈ legendreTwistValues(ξ, d) by
+    intros a aIn
+    refine ⟨ℂ[ξ(a) * complexOfReal(legendreSign(d, a))], ?_⟩
+    simp [legendreTwistValues]
+  have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ legendreTwistValues(ξ, d) →
+      (a, c) ∈ legendreTwistValues(ξ, d) → b = c by
+    intros a b c ab ac
+    simp [legendreTwistValues] at ab
+    simp [legendreTwistValues] at ac
+    obtain ⟨m, _, abEq⟩ := ab
+    obtain ⟨k, _, acEq⟩ := ac
+    obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+    obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+    cc
+  have mapped : (n, ℂ[ξ(n) * complexOfReal(legendreSign(d, n))]) ∈
+      legendreTwistValues(ξ, d) by
+    simp [legendreTwistValues]
+  exact coefficientGraph.apply with shape, total, functional, integer, mapped
+
+-- Integers prime to N and to d are prime to N d.
+theorem IntegerCoprime.mul_right (a : Set, N d : Nat)
+  requires integer : a ∈ ℤ
+  requires coprimeN : IntegerCoprime(a, integerOfNat(N))
+  requires coprimeD : IntegerCoprime(a, integerOfNat(d))
+  shows IntegerCoprime(a, integerOfNat(N * d))
+proof
+  obtain ⟨u, uInteger, v, vInteger, first⟩ := IntegerCoprime.bezout with
+    coprimeN
+  obtain ⟨w, wInteger, z, zInteger, second⟩ := IntegerCoprime.bezout with
+    coprimeD
+  have nInteger : integerOfNat(N) ∈ ℤ by typecheck
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  rw integerOfNat.mul
+  have identity : integerAddValue(integerMulValue(integerAddValue(
+      integerAddValue(integerMulValue(integerMulValue(u, w), a),
+        integerMulValue(integerMulValue(u, z), integerOfNat(d))),
+      integerMulValue(integerMulValue(v, integerOfNat(N)), w)), a),
+    integerMulValue(integerMulValue(v, z),
+      integerMulValue(integerOfNat(N), integerOfNat(d)))) = integerOne by
+    have product : integerMulValue(integerAddValue(integerMulValue(u, a),
+        integerMulValue(v, integerOfNat(N))),
+      integerAddValue(integerMulValue(w, a),
+        integerMulValue(z, integerOfNat(d)))) = integerOne by
+      rw [first, second]
+      ring
+    rw ← product
+    ring
+  exact IntegerCoprime.of_bezout with identity
+
+-- QuadField.lean, quadTwist (the product of ξ and (·/d), a character
+-- modulo N d): n ↦ ξ(n)(n/d) is a Dirichlet character modulo N d.
+theorem legendreTwistValues.character (N d : Nat, ξ : Set)
+  requires prime : Prime(d)
+  requires character : DirichletCharacter(N, ξ)
+  shows DirichletCharacter(N * d, legendreTwistValues(ξ, d))
+proof
+  have values := DirichletCharacter.function with character
+  have dInteger : integerOfNat(d) ∈ ℤ by typecheck
+  have nInteger : integerOfNat(N) ∈ ℤ by typecheck
+  have zeroInteger : integerZero ∈ ℤ by typecheck
+  have oneInteger : integerOne ∈ ℤ by typecheck
+  have function : legendreTwistValues(ξ, d) : ℤ → complexCarrier by
+    have shape : ∀ p ∈ legendreTwistValues(ξ, d), ∃ a ∈ ℤ,
+        ∃ b ∈ complexCarrier, p = (a, b) by
+      intros p hp
+      simp [legendreTwistValues] at hp
+      obtain ⟨m, mIn, eq⟩ := hp
+      rw ← eq
+      have value := FunctionBetween.apply_closed with values, mIn
+      have sign := legendreSign.real at d, m
+      have product : ℂ[ξ(m) * complexOfReal(legendreSign(d, m))] ∈
+        complexCarrier by typecheck
+      exact ⟨m, mIn, ℂ[ξ(m) * complexOfReal(legendreSign(d, m))], product,
+        rfl⟩
+    have total : ∀ a ∈ ℤ, ∃ b ∈ complexCarrier,
+        (a, b) ∈ legendreTwistValues(ξ, d) by
+      intros a aIn
+      have value := FunctionBetween.apply_closed with values, aIn
+      have sign := legendreSign.real at d, a
+      have product : ℂ[ξ(a) * complexOfReal(legendreSign(d, a))] ∈
+        complexCarrier by typecheck
+      refine ⟨ℂ[ξ(a) * complexOfReal(legendreSign(d, a))], product, ?_⟩
+      simp [legendreTwistValues]
+    have functional : ∀ a, ∀ b, ∀ c, (a, b) ∈ legendreTwistValues(ξ, d) →
+        (a, c) ∈ legendreTwistValues(ξ, d) → b = c by
+      intros a b c ab ac
+      simp [legendreTwistValues] at ab
+      simp [legendreTwistValues] at ac
+      obtain ⟨m, _, abEq⟩ := ab
+      obtain ⟨k, _, acEq⟩ := ac
+      obtain ⟨ma, mb⟩ := orderedPair.injective with abEq
+      obtain ⟨ka, kc⟩ := orderedPair.injective with acEq
+      cc
+    exact coefficientGraph.function with shape, total, functional
+  unfold DirichletCharacter
+  refine ⟨function, ?_, ?_, ?_, ?_⟩
+  -- Periodic modulo N d.
+  . intros a ha
+    have shifted : integerAddValue(a, integerOfNat(N * d)) ∈ ℤ by typecheck
+    rw [(legendreTwistValues.apply with shifted),
+      (legendreTwistValues.apply with ha)]
+    have ξShift := DirichletCharacter.shift at N, ξ, a, integerOfNat(d) with
+      character, ha, dInteger
+    have congruent : IntegerCongruent(integerOfNat(d),
+        integerAddValue(a, integerOfNat(N * d)), a) by
+      unfold IntegerCongruent
+      unfold IntegerDivides
+      refine ⟨integerOfNat(N), nInteger, ?_⟩
+      rw integerOfNat.mul
+      ring
+    have signShift := legendreSign.congruent with shifted, ha, congruent
+    rw [signShift, integerOfNat.mul, ξShift]
+  -- The value at 1.
+  . rw (legendreTwistValues.apply with oneInteger)
+    have ξOne := DirichletCharacter.one with character
+    have notDivides : ¬IntegerCongruent(integerOfNat(d), integerOne,
+        integerZero) by
+      intro congruent
+      have divides := (IntegerCongruent.zero_right_iff at integerOfNat(d),
+        integerOne).forward with congruent
+      rw ← integerOfNat.one at divides
+      have natural := IntegerDivides.ofNat_iff.forward with divides
+      have oneNonzero : (1:N) ≠ (0:N) by arith
+      have le := divides.le with natural, oneNonzero
+      have two := Prime.two_le with prime
+      arith
+    have square : IntegerSquareMod(d, integerOne) by
+      have shape : integerMulValue(integerOne, integerOne) = integerOne by ring
+      have congruent : IntegerCongruent(integerOfNat(d),
+          integerMulValue(integerOne, integerOne), integerOne) by
+        rw shape
+        exact IntegerCongruent.reflexive at integerOfNat(d), integerOne
+      unfold IntegerSquareMod
+      exact ⟨integerOne, oneInteger, congruent⟩
+    rw [ξOne, (legendreSign.of_square with notDivides, square),
+      complexOfReal.one]
+    ring
+  -- Multiplicative.
+  . intros a ha b hb
+    have product : integerMulValue(a, b) ∈ ℤ by typecheck
+    have aValue := FunctionBetween.apply_closed with values, ha
+    have bValue := FunctionBetween.apply_closed with values, hb
+    have aSign := legendreSign.real at d, a
+    have bSign := legendreSign.real at d, b
+    rw [(legendreTwistValues.apply with product),
+      (legendreTwistValues.apply with ha), (legendreTwistValues.apply with hb),
+      (DirichletCharacter.mul with character, ha, hb),
+      (legendreSign.mul with prime, ha, hb), complexOfReal.mul]
+    ring
+  -- Zero off the units modulo N d.
+  . intros a ha notCoprime
+    rw (legendreTwistValues.apply with ha)
+    by_cases coprimeN : IntegerCoprime(a, integerOfNat(N))
+    . have split := Prime.integer_coprime_or_divides with prime, ha
+      cases split with coprimeD | divides
+      . exfalso
+        exact notCoprime with (IntegerCoprime.mul_right with ha, coprimeN,
+          coprimeD)
+      . have congruent := (IntegerCongruent.zero_right_iff at integerOfNat(d),
+          a).backward with divides
+        have value := FunctionBetween.apply_closed with values, ha
+        rw [(legendreSign.of_divides with congruent), complexOfReal.zero]
+        ring
+    . have zero := DirichletCharacter.not_coprime with character, ha,
+        coprimeN
+      have sign := legendreSign.real at d, a
+      rw zero
+      ring
+
+end Legendre
