@@ -1,0 +1,362 @@
+-- The adelic Weil representation of a framed hermitian space V over a CM
+-- field with Weil data: the framed spaces (J, x) with xᴴJx = diag(s), the
+-- data space 𝒮(V) (the reproducing space of the adelic vacuum, which
+-- depends only on the signs), the Heisenberg operators ϱ(y), the vacuum,
+-- the finite vectors x ↦ αx and the finite Heisenberg operators; the
+-- rational vectors of V, invariant functionals and theta functionals,
+-- their existence and uniqueness up to a scalar; the standard spaces; and
+-- the spaces with a chosen theta functional, through which θ, the finite
+-- part 𝒲_f and the values of the vacuum are read.
+-- Source: grh-compact/src/Lib/Weil/Construction/PairDefs.lean (𝒮, finVec,
+-- Space.heisRep, ϱ, vacElem, rawTheta, θ, finHeisOp, θ_apply, ϱ_apply),
+-- Lib/Weil/Construction/ThetaFunctional.lean (Space.ratVectors,
+-- IsRatInvariant, IsThetaFunctional, exists_isThetaFunctional,
+-- IsThetaFunctional.eq_smul, injective_apply_heisOp),
+-- Lib/Weil/Construction/DataProduct.lean (Space.IsStd), and
+-- Lib/Weil/Construction/FinitePart.lean (Space.finitePart), with
+-- Lib/Adelic/Unitary/SpaceDefs.lean (stdForm, Space, vecAtPoint,
+-- stdSpace) and Lib/Adelic/QuotientMeasure/PeriodicMean.lean (quotMean),
+-- stated here until GRH.Adelic.QuotientMeasure exists. Part of:
+-- "Adelic Weil representation of a unitary group and the invariant
+-- theta functional (known result; see Lib.Weil.DualPair.PairSplitting)."
+-- The rest of the group GRH.Weil.Construction2 (the Weil operators ω(g)
+-- of the adelic unitary group, DataProduct's jets and box products,
+-- FiniteMultiplier, Projections, the Fock and mixed-model files, the
+-- period files) is not yet stated; FinitePart.lean belongs to the group
+-- GRH.Weil.MixedModel and is stated here for the forward declarations of
+-- layer 5.
+-- Encoding. A space is the predicate FramedSpace(W, n, s, J, x) on its
+-- data; 𝒮(V) and ϱ depend on (W, n, s) only, as in the source. The
+-- source's θ is V.rawTheta ∘ ϱ(0), a theta functional chosen with
+-- Classical.choose; here the choice is a field of the record ThetaSpace
+-- (weil, rank, signs, gram, frame, theta), and IsThetaSpace(V) says that
+-- the field is a theta functional of the framed space. A statement over
+-- every ThetaSpace is a statement over every choice of θ; theta
+-- functionals differ by a scalar of modulus one (IsThetaFunctional
+-- .eq_smul), so such statements say what the source says when they are
+-- invariant under rescaling θ.
+-- Part of the GRH blueprint (layer 4, Lib/Weil, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Weil.Construction2
+import GRH.Weil.Unramified
+import GRH.Matrix.Groups
+
+section Construction2
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Framed hermitian spaces
+-- The ring 𝔸 = ℂ^Φ × 𝔸f(E) of the Weil data W.
+def adeleRingOf (W : Set) : Set := cmAdeleRing(WeilDatum.field(W), WeilDatum.cmType(W))
+
+-- Complex conjugation on 𝔸: conjugate at the infinite places, finStar at
+-- the finite ones (the star of the source's 𝔸 E).
+def conjValues (Φ u : Set) : Set := { (σ, complexConj(u(σ))) | σ ∈ Φ }
+
+def adeleStar (W : Set) : Set :=
+  { (a, (conjValues(WeilDatum.cmType(W), fst(a)), finStar(WeilDatum.field(W))(snd(a)))) |
+    a ∈ cmAdeles(WeilDatum.field(W), WeilDatum.cmType(W)) }
+
+-- The map E → 𝔸, a ↦ toAdele(a).
+def toAdeleMap (W : Set) : Set :=
+  { (a, toCMAdele(WeilDatum.field(W), WeilDatum.cmType(W), a)) |
+    a ∈ Ring.carrier(WeilDatum.field(W)) }
+
+-- SpaceDefs.lean, stdForm E s: the diagonal adelic matrix equal to diag(s)
+-- at every infinite place and to 1 at the finite places.
+def signInfinite (W s i : Set) : Set := { (σ, s(i)) | σ ∈ WeilDatum.cmType(W) }
+
+def signAdele (W s i : Set) : Set := (signInfinite(W, s, i), finOne(WeilDatum.field(W)))
+
+def signAdeles (W n s : Set) : Set := { (i, signAdele(W, s, i)) | i ∈ n }
+
+def stdForm (W n s : Set) : Set := matDiagonal(adeleRingOf(W), n, signAdeles(W, n, s))
+
+-- SpaceDefs.lean, Space E n s: a matrix J over E and x ∈ GLₙ(𝔸) with
+-- xᴴ J x = stdForm(s) (gram_point).
+predicate FramedSpace (W n s J x : Set) :=
+  IsWeilDatum(W) ∧ Finite(n) ∧ SignsOn(n, s) ∧
+  J ∈ matrixSpace(WeilDatum.field(W), n, n) ∧
+  x ∈ invertibleMatrices(adeleRingOf(W), n) ∧
+  gramMatrix(adeleRingOf(W), adeleStar(W), n, n, n,
+    matMap(adeleRingOf(W), n, n, toAdeleMap(W), J), x, x) = stdForm(W, n, s)
+
+-- The constant signs 1 (the source's s = 1).
+def unitSigns (n : Set) : Set := n × {complexOne}
+
+-- SpaceDefs.lean, stdSpace E n: J = 1 and x = 1.
+def stdGram (W n : Set) : Set := matOne(WeilDatum.field(W), n)
+def stdFrame (W n : Set) : Set := matOne(adeleRingOf(W), n)
+
+theorem stdSpace.framed (W n : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  shows FramedSpace(W, n, unitSigns(n), stdGram(W, n), stdFrame(W, n))
+proof
+  sorry
+
+-- SpaceDefs.lean, Space.vecAtPoint: γ ∈ Eⁿ ↦ x⁻¹ toAdele(γ) ∈ 𝔸ⁿ.
+def adeleVectorOf (W n γ : Set) : Set := { (i, toAdeleMap(W)(γ(i))) | i ∈ n }
+
+def vecAtPoint (W n x γ : Set) : Set :=
+  mulVec(adeleRingOf(W), n, n, matInverse(adeleRingOf(W), n, x), adeleVectorOf(W, n, γ))
+
+-- ThetaFunctional.lean, Space.ratVectors: the rational vectors of V,
+-- the vecAtPoint γ for γ ∈ Eⁿ.
+def ratVectors (W n x : Set) : Set :=
+  { vecAtPoint(W, n, x, γ) | γ ∈ functionSpace(n, Ring.carrier(WeilDatum.field(W))) }
+
+-- Section: The data space and its operators
+-- PairDefs.lean, 𝒮 V = Model (adelicHeis E s): the reproducing space of the
+-- adelic vacuum, a ℂ-module with the L¹ norm; it depends only on the signs.
+def dataSpace (W n s : Set) : Set :=
+  modelSet(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n))
+
+def dataModule (W n s : Set) : Set :=
+  modelModule(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n))
+
+def dataNorm (W n s : Set) : Set :=
+  modelNorm(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n))
+
+-- PairDefs.lean, Space.heisRep and ϱ y: the Heisenberg operator
+-- f ↦ (x ↦ β(y, x) f(x − y)) on 𝒮(V).
+def dataHeis (W n s y : Set) : Set :=
+  heisRep(adelicVectorGroup(W, n), adelicVectorSpace(W, n), vacuumMeasure(W, n),
+    adelicBeta(W, n, s), vacuumFn(W, n))(y)
+
+-- PairDefs.lean, Space.vacElem: the vacuum e as an element of 𝒮(V).
+def dataVacuum (W n : Set) : Set := vacuumFn(W, n)
+
+-- PairDefs.lean, finVec x: the adelic vector with zero infinite part and
+-- finite part αx, for x ∈ 𝔸_fⁿ.
+def zeroInfinite (W : Set) : Set := { (σ, complexZero) | σ ∈ WeilDatum.cmType(W) }
+
+def finVec (W n x : Set) : Set :=
+  { (i, (zeroInfinite(W), finMul(WeilDatum.field(W), WeilDatum.alpha(W), x(i)))) | i ∈ n }
+
+-- PairDefs.lean, Space.finHeisOp x: sc(x) ϱ(αx).
+def finHeisOp (W n s x f : Set) : Set :=
+  Module.smul(dataModule(W, n, s))(semichar(W, n, x), dataHeis(W, n, s, finVec(W, n, x))(f))
+
+theorem dataModule.banach (W n s : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  requires signs : SignsOn(n, s)
+  shows BanachSpace(dataModule(W, n, s), complexRing, complexAbs, dataNorm(W, n, s)) ∧
+    dataVacuum(W, n) ∈ dataSpace(W, n, s)
+proof
+  sorry
+
+-- ThetaFunctional.lean, Space.beta_vecAtPoint_eq_one: β is 1 on pairs of
+-- rational vectors.
+theorem ratVectors.beta (W n s J x γ δ : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  requires hγ : γ ∈ ratVectors(W, n, x)
+  requires hδ : δ ∈ ratVectors(W, n, x)
+  shows adelicBeta(W, n, s)(γ, δ) = complexOne
+proof
+  sorry
+
+-- Section: Theta functionals
+-- The bounded functionals on 𝒮(V).
+predicate DataFunctional (W n s ℓ : Set) :=
+  ContinuousLinearMap(ℓ, dataModule(W, n, s), dataNorm(W, n, s), complexSelfModule,
+    complexAbs, complexRing)
+
+-- ThetaFunctional.lean, Space.IsRatInvariant ℓ: ℓ(ϱ(γ)v) = ℓ(v) for every
+-- rational vector γ of V.
+predicate RatInvariant (W n s x ℓ : Set) :=
+  DataFunctional(W, n, s, ℓ) ∧
+  ∀ γ ∈ ratVectors(W, n, x), ∀ v ∈ dataSpace(W, n, s), ℓ(dataHeis(W, n, s, γ)(v)) = ℓ(v)
+
+-- PeriodicMean.lean, quotMean B₀ F: the mean of a B₀-periodic F over the
+-- compact quotient B/B₀ for its Haar probability measure. A periodic F
+-- descends to the quotient (the value at any point of the class; the
+-- source reads F at a chosen representative q.out).
+def descendedValue (F q : Set) : Set := ⋃({ w ∈ complexCarrier | ∃ y ∈ q, w = F(y) })
+
+def quotientGroupOf (W n x : Set) : Set :=
+  quotientGroup(adelicVectorGroup(W, n), ratVectors(W, n, x))
+
+def quotientSpaceOf (W n x : Set) : Set :=
+  quotientGroupSpace(adelicVectorGroup(W, n), adelicVectorSpace(W, n), ratVectors(W, n, x))
+
+def descended (W n x F : Set) : Set :=
+  { (q, descendedValue(F, q)) | q ∈ Group.carrier(quotientGroupOf(W, n, x)) }
+
+def quotMean (W n x F : Set) : Set :=
+  complexMeasureIntegral(borelSpace(quotientSpaceOf(W, n, x)),
+    haarMeasureNormalized(quotientGroupOf(W, n, x), quotientSpaceOf(W, n, x),
+      Group.carrier(quotientGroupOf(W, n, x))),
+    descended(W, n, x, F))
+
+-- x ↦ |θ(ϱ(x) e)|² on 𝔸ⁿ.
+def thetaVacuumSq (W n s θ : Set) : Set :=
+  { (y, ℂ[θ(dataHeis(W, n, s, y)(dataVacuum(W, n))) *
+      complexConj(θ(dataHeis(W, n, s, y)(dataVacuum(W, n))))]) | y ∈ adelicVectors(W, n) }
+
+-- ThetaFunctional.lean, Space.IsThetaFunctional θ: θ is a rationally
+-- invariant bounded functional with |θ(ϱ(x)e)|² of mean 1 over 𝔸ⁿ modulo
+-- the rational vectors.
+predicate ThetaFunctional (W n s x θ : Set) :=
+  RatInvariant(W, n, s, x, θ) ∧ quotMean(W, n, x, thetaVacuumSq(W, n, s, θ)) = complexOne
+
+-- The quotient 𝔸ⁿ/ratVectors is compact (ThetaFunctional.lean, instance
+-- CompactSpace).
+theorem ratVectors.compact_quotient (W n s J x : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  shows Compact(quotientSpaceOf(W, n, x))
+proof
+  sorry
+
+-- ThetaFunctional.lean, Space.exists_isThetaFunctional (known result).
+theorem ThetaFunctional.exists (W n s J x : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  shows ∃ θ, ThetaFunctional(W, n, s, x, θ)
+proof
+  sorry
+
+-- ThetaFunctional.lean, IsThetaFunctional.eq_smul: every rationally
+-- invariant bounded functional is a multiple of a theta functional.
+def scaledFunctional (W n s c θ : Set) : Set := { (v, ℂ[c * θ(v)]) | v ∈ dataSpace(W, n, s) }
+
+theorem ThetaFunctional.eq_smul (W n s J x θ ℓ : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  requires theta : ThetaFunctional(W, n, s, x, θ)
+  requires invariant : RatInvariant(W, n, s, x, ℓ)
+  shows ∃ c ∈ complexCarrier, ℓ = scaledFunctional(W, n, s, c, θ)
+proof
+  sorry
+
+-- Two theta functionals differ by a scalar of modulus one (from eq_smul
+-- and the normalization).
+theorem ThetaFunctional.unique (W n s J x θ θ2 : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  requires theta : ThetaFunctional(W, n, s, x, θ)
+  requires theta2 : ThetaFunctional(W, n, s, x, θ2)
+  shows ∃ c ∈ complexCarrier, complexAbs(c) = realOne ∧ θ2 = scaledFunctional(W, n, s, c, θ)
+proof
+  sorry
+
+-- The function y ↦ θ(ϱ(y)f) on 𝔸ⁿ attached to f (PairDefs.lean, the
+-- FunLike instance of 𝒮 V).
+def thetaFunctionOf (W n s θ f : Set) : Set :=
+  { (y, θ(dataHeis(W, n, s, y)(f))) | y ∈ adelicVectors(W, n) }
+
+-- ThetaFunctional.lean, IsThetaFunctional.injective_apply_heisOp: f is
+-- determined by y ↦ θ(ϱ(y)f).
+theorem ThetaFunctional.injective (W n s J x θ f g : Set)
+  requires framed : FramedSpace(W, n, s, J, x)
+  requires theta : ThetaFunctional(W, n, s, x, θ)
+  requires hf : f ∈ dataSpace(W, n, s)
+  requires hg : g ∈ dataSpace(W, n, s)
+  requires same : thetaFunctionOf(W, n, s, θ, f) = thetaFunctionOf(W, n, s, θ, g)
+  shows f = g
+proof
+  sorry
+
+-- Section: Spaces with their theta functional
+-- A framed space with a theta functional: the Weil data, the index set n
+-- (finite), the signs, J, the frame x, and θ.
+structure ThetaSpace
+  | weil rank signs gram frame theta : Set
+
+predicate IsThetaSpace (V : Set) :=
+  ThetaSpace.Data(V) ∧
+  FramedSpace(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V),
+    ThetaSpace.gram(V), ThetaSpace.frame(V)) ∧
+  ThetaFunctional(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V),
+    ThetaSpace.frame(V), ThetaSpace.theta(V))
+
+-- DataProduct.lean, Space.IsStd: the signs are 1 and the frame x is 1
+-- (then J = 1 by gram_point).
+predicate IsStdSpace (V : Set) :=
+  IsThetaSpace(V) ∧ ThetaSpace.signs(V) = unitSigns(ThetaSpace.rank(V)) ∧
+  ThetaSpace.frame(V) = stdFrame(ThetaSpace.weil(V), ThetaSpace.rank(V))
+
+-- The data space of V, its module, Heisenberg operators and vacuum.
+def spaceData (V : Set) : Set :=
+  dataSpace(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V))
+
+def spaceModule (V : Set) : Set :=
+  dataModule(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V))
+
+def spaceHeis (V y f : Set) : Set :=
+  dataHeis(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V), y)(f)
+
+def spaceVacuum (V : Set) : Set := dataVacuum(ThetaSpace.weil(V), ThetaSpace.rank(V))
+
+-- PairDefs.lean, Space.θ: θ of V.
+def spaceTheta (V f : Set) : Set := ThetaSpace.theta(V)(f)
+
+-- PairDefs.lean, finVec at V: x ∈ 𝔸_fⁿ ↦ αx.
+def spaceFinVec (V x : Set) : Set :=
+  finVec(ThetaSpace.weil(V), ThetaSpace.rank(V), x)
+
+-- The finite adelic vectors 𝔸_fⁿ of V (the domain of finVec).
+def spaceFinVectors (V : Set) : Set := finVectors(ThetaSpace.weil(V), ThetaSpace.rank(V))
+
+-- FinitePart.lean, Space.finitePart: 𝒲_f, the span of the finite
+-- translates finHeisOp(x) e of the vacuum.
+def finiteTranslates (V : Set) : Set :=
+  { finHeisOp(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V), x,
+      spaceVacuum(V)) | x ∈ spaceFinVectors(V) }
+
+def spaceFinitePart (V : Set) : Set :=
+  moduleSpan(spaceModule(V), complexRing, finiteTranslates(V))
+
+-- PairDefs.lean, θ_apply and ϱ_apply: θ(ϱ(y)f) = f(y), and
+-- f(x) of ϱ(y)f is β(x, y) f(x + y).
+theorem spaceTheta.heis (V y z f : Set)
+  requires space : IsThetaSpace(V)
+  requires hy : y ∈ adelicVectors(ThetaSpace.weil(V), ThetaSpace.rank(V))
+  requires hz : z ∈ adelicVectors(ThetaSpace.weil(V), ThetaSpace.rank(V))
+  requires hf : f ∈ spaceData(V)
+  shows spaceTheta(V, spaceHeis(V, z, spaceHeis(V, y, f))) =
+    ℂ[adelicBeta(ThetaSpace.weil(V), ThetaSpace.rank(V), ThetaSpace.signs(V))(z, y) *
+      spaceTheta(V, spaceHeis(V, hAdd(adelicVectorGroup(ThetaSpace.weil(V),
+        ThetaSpace.rank(V)), z, y), f))]
+proof
+  sorry
+
+-- FinitePart.lean, Space.vacElem_mem_finitePart, finHeisOp_mem_finitePart
+-- and rho_finVec_mem_finitePart: 𝒲_f contains e and is stable under the
+-- finite Heisenberg operators.
+theorem spaceFinitePart.vacuum (V : Set)
+  requires space : IsThetaSpace(V)
+  shows spaceVacuum(V) ∈ spaceFinitePart(V)
+proof
+  sorry
+
+theorem spaceFinitePart.heis (V x f : Set)
+  requires space : IsThetaSpace(V)
+  requires hx : x ∈ spaceFinVectors(V)
+  requires hf : f ∈ spaceFinitePart(V)
+  shows spaceHeis(V, spaceFinVec(V, x), f) ∈ spaceFinitePart(V)
+proof
+  sorry
+
+-- Standard spaces exist in every rank: (W, n, 1, 1, 1, θ) for any theta
+-- functional θ of stdSpace (exists_isThetaFunctional).
+theorem IsStdSpace.exists (W n : Set)
+  requires weil : IsWeilDatum(W)
+  requires finite : Finite(n)
+  shows ∃ θ, IsStdSpace(ThetaSpace.mk(W, n, unitSigns(n), stdGram(W, n), stdFrame(W, n), θ))
+proof
+  sorry
+
+-- DataProduct.lean, IsStd: a standard space has J = 1.
+theorem IsStdSpace.gram (V : Set)
+  requires std : IsStdSpace(V)
+  shows ThetaSpace.gram(V) = stdGram(ThetaSpace.weil(V), ThetaSpace.rank(V))
+proof
+  sorry
+
+end Construction2

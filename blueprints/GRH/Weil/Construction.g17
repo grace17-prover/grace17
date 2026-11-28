@@ -1,0 +1,1023 @@
+-- The abstract Weil representation on vacuum coefficients: a Heisenberg
+-- bicharacter β on a locally compact abelian group W, its
+-- representations on complex Banach spaces, a vacuum e; the reproducing
+-- space of e (integrable v with v(x) = ∫ v(y) β(y, x) e(x − y) dμ(y)),
+-- with its L¹ norm, Heisenberg representation and vacuum element; the
+-- reproducing formula, Schur's lemma and uniqueness of the invariant
+-- form; the Weil operators ω(g) of a group acting on W, their cocycle,
+-- unitarity and intertwining; orthogonal sums and the tensor product of
+-- reproducing spaces.
+-- Source: grh-compact/src/Lib/Weil/Construction/SubmoduleNormedSpace.lean,
+-- Model.lean, WeilOperators.lean, OrthogonalSum.lean; the Heisenberg
+-- datum, its representations, vacua and multiplier actions are from
+-- Lib/General/Groups/ValuationPair.lean (Heisenberg, Heisenberg.Rep,
+-- Heisenberg.IsVacuum, Heisenberg.MultiplierAction), stated here until
+-- GRH.General.LinearAlgebra2 exists. Part of: "Adelic Weil
+-- representation of a unitary group and the invariant theta functional
+-- (known result; see Lib.Weil.DualPair.PairSplitting)."
+-- Encoding. The abelian group W is a group record G written in its mul
+-- slot (hAdd, hNeg, hSub, hZero), with a topology X on its carrier and a
+-- measure μ on borelSpace(X). The reproducing space is a set of
+-- functions W → ℂ (Mathlib's subtype of W → ℂ); its module, norm and
+-- operators are sets of pairs. A complex Banach space is a Module V over
+-- complexRing with a norm, as in GRH.Normed.Spaces.
+-- Part of the GRH blueprint (layer 4, Lib/Weil, stage S1).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.Weil.Construction
+import GRH.Measure.Haar
+import GRH.Normed.InnerProduct
+import Grace.Cumulus.Algebra.Group.Product
+
+section Construction
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: The abelian group W, written additively
+-- x + y, −x, x − y and 0 in the group record G (the mul slot is the
+-- addition of W).
+def hAdd (G x y : Set) : Set := Group.mul(G)(x, y)
+def hNeg (G x : Set) : Set := Group.inv(G)(x)
+def hSub (G x y : Set) : Set := Group.mul(G)(x, Group.inv(G)(y))
+def hZero (G : Set) : Set := Group.one(G)
+
+-- The integral of a complex function on W against μ, a measure on the
+-- Borel sets of X (Mathlib's ∫ x, f x ∂μ).
+def hIntegral (X μ f : Set) : Set := complexMeasureIntegral(borelSpace(X), μ, f)
+
+-- The integral of a V-valued function (Bochner, as GRH.Measure.Bochner).
+def hBanachIntegral (X μ V norm f : Set) : Set :=
+  banachIntegral(borelSpace(X), μ, V, complexOfReal, norm, f)
+
+-- The setting the source fixes by instances: W a locally compact,
+-- second-countable abelian topological group with a Haar measure μ
+-- (AddCommGroup, IsTopologicalAddGroup, BorelSpace,
+-- SecondCountableTopology, μ.IsAddHaarMeasure).
+predicate HaarSetting (G X μ : Set) :=
+  AbelianGroup(G) ∧ LocallyCompactGroup(G, X) ∧ SecondCountable(X) ∧
+  HaarMeasure(G, X, μ)
+
+-- ValuationPair.lean, Heisenberg W: a continuous β : W × W → ℂ of modulus
+-- one, multiplicative in each variable, with β(x, x) = 1.
+predicate HeisenbergDatum (G X β : Set) :=
+  AbelianGroup(G) ∧ TopologicalGroup(G, X) ∧
+  FunctionBetween(β, Group.carrier(G) × Group.carrier(G), complexCarrier) ∧
+  (∀ x ∈ Group.carrier(G), ∀ x2 ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G),
+    β(hAdd(G, x, x2), y) = ℂ[β(x, y) * β(x2, y)]) ∧
+  (∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G), ∀ y2 ∈ Group.carrier(G),
+    β(x, hAdd(G, y, y2)) = ℂ[β(x, y) * β(x, y2)]) ∧
+  (∀ x ∈ Group.carrier(G), β(x, x) = complexOne) ∧
+  (∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G), complexAbs(β(x, y)) = realOne) ∧
+  β : productSpace(X, X) ⇒ complexSpace
+
+-- The map (x, v) ↦ ρ(x)(v) on W × V.
+def repAction (G V ρ : Set) : Set :=
+  { (p, ρ(fst(p))(snd(p))) | p ∈ Group.carrier(G) × Module.carrier(V) }
+
+-- ValuationPair.lean, Heisenberg.Rep X: bounded operators ρ(x) on the
+-- complex normed space (V, norm), isometric, with ρ(x)ρ(y) = β(x, y) ρ(x + y)
+-- and (x, v) ↦ ρ(x)v continuous.
+predicate HeisenbergRep (G X β V norm ρ : Set) :=
+  HeisenbergDatum(G, X, β) ∧ NormedSpace(V, complexRing, complexAbs, norm) ∧
+  (∀ x ∈ Group.carrier(G),
+    ContinuousLinearMap(ρ(x), V, norm, V, norm, complexRing)) ∧
+  (∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G), ∀ v ∈ Module.carrier(V),
+    ρ(x)(ρ(y)(v)) = Module.smul(V)(β(x, y), ρ(hAdd(G, x, y))(v))) ∧
+  (∀ x ∈ Group.carrier(G), ∀ v ∈ Module.carrier(V), norm(ρ(x)(v)) = norm(v)) ∧
+  repAction(G, V, ρ) : productSpace(X, spaceTopology(V, norm)) ⇒
+    spaceTopology(V, norm)
+
+-- The integrand z ↦ e(z) β(z, y) β(z + y, x) e(x − (z + y)) of the
+-- twisted convolution.
+def twistedConvIntegrand (G β e y x : Set) : Set :=
+  { (z, ℂ[e(z) * (β(z, y) * (β(hAdd(G, z, y), x) *
+      e(hSub(G, x, hAdd(G, z, y)))))]) | z ∈ Group.carrier(G) }
+
+-- ValuationPair.lean, Heisenberg.IsVacuum: e is continuous, e(0) = 1, even,
+-- real, integrable, and ∫ e(z) β(z, y) β(z + y, x) e(x − z − y) dμ(z) =
+-- e(y) e(x).
+predicate IsVacuum (G X μ β e : Set) :=
+  HaarSetting(G, X, μ) ∧ HeisenbergDatum(G, X, β) ∧
+  FunctionBetween(e, Group.carrier(G), complexCarrier) ∧
+  e : X ⇒ complexSpace ∧
+  e(hZero(G)) = complexOne ∧
+  (∀ x ∈ Group.carrier(G), e(hNeg(G, x)) = e(x)) ∧
+  (∀ x ∈ Group.carrier(G), complexConj(e(x)) = e(x)) ∧
+  (∀ y ∈ Group.carrier(G), ∀ x ∈ Group.carrier(G),
+    hIntegral(X, μ, twistedConvIntegrand(G, β, e, y, x)) = ℂ[e(y) * e(x)]) ∧
+  ComplexIntegrable(borelSpace(X), μ, e)
+
+-- A group H acting on W by automorphisms: act(h)(x) = h • x, with
+-- 1 • x = x, (gh) • x = g • (h • x), and h • (x + y) = h • x + h • y
+-- (DistribMulAction), continuous in (h, x) (ContinuousSMul) for a
+-- topology Y on H.
+def actionMap (H G act : Set) : Set :=
+  { (p, act(fst(p))(snd(p))) | p ∈ Group.carrier(H) × Group.carrier(G) }
+
+predicate GroupActionOn (H Y G X act : Set) :=
+  TopologicalGroup(H, Y) ∧
+  (∀ h ∈ Group.carrier(H), FunctionBetween(act(h), Group.carrier(G), Group.carrier(G))) ∧
+  (∀ x ∈ Group.carrier(G), act(Group.one(H))(x) = x) ∧
+  (∀ g ∈ Group.carrier(H), ∀ h ∈ Group.carrier(H), ∀ x ∈ Group.carrier(G),
+    act(Group.mul(H)(g, h))(x) = act(g)(act(h)(x))) ∧
+  (∀ h ∈ Group.carrier(H), ∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G),
+    act(h)(hAdd(G, x, y)) = hAdd(G, act(h)(x), act(h)(y))) ∧
+  actionMap(H, G, act) : productSpace(Y, X) ⇒ X
+
+-- The double integral ∫∫ e(h x) e((gh) y) β(x, y) e(x + y) dμ(y) dμ(x)
+-- of the cocycle.
+def cocycleInner (H G act β e g h x : Set) : Set :=
+  { (y, ℂ[e(act(h)(x)) * e(act(Group.mul(H)(g, h))(y)) * β(x, y) *
+      e(hAdd(G, x, y))]) | y ∈ Group.carrier(G) }
+def cocycleOuter (H G X μ act β e g h : Set) : Set :=
+  { (x, hIntegral(X, μ, cocycleInner(H, G, act, β, e, g, h, x))) |
+    x ∈ Group.carrier(G) }
+
+-- ValuationPair.lean, Heisenberg.MultiplierAction G c: the action of H
+-- preserves β and μ, and Δ : H → ℂ is continuous with Δ(1) = 1,
+-- Δ(g⁻¹) = conj Δ(g), and Δ(g) Δ(h) Δ((gh)⁻¹) times the double integral is
+-- c(g, h).
+predicate MultiplierAction (H Y G X μ β e act Δ c : Set) :=
+  GroupActionOn(H, Y, G, X, act) ∧
+  (∀ h ∈ Group.carrier(H), ∀ x ∈ Group.carrier(G), ∀ y ∈ Group.carrier(G),
+    β(act(h)(x), act(h)(y)) = β(x, y)) ∧
+  (∀ h ∈ Group.carrier(H), ∀ A ∈ borelSigma(X),
+    μ(functionPreimage(act(h), Group.carrier(G), A)) = μ(A)) ∧
+  FunctionBetween(Δ, Group.carrier(H), complexCarrier) ∧
+  Δ : Y ⇒ complexSpace ∧
+  Δ(Group.one(H)) = complexOne ∧
+  (∀ g ∈ Group.carrier(H), Δ(Group.inv(H)(g)) = complexConj(Δ(g))) ∧
+  FunctionBetween(c, Group.carrier(H) × Group.carrier(H), complexCarrier) ∧
+  (∀ g ∈ Group.carrier(H), ∀ h ∈ Group.carrier(H),
+    ℂ[Δ(g) * Δ(h) * Δ(Group.inv(H)(Group.mul(H)(g, h))) *
+      hIntegral(X, μ, cocycleOuter(H, G, X, μ, act, β, e, g, h))] = c(g, h))
+
+-- The trivial cocycle (g, h) ↦ 1 (the source's default c = 1).
+def trivialCocycle (H : Set) : Set :=
+  (Group.carrier(H) × Group.carrier(H)) × {complexOne}
+
+-- Section: The Heisenberg bicharacter and the vacuum
+-- SubmoduleNormedSpace.lean, Heisenberg.β_ne_zero.
+theorem HeisenbergDatum.beta_ne_zero (G X β x y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hx : x ∈ Group.carrier(G)
+  requires hy : y ∈ Group.carrier(G)
+  shows β(x, y) ≠ complexZero
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.β_zero_left and β_zero_right.
+theorem HeisenbergDatum.beta_zero_left (G X β y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hy : y ∈ Group.carrier(G)
+  shows β(hZero(G), y) = complexOne
+proof
+  sorry
+
+theorem HeisenbergDatum.beta_zero_right (G X β y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hy : y ∈ Group.carrier(G)
+  shows β(y, hZero(G)) = complexOne
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.β_mul_β: β(x, y) β(y, x) = 1.
+theorem HeisenbergDatum.beta_mul_beta (G X β x y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hx : x ∈ Group.carrier(G)
+  requires hy : y ∈ Group.carrier(G)
+  shows ℂ[β(x, y) * β(y, x)] = complexOne
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.β_neg_left and β_neg_right:
+-- β(−x, y) = β(y, x) and β(x, −y) = β(y, x).
+theorem HeisenbergDatum.beta_neg_left (G X β x y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hx : x ∈ Group.carrier(G)
+  requires hy : y ∈ Group.carrier(G)
+  shows β(hNeg(G, x), y) = β(y, x)
+proof
+  sorry
+
+theorem HeisenbergDatum.beta_neg_right (G X β x y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hx : x ∈ Group.carrier(G)
+  requires hy : y ∈ Group.carrier(G)
+  shows β(x, hNeg(G, y)) = β(y, x)
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.conj_β: conj β(x, y) = β(y, x).
+theorem HeisenbergDatum.conj_beta (G X β x y : Set)
+  requires datum : HeisenbergDatum(G, X, β)
+  requires hx : x ∈ Group.carrier(G)
+  requires hy : y ∈ Group.carrier(G)
+  shows complexConj(β(x, y)) = β(y, x)
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.Rep.rho_zero_apply: ρ(0) = 1.
+theorem HeisenbergRep.rho_zero (G X β V norm ρ v : Set)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρ)
+  requires hv : v ∈ Module.carrier(V)
+  shows ρ(hZero(G))(v) = v
+proof
+  sorry
+
+-- |e(x)|² on W.
+def vacuumNormSq (G e : Set) : Set :=
+  { (x, complexOfReal(R[complexAbs(e(x)) * complexAbs(e(x))])) |
+    x ∈ Group.carrier(G) }
+
+-- SubmoduleNormedSpace.lean, Heisenberg.IsVacuum.integral_norm_sq_eq_one:
+-- ∫ |e|² dμ = 1.
+theorem IsVacuum.integral_norm_sq (G X μ β e : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows hIntegral(X, μ, vacuumNormSq(G, e)) = complexOne
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.IsVacuum.norm_le_one: |e(x)| ≤ 1.
+theorem IsVacuum.abs_le_one (G X μ β e x : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  shows complexAbs(e(x)) ≤ (1:R)
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.Rep.moveBy: for h ∈ H preserving
+-- β, the representation x ↦ ρ(h • x).
+def moveBy (G ρ act h : Set) : Set := { (x, ρ(act(h)(x))) | x ∈ Group.carrier(G) }
+
+theorem moveBy.rep (H Y G X μ β e act Δ c V norm ρ h : Set)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρ)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires hh : h ∈ Group.carrier(H)
+  shows HeisenbergRep(G, X, β, V, norm, moveBy(G, ρ, act, h))
+proof
+  sorry
+
+-- SubmoduleNormedSpace.lean, Heisenberg.Rep.moveBy_one.
+theorem moveBy.one (H Y G X μ β e act Δ c V norm ρ : Set)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρ)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  shows moveBy(G, ρ, act, Group.one(H)) = ρ
+proof
+  sorry
+
+-- Section: The reproducing space of a vacuum
+-- The integrand y ↦ v(y) β(y, x) e(x − y).
+def reproducingIntegrand (G β e v x : Set) : Set :=
+  { (y, ℂ[v(y) * (β(y, x) * e(hSub(G, x, y)))]) | y ∈ Group.carrier(G) }
+
+-- Model.lean, IsVacuum.modelSubmodule and IsVacuum.Model: the integrable
+-- v : W → ℂ with v(x) = ∫ v(y) β(y, x) e(x − y) dμ(y) for every x.
+def modelSet (G X μ β e : Set) : Set :=
+  { v ∈ functionSpace(Group.carrier(G), complexCarrier) |
+    ComplexIntegrable(borelSpace(X), μ, v) ∧
+    ∀ x ∈ Group.carrier(G), hIntegral(X, μ, reproducingIntegrand(G, β, e, v, x)) = v(x) }
+
+-- The functions W → ℂ as a ℂ-module, and the reproducing space as its
+-- submodule (Model.lean, deriving Module ℂ).
+def functionsOn (G : Set) : Set := coordinateModule(complexRing, Group.carrier(G))
+
+def modelModule (G X μ β e : Set) : Set :=
+  submoduleModule(functionsOn(G), complexRing, modelSet(G, X, μ, β, e))
+
+-- Model.lean, the norm induced by IsVacuum.toL1: ‖v‖ = ∫ |v| dμ
+-- (IsVacuum.norm_eq).
+def modelNorm (G X μ β e : Set) : Set :=
+  { (v, realMeasureIntegral(borelSpace(X), μ, complexAbsOn(v, Group.carrier(G)))) |
+    v ∈ modelSet(G, X, μ, β, e) }
+
+-- Model.lean: the reproducing space is a submodule of the functions, and
+-- a complex Banach space under the L¹ norm (instances NormedAddCommGroup,
+-- NormedSpace ℂ, CompleteSpace).
+theorem modelSet.submodule (G X μ β e : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows SubmoduleOf(modelSet(G, X, μ, β, e), functionsOn(G), complexRing)
+proof
+  sorry
+
+theorem modelModule.banach (G X μ β e : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows BanachSpace(modelModule(G, X, μ, β, e), complexRing, complexAbs,
+    modelNorm(G, X, μ, β, e))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.norm_apply_le: |v(x)| ≤ ‖v‖.
+theorem modelSet.abs_apply_le (G X μ β e v x : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  shows complexAbs(v(x)) ≤ modelNorm(G, X, μ, β, e)(v)
+proof
+  sorry
+
+-- Model.lean, IsVacuum.continuous: every v in the reproducing space is
+-- continuous.
+theorem modelSet.continuous (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows v : X ⇒ complexSpace
+proof
+  sorry
+
+-- Model.lean, IsVacuum.heisRep and heisOp: y acts by the L¹ isometry
+-- v ↦ (x ↦ β(y, x) v(x − y)).
+def heisTranslate (G β y v : Set) : Set :=
+  { (x, ℂ[β(y, x) * v(hSub(G, x, y))]) | x ∈ Group.carrier(G) }
+
+def heisOp (G X μ β e y : Set) : Set :=
+  { (v, heisTranslate(G, β, y, v)) | v ∈ modelSet(G, X, μ, β, e) }
+
+def heisRep (G X μ β e : Set) : Set :=
+  { (y, heisOp(G, X, μ, β, e, y)) | y ∈ Group.carrier(G) }
+
+-- Model.lean, IsVacuum.heisRep: a Heisenberg representation on the
+-- reproducing space.
+theorem heisRep.rep (G X μ β e : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows HeisenbergRep(G, X, β, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+    heisRep(G, X, μ, β, e))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.heisOp_apply.
+theorem heisOp.apply (G X μ β e y v x : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hy : y ∈ Group.carrier(G)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  shows heisRep(G, X, μ, β, e)(y)(v)(x) = ℂ[β(y, x) * v(hSub(G, x, y))]
+proof
+  sorry
+
+-- Model.lean, IsVacuum.vacElem: e itself lies in the reproducing space.
+theorem IsVacuum.mem_model (G X μ β e : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows e ∈ modelSet(G, X, μ, β, e)
+proof
+  sorry
+
+-- Model.lean, IsVacuum.modelEval x: v ↦ v(x), a bounded functional.
+def modelEval (G X μ β e x : Set) : Set := { (v, v(x)) | v ∈ modelSet(G, X, μ, β, e) }
+
+theorem modelEval.continuous (G X μ β e x : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  shows ContinuousLinearMap(modelEval(G, X, μ, β, e, x), modelModule(G, X, μ, β, e),
+    modelNorm(G, X, μ, β, e), complexSelfModule, complexAbs, complexRing)
+proof
+  sorry
+
+-- Model.lean, IsVacuum.modelInner: ⟨v, w⟩ = ∫ conj(v) w dμ, bounded,
+-- conjugate-linear in v (IsVacuum.modelInner_apply).
+def innerIntegrand (G v w : Set) : Set :=
+  { (x, ℂ[complexConj(v(x)) * w(x)]) | x ∈ Group.carrier(G) }
+
+def modelInner (G X μ v w : Set) : Set := hIntegral(X, μ, innerIntegrand(G, v, w))
+
+-- Model.lean, IsVacuum.kernelIntegral σ K: for an isometric ring
+-- endomorphism σ of ℂ and contractions K(y) : V → V′, strongly continuous
+-- in y, the map v ↦ (f ↦ ∫ σ(v(y)) K(y)f dμ(y)).
+def kernelIntegrand (G V2 σ K v f : Set) : Set :=
+  { (y, Module.smul(V2)(σ(v(y)), K(y)(f))) | y ∈ Group.carrier(G) }
+
+def kernelIntegral (G X μ β e V1 V2 norm2 σ K v : Set) : Set :=
+  { (f, hBanachIntegral(X, μ, V2, norm2, kernelIntegrand(G, V2, σ, K, v, f))) |
+    f ∈ Module.carrier(V1) }
+
+-- y ↦ K(y)f.
+def kernelOrbit (G K f : Set) : Set := { (y, K(y)(f)) | y ∈ Group.carrier(G) }
+
+-- Model.lean, IsVacuum.kernelIntegral: each value is a contraction-bounded
+-- continuous linear map V → V′ of norm at most ‖v‖.
+theorem kernelIntegral.bound (G X μ β e V1 norm1 V2 norm2 σ K v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach1 : BanachSpace(V1, complexRing, complexAbs, norm1)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires isometric : FunctionBetween(σ, complexCarrier, complexCarrier) ∧
+    RingHom(σ, complexRing, complexRing) ∧
+    (∀ z ∈ complexCarrier, complexAbs(σ(z)) = complexAbs(z))
+  requires kernel : ∀ y ∈ Group.carrier(G),
+    ContinuousLinearMap(K(y), V1, norm1, V2, norm2, complexRing)
+  requires strong : ∀ f ∈ Module.carrier(V1),
+    kernelOrbit(G, K, f) : X ⇒ spaceTopology(V2, norm2)
+  requires contraction : ∀ y ∈ Group.carrier(G), ∀ f ∈ Module.carrier(V1),
+    norm2(K(y)(f)) ≤ norm1(f)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows ContinuousLinearMap(kernelIntegral(G, X, μ, β, e, V1, V2, norm2, σ, K, v),
+      V1, norm1, V2, norm2, complexRing) ∧
+    LinearBound(kernelIntegral(G, X, μ, β, e, V1, V2, norm2, σ, K, v), V1, norm1,
+      norm2, modelNorm(G, X, μ, β, e)(v))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.integrable_norm_sq: |v|² is integrable.
+theorem modelSet.integrable_abs_sq (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows ComplexIntegrable(borelSpace(X), μ, vacuumNormSq(G, v))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.conj_modelInner.
+theorem modelInner.conj (G X μ β e v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows complexConj(modelInner(G, X, μ, v, w)) = modelInner(G, X, μ, w, v)
+proof
+  sorry
+
+-- Model.lean, IsVacuum.modelInner_heisOp: ρ(x) preserves ⟨·, ·⟩.
+theorem modelInner.heisOp (G X μ β e x v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, heisRep(G, X, μ, β, e)(x)(v), heisRep(G, X, μ, β, e)(x)(w)) =
+    modelInner(G, X, μ, v, w)
+proof
+  sorry
+
+-- Model.lean, IsVacuum.modelInner_heisOp_vacElem (the reproducing
+-- property): ⟨ρ(x) e, v⟩ = v(x).
+theorem modelInner.heisOp_vacuum (G X μ β e x v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hx : x ∈ Group.carrier(G)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, heisRep(G, X, μ, β, e)(x)(e), v) = v(x)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.modelInner_vacElem: ⟨e, v⟩ = v(0).
+theorem modelInner.vacuum (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, e, v) = v(hZero(G))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.modelInner_self: ⟨v, v⟩ = ∫ |v|².
+theorem modelInner.self (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, v, v) = hIntegral(X, μ, vacuumNormSq(G, v))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.eq_zero_of_modelInner_self.
+theorem modelInner.eq_zero_of_self (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires self : modelInner(G, X, μ, v, v) = complexZero
+  shows v = Module.zero(modelModule(G, X, μ, β, e))
+proof
+  sorry
+
+-- Section: Integrated representations and the reproducing formula
+-- Model.lean, Heisenberg.Rep.integrated: for a representation ρR on a
+-- Banach space V, (v, f) ↦ ∫ v(y) ρR(y)f dμ(y).
+def integratedIntegrand (G V ρR v f : Set) : Set :=
+  { (y, Module.smul(V)(v(y), ρR(y)(f))) | y ∈ Group.carrier(G) }
+
+def integrated (G X μ V norm ρR v f : Set) : Set :=
+  hBanachIntegral(X, μ, V, norm, integratedIntegrand(G, V, ρR, v, f))
+
+-- The map f ↦ ρR.integrated v f (for fixed v).
+def integratedMap (G X μ V norm ρR v : Set) : Set :=
+  { (f, integrated(G, X, μ, V, norm, ρR, v, f)) | f ∈ Module.carrier(V) }
+
+-- Model.lean, Rep.integrated: a bounded bilinear map, of norm at most
+-- ‖v‖ ‖f‖ (it is kernelIntegral with σ = id and K = ρR).
+theorem integrated.bound (G X μ β e V norm ρR v f : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hf : f ∈ Module.carrier(V)
+  shows integrated(G, X, μ, V, norm, ρR, v, f) ∈ Module.carrier(V) ∧
+    norm(integrated(G, X, μ, V, norm, ρR, v, f)) ≤
+      R[modelNorm(G, X, μ, β, e)(v) * norm(f)] ∧
+    ContinuousLinearMap(integratedMap(G, X, μ, V, norm, ρR, v), V, norm, V, norm,
+      complexRing)
+proof
+  sorry
+
+-- The integrand y ↦ v(y) T(ρR(y)f) for a bounded T : V → V′.
+def mappedIntegrand (G V2 ρR T v f : Set) : Set :=
+  { (y, Module.smul(V2)(v(y), T(ρR(y)(f)))) | y ∈ Group.carrier(G) }
+
+-- Model.lean, Rep.map_integrated_eq_integral: T(∫ v(y) ρR(y)f) =
+-- ∫ v(y) T(ρR(y)f).
+theorem integrated.map_eq_integral (G X μ β e V norm V2 norm2 ρR T v f : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  requires bounded : ContinuousLinearMap(T, V, norm, V2, norm2, complexRing)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hf : f ∈ Module.carrier(V)
+  shows T(integrated(G, X, μ, V, norm, ρR, v, f)) =
+    hBanachIntegral(X, μ, V2, norm2, mappedIntegrand(G, V2, ρR, T, v, f))
+proof
+  sorry
+
+-- Model.lean, Rep.integrated_heisOp: ∫ (ρ(x)v)(y) ρR(y)f = ρR(x) ∫ v(y) ρR(y)f.
+theorem integrated.heisOp (G X μ β e V norm ρR x v f : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  requires hx : x ∈ Group.carrier(G)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hf : f ∈ Module.carrier(V)
+  shows integrated(G, X, μ, V, norm, ρR, heisRep(G, X, μ, β, e)(x)(v), f) =
+    ρR(x)(integrated(G, X, μ, V, norm, ρR, v, f))
+proof
+  sorry
+
+-- Model.lean, Rep.map_integrated: a bounded T intertwining ρR and ρR′
+-- intertwines the integrated maps.
+theorem integrated.map (G X μ β e V norm V2 norm2 ρR ρ2 T v f : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  requires rep2 : HeisenbergRep(G, X, β, V2, norm2, ρ2)
+  requires bounded : ContinuousLinearMap(T, V, norm, V2, norm2, complexRing)
+  requires intertwines : ∀ y ∈ Group.carrier(G), ∀ g ∈ Module.carrier(V),
+    T(ρR(y)(g)) = ρ2(y)(T(g))
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hf : f ∈ Module.carrier(V)
+  shows T(integrated(G, X, μ, V, norm, ρR, v, f)) =
+    integrated(G, X, μ, V2, norm2, ρ2, v, T(f))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.integrated_vacElem: ∫ v(y) ρ(y)e dμ(y) = v.
+theorem integrated.vacuum (G X μ β e v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows integrated(G, X, μ, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+    heisRep(G, X, μ, β, e), v, e) = v
+proof
+  sorry
+
+-- Model.lean, IsVacuum.integrated_eq_smul: ∫ v(y) ρ(y)w dμ(y) = w(0) v.
+theorem integrated.eq_smul (G X μ β e v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows integrated(G, X, μ, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+      heisRep(G, X, μ, β, e), v, w) =
+    Module.smul(modelModule(G, X, μ, β, e))(w(hZero(G)), v)
+proof
+  sorry
+
+-- y ↦ v(y) T(ρ(y)e) for a bounded T on the reproducing space.
+def translateIntegrand (G X μ β e V2 T v : Set) : Set :=
+  { (y, Module.smul(V2)(v(y), T(heisRep(G, X, μ, β, e)(y)(e)))) | y ∈ Group.carrier(G) }
+
+-- Model.lean, IsVacuum.map_eq_integral: Tv = ∫ v(y) T(ρ(y)e) dμ(y).
+theorem modelSet.map_eq_integral (G X μ β e V2 norm2 T v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires bounded : ContinuousLinearMap(T, modelModule(G, X, μ, β, e),
+    modelNorm(G, X, μ, β, e), V2, norm2, complexRing)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows T(v) = hBanachIntegral(X, μ, V2, norm2, translateIntegrand(G, X, μ, β, e, V2, T, v))
+proof
+  sorry
+
+-- Model.lean, IsVacuum.hom_ext: bounded maps agreeing on the translates
+-- ρ(y)e are equal.
+theorem modelSet.hom_ext (G X μ β e V2 norm2 L L2 : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires bounded : ContinuousLinearMap(L, modelModule(G, X, μ, β, e),
+    modelNorm(G, X, μ, β, e), V2, norm2, complexRing)
+  requires bounded2 : ContinuousLinearMap(L2, modelModule(G, X, μ, β, e),
+    modelNorm(G, X, μ, β, e), V2, norm2, complexRing)
+  requires agree : ∀ y ∈ Group.carrier(G),
+    L(heisRep(G, X, μ, β, e)(y)(e)) = L2(heisRep(G, X, μ, β, e)(y)(e))
+  shows L = L2
+proof
+  sorry
+
+-- Model.lean, IsVacuum.exists_lift: a bounded continuous K : W → V yields a
+-- bounded L from the reproducing space to V with M ∘ L = N whenever
+-- M(K(y)) = N(ρ(y)e) for all y.
+theorem modelSet.exists_lift (G X μ β e V norm V2 norm2 K C : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires banach2 : BanachSpace(V2, complexRing, complexAbs, norm2)
+  requires values : FunctionBetween(K, Group.carrier(G), Module.carrier(V))
+  requires continuous : K : X ⇒ spaceTopology(V, norm)
+  requires hC : C ∈ ℝ
+  requires bounded : ∀ y ∈ Group.carrier(G), norm(K(y)) ≤ C
+  shows ∃ L, ContinuousLinearMap(L, modelModule(G, X, μ, β, e),
+      modelNorm(G, X, μ, β, e), V, norm, complexRing) ∧
+    ∀ M, ∀ N, ContinuousLinearMap(M, V, norm, V2, norm2, complexRing) →
+      ContinuousLinearMap(N, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+        V2, norm2, complexRing) →
+      (∀ y ∈ Group.carrier(G), M(K(y)) = N(heisRep(G, X, μ, β, e)(y)(e))) →
+      ∀ v ∈ modelSet(G, X, μ, β, e), M(L(v)) = N(v)
+proof
+  sorry
+
+-- z ↦ B_z(v, w) for a family of sesquilinear forms B on the reproducing
+-- space.
+def formFamilyAt (Z B v w : Set) : Set :=
+  { (z, call2(B(z), v, w)) | z ∈ MeasurableSpace.carrier(Z) }
+
+-- w ↦ B(v, w) and v ↦ conj B(v, w).
+def formRightSlice (G X μ β e B v : Set) : Set :=
+  { (w, call2(B, v, w)) | w ∈ modelSet(G, X, μ, β, e) }
+def formLeftSliceConj (G X μ β e B w : Set) : Set :=
+  { (v, complexConj(call2(B, v, w))) | v ∈ modelSet(G, X, μ, β, e) }
+
+-- B is a bounded sesquilinear form on the reproducing space (Mathlib's
+-- Model H →L⋆[ℂ] Model H →L[ℂ] ℂ): conjugate-linear in the first and
+-- linear in the second argument, |B(v, w)| ≤ C ‖v‖ ‖w‖.
+predicate BoundedSesquilinear (G X μ β e B : Set) :=
+  FunctionBetween(B, modelSet(G, X, μ, β, e) × modelSet(G, X, μ, β, e), complexCarrier) ∧
+  (∀ v ∈ modelSet(G, X, μ, β, e),
+    LinearMap(formRightSlice(G, X, μ, β, e, B, v),
+      modelModule(G, X, μ, β, e), complexRing, complexSelfModule)) ∧
+  (∀ w ∈ modelSet(G, X, μ, β, e),
+    LinearMap(formLeftSliceConj(G, X, μ, β, e, B, w),
+      modelModule(G, X, μ, β, e), complexRing, complexSelfModule)) ∧
+  (∃ C ∈ ℝ, ∀ v ∈ modelSet(G, X, μ, β, e), ∀ w ∈ modelSet(G, X, μ, β, e),
+    complexAbs(call2(B, v, w)) ≤
+      R[C * modelNorm(G, X, μ, β, e)(v) * modelNorm(G, X, μ, β, e)(w)])
+
+-- Model.lean, IsVacuum.integral_form_eq_mul_modelInner (uniqueness of the
+-- invariant form): if z ↦ B_z(v, w) is integrable for a measure ν on Z and
+-- ∫ B_z(ρ(x)f, ρ(x)g) dν = ∫ B_z(f, g) dν, then ∫ B_z(v, w) dν =
+-- (∫ B_z(e, e) dν) ⟨v, w⟩.
+theorem modelInner.invariant_form (G X μ β e Z ν B v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires measure : Measure(Z, ν)
+  requires forms : ∀ z ∈ MeasurableSpace.carrier(Z), BoundedSesquilinear(G, X, μ, β, e, B(z))
+  requires integrable : ∀ f ∈ modelSet(G, X, μ, β, e), ∀ g ∈ modelSet(G, X, μ, β, e),
+    ComplexIntegrable(Z, ν, formFamilyAt(Z, B, f, g))
+  requires invariant : ∀ x ∈ Group.carrier(G), ∀ f ∈ modelSet(G, X, μ, β, e),
+    ∀ g ∈ modelSet(G, X, μ, β, e),
+      complexMeasureIntegral(Z, ν, formFamilyAt(Z, B, heisRep(G, X, μ, β, e)(x)(f),
+        heisRep(G, X, μ, β, e)(x)(g))) = complexMeasureIntegral(Z, ν, formFamilyAt(Z, B, f, g))
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows complexMeasureIntegral(Z, ν, formFamilyAt(Z, B, v, w)) =
+    ℂ[complexMeasureIntegral(Z, ν, formFamilyAt(Z, B, e, e)) * modelInner(G, X, μ, v, w)]
+proof
+  sorry
+
+-- Section: The Weil operators
+-- WeilOperators.lean, IsVacuum.weilOp B g: v ↦ Δ(g) ∫ v(y) ρ(g y) e dμ(y),
+-- the flip of the integrated representation moved by g, at e.
+def weilOpValue (G X μ β e act Δ g v : Set) : Set :=
+  Module.smul(modelModule(G, X, μ, β, e))(Δ(g),
+    integrated(G, X, μ, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+      moveBy(G, heisRep(G, X, μ, β, e), act, g), v, e))
+
+def weilOp (G X μ β e act Δ g : Set) : Set :=
+  { (v, weilOpValue(G, X, μ, β, e, act, Δ, g, v)) | v ∈ modelSet(G, X, μ, β, e) }
+
+-- The identity of the reproducing space and c · 1.
+def modelIdentity (G X μ β e : Set) : Set := identity(modelSet(G, X, μ, β, e))
+
+def modelScalarOp (G X μ β e c : Set) : Set :=
+  { (v, Module.smul(modelModule(G, X, μ, β, e))(c, v)) | v ∈ modelSet(G, X, μ, β, e) }
+
+-- WeilOperators.lean: ω(g) is a bounded operator of norm at most |Δ(g)|
+-- (norm_integrated_flip_le).
+theorem weilOp.bounded (H Y G X μ β e act Δ c g : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires hg : g ∈ Group.carrier(H)
+  shows ContinuousLinearMap(weilOp(G, X, μ, β, e, act, Δ, g), modelModule(G, X, μ, β, e),
+    modelNorm(G, X, μ, β, e), modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+    complexRing)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.weilOp_triple:
+-- ω((gh)⁻¹) ω(g) ω(h) = c(g, h).
+theorem weilOp.triple (H Y G X μ β e act Δ c g h v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires hg : g ∈ Group.carrier(H)
+  requires hh : h ∈ Group.carrier(H)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows weilOp(G, X, μ, β, e, act, Δ, Group.inv(H)(Group.mul(H)(g, h)))(
+      weilOp(G, X, μ, β, e, act, Δ, g)(weilOp(G, X, μ, β, e, act, Δ, h)(v))) =
+    Module.smul(modelModule(G, X, μ, β, e))(c(g, h), v)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.weilOp_one: ω(1) = 1.
+theorem weilOp.one (H Y G X μ β e act Δ c : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  shows weilOp(G, X, μ, β, e, act, Δ, Group.one(H)) = modelIdentity(G, X, μ, β, e)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.weilOp_mul: if c(g, 1) = 1 for all g, then
+-- ω(g) ω(h) = c(g, h) ω(gh).
+theorem weilOp.mul (H Y G X μ β e act Δ c g h v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires unit : ∀ k ∈ Group.carrier(H), c(k, Group.one(H)) = complexOne
+  requires hg : g ∈ Group.carrier(H)
+  requires hh : h ∈ Group.carrier(H)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows weilOp(G, X, μ, β, e, act, Δ, g)(weilOp(G, X, μ, β, e, act, Δ, h)(v)) =
+    Module.smul(modelModule(G, X, μ, β, e))(c(g, h),
+      weilOp(G, X, μ, β, e, act, Δ, Group.mul(H)(g, h))(v))
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.modelInner_weilOp: if c(g, 1) = 1, ω(g)
+-- preserves ⟨·, ·⟩.
+theorem weilOp.modelInner (H Y G X μ β e act Δ c g v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires hg : g ∈ Group.carrier(H)
+  requires unit : c(g, Group.one(H)) = complexOne
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, weilOp(G, X, μ, β, e, act, Δ, g)(v),
+    weilOp(G, X, μ, β, e, act, Δ, g)(w)) = modelInner(G, X, μ, v, w)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.cocycleRadical: for c(g, 1) = 1, the s with
+-- c(g, s) = 1 for every g form a subgroup.
+def cocycleRadical (H c : Set) : Set :=
+  { s ∈ Group.carrier(H) | ∀ g ∈ Group.carrier(H), c(g, s) = complexOne }
+
+theorem cocycleRadical.subgroup (H Y G X μ β e act Δ c : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, c)
+  requires unit : ∀ k ∈ Group.carrier(H), c(k, Group.one(H)) = complexOne
+  shows Subgroup(cocycleRadical(H, c), H)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.weilRep A: for an action with trivial
+-- cocycle, g ↦ ω(g) is a homomorphism to the bounded operators.
+def weilRep (H G X μ β e act Δ : Set) : Set :=
+  { (g, weilOp(G, X, μ, β, e, act, Δ, g)) | g ∈ Group.carrier(H) }
+
+theorem weilRep.mul (H Y G X μ β e act Δ g h v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires hg : g ∈ Group.carrier(H)
+  requires hh : h ∈ Group.carrier(H)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows weilRep(H, G, X, μ, β, e, act, Δ)(Group.mul(H)(g, h))(v) =
+    weilRep(H, G, X, μ, β, e, act, Δ)(g)(weilRep(H, G, X, μ, β, e, act, Δ)(h)(v))
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.modelInner_weilRep.
+theorem weilRep.modelInner (H Y G X μ β e act Δ g v w : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires hg : g ∈ Group.carrier(H)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  requires hw : w ∈ modelSet(G, X, μ, β, e)
+  shows modelInner(G, X, μ, weilRep(H, G, X, μ, β, e, act, Δ)(g)(v),
+    weilRep(H, G, X, μ, β, e, act, Δ)(g)(w)) = modelInner(G, X, μ, v, w)
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.weilRep_heisOp: ω(g) ρ(x) = ρ(g x) ω(g).
+theorem weilRep.heisOp (H Y G X μ β e act Δ g x v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires hg : g ∈ Group.carrier(H)
+  requires hx : x ∈ Group.carrier(G)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows weilRep(H, G, X, μ, β, e, act, Δ)(g)(heisRep(G, X, μ, β, e)(x)(v)) =
+    heisRep(G, X, μ, β, e)(act(g)(x))(weilRep(H, G, X, μ, β, e, act, Δ)(g)(v))
+proof
+  sorry
+
+-- y ↦ v(g⁻¹ y) ρ(y)e.
+def weilIntegrand (H G X μ β e act g v : Set) : Set :=
+  { (y, Module.smul(modelModule(G, X, μ, β, e))(v(act(Group.inv(H)(g))(y)),
+      heisRep(G, X, μ, β, e)(y)(e))) | y ∈ Group.carrier(G) }
+
+-- WeilOperators.lean, IsVacuum.weilRep_eq_integral:
+-- ω(g)v = Δ(g) ∫ v(g⁻¹ y) ρ(y)e dμ(y).
+theorem weilRep.eq_integral (H Y G X μ β e act Δ g v : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires hg : g ∈ Group.carrier(H)
+  requires hv : v ∈ modelSet(G, X, μ, β, e)
+  shows weilRep(H, G, X, μ, β, e, act, Δ)(g)(v) =
+    Module.smul(modelModule(G, X, μ, β, e))(Δ(g),
+      hBanachIntegral(X, μ, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+        weilIntegrand(H, G, X, μ, β, e, act, g, v)))
+proof
+  sorry
+
+-- WeilOperators.lean, IsVacuum.conj_delta_mul_weilRep_vacElem:
+-- conj Δ(g) · (ω(g)e)(0) = 1.
+theorem weilRep.vacuum_at_zero (H Y G X μ β e act Δ g : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires hg : g ∈ Group.carrier(H)
+  shows ℂ[complexConj(Δ(g)) * weilRep(H, G, X, μ, β, e, act, Δ)(g)(e)(hZero(G))] =
+    complexOne
+proof
+  sorry
+
+-- The map (g, v) ↦ ω(g)v on H × the reproducing space.
+def weilRepAction (H G X μ β e act Δ : Set) : Set :=
+  { (p, weilRep(H, G, X, μ, β, e, act, Δ)(fst(p))(snd(p))) |
+    p ∈ Group.carrier(H) × modelSet(G, X, μ, β, e) }
+
+-- WeilOperators.lean, IsVacuum.continuous_weilRep: for H first countable,
+-- (g, v) ↦ ω(g)v is continuous.
+theorem weilRep.continuous (H Y G X μ β e act Δ : Set)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires multiplier : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires firstCountable : FirstCountableSpace(Y)
+  shows weilRepAction(H, G, X, μ, β, e, act, Δ) :
+    productSpace(Y, spaceTopology(modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e))) ⇒
+    spaceTopology(modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e))
+proof
+  sorry
+
+-- Section: Orthogonal sums
+-- The product group W₁ × W₂ and its topology.
+def pairGroup (G1 G2 : Set) : Set := productGroup(G1, G2)
+
+-- OrthogonalSum.lean, Heisenberg.OrthogonalSum: an isomorphism of
+-- topological groups φ : W₁ × W₂ → W under which β and e are the products
+-- of those of the factors.
+predicate OrthogonalSum (G X β e G1 X1 β1 e1 G2 X2 β2 e2 φ : Set) :=
+  GroupHom(φ, pairGroup(G1, G2), G) ∧
+  Homeomorphism(φ, productSpace(X1, X2), X) ∧
+  (∀ x1 ∈ Group.carrier(G1), ∀ x2 ∈ Group.carrier(G2), ∀ y1 ∈ Group.carrier(G1),
+    ∀ y2 ∈ Group.carrier(G2),
+      β(φ((x1, x2)), φ((y1, y2))) = ℂ[β1(x1, y1) * β2(x2, y2)]) ∧
+  (∀ x1 ∈ Group.carrier(G1), ∀ x2 ∈ Group.carrier(G2),
+    e(φ((x1, x2))) = ℂ[e1(x1) * e2(x2)])
+
+-- OrthogonalSum.lean, Rep.left and Rep.right: x ↦ ρR(φ(x, 0)) and
+-- x ↦ ρR(φ(0, x)).
+def repLeft (G1 G2 ρR φ : Set) : Set :=
+  { (x, ρR(φ((x, hZero(G2))))) | x ∈ Group.carrier(G1) }
+def repRight (G1 G2 ρR φ : Set) : Set :=
+  { (x, ρR(φ((hZero(G1), x)))) | x ∈ Group.carrier(G2) }
+
+theorem repLeft.rep (G X β e G1 X1 β1 e1 G2 X2 β2 e2 φ V norm ρR : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires datum1 : HeisenbergDatum(G1, X1, β1)
+  requires datum2 : HeisenbergDatum(G2, X2, β2)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  shows HeisenbergRep(G1, X1, β1, V, norm, repLeft(G1, G2, ρR, φ)) ∧
+    HeisenbergRep(G2, X2, β2, V, norm, repRight(G1, G2, ρR, φ))
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.tmul: (v₁, v₂) ↦
+-- ∫ v₁(x) ϱ(φ(x, 0)) (∫ v₂(y) ϱ(φ(0, y)) e dy) dx.
+def orthogonalTmul (G X μ β e G1 X1 μ1 G2 X2 μ2 φ v1 v2 : Set) : Set :=
+  integrated(G1, X1, μ1, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+    repLeft(G1, G2, heisRep(G, X, μ, β, e), φ), v1,
+    integrated(G2, X2, μ2, modelModule(G, X, μ, β, e), modelNorm(G, X, μ, β, e),
+      repRight(G1, G2, heisRep(G, X, μ, β, e), φ), v2, e))
+
+-- The product measure (μ₁ × μ₂) pushed forward along φ.
+def pushedProduct (X X1 μ1 X2 μ2 φ : Set) : Set :=
+  mapMeasure(φ, productMeasurableSpace(borelSpace(X1), borelSpace(X2)),
+    productMeasure(borelSpace(X1), μ1, borelSpace(X2), μ2), borelSpace(X))
+
+-- OrthogonalSum.lean, OrthogonalSum.isVacuum: e is a vacuum for the
+-- push-forward of μ₁ × μ₂.
+theorem OrthogonalSum.vacuum (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires setting : HaarSetting(G, X, μ)
+  shows IsVacuum(G, X, pushedProduct(X, X1, μ1, X2, μ2, φ), β, e)
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.measurePreserving_equiv: if e is also
+-- a vacuum for the Haar measure μ, φ carries μ₁ × μ₂ to μ.
+theorem OrthogonalSum.measure_eq (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows pushedProduct(X, X1, μ1, X2, μ2, φ) = μ
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.tmul_apply:
+-- (v₁ ⊗ v₂)(x) = v₁(φ⁻¹(x)₁) v₂(φ⁻¹(x)₂).
+theorem orthogonalTmul.apply (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ v1 v2 x : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv1 : v1 ∈ modelSet(G1, X1, μ1, β1, e1)
+  requires hv2 : v2 ∈ modelSet(G2, X2, μ2, β2, e2)
+  requires hx : x ∈ Group.carrier(G)
+  shows orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ, v1, v2)(x) =
+    ℂ[v1(fst(converse(φ, Group.carrier(G1) × Group.carrier(G2), Group.carrier(G))(x))) * v2(snd(converse(φ, Group.carrier(G1) × Group.carrier(G2), Group.carrier(G))(x)))]
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.tmul_vacElem: e₁ ⊗ e₂ = e.
+theorem orthogonalTmul.vacuum (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  shows orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ, e1, e2) = e
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.heisOp_tmul:
+-- ρ(x)(v₁ ⊗ v₂) = ρ(φ⁻¹(x)₁)v₁ ⊗ ρ(φ⁻¹(x)₂)v₂.
+theorem orthogonalTmul.heisOp (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ v1 v2 x : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires hv1 : v1 ∈ modelSet(G1, X1, μ1, β1, e1)
+  requires hv2 : v2 ∈ modelSet(G2, X2, μ2, β2, e2)
+  requires hx : x ∈ Group.carrier(G)
+  shows heisRep(G, X, μ, β, e)(x)(orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ,
+      v1, v2)) =
+    orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ,
+      heisRep(G1, X1, μ1, β1, e1)(fst(converse(φ, Group.carrier(G1) × Group.carrier(G2), Group.carrier(G))(x)))(v1),
+      heisRep(G2, X2, μ2, β2, e2)(snd(converse(φ, Group.carrier(G1) × Group.carrier(G2), Group.carrier(G))(x)))(v2))
+proof
+  sorry
+
+-- OrthogonalSum.lean, Rep.integrated_tmul: ρR.integrated (v₁ ⊗ v₂) f =
+-- (ρR.left).integrated v₁ ((ρR.right).integrated v₂ f).
+theorem orthogonalTmul.integrated (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ V norm ρR v1
+    v2 f : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires banach : BanachSpace(V, complexRing, complexAbs, norm)
+  requires rep : HeisenbergRep(G, X, β, V, norm, ρR)
+  requires hv1 : v1 ∈ modelSet(G1, X1, μ1, β1, e1)
+  requires hv2 : v2 ∈ modelSet(G2, X2, μ2, β2, e2)
+  requires hf : f ∈ Module.carrier(V)
+  shows integrated(G, X, μ, V, norm, ρR,
+      orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ, v1, v2), f) =
+    integrated(G1, X1, μ1, V, norm, repLeft(G1, G2, ρR, φ), v1,
+      integrated(G2, X2, μ2, V, norm, repRight(G1, G2, ρR, φ), v2, f))
+proof
+  sorry
+
+-- OrthogonalSum.lean, OrthogonalSum.weilRep_tmul: if g acts on W as
+-- (g₁, g₂) on W₁ × W₂ and Δ(g) = Δ₁(g₁) Δ₂(g₂), then
+-- ω(g)(v₁ ⊗ v₂) = ω₁(g₁)v₁ ⊗ ω₂(g₂)v₂.
+theorem orthogonalTmul.weilRep (G X μ β e G1 X1 μ1 β1 e1 G2 X2 μ2 β2 e2 φ
+    H Y act Δ H1 Y1 act1 Δ1 H2 Y2 act2 Δ2 g g1 g2 v1 v2 : Set)
+  requires sum : OrthogonalSum(G, X, β, e, G1, X1, β1, e1, G2, X2, β2, e2, φ)
+  requires vacuum1 : IsVacuum(G1, X1, μ1, β1, e1)
+  requires vacuum2 : IsVacuum(G2, X2, μ2, β2, e2)
+  requires vacuum : IsVacuum(G, X, μ, β, e)
+  requires action : MultiplierAction(H, Y, G, X, μ, β, e, act, Δ, trivialCocycle(H))
+  requires action1 : MultiplierAction(H1, Y1, G1, X1, μ1, β1, e1, act1, Δ1,
+    trivialCocycle(H1))
+  requires action2 : MultiplierAction(H2, Y2, G2, X2, μ2, β2, e2, act2, Δ2,
+    trivialCocycle(H2))
+  requires hg : g ∈ Group.carrier(H)
+  requires hg1 : g1 ∈ Group.carrier(H1)
+  requires hg2 : g2 ∈ Group.carrier(H2)
+  requires multipliers : Δ(g) = ℂ[Δ1(g1) * Δ2(g2)]
+  requires compatible : ∀ x1 ∈ Group.carrier(G1), ∀ x2 ∈ Group.carrier(G2),
+    act(g)(φ((x1, x2))) = φ((act1(g1)(x1), act2(g2)(x2)))
+  requires hv1 : v1 ∈ modelSet(G1, X1, μ1, β1, e1)
+  requires hv2 : v2 ∈ modelSet(G2, X2, μ2, β2, e2)
+  shows weilRep(H, G, X, μ, β, e, act, Δ)(g)(
+      orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ, v1, v2)) =
+    orthogonalTmul(G, X, μ, β, e, G1, X1, μ1, G2, X2, μ2, φ,
+      weilRep(H1, G1, X1, μ1, β1, e1, act1, Δ1)(g1)(v1),
+      weilRep(H2, G2, X2, μ2, β2, e2, act2, Δ2)(g2)(v2))
+proof
+  sorry
+
+end Construction
