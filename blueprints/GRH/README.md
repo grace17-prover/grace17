@@ -373,7 +373,7 @@ graph TD
 | GRH.LSeries.Dirichlet | 141 | 120 | 21 |
 | GRH.LSeries.Completed | 77 | 40 | 37 |
 | GRH.LSeries.NonVanishing | 73 | 63 | 10 |
-| GRH.Calculus.Analytic | 40 | 5 | 35 |
+| GRH.Calculus.Analytic | 72 | 65 | 7 |
 | GRH.LSeries.VonMangoldt | 65 | 50 | 15 |
 | GRH.SpecialFunctions.More | 100 | 90 | 10 |
 | GRH.LSeries.Values | 32 | 13 | 19 |
@@ -417,5 +417,5 @@ graph TD
 | GRH.Scheme.Morphisms | 56 | 0 | 56 |
 | GRH.Scheme.Points | 27 | 0 | 27 |
 | GRH.Weil.Construction.Local | 18 | 1 | 17 |
-| **total** | **8994** | **6727** | **2267** |
+| **total** | **9026** | **6787** | **2239** |
 <!-- /blueprint-status -->
