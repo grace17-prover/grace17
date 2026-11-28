@@ -1,0 +1,343 @@
+-- Green's characters Ξ_c of squarefree labels: the degree bound, twisting
+-- by a determinant character scales the roots of the label, linear labels
+-- give χ∘det, Ξ_c lives in dimension deg c, orthonormality, Green's
+-- theorem that Ξ_c is an irreducible character of GL_r(F_q), and the label
+-- idempotents e_c of ℂ[GLₙ(F_q)] and their tensor products: orthogonal
+-- central idempotents killing twisted sums over the elements 1 + u lᵀ.
+-- Source: grh-compact/src/Lib/LocalGL/Green/LabelDegree.lean (IsLabel.map,
+-- labelChar_degree_bounds), Lib/LocalGL/Green/LabelIdempotents.lean
+-- (scaleRootsEquiv, IsLabel.scaleRoots, frobenius_conj_pow_injOn,
+-- labelChar_mul_det, labelIdem_orthogonal, reflectionSum_mul_labelIdem,
+-- tupleIdem, isCentralProj_tupleIdem, tupleIdem_orthogonal,
+-- isCentralProj_sum_tupleIdem), Lib/LocalGL/Green/FrobeniusOrbits.lean
+-- (reflectionSum, labelIdem), Lib/LocalGL/Shintani/LabelCharacters.lean
+-- (labelChar_X_sub_C, IsLabel.exists_eq_prod_of_splits,
+-- rankPart_labelChar, skew_greenTau_labelChar_eq_zero,
+-- rankInner_labelChar_mul_constOne, rankInner_labelChar,
+-- IsLabel.isIrrChar_labelChar, skew_detChar_labelChar_eq_zero).
+-- Not stated: IsLabel.induction_irreducible_mul (an induction principle on
+-- labels, a proof device).
+-- Encoding as in GRH.LocalGL.Green. The source's labelIdem uses
+-- faithfulChar k, a character of an algebraic closure chosen by
+-- Classical.epsilon; here the closure and the character are a parameter
+-- (E, T) with IsFaithfulMulChar(E, T), and a family of finite fields k_w
+-- carries a family (E_w, T_w). The group algebra ℂ[GLₙ(k)] is as in
+-- GRH.LocalGL.GroupChars. Polynomial.scaleRoots c a, whose roots are a
+-- times those of c, is polyScaleRoots: coefficient cᵢ a^(deg c − i).
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.Labels
+import GRH.LocalGL.Green
+
+section Labels
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Definitions
+-- GLₙ(k) as a group record.
+def glGroup (K n : Set) : Set := generalLinearGroup(K, n)
+
+-- Polynomial.scaleRoots c a: the coefficient of Xⁱ is cᵢ a^(deg c − i)
+-- (LabelIdempotents.lean, scaleRootsEquiv a).
+def polyScaleRoots (K c a : Set) : Set :=
+  { (m, call2(Ring.mul(K), c(m), Ring.pow(K, a, sub(polyNatDegree(K, c), m(0))))) |
+    m ∈ domain(c) }
+
+-- The map c ↦ c^σ of polynomials along the structure map k → K.
+def polyToExtension (E c : Set) : Set :=
+  polyMap(Algebra.base(E), Algebra.ring(E), Algebra.map(E))(c)
+
+-- X − a.
+def linearLabel (K a : Set) : Set := polyXSubC(K, a)
+
+-- FrobeniusOrbits.lean, reflectionSum χ l: Σ χ(det h)⁻¹ h over the
+-- invertible h = 1 + u lᵀ.
+predicate IsReflectionShape (K n l h : Set) :=
+  ∃ u ∈ functionSpace(n, Ring.carrier(K)),
+    h = matAdd(K, n, n, matOne(K, n), vecMulVec(K, n, n, u, l))
+
+def reflectionValue (K n χ l h : Set) : Set :=
+  ⋃({ c ∈ complexCarrier |
+    (IsReflectionShape(K, n, l, h) ∧
+      c = mulCharInverse(K, complexRing, χ)(matDet(K, n, h))) ∨
+    (¬IsReflectionShape(K, n, l, h) ∧ c = complexZero) })
+
+def reflectionSum (K n χ l : Set) : Set :=
+  { (h, reflectionValue(K, n, χ, l, h)) | h ∈ invertibleMatrices(K, n) }
+
+-- FrobeniusOrbits.lean, labelIdem n c: for a label c of degree n,
+-- e_c = Σ (Ξ_c(1)/|G|) conj Ξ_c(g) g in ℂ[G], G = GLₙ(k); zero otherwise.
+def labelIdemTerms (E T n c : Set) : Set :=
+  { (g, ℂ[complexDiv(labelChar(E, T, c)((n, matOne(Algebra.base(E), n))),
+      csLGNat(cardinality(invertibleMatrices(Algebra.base(E), n)))) *
+      complexConj(labelChar(E, T, c)((n, g)))]) |
+    g ∈ invertibleMatrices(Algebra.base(E), n) }
+
+def labelIdemValue (E T n c : Set) : Set :=
+  ⋃({ e ∈ 𝒫(invertibleMatrices(Algebra.base(E), n) × complexCarrier) |
+    (IsLabel(Algebra.base(E), n, c) ∧ e = labelIdemTerms(E, T, n, c)) ∨
+    (¬IsLabel(Algebra.base(E), n, c) ∧ e = groupAlgZero(glGroup(Algebra.base(E), n))) })
+
+def labelIdem (E T n c : Set) : Set := labelIdemValue(E, T, n, c)
+
+-- The family c ↦ e_c over all polynomials.
+def labelIdems (E T n : Set) : Set :=
+  { (c, labelIdem(E, T, n, c)) | c ∈ uniPolys(Algebra.base(E)) }
+
+-- LabelIdempotents.lean, tupleIdem n c: ⊗_w e_{c_w} in ℂ[Π_w GLₙ(k_w)],
+-- for fields k_w = Algebra.base(Ef(w)) with characters Tf(w).
+def glFamily (I Ef n : Set) : Set := { (w, glGroup(Algebra.base(Ef(w)), n)) | w ∈ I }
+
+def tupleIdemFactors (I Ef Tf n c : Set) : Set :=
+  { (w, labelIdem(Ef(w), Tf(w), n, c(w))) | w ∈ I }
+
+def tupleIdem (I Ef Tf n c : Set) : Set :=
+  piTensorElem(I, glFamily(I, Ef, n), tupleIdemFactors(I, Ef, Tf, n, c))
+
+-- The tuples (c_w) of polynomials, c_w over k_w.
+def polyCarriers (I Ef : Set) : Set := { uniPolys(Algebra.base(Ef(w))) | w ∈ I }
+
+def polyTuples (I Ef : Set) : Set :=
+  { c ∈ functionSpace(I, ⋃(polyCarriers(I, Ef))) | ∀ w ∈ I, c(w) ∈ uniPolys(Algebra.base(Ef(w))) }
+
+def tupleIdems (I Ef Tf n : Set) : Set :=
+  { (c, tupleIdem(I, Ef, Tf, n, c)) | c ∈ polyTuples(I, Ef) }
+
+-- Section: Labels
+-- IsLabel.map: a label over k stays a label over K.
+theorem IsLabel.map (E r c : Set)
+  requires closure : FiniteBaseClosure(E)
+  requires label : IsLabel(Algebra.base(E), r, c)
+  shows IsLabel(Algebra.ring(E), r, polyToExtension(E, c))
+proof
+  sorry
+
+-- IsLabel.scaleRoots: scaling the roots by a unit keeps a label.
+theorem IsLabel.scaleRoots (K r c a : Set)
+  requires field : Field(K)
+  requires label : IsLabel(K, r, c)
+  requires unit : a ∈ ringUnits(K)
+  shows IsLabel(K, r, polyScaleRoots(K, c, a))
+proof
+  sorry
+
+-- frobenius_conj_pow_injOn: for q ≡ 1 mod 9, r = 3^(e+1), ξ a primitive
+-- (q^r − 1)-th root of unity and l prime, the q^i-th powers of ξ^(l^a),
+-- 0 ≤ i < r, are distinct.
+theorem frobeniusPow.inj_on_prime_power (E ξ e l a : Set)
+  requires extension : FieldExtension(E)
+  requires finite : FiniteField(Algebra.base(E))
+  requires he : e ∈ ℕ
+  requires hl : l ∈ ℕ
+  requires ha : a ∈ ℕ
+  requires nine : 9 ∣ sub(fieldOrder(Algebra.base(E)), 1)
+  requires primitive : IsPrimitiveRoot(Algebra.ring(E), ξ,
+    sub(pow(fieldOrder(Algebra.base(E)), pow(3, succ(e))), 1))
+  requires prime : Prime(l)
+  shows ∀ i ∈ pow(3, succ(e)), ∀ j ∈ pow(3, succ(e)),
+    frobeniusPow(E, Ring.pow(Algebra.ring(E), ξ, pow(l, a)), i) =
+      frobeniusPow(E, Ring.pow(Algebra.ring(E), ξ, pow(l, a)), j) → i = j
+proof
+  sorry
+
+-- Section: Values of Ξ_c
+-- labelChar_degree_bounds: for a label c of degree n, d = Ξ_c(1) has
+-- re d ≥ 0 and |d|²/|GLₙ(k)| ≥ (1 − n/q)/qⁿ.
+theorem labelChar.degree_bounds (E T n c : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires natural : n ∈ ℕ
+  requires label : IsLabel(Algebra.base(E), n, c)
+  shows (0:R) ≤ complexRe(labelChar(E, T, c)((n, matOne(Algebra.base(E), n)))) ∧
+    R[(realOne - realNat(n) / realNat(fieldOrder(Algebra.base(E)))) /
+        realNat(pow(fieldOrder(Algebra.base(E)), n))] ≤
+      R[complexAbs(labelChar(E, T, c)((n, matOne(Algebra.base(E), n)))) *
+        complexAbs(labelChar(E, T, c)((n, matOne(Algebra.base(E), n)))) /
+        realNat(cardinality(invertibleMatrices(Algebra.base(E), n)))]
+proof
+  sorry
+
+-- labelChar_mul_det: Ξ_c(g) χ(det g) = Ξ_{c′}(g) on GLₙ(k), the roots of
+-- c′ being x_χ times those of c.
+theorem labelChar.mul_det (E T r c χ n g : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires natural : n ∈ ℕ
+  requires hg : g ∈ invertibleMatrices(Algebra.base(E), n)
+  shows ℂ[labelChar(E, T, c)((n, g)) * χ(matDet(Algebra.base(E), n, g))] =
+    labelChar(E, T, polyScaleRoots(Algebra.base(E), c, charName(E, T, χ)))((n, g))
+proof
+  sorry
+
+-- labelChar_X_sub_C: Ξ_{X − x_χ} = χ∘det in dimension 1, zero elsewhere.
+theorem labelChar.linear (E T χ : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  shows labelChar(E, T, linearLabel(Algebra.base(E), charName(E, T, χ))) =
+    rankPart(Algebra.base(E), (1:N), detChar(Algebra.base(E), χ))
+proof
+  sorry
+
+-- IsLabel.exists_eq_prod_of_splits: a label of degree r split over k is
+-- Π_{i<r} (X − x_{χᵢ}) for characters χᵢ of k.
+def namedLinearFactors (E T r χ : Set) : Set :=
+  { (i, linearLabel(Algebra.base(E), charName(E, T, χ(i)))) | i ∈ r }
+
+theorem IsLabel.split_product (E T r c : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires natural : r ∈ ℕ
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires split : ∀ x ∈ polyAlgebraRootSet(E, c),
+    Ring.pow(Algebra.ring(E), x, fieldOrder(Algebra.base(E))) = x
+  shows ∃ χ ∈ functionSpace(r, mulChars(Algebra.base(E), complexRing)),
+    c = finiteRingProduct(r, uniPolys(Algebra.base(E)),
+      Ring.add(polyRing(Algebra.base(E))), Ring.zero(polyRing(Algebra.base(E))),
+      Ring.neg(polyRing(Algebra.base(E))), Ring.mul(polyRing(Algebra.base(E))),
+      Ring.one(polyRing(Algebra.base(E))), namedLinearFactors(E, T, r, χ))
+proof
+  sorry
+
+-- rankPart_labelChar: Ξ_c is concentrated in dimension deg c.
+theorem labelChar.rankPart (E T r c : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  shows rankPart(Algebra.base(E), r, labelChar(E, T, c)) = labelChar(E, T, c)
+proof
+  sorry
+
+-- skew_greenTau_labelChar_eq_zero: for P an irreducible label of degree d
+-- not dividing c, skew d τ_P Ξ_c = 0.
+theorem skew.greenTau_labelChar (E T r c P d : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires labelP : IsLabel(Algebra.base(E), d, P)
+  requires coprime : ¬RingDvd(polyRing(Algebra.base(E)), P, c)
+  shows skew(Algebra.base(E), d, greenTau(E, T, P), labelChar(E, T, c)) =
+    hallZero(Algebra.base(E))
+proof
+  sorry
+
+-- skew_detChar_labelChar_eq_zero: if c(x_χ) ≠ 0, skew 1 of χ∘det kills Ξ_c.
+theorem skew.detChar_labelChar (E T r c χ : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires nonroot : polyEval(Algebra.base(E), c, charName(E, T, χ)) ≠ Ring.zero(Algebra.base(E))
+  shows skew(Algebra.base(E), (1:N), rankPart(Algebra.base(E), (1:N),
+    detChar(Algebra.base(E), χ)), labelChar(E, T, c)) = hallZero(Algebra.base(E))
+proof
+  sorry
+
+-- rankInner_labelChar_mul_constOne: if c(1) ≠ 0, ⟨Ξ_c, A ∗ 𝟙⟩_r = ⟨Ξ_c, A⟩_r.
+theorem rankInner.labelChar_mul_constOne (E T r c A : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires atOne : polyEval(Algebra.base(E), c, Ring.one(Algebra.base(E))) ≠
+    Ring.zero(Algebra.base(E))
+  requires hA : A ∈ hallFunctions(Algebra.base(E))
+  shows rankInner(Algebra.base(E), r, labelChar(E, T, c),
+    hallMul(Algebra.base(E), A, constOne(Algebra.base(E)))) =
+    rankInner(Algebra.base(E), r, labelChar(E, T, c), A)
+proof
+  sorry
+
+-- rankInner_labelChar (orthonormality, Green): ⟨Ξ_c, Ξ_{c′}⟩_r = [c = c′]
+-- for labels c, c′ of degree r.
+theorem rankInner.labelChar (E T r c c2 : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires label : IsLabel(Algebra.base(E), r, c)
+  requires label2 : IsLabel(Algebra.base(E), r, c2)
+  shows (c = c2 → rankInner(Algebra.base(E), r, labelChar(E, T, c), labelChar(E, T, c2)) =
+      complexOne) ∧
+    (c ≠ c2 → rankInner(Algebra.base(E), r, labelChar(E, T, c), labelChar(E, T, c2)) =
+      complexZero)
+proof
+  sorry
+
+-- IsLabel.isIrrChar_labelChar (Green's theorem): for a label c of degree
+-- n, Ξ_c is an irreducible character of GLₙ(k).
+theorem IsLabel.irreducible_character (E T n c : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires natural : n ∈ ℕ
+  requires label : IsLabel(Algebra.base(E), n, c)
+  shows IsIrrChar(glGroup(Algebra.base(E), n), evalGL(Algebra.base(E), n, labelChar(E, T, c)))
+proof
+  sorry
+
+-- Section: Label idempotents
+-- labelIdem_orthogonal: the e_c are orthogonal idempotents of ℂ[GLₙ(k)].
+theorem labelIdem.orthogonal (E T n : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires natural : n ∈ ℕ
+  shows OrthogonalIdempotents(glGroup(Algebra.base(E), n), uniPolys(Algebra.base(E)),
+    labelIdems(E, T, n))
+proof
+  sorry
+
+-- reflectionSum_mul_labelIdem: if x_χ is not a root of c and l ≠ 0, then
+-- (Σ χ(det h)⁻¹ h) e_c = 0, h running over the invertible 1 + u lᵀ.
+theorem reflectionSum.mul_labelIdem (E T n c χ l : Set)
+  requires faithful : IsFaithfulMulChar(E, T)
+  requires finite : FiniteField(Algebra.base(E))
+  requires natural : n ∈ ℕ
+  requires hc : c ∈ uniPolys(Algebra.base(E))
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires nonroot : polyEval(Algebra.base(E), c, charName(E, T, χ)) ≠ Ring.zero(Algebra.base(E))
+  requires hl : l ∈ functionSpace(n, Ring.carrier(Algebra.base(E)))
+  requires nonzero : l ≠ constantFunction(n, Ring.carrier(Algebra.base(E)),
+    Ring.zero(Algebra.base(E)))
+  shows groupAlgMul(glGroup(Algebra.base(E), n), reflectionSum(Algebra.base(E), n, χ, l),
+    labelIdem(E, T, n, c)) = groupAlgZero(glGroup(Algebra.base(E), n))
+proof
+  sorry
+
+-- isCentralProj_tupleIdem and tupleIdem_orthogonal: ⊗_w e_{c_w} is a
+-- central idempotent, and these elements are orthogonal.
+predicate FaithfulFamily (I Ef Tf : Set) :=
+  Finite(I) ∧ ∀ w ∈ I, IsFaithfulMulChar(Ef(w), Tf(w)) ∧ FiniteField(Algebra.base(Ef(w)))
+
+theorem tupleIdem.central (I Ef Tf n c : Set)
+  requires family : FaithfulFamily(I, Ef, Tf)
+  requires natural : n ∈ ℕ
+  requires hc : c ∈ polyTuples(I, Ef)
+  shows IsCentralProj(piFamilyGroup(I, glFamily(I, Ef, n)), tupleIdem(I, Ef, Tf, n, c))
+proof
+  sorry
+
+theorem tupleIdem.orthogonal (I Ef Tf n : Set)
+  requires family : FaithfulFamily(I, Ef, Tf)
+  requires natural : n ∈ ℕ
+  shows OrthogonalIdempotents(piFamilyGroup(I, glFamily(I, Ef, n)), polyTuples(I, Ef),
+    tupleIdems(I, Ef, Tf, n))
+proof
+  sorry
+
+-- isCentralProj_sum_tupleIdem: a sum over a finite set of tuples of the
+-- ⊗_w e_{c_w} is a central idempotent.
+theorem tupleIdem.sum_central (I Ef Tf n s : Set)
+  requires family : FaithfulFamily(I, Ef, Tf)
+  requires natural : n ∈ ℕ
+  requires finiteS : Finite(s)
+  requires hs : s ⊆ polyTuples(I, Ef)
+  shows IsCentralProj(piFamilyGroup(I, glFamily(I, Ef, n)),
+    groupAlgSum(piFamilyGroup(I, glFamily(I, Ef, n)), s, tupleIdems(I, Ef, Tf, n)))
+proof
+  sorry
+
+end Labels
