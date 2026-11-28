@@ -52,6 +52,405 @@ predicate ComplexAnalyticOnNhd (f U : Set) := ∀ a ∈ U, ComplexAnalyticAt(f, 
 predicate EventuallyZeroAt (f a : Set) :=
   ∃ r ∈ ℝ, realZero < r ∧ (∀ z ∈ complexDisk(a, r), f(z) = complexZero)
 
+-- The coefficients c(n), c(n + 1), … of a power series with its first n
+-- terms removed, and the factorization it gives when those terms vanish.
+def cxaShiftN (c : Set, n : Nat) → Set
+  | c, zero => c
+  | c, succ(j) => complexShift(cxaShiftN(c, j))
+
+-- The indices of the nonzero coefficients.
+def cxaNonzeroIndices (c : Set) : Set := { k ∈ ℕ | c(k) ≠ complexZero }
+
+theorem cxaShiftN.radius (c r : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  shows PowerSeriesRadiusAtLeast(cxaShiftN(c, n), r)
+proof
+  induction n
+  | zero =>
+    rw cxaShiftN
+    exact radius
+  | succ(j) using ih =>
+    rw cxaShiftN
+    exact PowerSeriesRadiusAtLeast.shift with ih
+
+theorem cxaShiftN.value (c r : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  shows ∀ k ∈ ℕ, cxaShiftN(c, n)(k) = c(n + k)
+proof
+  induction n
+  | zero =>
+    intros k hk
+    have kNat := nat.omega.backward at k with hk
+    have same : (0:N) + k = k by arith
+    rw [cxaShiftN, same]
+  | succ(j) using ih =>
+    intros k hk
+    have kNat := nat.omega.backward at k with hk
+    have previous := cxaShiftN.radius at c, r, j with radius
+    have next : succ(k) ∈ ℕ by typecheck
+    have sj : succ(j) ∈ ℕ by typecheck
+    have sjNat := nat.omega.backward at succ(j) with sj
+    have same : j + succ(k) = succ(j) + k by arith
+    rw [cxaShiftN, (complexShift.value with previous.left, hk),
+      (ih with succ(k), next), same]
+
+theorem cxaShiftN.factor (c a r z : Set, n : Nat)
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  requires ha : a ∈ ℂ
+  requires hz : z ∈ complexDisk(a, r)
+  requires zeros : ∀ j ∈ n, c(j) = ℂ[0]
+  shows powerSeriesSum(c, a, r)(z) =
+    ℂ[(z - a) ^ n * powerSeriesSum(cxaShiftN(c, n), a, r)(z)]
+proof
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have za : ℂ[z - a] ∈ ℂ by typecheck
+  induction n
+  | zero =>
+    intros zeros
+    have sumMember := FunctionBetween.apply_closed with
+      (powerSeriesSum.function with radius, ha), hz
+    rw [cxaShiftN, monoidPow.zero]
+    ring
+  | succ(m) using ih =>
+    intros zeros
+    have earlier : ∀ j ∈ m, c(j) = ℂ[0]
+      intros j hj
+      have jIn := membership.into_successor at j, m with hj
+      exact zeros with j, jIn
+    have previous := ih with earlier
+    have shifted := cxaShiftN.radius at c, r, m with radius
+    have zeroN : (0:N) ∈ ℕ by typecheck
+    have first := cxaShiftN.value at c, r, m with radius
+    have firstValue := first with (0:N), zeroN
+    have plusZero : m + (0:N) = m by arith
+    have mIn := bootstrap.succ.self at m
+    rw [plusZero, (zeros with m, mIn)] at firstValue
+    have step := powerSeriesSum.shift with shifted, ha, hz, firstValue
+    have nextRadius := PowerSeriesRadiusAtLeast.shift with shifted
+    have nextMember := FunctionBetween.apply_closed with
+      (powerSeriesSum.function with nextRadius, ha), hz
+    have power := complexPow.member at ℂ[z - a], m with za
+    obtain ⟨zIn, _⟩ := complexDisk.membership.forward with hz
+    rw [previous, step, cxaShiftN, monoidPow.succ]
+    ring
+
+-- Powers of a nonzero complex number are nonzero.
+theorem cxaPow.nonzero (w : Set, n : Nat)
+  requires hw : w ∈ ℂ
+  requires nonzero : w ≠ ℂ[0]
+  shows ℂ[w ^ n] ≠ ℂ[0]
+proof
+  induction n
+  | zero =>
+    rw monoidPow.zero
+    intro vanish
+    have size := complexAbs.one
+    rw [vanish, complexAbs.zero] at size
+    linarith
+  | succ(k) using ih =>
+    intro vanish
+    rw monoidPow.succ at vanish
+    have power := complexPow.member at w, k with hw
+    have zero := complexMul.eq_zero_cancel_left with hw, power, nonzero,
+      vanish
+    exact ih with zero
+
+-- Every disk about a holds points other than a arbitrarily close to it.
+theorem cxaDisk.punctured_point (a r d : Set)
+  requires ha : a ∈ ℂ
+  requires hr : r ∈ ℝ
+  requires hd : d ∈ ℝ
+  requires positiveR : R[0] < r
+  requires positiveD : R[0] < d
+  shows ∃ z ∈ complexDisk(a, r), z ≠ a ∧ complexAbs(ℂ[z - a]) < d
+proof
+  obtain ⟨t, ht, tPositive, leR, leD⟩ := realRadius.common with hr, hd,
+    positiveR, positiveD
+  have halfPositive := half.positive with tPositive
+  have halfBelow := half.lt_self with tPositive
+  have point : ℂ[a + complexOfReal(half(t))] ∈ ℂ by typecheck
+  have distance : complexAbs(ℂ[(a + complexOfReal(half(t))) - a]) = half(t)
+    have shift : ℂ[(a + complexOfReal(half(t))) - a] =
+      complexOfReal(half(t)) by ring
+    have halfNonnegative : R[0] ≤ half(t) by linarith
+    rw [shift, (complexAbs.of_real at half(t)),
+      (abs.of_nonnegative at half(t) with halfNonnegative)]
+  have inDisk : ℂ[a + complexOfReal(half(t))] ∈ complexDisk(a, r)
+    apply complexDisk.membership.backward
+    refine ⟨point, ?_⟩
+    rw distance
+    linarith
+  refine ⟨ℂ[a + complexOfReal(half(t))], inDisk, ?_, ?_⟩
+  . intro same
+    rw same at distance
+    have zero : ℂ[a - a] = ℂ[0] by ring
+    rw [zero, complexAbs.zero] at distance
+    linarith
+  . rw distance
+    linarith
+
+-- A function analytic at a is continuous on a disk about a.
+theorem cxaAnalytic.continuous (g a : Set)
+  requires analytic : ComplexAnalyticAt(g, a)
+  shows ∃ r ∈ ℝ, R[0] < r ∧ ComplexContinuousOn(g, complexDisk(a, r))
+proof
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic
+  have holomorphic := powerSeriesSum.holomorphic with radius, aMember
+  have continuous := HolomorphicOn.continuous with holomorphic
+  have agree : ∀ w ∈ complexDisk(a, r), g(w) = powerSeriesSum(c, a, r)(w)
+    intros w hw
+    exact ComplexSumsTo.unique with (sums with w, hw),
+      (powerSeriesSum.sums with radius, aMember, hw)
+  refine ⟨r, hr, positive, ?_⟩
+  exact ComplexContinuousOn.congr with continuous, agree
+
+-- The value at the centre of a function analytic there is complex.
+theorem cxaAnalytic.value_member (g a : Set)
+  requires analytic : ComplexAnalyticAt(g, a)
+  shows g(a) ∈ ℂ
+proof
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic
+  have center := complexDisk.center with aMember, hr, positive
+  exact ComplexSumsTo.member with (sums with a, center)
+
+-- A function analytic at a with g(a) ≠ 0 is complex and nonzero near a.
+theorem cxaAnalytic.nonvanishing (g a : Set)
+  requires analytic : ComplexAnalyticAt(g, a)
+  requires nonzero : g(a) ≠ ℂ[0]
+  shows ∃ t ∈ ℝ, R[0] < t ∧
+    (∀ z ∈ complexDisk(a, t), g(z) ∈ ℂ ∧ g(z) ≠ ℂ[0])
+proof
+  have aMember := analytic.left
+  obtain ⟨r, hr, positiveR, continuous⟩ := cxaAnalytic.continuous with analytic
+  have center := complexDisk.center with aMember, hr, positiveR
+  have values := continuous.right.left
+  have ga := values with a, center
+  have gaAbs := complexAbs.positive with ga, nonzero
+  have gaReal : complexAbs(g(a)) ∈ ℝ by typecheck
+  obtain ⟨δ, hδ, positiveδ, near⟩ := continuous.right.right with a, center,
+    complexAbs(g(a)), gaReal, gaAbs
+  obtain ⟨t, ht, positiveT, leR, leδ⟩ := realRadius.common with hr, hδ,
+    positiveR, positiveδ
+  have into := complexDisk.mono at a, t, r with aMember, ht, hr, leR
+  refine ⟨t, ht, positiveT, ?_⟩
+  intros z hz
+  obtain ⟨zMember, closeT⟩ := complexDisk.membership.forward with hz
+  have zR := into with z, hz
+  refine ⟨(values with z, zR), ?_⟩
+  intro vanish
+  have closeδ : complexAbs(ℂ[z - a]) < δ by linarith
+  have small := near with z, zR, closeδ
+  rw vanish at small
+  have zero : ℂ[0 - g(a)] = ℂ[-g(a)] by ring
+  rw [zero, (complexAbs.neg with ga)] at small
+  linarith
+
+-- The derivative of a holomorphic function is any derivative it has.
+theorem cxaDeriv.eq (f U D z : Set)
+  requires holomorphic : HolomorphicOn(f, U)
+  requires derivative : HasComplexDerivativeAt(f, U, D, z)
+  shows complexDeriv(f, U)(z) = D
+proof
+  have zU := derivative.right.left
+  exact HasComplexDerivativeAt.unique with
+    (complexDeriv.has_derivative with holomorphic, zU), derivative
+
+-- The maps w ↦ (w − a)^q, and the pointwise difference of two functions.
+defgraph cxaPowerMap (a : Set, q : Nat) (w ∈ complexCarrier) :
+    complexCarrier := ℂ[(w - a) ^ q]
+requires ha : a ∈ complexCarrier
+proof
+  have difference : ℂ[w - a] ∈ ℂ by typecheck
+  exact complexPow.member at ℂ[w - a], q with difference
+
+defgraph cxaSubMap (f g U : Set) (w ∈ U) : complexCarrier := ℂ[f(w) - g(w)]
+requires valuesF : ComplexValuedOn(f, U)
+requires valuesG : ComplexValuedOn(g, U)
+proof
+  have fw := valuesF with member
+  have gw := valuesG with member
+  typecheck
+
+theorem cxaPowerMap.continuous (a : Set, q : Nat)
+  requires ha : a ∈ ℂ
+  shows ComplexContinuousOn(cxaPowerMap(a, q), ℂ)
+proof
+  have whole := ComplexOpen.whole
+  have sub : ℂ ⊆ ℂ
+    intros w hw
+    exact hw
+  induction q
+  | zero =>
+    have one : ℂ[1] ∈ ℂ by typecheck
+    have constant := HolomorphicOn.const with whole, one
+    have continuous := HolomorphicOn.continuous with constant
+    have agree : ∀ w ∈ ℂ, cxaPowerMap(a, (0:N))(w) =
+        complexFunctionConst(ℂ[1], ℂ)(w)
+      intros w hw
+      rw [(cxaPowerMap.value with ha, hw), (complexFunctionConst.value with
+        one, hw), monoidPow.zero]
+    exact ComplexContinuousOn.congr with continuous, agree
+  | succ(k) using ih =>
+    have linear : ComplexContinuousOn(cxaPowerMap(a, (1:N)), ℂ)
+      have oneValues : ComplexValuedOn(cxaPowerMap(a, (1:N)), ℂ)
+        intros w hw
+        exact FunctionBetween.apply_closed with (cxaPowerMap.function with ha),
+          hw
+      refine ⟨sub, oneValues, ?_⟩
+      intros b hb e he ePositive
+      refine ⟨e, he, ePositive, ?_⟩
+      intros z hz near
+      have shape : ℂ[cxaPowerMap(a, (1:N))(z) - cxaPowerMap(a, (1:N))(b)] =
+          ℂ[z - b]
+        rw [(cxaPowerMap.value with ha, hz), (cxaPowerMap.value with ha, hb),
+          monoidPow.succ, monoidPow.succ, monoidPow.zero, monoidPow.zero]
+        ring
+      rw shape
+      exact near
+    have values : ComplexValuedOn(cxaPowerMap(a, k), ℂ)
+      intros w hw
+      exact FunctionBetween.apply_closed with (cxaPowerMap.function with ha),
+        hw
+    have previous := ih
+    have formula : ∀ w ∈ ℂ, cxaPowerMap(a, succ(k))(w) =
+        ℂ[cxaPowerMap(a, (1:N))(w) * cxaPowerMap(a, k)(w)]
+      intros w hw
+      have difference : ℂ[w - a] ∈ ℂ by typecheck
+      have power := complexPow.member at ℂ[w - a], k with difference
+      rw [(cxaPowerMap.value at a, succ(k), w with ha, hw),
+        (cxaPowerMap.value at a, (1:N), w with ha, hw),
+        (cxaPowerMap.value at a, k, w with ha, hw), monoidPow.succ, monoidPow.succ,
+        monoidPow.zero]
+      ring
+    exact ComplexContinuousOn.mul with linear, previous, formula
+
+-- Two factorizations f = (z − a)ⁿ g = (z − a)^m h with g(a) ≠ 0 and n < m
+-- are impossible: g(z) = (z − a)^(m − n) h(z) off a would force g(a) = 0.
+theorem cxaOrder.not_less (f g h a r s : Set, n m : Nat)
+  requires analyticG : ComplexAnalyticAt(g, a)
+  requires analyticH : ComplexAnalyticAt(h, a)
+  requires nonzero : g(a) ≠ complexZero
+  requires hr : r ∈ ℝ
+  requires positiveR : R[0] < r
+  requires hs : s ∈ ℝ
+  requires positiveS : R[0] < s
+  requires factorG : ∀ z ∈ complexDisk(a, r), f(z) = ℂ[(z - a) ^ n * g(z)]
+  requires factorH : ∀ z ∈ complexDisk(a, s), f(z) = ℂ[(z - a) ^ m * h(z)]
+  requires less : n < m
+  shows ⊥
+proof
+  have aMember := analyticG.left
+  obtain ⟨rg, hrg, positiveG, continuousG⟩ := cxaAnalytic.continuous with
+    analyticG
+  obtain ⟨rh, hrh, positiveH, continuousH⟩ := cxaAnalytic.continuous with
+    analyticH
+  obtain ⟨t1, ht1, positive1, le1r, le1s⟩ := realRadius.common with hr, hs,
+    positiveR, positiveS
+  obtain ⟨t2, ht2, positive2, le2g, le2h⟩ := realRadius.common with hrg, hrh,
+    positiveG, positiveH
+  obtain ⟨t, ht, positive, le1, le2⟩ := realRadius.common with ht1, ht2,
+    positive1, positive2
+  have tr : (t:R) ≤ r by linarith
+  have ts : (t:R) ≤ s by linarith
+  have tg : (t:R) ≤ rg by linarith
+  have th : (t:R) ≤ rh by linarith
+  have intoR := complexDisk.mono at a, t, r with aMember, ht, hr, tr
+  have intoS := complexDisk.mono at a, t, s with aMember, ht, hs, ts
+  have intoG := complexDisk.mono at a, t, rg with aMember, ht, hrg, tg
+  have intoH := complexDisk.mono at a, t, rh with aMember, ht, hrh, th
+  have contG := ComplexContinuousOn.mono with continuousG, intoG
+  have contH := ComplexContinuousOn.mono with continuousH, intoH
+  obtain ⟨p, pNat, sum⟩ := less
+  have sp : succ(p) ∈ ℕ by typecheck
+  have spNat := nat.omega.backward at succ(p) with sp
+  have exponent : m = n + succ(p) by arith
+  -- Off a, g(z) = (z − a)^(p + 1) h(z).
+  have relation : ∀ z ∈ complexDisk(a, t), z ≠ a →
+      g(z) = ℂ[(z - a) ^ succ(p) * h(z)]
+    intros z hz distinct
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have first := factorG with z, (intoR with z, hz)
+    have second := factorH with z, (intoS with z, hz)
+    have gz := contG.right.left with z, hz
+    have hzH := contH.right.left with z, hz
+    have difference : ℂ[z - a] ∈ ℂ by typecheck
+    have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+      intro same
+      apply distinct
+      have shape : z = ℂ[(z - a) + a] by ring
+      rw [shape, same]
+      ring
+    have ring := complexes.comm_ring
+    have ordinary := IsCommRing.ring with ring
+    have monoid := IsRing.multiplicative with ordinary
+    have split := monoidPow.add at ℂ, complexMul, complexOne, ℂ[z - a], n,
+      succ(p) with monoid, difference
+    have powerN := complexPow.member at ℂ[z - a], n with difference
+    have powerP := complexPow.member at ℂ[z - a], succ(p) with difference
+    have powerNonzero := cxaPow.nonzero at ℂ[z - a], n with difference,
+      nonzeroD
+    rw [exponent, split] at second
+    have target : ℂ[g(z) - (z - a) ^ succ(p) * h(z)] ∈ ℂ by typecheck
+    have product : ℂ[(z - a) ^ n * (g(z) - (z - a) ^ succ(p) * h(z))] = ℂ[0]
+      have both : ℂ[(z - a) ^ n * g(z)] =
+          ℂ[(z - a) ^ n * (z - a) ^ succ(p) * h(z)]
+        rw [← first, second]
+      linear_combination both
+    have vanish := complexMul.eq_zero_cancel_left with powerN, target,
+      powerNonzero, product
+    linear_combination vanish
+  -- The difference k(z) = g(z) − (z − a)^(p + 1) h(z) is continuous at a.
+  have whole := cxaPowerMap.continuous at a, succ(p) with aMember
+  have insideC := complexDisk.subset at a, t
+  have contP := ComplexContinuousOn.mono with whole, insideC
+  have valuesP := contP.right.left
+  have valuesH := contH.right.left
+  have valuesG := contG.right.left
+  have formulaQ : ∀ w ∈ complexDisk(a, t),
+      complexFunctionMul(cxaPowerMap(a, succ(p)), h, complexDisk(a, t))(w) =
+      ℂ[cxaPowerMap(a, succ(p))(w) * h(w)]
+    intros w hw
+    exact complexFunctionMul.value with valuesP, valuesH, hw
+  have contQ := ComplexContinuousOn.mul with contP, contH, formulaQ
+  have valuesQ := contQ.right.left
+  have formulaK : ∀ w ∈ complexDisk(a, t), cxaSubMap(g,
+      complexFunctionMul(cxaPowerMap(a, succ(p)), h, complexDisk(a, t)),
+      complexDisk(a, t))(w) = ℂ[g(w) -
+      complexFunctionMul(cxaPowerMap(a, succ(p)), h, complexDisk(a, t))(w)]
+    intros w hw
+    exact cxaSubMap.value with valuesG, valuesQ, hw
+  have contK := ComplexContinuousOn.sub with contG, contQ, formulaK
+  have center := complexDisk.center with aMember, ht, positive
+  have kValue : ∀ z ∈ complexDisk(a, t), cxaSubMap(g,
+      complexFunctionMul(cxaPowerMap(a, succ(p)), h, complexDisk(a, t)),
+      complexDisk(a, t))(z) = ℂ[g(z) - (z - a) ^ succ(p) * h(z)]
+    intros z hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    rw [(cxaSubMap.value with valuesG, valuesQ, hz),
+      (complexFunctionMul.value with valuesP, valuesH, hz),
+      (cxaPowerMap.value at a, succ(p), z with aMember, zMember)]
+  have ga := valuesG with a, center
+  have haH := valuesH with a, center
+  have atCenter : ℂ[g(a) - (a - a) ^ succ(p) * h(a)] = g(a)
+    have aa : ℂ[a - a] ∈ ℂ by typecheck
+    have power := complexPow.member at ℂ[a - a], p with aa
+    rw monoidPow.succ
+    ring
+  obtain ⟨_, _, closeK⟩ := contK
+  have gaAbs := complexAbs.positive with ga, nonzero
+  have gaReal : complexAbs(g(a)) ∈ ℝ by typecheck
+  obtain ⟨d, hd, dPositive, near⟩ := closeK with a, center, complexAbs(g(a)),
+    gaReal, gaAbs
+  obtain ⟨z, hz, distinct, small⟩ := cxaDisk.punctured_point with aMember,
+    ht, hd, positive, dPositive
+  have atZ := near with z, hz, small
+  rw [(kValue with z, hz), (kValue with a, center), atCenter,
+    ← (relation with z, hz, distinct)] at atZ
+  have gz := valuesG with z, hz
+  have zero : ℂ[g(z) - g(z) - g(a)] = ℂ[-g(a)] by ring
+  rw [zero, (complexAbs.neg with ga)] at atZ
+  linarith
+
 -- The order of the zero of f at a (Mathlib's analyticOrderNatAt): the n
 -- with f(z) = (z − a)ⁿ g(z) near a for some g analytic at a with
 -- g(a) ≠ 0; it is 0 when f vanishes identically near a, as in Mathlib.
@@ -62,9 +461,92 @@ defunique analyticOrderNat (f a : Set) (n ∈ ℕ) :=
     (∀ z ∈ complexDisk(a, r), f(z) = ℂ[(z - a) ^ n * g(z)]))
 requires analytic : ComplexAnalyticAt(f, a)
 proof
-  sorry
+  by_cases eventually : EventuallyZeroAt(f, a)
+  . have zeroN : (0:N) ∈ ℕ by typecheck
+    refine ⟨(0:N), zeroN, ?_⟩
+    left
+    refine ⟨eventually, ?_⟩
+    rfl
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic
+  have coefficients := radius.left
+  have value : ∀ z ∈ complexDisk(a, r), f(z) = powerSeriesSum(c, a, r)(z)
+    intros z hz
+    exact ComplexSumsTo.unique with (sums with z, hz),
+      (powerSeriesSum.sums with radius, aMember, hz)
+  have nonempty : cxaNonzeroIndices(c) ≠ ∅
+    intro empty
+    apply eventually
+    refine ⟨r, hr, positive, ?_⟩
+    intros z hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have allZero : ∀ k ∈ ℕ, c(k) = ℂ[0]
+      intros k hk
+      by_contra nonzero
+      have inS : k ∈ cxaNonzeroIndices(c) by simp [hk, nonzero]
+      rw empty at inS
+      simp at inS
+    have zeroSums := powerSeriesTerms.zero_sums with coefficients, aMember,
+      zMember, allZero
+    exact ComplexSumsTo.unique with (sums with z, hz), zeroSums
+  obtain ⟨n, member, minimal⟩ := set.foundation at cxaNonzeroIndices(c)
+    with nonempty
+  obtain ⟨nIn, nonzeroN⟩ := member
+  have nNat := nat.omega.backward at n with nIn
+  have zeros : ∀ j ∈ n, c(j) = ℂ[0]
+    intros j hj
+    have jIn := natural.member at n with hj
+    by_contra nonzero
+    have jOmega : j ∈ ℕ by typecheck
+    have inS : j ∈ cxaNonzeroIndices(c) by simp [jOmega, nonzero]
+    exact minimal with j, hj, inS
+  have shifted := cxaShiftN.radius at c, r, n with radius
+  have zeroN : (0:N) ∈ ℕ by typecheck
+  have center := complexDisk.center with aMember, hr, positive
+  have atCenter := ComplexSumsTo.unique with
+    (powerSeriesSum.sums with shifted, aMember, center),
+    (powerSeriesTerms.center_sums with shifted.left, aMember)
+  have firstValue := cxaShiftN.value at c, r, n with radius
+  have plusZero : n + (0:N) = n by arith
+  rw [(firstValue with (0:N), zeroN), plusZero] at atCenter
+  refine ⟨n, nIn, ?_⟩
+  right
+  refine ⟨eventually, powerSeriesSum(cxaShiftN(c, n), a, r), r, hr, positive,
+    ?_, ?_, ?_⟩
+  . refine ⟨aMember, cxaShiftN(c, n), r, hr, positive, shifted, ?_⟩
+    intros z hz
+    exact powerSeriesSum.sums with shifted, aMember, hz
+  . rw atCenter
+    exact nonzeroN
+  . intros z hz
+    rw (value with z, hz)
+    exact cxaShiftN.factor with radius, aMember, hz, zeros
 uniqueness
-  sorry
+  intros n nIn nData m mIn mData
+  have nNat := nat.omega.backward at n with nIn
+  have mNat := nat.omega.backward at m with mIn
+  cases nData with nZero | nFactor
+  . obtain ⟨eventuallyN, nIsZero⟩ := nZero
+    cases mData with mZero | mFactor
+    . obtain ⟨_, mIsZero⟩ := mZero
+      rw [nIsZero, mIsZero]
+    . exfalso
+      exact mFactor.left with eventuallyN
+  . obtain ⟨notEventually, g, r, hr, positiveR, analyticG, nonzeroG,
+      factorG⟩ := nFactor
+    cases mData with mZero | mFactor
+    . exfalso
+      exact notEventually with mZero.left
+    . obtain ⟨_, h, s, hs, positiveS, analyticH, nonzeroH, factorH⟩ := mFactor
+      obtain before | same | after := Less.trichotomy at n, m with *
+      . exfalso
+        exact cxaOrder.not_less at f, g, h, a, r, s, n, m with analyticG,
+          analyticH, nonzeroG, hr, positiveR, hs, positiveS, factorG,
+          factorH, before
+      . exact same
+      . exfalso
+        exact cxaOrder.not_less at f, h, g, a, s, r, m, n with analyticH,
+          analyticG, nonzeroH, hs, positiveS, hr, positiveR, factorH,
+          factorG, after
 
 -- f is meromorphic at a: (z − a)ⁿ f(z) agrees with a function analytic at
 -- a on a punctured disk, for some n. Its order is the integer m with
@@ -99,19 +581,118 @@ proof
   exact complexIntegral.member at K(s), A, B
 
 -- Section: Real analyticity
+-- A real point lies in a disk about a real centre exactly when it lies in
+-- the interval of the same radius.
+theorem cxaReal.distance (x t : Real)
+  shows complexAbs(ℂ[complexOfReal(t) - complexOfReal(x)]) = abs(R[t - x])
+proof
+  rw [← (complexOfReal.sub at t, x), complexAbs.of_real]
+
+theorem cxaReal.disk (x t r : Real)
+  shows complexOfReal(t) ∈ complexDisk(complexOfReal(x), r) ↔
+    abs(R[t - x]) < r
+proof
+  have distance := cxaReal.distance at x, t
+  have member : complexOfReal(t) ∈ ℂ by typecheck
+  constructor
+  . intro inside
+    obtain ⟨_, close⟩ := complexDisk.membership.forward with inside
+    rw distance at close
+    exact close
+  . intro close
+    apply complexDisk.membership.backward
+    refine ⟨member, ?_⟩
+    rw distance
+    exact close
+
+-- A function agreeing near x with the restriction of a holomorphic function
+-- is real-analytic at x.
+theorem cxaRealAnalytic.of_holomorphic_local (f g U x : Set)
+  requires holomorphic : HolomorphicOn(f, U)
+  requires member : complexOfReal(x) ∈ U
+  requires real : x ∈ ℝ
+  requires restricted : ∀ t ∈ ℝ, complexOfReal(t) ∈ U →
+    g(t) = f(complexOfReal(t))
+  shows RealAnalyticAt(g, x)
+proof
+  have isOpen := holomorphic.left
+  obtain ⟨r, hr, positive, inside⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨c, radius, sums⟩ := HolomorphicOn.power_series with holomorphic,
+    member, hr, inside
+  refine ⟨real, c, r, hr, positive, radius, ?_⟩
+  intros t ht close
+  have inDisk := (cxaReal.disk at x, t, r).backward with close
+  rw (restricted with t, ht, (inside with complexOfReal(t), inDisk))
+  exact sums with complexOfReal(t), inDisk
+
+-- A real-analytic function extends holomorphically to a disk about x.
+theorem RealAnalyticAt.extends (f x : Set)
+  requires analytic : RealAnalyticAt(f, x)
+  shows ∃ F, ∃ r ∈ ℝ, realZero < r ∧
+    HolomorphicOn(F, complexDisk(complexOfReal(x), r)) ∧
+    (∀ t ∈ ℝ, abs(R[t - x]) < r → F(complexOfReal(t)) = f(t))
+proof
+  obtain ⟨xReal, c, r, hr, positive, radius, sums⟩ := analytic
+  have center : complexOfReal(x) ∈ ℂ by typecheck
+  have holomorphic := powerSeriesSum.holomorphic with radius, center
+  refine ⟨powerSeriesSum(c, complexOfReal(x), r), r, hr, positive,
+    holomorphic, ?_⟩
+  intros t ht close
+  have inDisk := (cxaReal.disk at x, t, r).backward with close
+  exact ComplexSumsTo.unique with
+    (powerSeriesSum.sums with radius, center, inDisk), (sums with t, ht, close)
+
 theorem RealAnalyticAt.continuous (f x : Set)
   requires analytic : RealAnalyticAt(f, x)
   shows ∀ e ∈ ℝ, realZero < e → ∃ d ∈ ℝ, realZero < d ∧
     (∀ t ∈ ℝ, abs(R[t - x]) < d → complexAbs(ℂ[f(t) - f(x)]) < e)
 proof
-  sorry
+  have xReal := analytic.left
+  obtain ⟨F, r, hr, positive, holomorphic, agree⟩ := RealAnalyticAt.extends
+    with analytic
+  have continuous := HolomorphicOn.continuous with holomorphic
+  have center : complexOfReal(x) ∈ ℂ by typecheck
+  have centerD := complexDisk.center with center, hr, positive
+  intros e he ePositive
+  obtain ⟨δ, hδ, positiveδ, near⟩ := continuous.right.right with
+    complexOfReal(x), centerD, e, he, ePositive
+  obtain ⟨d, hd, positiveD, leδ, leR⟩ := realRadius.common with hδ, hr,
+    positiveδ, positive
+  refine ⟨d, hd, positiveD, ?_⟩
+  intros t ht close
+  have closeR : abs(R[t - x]) < r by linarith
+  have inDisk := (cxaReal.disk at x, t, r).backward with closeR
+  have zero : abs(R[x - x]) < r
+    have same : R[x - x] = R[0] by ring
+    rw [same, abs.zero]
+    exact positive
+  have distance := cxaReal.distance at x, t
+  have closeδ : complexAbs(ℂ[complexOfReal(t) - complexOfReal(x)]) < δ
+    rw distance
+    linarith
+  have small := near with complexOfReal(t), inDisk, closeδ
+  rw [(agree with t, ht, closeR), (agree with x, xReal, zero)] at small
+  exact small
 
 -- Analytic at a point means analytic nearby.
 theorem RealAnalyticAt.eventually (f x : Set)
   requires analytic : RealAnalyticAt(f, x)
   shows ∃ r ∈ ℝ, realZero < r ∧ (∀ t ∈ ℝ, abs(R[t - x]) < r → RealAnalyticAt(f, t))
 proof
-  sorry
+  have xReal := analytic.left
+  obtain ⟨F, r, hr, positive, holomorphic, agree⟩ := RealAnalyticAt.extends
+    with analytic
+  refine ⟨r, hr, positive, ?_⟩
+  intros t ht close
+  have inDisk := (cxaReal.disk at x, t, r).backward with close
+  have local : ∀ u ∈ ℝ, complexOfReal(u) ∈ complexDisk(complexOfReal(x), r) →
+      f(u) = F(complexOfReal(u))
+    intros u hu inside
+    have closeU := (cxaReal.disk at x, u, r).forward with inside
+    symm
+    exact agree with u, hu, closeU
+  exact cxaRealAnalytic.of_holomorphic_local with holomorphic, inDisk, ht,
+    local
 
 theorem RealAnalyticAt.add (f g h x : Set)
   requires first : RealAnalyticAt(f, x)
@@ -119,7 +700,37 @@ theorem RealAnalyticAt.add (f g h x : Set)
   requires sum : ∀ t ∈ ℝ, h(t) = ℂ[f(t) + g(t)]
   shows RealAnalyticAt(h, x)
 proof
-  sorry
+  have xReal := first.left
+  obtain ⟨F, r1, hr1, positive1, holomorphicF, agreeF⟩ :=
+    RealAnalyticAt.extends with first
+  obtain ⟨G, r2, hr2, positive2, holomorphicG, agreeG⟩ :=
+    RealAnalyticAt.extends with second
+  obtain ⟨ρ, hρ, positiveρ, le1, le2⟩ := realRadius.common with hr1, hr2,
+    positive1, positive2
+  have center : complexOfReal(x) ∈ ℂ by typecheck
+  have into1 := complexDisk.mono at complexOfReal(x), ρ, r1 with center, hρ,
+    hr1, le1
+  have into2 := complexDisk.mono at complexOfReal(x), ρ, r2 with center, hρ,
+    hr2, le2
+  have openD := complexDisk.open with center, hρ
+  have centerD := complexDisk.center with center, hρ, positiveρ
+  have holomorphicF2 := HolomorphicOn.mono with holomorphicF, openD, into1
+  have holomorphicG2 := HolomorphicOn.mono with holomorphicG, openD, into2
+  have holomorphicH := HolomorphicOn.add with holomorphicF2, holomorphicG2
+  have valuesF := holomorphicF2.right.left
+  have valuesG := holomorphicG2.right.left
+  have local : ∀ t ∈ ℝ, complexOfReal(t) ∈ complexDisk(complexOfReal(x), ρ) →
+      h(t) = complexFunctionAdd(F, G, complexDisk(complexOfReal(x), ρ))(
+        complexOfReal(t))
+    intros t ht inside
+    have close := (cxaReal.disk at x, t, ρ).forward with inside
+    have close1 : abs(R[t - x]) < r1 by linarith
+    have close2 : abs(R[t - x]) < r2 by linarith
+    rw [(complexFunctionAdd.value with valuesF, valuesG, inside),
+      (agreeF with t, ht, close1), (agreeG with t, ht, close2)]
+    exact sum with t, ht
+  exact cxaRealAnalytic.of_holomorphic_local with holomorphicH, centerD, xReal,
+    local
 
 theorem RealAnalyticAt.mul (f g h x : Set)
   requires first : RealAnalyticAt(f, x)
@@ -127,7 +738,37 @@ theorem RealAnalyticAt.mul (f g h x : Set)
   requires product : ∀ t ∈ ℝ, h(t) = ℂ[f(t) * g(t)]
   shows RealAnalyticAt(h, x)
 proof
-  sorry
+  have xReal := first.left
+  obtain ⟨F, r1, hr1, positive1, holomorphicF, agreeF⟩ :=
+    RealAnalyticAt.extends with first
+  obtain ⟨G, r2, hr2, positive2, holomorphicG, agreeG⟩ :=
+    RealAnalyticAt.extends with second
+  obtain ⟨ρ, hρ, positiveρ, le1, le2⟩ := realRadius.common with hr1, hr2,
+    positive1, positive2
+  have center : complexOfReal(x) ∈ ℂ by typecheck
+  have into1 := complexDisk.mono at complexOfReal(x), ρ, r1 with center, hρ,
+    hr1, le1
+  have into2 := complexDisk.mono at complexOfReal(x), ρ, r2 with center, hρ,
+    hr2, le2
+  have openD := complexDisk.open with center, hρ
+  have centerD := complexDisk.center with center, hρ, positiveρ
+  have holomorphicF2 := HolomorphicOn.mono with holomorphicF, openD, into1
+  have holomorphicG2 := HolomorphicOn.mono with holomorphicG, openD, into2
+  have holomorphicH := HolomorphicOn.mul with holomorphicF2, holomorphicG2
+  have valuesF := holomorphicF2.right.left
+  have valuesG := holomorphicG2.right.left
+  have local : ∀ t ∈ ℝ, complexOfReal(t) ∈ complexDisk(complexOfReal(x), ρ) →
+      h(t) = complexFunctionMul(F, G, complexDisk(complexOfReal(x), ρ))(
+        complexOfReal(t))
+    intros t ht inside
+    have close := (cxaReal.disk at x, t, ρ).forward with inside
+    have close1 : abs(R[t - x]) < r1 by linarith
+    have close2 : abs(R[t - x]) < r2 by linarith
+    rw [(complexFunctionMul.value with valuesF, valuesG, inside),
+      (agreeF with t, ht, close1), (agreeG with t, ht, close2)]
+    exact product with t, ht
+  exact cxaRealAnalytic.of_holomorphic_local with holomorphicH, centerD, xReal,
+    local
 
 -- The restriction of a holomorphic function to the real line is
 -- real-analytic (Mathlib's AnalyticAt.comp of ofReal, as the source uses
@@ -139,16 +780,11 @@ theorem RealAnalyticAt.of_holomorphic (f g U x : Set)
   requires restricted : ∀ t ∈ ℝ, g(t) = f(complexOfReal(t))
   shows RealAnalyticAt(g, x)
 proof
-  sorry
-
--- A real-analytic function extends holomorphically to a disk about x.
-theorem RealAnalyticAt.extends (f x : Set)
-  requires analytic : RealAnalyticAt(f, x)
-  shows ∃ F, ∃ r ∈ ℝ, realZero < r ∧
-    HolomorphicOn(F, complexDisk(complexOfReal(x), r)) ∧
-    (∀ t ∈ ℝ, abs(R[t - x]) < r → F(complexOfReal(t)) = f(t))
-proof
-  sorry
+  have local : ∀ t ∈ ℝ, complexOfReal(t) ∈ U → g(t) = f(complexOfReal(t))
+    intros t ht inside
+    exact restricted with t, ht
+  exact cxaRealAnalytic.of_holomorphic_local with holomorphic, member, real,
+    local
 
 -- The identity theorem on an interval: two functions real-analytic on an
 -- open interval that agree near one of its points agree on all of it.
@@ -167,9 +803,27 @@ theorem RealValuedAnalyticAt.complex (f g x : Set)
   requires embedded : ∀ t ∈ ℝ, g(t) = complexOfReal(f(t))
   shows RealAnalyticAt(g, x)
 proof
-  sorry
+  obtain ⟨xReal, realValues, c, realCoefficients, r, hr, positive, radius,
+    sums⟩ := analytic
+  refine ⟨xReal, c, r, hr, positive, radius, ?_⟩
+  intros t ht close
+  rw (embedded with t, ht)
+  exact sums with t, ht, close
 
 -- Section: Complex analyticity
+theorem ComplexAnalyticAt.of_holomorphic (f U a : Set)
+  requires holomorphic : HolomorphicOn(f, U)
+  requires member : a ∈ U
+  shows ComplexAnalyticAt(f, a)
+proof
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have aMember := sub with a, member
+  obtain ⟨r, hr, positive, inside⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨c, radius, sums⟩ := HolomorphicOn.power_series with holomorphic,
+    member, hr, inside
+  refine ⟨aMember, c, r, hr, positive, radius, sums⟩
+
 -- Mathlib's FDifferentiableOn.analyticAt and AnalyticOnNhd.differentiableOn:
 -- on an open set, holomorphic is analytic.
 theorem ComplexAnalyticOnNhd.iff_holomorphic (f U : Set)
@@ -177,14 +831,81 @@ theorem ComplexAnalyticOnNhd.iff_holomorphic (f U : Set)
   requires values : ComplexValuedOn(f, U)
   shows ComplexAnalyticOnNhd(f, U) ↔ HolomorphicOn(f, U)
 proof
-  sorry
+  have isOpen : ComplexOpen(U) := open
+  have sub := ComplexOpen.subset with isOpen
+  constructor
+  . intro analytic
+    refine ⟨isOpen, values, ?_⟩
+    intros a ha
+    obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic with a, ha
+    obtain ⟨ru, hru, positiveU, diskU⟩ := ComplexOpen.disk with isOpen, ha
+    obtain ⟨t, ht, positiveT, leR, leU⟩ := realRadius.common with hr, hru,
+      positive, positiveU
+    have intoR2 := complexDisk.mono at a, t, r with aMember, ht, hr, leR
+    have intoU := complexDisk.mono at a, t, ru with aMember, ht, hru, leU
+    have insideU : complexDisk(a, t) ⊆ U
+      intros w hw
+      exact diskU with w, (intoU with w, hw)
+    have centerR := complexDisk.center with aMember, hr, positive
+    have centerT := complexDisk.center with aMember, ht, positiveT
+    have openT := complexDisk.open with aMember, ht
+    have derivative := powerSeriesSum.derivative with radius, aMember, centerR
+    have local := HasComplexDerivativeAt.mono with derivative, openT, intoR2,
+      centerT
+    have agree : ∀ w ∈ complexDisk(a, t), powerSeriesSum(c, a, r)(w) = f(w)
+      intros w hw
+      have wR := intoR2 with w, hw
+      exact ComplexSumsTo.unique with
+        (powerSeriesSum.sums with radius, aMember, wR), (sums with w, wR)
+    have localF := HasComplexDerivativeAt.congr with local, agree
+    have global := HasComplexDerivativeAt.of_local with localF, isOpen,
+      insideU, values
+    exact ⟨powerSeriesSum(powerSeriesDerivCoefficients(c), a, r)(a),
+      global.right.right.left, global⟩
+  . intro holomorphic
+    intros a ha
+    exact ComplexAnalyticAt.of_holomorphic with holomorphic, ha
 
-theorem ComplexAnalyticAt.of_holomorphic (f U a : Set)
-  requires holomorphic : HolomorphicOn(f, U)
-  requires member : a ∈ U
-  shows ComplexAnalyticAt(f, a)
+-- The (n + 1)-st iterated derivative is the n-th iterated derivative of
+-- the derivative.
+theorem cxaIteratedDeriv.shift (f U : Set, n : Nat)
+  shows holomorphicIteratedDeriv(f, U, succ(n)) =
+    holomorphicIteratedDeriv(complexDeriv(f, U), U, n)
 proof
-  sorry
+  induction n
+  | zero =>
+    simp [holomorphicIteratedDeriv]
+  | succ(k) using ih =>
+    rw holomorphicIteratedDeriv
+    rw ih
+    rw holomorphicIteratedDeriv
+
+-- The derivative of a function expanded in a power series on a disk is
+-- expanded by the termwise derived coefficients.
+theorem cxaExpansion.deriv (f U a c r : Set)
+  requires holomorphic : HolomorphicOn(f, U)
+  requires ha : a ∈ ℂ
+  requires radius : PowerSeriesRadiusAtLeast(c, r)
+  requires inside : complexDisk(a, r) ⊆ U
+  requires expansion : ∀ z ∈ complexDisk(a, r),
+    ComplexSumsTo(powerSeriesTerms(c, a, z), f(z))
+  shows ∀ z ∈ complexDisk(a, r), ComplexSumsTo(powerSeriesTerms(
+    powerSeriesDerivCoefficients(c), a, z), complexDeriv(f, U)(z))
+proof
+  intros z hz
+  have isOpen := holomorphic.left
+  have values := holomorphic.right.left
+  have derivative := powerSeriesSum.derivative with radius, ha, hz
+  have agree : ∀ w ∈ complexDisk(a, r), powerSeriesSum(c, a, r)(w) = f(w)
+    intros w hw
+    exact ComplexSumsTo.unique with (powerSeriesSum.sums with radius, ha, hw),
+      (expansion with w, hw)
+  have derivativeF := HasComplexDerivativeAt.congr with derivative, agree
+  have global := HasComplexDerivativeAt.of_local with derivativeF, isOpen,
+    inside, values
+  rw (cxaDeriv.eq with holomorphic, global)
+  have derived := powerSeriesDerivCoefficients.radius_at_least with radius
+  exact powerSeriesSum.sums with derived, ha, hz
 
 -- The coefficients of the expansion are the derivatives divided by n!.
 theorem ComplexAnalyticAt.coefficients (f U a c r : Set, n : Nat)
@@ -197,7 +918,90 @@ theorem ComplexAnalyticAt.coefficients (f U a c r : Set, n : Nat)
     ComplexSumsTo(powerSeriesTerms(c, a, z), f(z))
   shows holomorphicIteratedDeriv(f, U, n)(a) = ℂ[complexOfReal(realNat(n!)) * c(n)]
 proof
-  sorry
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have aMember := sub with a, member
+  have hr := radius.right.left
+  have center := complexDisk.center with aMember, hr, positive
+  induction n generalizing f c
+  | zero =>
+    intros f c holomorphic radius expansion
+    have atCenter := ComplexSumsTo.unique with (expansion with a, center),
+      (powerSeriesTerms.center_sums with radius.left, aMember)
+    have zeroN : (0:N) ∈ ℕ by typecheck
+    have c0 := FunctionBetween.apply_closed with radius.left, zeroN
+    have base : (0:N)! = (1:N) by simp [factorial]
+    rw holomorphicIteratedDeriv
+    rw [atCenter, base, realNat.one,
+      complexOfReal.one]
+    ring
+  | succ(k) using ih =>
+    intros f c holomorphic radius expansion
+    have derived := powerSeriesDerivCoefficients.radius_at_least with radius
+    have holomorphicD := HolomorphicOn.deriv with holomorphic
+    have expansionD := cxaExpansion.deriv with holomorphic, aMember, radius,
+      inside, expansion
+    have previous := ih with complexDeriv(f, U),
+      powerSeriesDerivCoefficients(c), holomorphicD, derived, expansionD
+    have kIn : k ∈ ℕ by typecheck
+    have next : succ(k) ∈ ℕ by typecheck
+    have ck := FunctionBetween.apply_closed with radius.left, next
+    rw [cxaIteratedDeriv.shift, previous,
+      (powerSeriesDerivCoefficients.value with radius.left, kIn)]
+    have step : succ(k)! = mul(succ(k), k!) by simp [factorial]
+    have factorialNat := factorial.closed at k
+    rw [step, realNat.mul, complexOfReal.mul]
+    ring
+
+-- The order of a zero: f(a) ≠ 0 exactly when the order is 0 (and f does
+-- not vanish identically), and the factorization it records.
+theorem analyticOrderNat.zero_iff (f a : Set)
+  requires analytic : ComplexAnalyticAt(f, a)
+  requires nonzero : ¬EventuallyZeroAt(f, a)
+  shows analyticOrderNat(f, a) = (0:N) ↔ f(a) ≠ complexZero
+proof
+  obtain ⟨orderIn, data⟩ := analyticOrderNat.selected with analytic
+  cases data with zeroCase | factorCase
+  . exfalso
+    exact nonzero with zeroCase.left
+  obtain ⟨_, g, r, hr, positive, analyticG, nonzeroG, factor⟩ := factorCase
+  have aMember := analyticG.left
+  have center := complexDisk.center with aMember, hr, positive
+  have atA := factor with a, center
+  have ga := cxaAnalytic.value_member with analyticG
+  have orderNat := nat.omega.backward at analyticOrderNat(f, a) with orderIn
+  constructor
+  . intro isZero
+    rw [isZero, monoidPow.zero] at atA
+    intro vanish
+    rw vanish at atA
+    apply nonzeroG
+    linear_combination -atA
+  . intro fNonzero
+    cases natural.zero_or_successor at analyticOrderNat(f, a) with zeroOrder | successor
+    . exact zeroOrder
+    . obtain ⟨k, kNat, isSucc⟩ := successor
+      exfalso
+      apply fNonzero
+      have aa : ℂ[a - a] ∈ ℂ by typecheck
+      have power := complexPow.member at ℂ[a - a], k with aa
+      rw [isSucc, monoidPow.succ] at atA
+      rw atA
+      ring
+
+theorem analyticOrderNat.factor (f a : Set)
+  requires analytic : ComplexAnalyticAt(f, a)
+  requires nonzero : ¬EventuallyZeroAt(f, a)
+  shows ∃ g, ∃ r ∈ ℝ, realZero < r ∧ ComplexAnalyticAt(g, a) ∧
+    g(a) ≠ complexZero ∧
+    (∀ z ∈ complexDisk(a, r), f(z) = ℂ[(z - a) ^ analyticOrderNat(f, a) * g(z)])
+proof
+  obtain ⟨orderIn, data⟩ := analyticOrderNat.selected with analytic
+  cases data with zeroCase | factorCase
+  . exfalso
+    exact nonzero with zeroCase.left
+  obtain ⟨_, g, r, hr, positive, analyticG, nonzeroG, factor⟩ := factorCase
+  exact ⟨g, r, hr, positive, analyticG, nonzeroG, factor⟩
 
 -- Isolated zeros: an analytic function not vanishing identically near a
 -- has no other zero near a.
@@ -207,25 +1011,132 @@ theorem ComplexAnalyticAt.isolated_zero (f a : Set)
   shows ∃ r ∈ ℝ, realZero < r ∧
     (∀ z ∈ complexDisk(a, r), z ≠ a → f(z) ≠ complexZero)
 proof
-  sorry
+  obtain ⟨g, r, hr, positiveR, analyticG, nonzeroG, factor⟩ :=
+    analyticOrderNat.factor with analytic, nonzero
+  have aMember := analyticG.left
+  obtain ⟨t, ht, positiveT, nonvanishing⟩ := cxaAnalytic.nonvanishing with
+    analyticG, nonzeroG
+  obtain ⟨ρ, hρ, positiveρ, leR, leT⟩ := realRadius.common with hr, ht,
+    positiveR, positiveT
+  have intoR := complexDisk.mono at a, ρ, r with aMember, hρ, hr, leR
+  have intoT := complexDisk.mono at a, ρ, t with aMember, hρ, ht, leT
+  refine ⟨ρ, hρ, positiveρ, ?_⟩
+  intros z hz distinct vanish
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have difference : ℂ[z - a] ∈ ℂ by typecheck
+  have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+    intro same
+    apply distinct
+    have shape : z = ℂ[(z - a) + a] by ring
+    rw [shape, same]
+    ring
+  have orderIn := (analyticOrderNat.selected with analytic).left
+  have orderNat := nat.omega.backward at analyticOrderNat(f, a) with orderIn
+  have power := complexPow.member at ℂ[z - a], analyticOrderNat(f, a) with
+    difference
+  have powerNonzero := cxaPow.nonzero at ℂ[z - a], analyticOrderNat(f, a) with
+    difference, nonzeroD
+  have value := factor with z, (intoR with z, hz)
+  rw vanish at value
+  symm at value
+  obtain ⟨gzMember, gzNonzero⟩ := nonvanishing with z, (intoT with z, hz)
+  have zero := complexMul.eq_zero_cancel_left with power, gzMember,
+    powerNonzero, value
+  exact gzNonzero with zero
 
--- The order of a zero: f(a) ≠ 0 exactly when the order is 0 (and f does
--- not vanish identically), and the factorization it records.
-theorem analyticOrderNat.zero_iff (f a : Set)
-  requires analytic : ComplexAnalyticAt(f, a)
-  requires nonzero : ¬EventuallyZeroAt(f, a)
-  shows analyticOrderNat(f, a) = (0:N) ↔ f(a) ≠ complexZero
+-- A function analytic at a is holomorphic on a disk about a.
+theorem cxaAnalytic.holomorphic_disk (g a : Set)
+  requires analytic : ComplexAnalyticAt(g, a)
+  shows ∃ r ∈ ℝ, R[0] < r ∧ HolomorphicOn(g, complexDisk(a, r))
 proof
-  sorry
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := analytic
+  have series := powerSeriesSum.holomorphic with radius, aMember
+  have agree : ∀ w ∈ complexDisk(a, r), powerSeriesSum(c, a, r)(w) = g(w)
+    intros w hw
+    exact ComplexSumsTo.unique with
+      (powerSeriesSum.sums with radius, aMember, hw), (sums with w, hw)
+  refine ⟨r, hr, positive, ?_⟩
+  exact HolomorphicOn.congr with series, agree
 
-theorem analyticOrderNat.factor (f a : Set)
-  requires analytic : ComplexAnalyticAt(f, a)
-  requires nonzero : ¬EventuallyZeroAt(f, a)
-  shows ∃ g, ∃ r ∈ ℝ, realZero < r ∧ ComplexAnalyticAt(g, a) ∧
-    g(a) ≠ complexZero ∧
-    (∀ z ∈ complexDisk(a, r), f(z) = ℂ[(z - a) ^ analyticOrderNat(f, a) * g(z)])
+-- Two functions analytic at a are holomorphic on a common disk inside a
+-- given one.
+theorem cxaAnalytic.common_disk (f g a r : Set)
+  requires analyticF : ComplexAnalyticAt(f, a)
+  requires analyticG : ComplexAnalyticAt(g, a)
+  requires hr : r ∈ ℝ
+  requires positive : R[0] < r
+  shows ∃ t ∈ ℝ, R[0] < t ∧ complexDisk(a, t) ⊆ complexDisk(a, r) ∧
+    HolomorphicOn(f, complexDisk(a, t)) ∧ HolomorphicOn(g, complexDisk(a, t))
 proof
-  sorry
+  have aMember := analyticF.left
+  obtain ⟨rf, hrf, positiveF, holomorphicF⟩ := cxaAnalytic.holomorphic_disk
+    with analyticF
+  obtain ⟨rg, hrg, positiveG, holomorphicG⟩ := cxaAnalytic.holomorphic_disk
+    with analyticG
+  obtain ⟨t1, ht1, positive1, le1f, le1g⟩ := realRadius.common with hrf, hrg,
+    positiveF, positiveG
+  obtain ⟨t, ht, positiveT, le1, leR⟩ := realRadius.common with ht1, hr,
+    positive1, positive
+  have tf : (t:R) ≤ rf by linarith
+  have tg : (t:R) ≤ rg by linarith
+  have intoF := complexDisk.mono at a, t, rf with aMember, ht, hrf, tf
+  have intoG := complexDisk.mono at a, t, rg with aMember, ht, hrg, tg
+  have intoR := complexDisk.mono at a, t, r with aMember, ht, hr, leR
+  have openT := complexDisk.open with aMember, ht
+  refine ⟨t, ht, positiveT, intoR, (HolomorphicOn.mono with holomorphicF,
+    openT, intoF), (HolomorphicOn.mono with holomorphicG, openT, intoG)⟩
+
+-- Products and quotients of functions analytic at a are analytic at a.
+theorem cxaAnalytic.mul (f g h a r : Set)
+  requires analyticF : ComplexAnalyticAt(f, a)
+  requires analyticG : ComplexAnalyticAt(g, a)
+  requires hr : r ∈ ℝ
+  requires positive : R[0] < r
+  requires product : ∀ z ∈ complexDisk(a, r), h(z) = ℂ[f(z) * g(z)]
+  shows ComplexAnalyticAt(h, a)
+proof
+  have aMember := analyticF.left
+  obtain ⟨t, ht, positiveT, intoR, holomorphicF, holomorphicG⟩ :=
+    cxaAnalytic.common_disk with analyticF, analyticG, hr, positive
+  have holomorphicM := HolomorphicOn.mul with holomorphicF, holomorphicG
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have agree : ∀ w ∈ complexDisk(a, t), complexFunctionMul(f, g,
+      complexDisk(a, t))(w) = h(w)
+    intros w hw
+    rw [(complexFunctionMul.value with valuesF, valuesG, hw),
+      (product with w, (intoR with w, hw))]
+  have holomorphicH := HolomorphicOn.congr with holomorphicM, agree
+  have center := complexDisk.center with aMember, ht, positiveT
+  exact ComplexAnalyticAt.of_holomorphic with holomorphicH, center
+
+theorem cxaAnalytic.div (f g h a r : Set)
+  requires analyticF : ComplexAnalyticAt(f, a)
+  requires analyticG : ComplexAnalyticAt(g, a)
+  requires hr : r ∈ ℝ
+  requires positive : R[0] < r
+  requires nonvanishing : ∀ z ∈ complexDisk(a, r), g(z) ≠ ℂ[0]
+  requires quotient : ∀ z ∈ complexDisk(a, r), h(z) = complexDiv(f(z), g(z))
+  shows ComplexAnalyticAt(h, a)
+proof
+  have aMember := analyticF.left
+  obtain ⟨t, ht, positiveT, intoR, holomorphicF, holomorphicG⟩ :=
+    cxaAnalytic.common_disk with analyticF, analyticG, hr, positive
+  have nonvanishingT : ∀ z ∈ complexDisk(a, t), g(z) ≠ ℂ[0]
+    intros z hz
+    exact nonvanishing with z, (intoR with z, hz)
+  have holomorphicQ := HolomorphicOn.div with holomorphicF, holomorphicG,
+    nonvanishingT
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have agree : ∀ w ∈ complexDisk(a, t), complexFunctionDiv(f, g,
+      complexDisk(a, t))(w) = h(w)
+    intros w hw
+    rw [(complexFunctionDiv.value with valuesF, valuesG, hw),
+      (quotient with w, (intoR with w, hw))]
+  have holomorphicH := HolomorphicOn.congr with holomorphicQ, agree
+  have center := complexDisk.center with aMember, ht, positiveT
+  exact ComplexAnalyticAt.of_holomorphic with holomorphicH, center
 
 theorem analyticOrderNat.mul (f g h a : Set)
   requires analyticF : ComplexAnalyticAt(f, a)
@@ -235,7 +1146,124 @@ theorem analyticOrderNat.mul (f g h a : Set)
   requires product : ∀ z ∈ complexCarrier, h(z) = ℂ[f(z) * g(z)]
   shows analyticOrderNat(h, a) = analyticOrderNat(f, a) + analyticOrderNat(g, a)
 proof
-  sorry
+  have aMember := analyticF.left
+  obtain ⟨F, r1, hr1, positive1, analyticFF, nonzeroFF, factorF⟩ :=
+    analyticOrderNat.factor with analyticF, nonzeroF
+  obtain ⟨G, r2, hr2, positive2, analyticGG, nonzeroGG, factorG⟩ :=
+    analyticOrderNat.factor with analyticG, nonzeroG
+  obtain ⟨tF, htF, positiveF, nonvanishingF⟩ := cxaAnalytic.nonvanishing with
+    analyticFF, nonzeroFF
+  obtain ⟨tG, htG, positiveG, nonvanishingG⟩ := cxaAnalytic.nonvanishing with
+    analyticGG, nonzeroGG
+  obtain ⟨u1, hu1, positiveU1, le1a, le1b⟩ := realRadius.common with hr1, hr2,
+    positive1, positive2
+  obtain ⟨u2, hu2, positiveU2, le2a, le2b⟩ := realRadius.common with htF, htG,
+    positiveF, positiveG
+  obtain ⟨ρ, hρ, positiveρ, leU1, leU2⟩ := realRadius.common with hu1, hu2,
+    positiveU1, positiveU2
+  have ρ1 : (ρ:R) ≤ r1 by linarith
+  have ρ2 : (ρ:R) ≤ r2 by linarith
+  have ρF : (ρ:R) ≤ tF by linarith
+  have ρG : (ρ:R) ≤ tG by linarith
+  have into1 := complexDisk.mono at a, ρ, r1 with aMember, hρ, hr1, ρ1
+  have into2 := complexDisk.mono at a, ρ, r2 with aMember, hρ, hr2, ρ2
+  have intoF := complexDisk.mono at a, ρ, tF with aMember, hρ, htF, ρF
+  have intoG := complexDisk.mono at a, ρ, tG with aMember, hρ, htG, ρG
+  have valuesF : ComplexValuedOn(F, complexDisk(a, ρ))
+    intros z hz
+    exact (nonvanishingF with z, (intoF with z, hz)).left
+  have valuesG : ComplexValuedOn(G, complexDisk(a, ρ))
+    intros z hz
+    exact (nonvanishingG with z, (intoG with z, hz)).left
+  have productP : ∀ z ∈ complexDisk(a, ρ), complexFunctionMul(F, G,
+      complexDisk(a, ρ))(z) = ℂ[F(z) * G(z)]
+    intros z hz
+    exact complexFunctionMul.value with valuesF, valuesG, hz
+  have analyticP := cxaAnalytic.mul with analyticFF, analyticGG, hρ,
+    positiveρ, productP
+  have center := complexDisk.center with aMember, hρ, positiveρ
+  have fa := (nonvanishingF with a, (intoF with a, center)).left
+  have ga := (nonvanishingG with a, (intoG with a, center)).left
+  have nonzeroP : complexFunctionMul(F, G, complexDisk(a, ρ))(a) ≠ ℂ[0]
+    rw (productP with a, center)
+    intro vanish
+    exact nonzeroGG with (complexMul.eq_zero_cancel_left with fa, ga,
+      nonzeroFF, vanish)
+  have productH : ∀ z ∈ complexDisk(a, ρ), h(z) = ℂ[f(z) * g(z)]
+    intros z hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    exact product with z, zMember
+  have analyticH := cxaAnalytic.mul with analyticF, analyticG, hρ, positiveρ,
+    productH
+  have nIn := (analyticOrderNat.selected with analyticF).left
+  have mIn := (analyticOrderNat.selected with analyticG).left
+  have nNat := nat.omega.backward at analyticOrderNat(f, a) with nIn
+  have mNat := nat.omega.backward at analyticOrderNat(g, a) with mIn
+  have sumIn : analyticOrderNat(f, a) + analyticOrderNat(g, a) ∈ ℕ by
+    typecheck
+  have ring := complexes.comm_ring
+  have ordinary := IsCommRing.ring with ring
+  have monoid := IsRing.multiplicative with ordinary
+  have factorH : ∀ z ∈ complexDisk(a, ρ), h(z) = ℂ[(z - a) ^
+      (analyticOrderNat(f, a) + analyticOrderNat(g, a)) *
+      complexFunctionMul(F, G, complexDisk(a, ρ))(z)]
+    intros z hz
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have difference : ℂ[z - a] ∈ ℂ by typecheck
+    have split := monoidPow.add at ℂ, complexMul, complexOne, ℂ[z - a],
+      analyticOrderNat(f, a), analyticOrderNat(g, a) with monoid, difference
+    have fz := (nonvanishingF with z, (intoF with z, hz)).left
+    have gz := (nonvanishingG with z, (intoG with z, hz)).left
+    have powerN := complexPow.member at ℂ[z - a], analyticOrderNat(f, a) with
+      difference
+    have powerM := complexPow.member at ℂ[z - a], analyticOrderNat(g, a) with
+      difference
+    rw [(productH with z, hz), (factorF with z, (into1 with z, hz)),
+      (factorG with z, (into2 with z, hz)), split, (productP with z, hz)]
+    ring
+  have notEventually : ¬EventuallyZeroAt(h, a)
+    intro eventually
+    obtain ⟨e, he, positiveE, zero⟩ := eventually
+    obtain ⟨z, hz, distinct, small⟩ := cxaDisk.punctured_point with aMember,
+      hρ, he, positiveρ, positiveE
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have zE : z ∈ complexDisk(a, e)
+      apply complexDisk.membership.backward
+      exact ⟨zMember, small⟩
+    have value := factorH with z, hz
+    rw (zero with z, zE) at value
+    symm at value
+    have difference : ℂ[z - a] ∈ ℂ by typecheck
+    have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+      intro same
+      apply distinct
+      have shape : z = ℂ[(z - a) + a] by ring
+      rw [shape, same]
+      ring
+    have power := complexPow.member at ℂ[z - a], analyticOrderNat(f, a) +
+      analyticOrderNat(g, a) with difference
+    have powerNonzero := cxaPow.nonzero at ℂ[z - a], analyticOrderNat(f, a) +
+      analyticOrderNat(g, a) with difference, nonzeroD
+    have pz := FunctionBetween.apply_closed with
+      (complexFunctionMul.function with valuesF, valuesG), hz
+    have pZero := complexMul.eq_zero_cancel_left with power, pz, powerNonzero,
+      value
+    rw (productP with z, hz) at pZero
+    obtain ⟨fz, fzNonzero⟩ := nonvanishingF with z, (intoF with z, hz)
+    obtain ⟨gz, gzNonzero⟩ := nonvanishingG with z, (intoG with z, hz)
+    exact gzNonzero with (complexMul.eq_zero_cancel_left with fz, gz,
+      fzNonzero, pZero)
+  have spec : (EventuallyZeroAt(h, a) ∧ analyticOrderNat(f, a) +
+      analyticOrderNat(g, a) = (0:N)) ∨ (¬EventuallyZeroAt(h, a) ∧ ∃ P,
+      ∃ r ∈ ℝ, realZero < r ∧ ComplexAnalyticAt(P, a) ∧ P(a) ≠ complexZero ∧
+      (∀ z ∈ complexDisk(a, r), h(z) = ℂ[(z - a) ^ (analyticOrderNat(f, a) +
+        analyticOrderNat(g, a)) * P(z)]))
+    right
+    exact ⟨notEventually, complexFunctionMul(F, G, complexDisk(a, ρ)), ρ, hρ,
+      positiveρ, analyticP, nonzeroP, factorH⟩
+  obtain ⟨hIn, hSpec⟩ := analyticOrderNat.selected with analyticH
+  exact analyticOrderNat.unique at h, a with analyticH, analyticOrderNat(h, a),
+    hIn, hSpec, analyticOrderNat(f, a) + analyticOrderNat(g, a), sumIn, spec
 
 -- On a connected open set a holomorphic function that is not identically
 -- zero vanishes identically near no point.
@@ -246,14 +1274,50 @@ theorem EventuallyZeroAt.connected (f U a : Set)
   requires somewhere : ∃ b ∈ U, f(b) ≠ complexZero
   shows ¬EventuallyZeroAt(f, a)
 proof
-  sorry
+  intro eventually
+  obtain ⟨r, hr, positive, zero⟩ := eventually
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have aMember := sub with a, member
+  obtain ⟨s, hs, sPositive, inside⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨t, ht, tPositive, leR, leS⟩ := realRadius.common with hr, hs,
+    positive, sPositive
+  have diskOpen := complexDisk.open with aMember, ht
+  have center := complexDisk.center with aMember, ht, tPositive
+  have nonempty : ∃ v, v ∈ complexDisk(a, t)
+    exact ⟨a, center⟩
+  have intoS := complexDisk.mono with aMember, ht, hs, leS
+  have intoR := complexDisk.mono with aMember, ht, hr, leR
+  have insideU : complexDisk(a, t) ⊆ U
+    intros z hz
+    exact inside with z, (intoS with z, hz)
+  have zeroMember : ℂ[0] ∈ ℂ by typecheck
+  have constant := HolomorphicOn.const with isOpen, zeroMember
+  have agree : ∀ z ∈ complexDisk(a, t), f(z) = complexFunctionConst(ℂ[0], U)(z)
+    intros z hz
+    have zU := insideU with z, hz
+    rw (complexFunctionConst.value with zeroMember, zU)
+    exact zero with z, (intoR with z, hz)
+  have everywhere := holomorphic.identity with holomorphic, constant,
+    connected, diskOpen, nonempty, insideU, agree
+  obtain ⟨b, hb, nonzeroB⟩ := somewhere
+  have atB := everywhere with b, hb
+  rw (complexFunctionConst.value with zeroMember, hb) at atB
+  exact nonzeroB with atB
 
 -- Section: Meromorphic functions
 theorem MeromorphicAt.of_analytic (f a : Set)
   requires analytic : ComplexAnalyticAt(f, a)
   shows MeromorphicAt(f, a)
 proof
-  sorry
+  have copy := analytic
+  obtain ⟨aMember, c, r, hr, positive, radius, sums⟩ := copy
+  have zeroN : (0:N) ∈ ℕ by typecheck
+  refine ⟨aMember, (0:N), zeroN, f, r, hr, positive, analytic, ?_⟩
+  intros z hz distinct
+  have fz := ComplexSumsTo.member with (sums with z, hz)
+  rw monoidPow.zero
+  ring
 
 -- A quotient of analytic functions is meromorphic.
 theorem MeromorphicAt.div (f g h a : Set)
@@ -263,7 +1327,67 @@ theorem MeromorphicAt.div (f g h a : Set)
   requires quotient : ∀ z ∈ complexCarrier, h(z) = complexDiv(f(z), g(z))
   shows MeromorphicAt(h, a)
 proof
-  sorry
+  have aMember := analyticF.left
+  obtain ⟨G, r, hr, positiveR, analyticGG, nonzeroGG, factor⟩ :=
+    analyticOrderNat.factor with analyticG, nonzeroG
+  obtain ⟨t, ht, positiveT, nonvanishing⟩ := cxaAnalytic.nonvanishing with
+    analyticGG, nonzeroGG
+  obtain ⟨ρ, hρ, positiveρ, leR, leT⟩ := realRadius.common with hr, ht,
+    positiveR, positiveT
+  have intoR := complexDisk.mono at a, ρ, r with aMember, hρ, hr, leR
+  have intoT := complexDisk.mono at a, ρ, t with aMember, hρ, ht, leT
+  have nonvanishingρ : ∀ z ∈ complexDisk(a, ρ), G(z) ≠ ℂ[0]
+    intros z hz
+    exact (nonvanishing with z, (intoT with z, hz)).right
+  obtain ⟨u, hu, positiveU, intoρ, holomorphicF, holomorphicG⟩ :=
+    cxaAnalytic.common_disk with analyticF, analyticGG, hρ, positiveρ
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have quotientQ : ∀ z ∈ complexDisk(a, u), complexFunctionDiv(f, G,
+      complexDisk(a, u))(z) = complexDiv(f(z), G(z))
+    intros z hz
+    exact complexFunctionDiv.value with valuesF, valuesG, hz
+  have nonvanishingU : ∀ z ∈ complexDisk(a, u), G(z) ≠ ℂ[0]
+    intros z hz
+    exact nonvanishingρ with z, (intoρ with z, hz)
+  have analyticQ := cxaAnalytic.div with analyticF, analyticGG, hu, positiveU,
+    nonvanishingU, quotientQ
+  have orderIn := (analyticOrderNat.selected with analyticG).left
+  refine ⟨aMember, analyticOrderNat(g, a), orderIn, complexFunctionDiv(f, G,
+    complexDisk(a, u)), u, hu, positiveU, analyticQ, ?_⟩
+  intros z hz distinct
+  obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+  have zρ := intoρ with z, hz
+  have orderNat := nat.omega.backward at analyticOrderNat(g, a) with orderIn
+  have difference : ℂ[z - a] ∈ ℂ by typecheck
+  have nonzeroD : ℂ[z - a] ≠ ℂ[0]
+    intro same
+    apply distinct
+    have shape : z = ℂ[(z - a) + a] by ring
+    rw [shape, same]
+    ring
+  have power := complexPow.member at ℂ[z - a], analyticOrderNat(g, a) with
+    difference
+  have powerNonzero := cxaPow.nonzero at ℂ[z - a], analyticOrderNat(g, a) with
+    difference, nonzeroD
+  have fz := valuesF with z, hz
+  have gz := valuesG with z, hz
+  have gzNonzero := nonvanishingU with z, hz
+  have pg : ℂ[(z - a) ^ analyticOrderNat(g, a) * G(z)] ∈ ℂ by typecheck
+  have pgNonzero : ℂ[(z - a) ^ analyticOrderNat(g, a) * G(z)] ≠ ℂ[0]
+    intro vanish
+    exact gzNonzero with (complexMul.eq_zero_cancel_left with power, gz,
+      powerNonzero, vanish)
+  have cancelPG := complexInv.mul_cancel with pg, pgNonzero
+  have cancelG := complexInv.mul_cancel with gz, gzNonzero
+  have inversePG := complexInv.member with pg
+  have inverseG := complexInv.member with gz
+  rw [(quotientQ with z, hz), (quotient with z, zMember),
+    (factor with z, (intoR with z, zρ))]
+  unfold complexDiv
+  linear_combination (f(z) * complexInv(G(z))) * cancelPG -
+    (f(z) * (z - a) ^ analyticOrderNat(g, a) *
+    complexInv(ℂ[(z - a) ^ analyticOrderNat(g, a) * G(z)])) * cancelG
 
 -- The order of a meromorphic function that does not vanish near a is
 -- unique when it exists, and exists.
@@ -290,20 +1414,26 @@ proof
 theorem holomorphicIteratedDeriv.zero (f U : Set)
   shows holomorphicIteratedDeriv(f, U, (0:N)) = f
 proof
-  sorry
+  rw holomorphicIteratedDeriv
 
 -- Mathlib's iteratedDeriv_succ.
 theorem holomorphicIteratedDeriv.succ (f U : Set, k : Nat)
   shows holomorphicIteratedDeriv(f, U, succ(k)) =
     complexDeriv(holomorphicIteratedDeriv(f, U, k), U)
 proof
-  sorry
+  rw holomorphicIteratedDeriv
 
 theorem holomorphicIteratedDeriv.holomorphic (f U : Set, k : Nat)
   requires holomorphic : HolomorphicOn(f, U)
   shows HolomorphicOn(holomorphicIteratedDeriv(f, U, k), U)
 proof
-  sorry
+  induction k
+  | zero =>
+    rw holomorphicIteratedDeriv
+    exact holomorphic
+  | succ(j) using ih =>
+    rw holomorphicIteratedDeriv
+    exact HolomorphicOn.deriv with ih
 
 -- Mathlib's Set.EqOn.iteratedDeriv_of_isOpen: functions agreeing on an
 -- open set have the same iterated derivatives there.
@@ -316,7 +1446,28 @@ theorem holomorphicIteratedDeriv.congr (f g U V : Set, k : Nat)
   shows ∀ z ∈ U, holomorphicIteratedDeriv(f, U, k)(z) =
     holomorphicIteratedDeriv(g, V, k)(z)
 proof
-  sorry
+  induction k
+  | zero =>
+    intros z hz
+    rw [holomorphicIteratedDeriv.zero, holomorphicIteratedDeriv.zero]
+    exact agree with z, hz
+  | succ(j) using ih =>
+    intros z hz
+    have zV := inside with z, hz
+    have iteratedF := holomorphicIteratedDeriv.holomorphic at f, U, j with
+      holomorphicF
+    have iteratedG := holomorphicIteratedDeriv.holomorphic at g, V, j with
+      holomorphicG
+    have derivative := complexDeriv.has_derivative with iteratedG, zV
+    have local := HasComplexDerivativeAt.mono with derivative, open, inside, hz
+    have back : ∀ w ∈ U, holomorphicIteratedDeriv(g, V, j)(w) =
+        holomorphicIteratedDeriv(f, U, j)(w)
+      intros w hw
+      symm
+      exact ih with w, hw
+    have localF := HasComplexDerivativeAt.congr with local, back
+    rw [holomorphicIteratedDeriv.succ, holomorphicIteratedDeriv.succ]
+    exact cxaDeriv.eq with iteratedF, localF
 
 theorem holomorphicIteratedDeriv.add (f g h U : Set, k : Nat)
   requires holomorphicF : HolomorphicOn(f, U)
@@ -325,7 +1476,41 @@ theorem holomorphicIteratedDeriv.add (f g h U : Set, k : Nat)
   shows ∀ z ∈ U, holomorphicIteratedDeriv(h, U, k)(z) =
     ℂ[holomorphicIteratedDeriv(f, U, k)(z) + holomorphicIteratedDeriv(g, U, k)(z)]
 proof
-  sorry
+  have holomorphicSum := HolomorphicOn.add with holomorphicF, holomorphicG
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have agree : ∀ w ∈ U, complexFunctionAdd(f, g, U)(w) = h(w)
+    intros w hw
+    rw [(complexFunctionAdd.value with valuesF, valuesG, hw), (sum with w, hw)]
+  have holomorphicH := HolomorphicOn.congr with holomorphicSum, agree
+  induction k
+  | zero =>
+    intros z hz
+    rw [holomorphicIteratedDeriv.zero, holomorphicIteratedDeriv.zero,
+      holomorphicIteratedDeriv.zero]
+    exact sum with z, hz
+  | succ(j) using ih =>
+    intros z hz
+    have iteratedF := holomorphicIteratedDeriv.holomorphic at f, U, j with
+      holomorphicF
+    have iteratedG := holomorphicIteratedDeriv.holomorphic at g, U, j with
+      holomorphicG
+    have iteratedH := holomorphicIteratedDeriv.holomorphic at h, U, j with
+      holomorphicH
+    have valuesIF := iteratedF.right.left
+    have valuesIG := iteratedG.right.left
+    have derivative := HasComplexDerivativeAt.add with
+      (complexDeriv.has_derivative with iteratedF, hz),
+      (complexDeriv.has_derivative with iteratedG, hz)
+    have agreeJ : ∀ w ∈ U, complexFunctionAdd(holomorphicIteratedDeriv(f, U, j),
+        holomorphicIteratedDeriv(g, U, j), U)(w) =
+        holomorphicIteratedDeriv(h, U, j)(w)
+      intros w hw
+      rw [(complexFunctionAdd.value with valuesIF, valuesIG, hw), (ih with w, hw)]
+    have derivativeH := HasComplexDerivativeAt.congr with derivative, agreeJ
+    rw [holomorphicIteratedDeriv.succ, holomorphicIteratedDeriv.succ,
+      holomorphicIteratedDeriv.succ]
+    exact cxaDeriv.eq with iteratedH, derivativeH
 
 -- The Cauchy estimates (Mathlib's norm_deriv_le_of_forall_mem_sphere_norm_le
 -- and iteratedDeriv_le_of_forall_mem_sphere_norm_le): if |f| ≤ M on the
@@ -361,7 +1546,43 @@ theorem logDeriv.mul (f g h U z : Set)
   requires nonzeroG : g(z) ≠ complexZero
   shows logDeriv(h, U, z) = ℂ[logDeriv(f, U, z) + logDeriv(g, U, z)]
 proof
-  sorry
+  have holomorphicM := HolomorphicOn.mul with holomorphicF, holomorphicG
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have agree : ∀ w ∈ U, complexFunctionMul(f, g, U)(w) = h(w)
+    intros w hw
+    rw [(complexFunctionMul.value with valuesF, valuesG, hw),
+      (product with w, hw)]
+  have holomorphicH := HolomorphicOn.congr with holomorphicM, agree
+  have derivative := HasComplexDerivativeAt.mul with
+    (complexDeriv.has_derivative with holomorphicF, member),
+    (complexDeriv.has_derivative with holomorphicG, member)
+  have derivativeH := HasComplexDerivativeAt.congr with derivative, agree
+  have value := cxaDeriv.eq with holomorphicH, derivativeH
+  have fz := valuesF with z, member
+  have gz := valuesG with z, member
+  have dfz := FunctionBetween.apply_closed with
+    (complexDeriv.function with holomorphicF), member
+  have dgz := FunctionBetween.apply_closed with
+    (complexDeriv.function with holomorphicG), member
+  have fgz : ℂ[f(z) * g(z)] ∈ ℂ by typecheck
+  have fgNonzero : ℂ[f(z) * g(z)] ≠ ℂ[0]
+    intro vanish
+    exact nonzeroG with (complexMul.eq_zero_cancel_left with fz, gz, nonzeroF,
+      vanish)
+  have cancelFG := complexInv.mul_cancel with fgz, fgNonzero
+  have cancelF := complexInv.mul_cancel with fz, nonzeroF
+  have cancelG := complexInv.mul_cancel with gz, nonzeroG
+  have inverseFG := complexInv.member with fgz
+  have inverseF := complexInv.member with fz
+  have inverseG := complexInv.member with gz
+  unfold logDeriv
+  unfold complexDiv
+  rw [value, (product with z, member)]
+  linear_combination (complexDeriv(f, U)(z) * complexInv(f(z)) +
+    complexDeriv(g, U)(z) * complexInv(g(z))) * cancelFG -
+    (complexDeriv(f, U)(z) * g(z) * complexInv(ℂ[f(z) * g(z)])) * cancelF -
+    (complexDeriv(g, U)(z) * f(z) * complexInv(ℂ[f(z) * g(z)])) * cancelG
 
 theorem logDeriv.div (f g h U z : Set)
   requires holomorphicF : HolomorphicOn(f, U)
@@ -372,7 +1593,68 @@ theorem logDeriv.div (f g h U z : Set)
   requires nonzeroF : f(z) ≠ complexZero
   shows logDeriv(h, U, z) = ℂ[logDeriv(f, U, z) - logDeriv(g, U, z)]
 proof
-  sorry
+  have holomorphicQ := HolomorphicOn.div with holomorphicF, holomorphicG,
+    nonzero
+  have valuesF := holomorphicF.right.left
+  have valuesG := holomorphicG.right.left
+  have agree : ∀ w ∈ U, complexFunctionDiv(f, g, U)(w) = h(w)
+    intros w hw
+    rw [(complexFunctionDiv.value with valuesF, valuesG, hw),
+      (quotient with w, hw)]
+  have holomorphicH := HolomorphicOn.congr with holomorphicQ, agree
+  have derivative := HasComplexDerivativeAt.div with
+    (complexDeriv.has_derivative with holomorphicF, member),
+    (complexDeriv.has_derivative with holomorphicG, member), nonzero
+  have derivativeH := HasComplexDerivativeAt.congr with derivative, agree
+  have value := cxaDeriv.eq with holomorphicH, derivativeH
+  have fz := valuesF with z, member
+  have gz := valuesG with z, member
+  have nonzeroGz := nonzero with z, member
+  have dfz := FunctionBetween.apply_closed with
+    (complexDeriv.function with holomorphicF), member
+  have dgz := FunctionBetween.apply_closed with
+    (complexDeriv.function with holomorphicG), member
+  have inverseF := complexInv.member with fz
+  have inverseG := complexInv.member with gz
+  have ggz : ℂ[g(z) * g(z)] ∈ ℂ by typecheck
+  have ggNonzero : ℂ[g(z) * g(z)] ≠ ℂ[0]
+    intro vanish
+    exact nonzeroGz with (complexMul.eq_zero_cancel_left with gz, gz,
+      nonzeroGz, vanish)
+  have fgz : ℂ[f(z) * complexInv(g(z))] ∈ ℂ by typecheck
+  have cancelF := complexInv.mul_cancel with fz, nonzeroF
+  have cancelG := complexInv.mul_cancel with gz, nonzeroGz
+  have fgNonzero : ℂ[f(z) * complexInv(g(z))] ≠ ℂ[0]
+    intro vanish
+    have zero : ℂ[g(z) * (f(z) * complexInv(g(z)))] = ℂ[0]
+      rw vanish
+      ring
+    have back : ℂ[g(z) * (f(z) * complexInv(g(z)))] = f(z)
+      linear_combination f(z) * cancelG
+    rw back at zero
+    exact nonzeroF with zero
+  have cancelGG := complexInv.mul_cancel with ggz, ggNonzero
+  have cancelFG := complexInv.mul_cancel with fgz, fgNonzero
+  have inverseGG := complexInv.member with ggz
+  have inverseFG := complexInv.member with fgz
+  have eqA : complexInv(ℂ[g(z) * g(z)]) = ℂ[complexInv(g(z)) * complexInv(g(z))]
+    linear_combination (complexInv(g(z)) * complexInv(g(z))) * cancelGG -
+      (complexInv(ℂ[g(z) * g(z)]) * (g(z) * complexInv(g(z)) + 1)) * cancelG
+  have eqB : complexInv(ℂ[f(z) * complexInv(g(z))]) =
+      ℂ[g(z) * complexInv(f(z))]
+    linear_combination (g(z) * complexInv(f(z))) * cancelFG -
+      complexInv(ℂ[f(z) * complexInv(g(z))]) * cancelF -
+      (complexInv(ℂ[f(z) * complexInv(g(z))]) * f(z) * complexInv(f(z))) *
+      cancelG
+  unfold logDeriv
+  unfold complexDiv
+  rw [value, (quotient with z, member)]
+  unfold complexDiv
+  rw [eqA, eqB]
+  linear_combination (complexDeriv(f, U)(z) * complexInv(f(z)) *
+    (g(z) * complexInv(g(z)) + 1)) * cancelG -
+    (complexDeriv(g, U)(z) * complexInv(g(z)) * g(z) * complexInv(g(z))) *
+    cancelF - (complexDeriv(g, U)(z) * complexInv(g(z))) * cancelG
 
 -- The logarithmic derivative of a finite product is the sum of the
 -- logarithmic derivatives, over {0, …, n − 1}.
@@ -387,6 +1669,208 @@ theorem logDeriv.prod (F h u U z : Set, n : Nat)
 proof
   sorry
 
+-- The metric space ℂ behind complexSpace: its distance is the modulus of
+-- the difference.
+theorem cxaSpace.parts
+  shows MetricSpace(normMetric(complexAdditiveGroup, complexAbs)) ∧
+    MetricSpace.carrier(normMetric(complexAdditiveGroup, complexAbs)) = ℂ ∧
+    complexSpace = metricTopology(normMetric(complexAdditiveGroup, complexAbs))
+proof
+  have normed := complexAdditiveGroup.normed
+  have metric := normMetric.metric at complexAdditiveGroup, complexAbs with
+    normed
+  have carrier := normMetric.carrier at complexAdditiveGroup, complexAbs with
+    normed
+  have parts := complexAdditiveGroup.parts
+  rw parts.left at carrier
+  have space : complexSpace =
+      metricTopology(normMetric(complexAdditiveGroup, complexAbs))
+    unfold complexSpace
+    unfold normTopology
+    rfl
+  exact ⟨metric, carrier, space⟩
+
+theorem cxaSpace.dist (x y : Set)
+  requires hx : x ∈ ℂ
+  requires hy : y ∈ ℂ
+  shows MetricSpace.dist(normMetric(complexAdditiveGroup, complexAbs))(x, y) =
+    complexAbs(ℂ[x - y])
+proof
+  have normed := complexAdditiveGroup.normed
+  have parts := complexAdditiveGroup.parts
+  have xG : x ∈ Group.carrier(complexAdditiveGroup)
+    rw parts.left
+    exact hx
+  have yG : y ∈ Group.carrier(complexAdditiveGroup)
+    rw parts.left
+    exact hy
+  have inverse : Group.inv(complexAdditiveGroup) = complexNeg
+    unfold complexAdditiveGroup
+    group_projections
+  rw [(normMetric.dist at complexAdditiveGroup, complexAbs, x, y with normed,
+    xG, yG), parts.right, inverse]
+
+-- An ε–δ criterion for a limit along the punctured neighbourhoods of s.
+theorem cxaTendsto.punctured (h U s L : Set)
+  requires sub : U ⊆ ℂ
+  requires values : ∀ z ∈ U, h(z) ∈ ℂ
+  requires hs : s ∈ ℂ
+  requires hL : L ∈ ℂ
+  requires close : ∀ e ∈ ℝ, R[0] < e → ∃ d ∈ ℝ, R[0] < d ∧
+    complexDisk(s, d) ⊆ U ∧ (∀ z ∈ complexDisk(s, d), z ≠ s →
+      complexAbs(ℂ[h(z) - L]) < e)
+  shows Tendsto(h, U, nhdsPunctured(complexSpace, s), nhds(complexSpace, L))
+proof
+  obtain ⟨metric, carrier, space⟩ := cxaSpace.parts
+  have top := MetricSpace.topological_space with metric
+  have sM : s ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup, complexAbs))
+    rw carrier
+    exact hs
+  have LM : L ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup, complexAbs))
+    rw carrier
+    exact hL
+  unfold Tendsto
+  intros B hB
+  rw space at hB
+  obtain ⟨Bsub, e, he, ePositive, ballB⟩ := (nhds.metric_iff at
+    normMetric(complexAdditiveGroup, complexAbs), L, B with metric, LM).forward
+    with hB
+  obtain ⟨d, hd, dPositive, inside, near⟩ := close with e, he, ePositive
+  have dReal : Real(d) by typecheck
+  rw space
+  unfold nhdsPunctured
+  apply (nhdsWithin.mem_iff at
+    metricTopology(normMetric(complexAdditiveGroup, complexAbs)), s,
+    TopologicalSpace.carrier(metricTopology(normMetric(complexAdditiveGroup,
+      complexAbs))) ∖ {s}, functionPreimage(h, U, B) with top).backward
+  have openB := ball_open at normMetric(complexAdditiveGroup, complexAbs), s, d
+    with metric
+  have memB := Open.mem with top, openB
+  have sB := mem_ball_self at normMetric(complexAdditiveGroup, complexAbs), s,
+    d with metric, dPositive
+  rw [metricTopology.carrier, carrier]
+  refine ⟨?_, ball(normMetric(complexAdditiveGroup, complexAbs), s, d), memB,
+    sB, ?_⟩
+  . intros z hz
+    have zU := (functionPreimage.subset at h, U, B) with z, hz
+    exact sub with z, zU
+  . intros z hz
+    have parts := intersection.membership.forward with hz
+    have outside := difference.membership.forward with parts.right
+    have zC : z ∈ ℂ
+      have c0 := outside.left
+      rwa [metricTopology.carrier, carrier] at c0
+    have distinct : z ≠ s
+      intro same
+      apply outside.right
+      rw same
+      simp
+    have zM : z ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup,
+        complexAbs))
+      rw carrier
+      exact zC
+    have distance := (mem_ball at normMetric(complexAdditiveGroup, complexAbs),
+      s, z, d with metric, sM, zM).forward with parts.left
+    rw (cxaSpace.dist with hs, zC) at distance
+    rw (complexAbs.dist_symm at s, z) at distance
+    have zDisk : z ∈ complexDisk(s, d)
+      apply complexDisk.membership.backward
+      exact ⟨zC, distance⟩
+    have zU := inside with z, zDisk
+    have small := near with z, zDisk, distinct
+    have hzC := values with z, zU
+    have hM : h(z) ∈ MetricSpace.carrier(normMetric(complexAdditiveGroup,
+        complexAbs))
+      rw carrier
+      exact hzC
+    have target : h(z) ∈ ball(normMetric(complexAdditiveGroup, complexAbs), L, e)
+      apply (mem_ball at normMetric(complexAdditiveGroup, complexAbs), L, h(z),
+        e with metric, LM, hM).backward
+      rw [(cxaSpace.dist with hL, hzC), (complexAbs.dist_symm at L, h(z))]
+      exact small
+    have hzB := ballB with h(z), target
+    apply functionPreimage.membership.backward
+    exact ⟨zU, hzB⟩
+
+-- The derivative of w ↦ (w − s)ⁿ at z, through (z − s) D = n (z − s)ⁿ.
+theorem cxaPowerMap.derivative (s V z : Set, n : Nat)
+  requires hs : s ∈ ℂ
+  requires isOpen : ComplexOpen(V)
+  requires hz : z ∈ V
+  shows ∃ D ∈ ℂ, HasComplexDerivativeAt(cxaPowerMap(s, n), V, D, z) ∧
+    ℂ[(z - s) * D] = ℂ[complexOfReal(realNat(n)) * (z - s) ^ n]
+proof
+  have sub := ComplexOpen.subset with isOpen
+  have zMember := sub with z, hz
+  have difference : ℂ[z - s] ∈ ℂ by typecheck
+  have valuesP : ∀ q ∈ ℕ, ComplexValuedOn(cxaPowerMap(s, q), V)
+    intros q hq
+    have qNat := nat.omega.backward at q with hq
+    intros w hw
+    exact FunctionBetween.apply_closed with (cxaPowerMap.function at s, q
+      with hs), (sub with w, hw)
+  induction n
+  | zero =>
+    have one : ℂ[1] ∈ ℂ by typecheck
+    have constant := HasComplexDerivativeAt.const with isOpen, hz, one
+    have agree : ∀ w ∈ V, complexFunctionConst(ℂ[1], V)(w) =
+        cxaPowerMap(s, (0:N))(w)
+      intros w hw
+      rw [(complexFunctionConst.value with one, hw),
+        (cxaPowerMap.value with hs, (sub with w, hw)), monoidPow.zero]
+    have derivative := HasComplexDerivativeAt.congr with constant, agree
+    have zero : ℂ[0] ∈ ℂ by typecheck
+    refine ⟨ℂ[0], zero, derivative, ?_⟩
+    rw [monoidPow.zero, realNat.zero, complexOfReal.zero]
+    ring
+  | succ(k) using ih =>
+    obtain ⟨D, hD, derivativeK, relation⟩ := ih
+    have kIn : k ∈ ℕ by typecheck
+    have valuesK := valuesP with k, kIn
+    have one : ℂ[1] ∈ ℂ by typecheck
+    have minus : ℂ[-s] ∈ ℂ by typecheck
+    have identity := HasComplexDerivativeAt.id with isOpen, hz
+    have constant := HasComplexDerivativeAt.const at ℂ[-s], V, z with isOpen,
+      hz, minus
+    have linear := HasComplexDerivativeAt.add with identity, constant
+    have valuesL := linear.right.right.right.left
+    have product := HasComplexDerivativeAt.mul with linear, derivativeK
+    have agree : ∀ w ∈ V, complexFunctionMul(complexFunctionAdd(
+        complexFunctionId(V), complexFunctionConst(ℂ[-s], V), V),
+        cxaPowerMap(s, k), V)(w) = cxaPowerMap(s, succ(k))(w)
+      intros w hw
+      have wMember := sub with w, hw
+      have valuesI := identity.right.right.right.left
+      have valuesC := constant.right.right.right.left
+      have wa : ℂ[w - s] ∈ ℂ by typecheck
+      have power := complexPow.member at ℂ[w - s], k with wa
+      rw [(complexFunctionMul.value with valuesL, valuesK, hw),
+        (complexFunctionAdd.value with valuesI, valuesC, hw),
+        (complexFunctionId.value with sub, hw),
+        (complexFunctionConst.value with minus, hw),
+        (cxaPowerMap.value at s, k, w with hs, wMember),
+        (cxaPowerMap.value at s, succ(k), w with hs, wMember), monoidPow.succ]
+      ring
+    have derivative := HasComplexDerivativeAt.congr with product, agree
+    have valuesI := identity.right.right.right.left
+    have valuesC := constant.right.right.right.left
+    have linearValue : complexFunctionAdd(complexFunctionId(V),
+        complexFunctionConst(ℂ[-s], V), V)(z) = ℂ[z - s]
+      rw [(complexFunctionAdd.value with valuesI, valuesC, hz),
+        (complexFunctionId.value with sub, hz),
+        (complexFunctionConst.value with minus, hz)]
+      ring
+    have powerValue := cxaPowerMap.value at s, k, z with hs, zMember
+    have power := complexPow.member at ℂ[z - s], k with difference
+    have nk : complexOfReal(realNat(k)) ∈ ℂ by typecheck
+    rw [linearValue, powerValue] at derivative
+    have value : ℂ[(1 + 0) * (z - s) ^ k + (z - s) * D] ∈ ℂ by typecheck
+    refine ⟨ℂ[(1 + 0) * (z - s) ^ k + (z - s) * D], value, derivative, ?_⟩
+    have expand : ℂ[(z - s) * ((1 + 0) * (z - s) ^ k + (z - s) * D)] =
+        ℂ[(z - s) * (z - s) ^ k + (z - s) * ((z - s) * D)] by ring
+    rw [expand, relation, complexOfReal.nat_succ, monoidPow.succ]
+    ring
+
 -- Mathlib's tendsto_sub_mul_logDeriv: near a zero of order n,
 -- (z − s) f′(z)/f(z) → n as z → s with z ≠ s.
 theorem logDeriv.residue (f U s h : Set)
@@ -398,7 +1882,188 @@ theorem logDeriv.residue (f U s h : Set)
   shows Tendsto(h, U, nhdsPunctured(complexSpace, s),
     nhds(complexSpace, complexOfReal(realNat(analyticOrderNat(f, s)))))
 proof
-  sorry
+  have isOpen := holomorphic.left
+  have sub := ComplexOpen.subset with isOpen
+  have sMember := sub with s, member
+  have valuesF := holomorphic.right.left
+  have analytic := ComplexAnalyticAt.of_holomorphic with holomorphic, member
+  obtain ⟨g, r, hr, positiveR, analyticG, nonzeroG, factor⟩ :=
+    analyticOrderNat.factor with analytic, nonzero
+  have orderIn := (analyticOrderNat.selected with analytic).left
+  have orderNat := nat.omega.backward at analyticOrderNat(f, s) with orderIn
+  obtain ⟨_, c, rg, hrg, positiveG, radius, sums⟩ := analyticG
+  -- g is holomorphic on a disk about s.
+  have series := powerSeriesSum.holomorphic with radius, sMember
+  have agreeG : ∀ w ∈ complexDisk(s, rg), powerSeriesSum(c, s, rg)(w) = g(w)
+    intros w hw
+    exact ComplexSumsTo.unique with
+      (powerSeriesSum.sums with radius, sMember, hw), (sums with w, hw)
+  have holomorphicG := HolomorphicOn.congr with series, agreeG
+  have continuousG := HolomorphicOn.continuous with holomorphicG
+  have centerG := complexDisk.center with sMember, hrg, positiveG
+  have gs := holomorphicG.right.left with s, centerG
+  have gsAbs := complexAbs.positive with gs, nonzeroG
+  have gsReal : complexAbs(g(s)) ∈ ℝ by typecheck
+  obtain ⟨δ, hδ, positiveδ, nearG⟩ := continuousG.right.right with s, centerG,
+    complexAbs(g(s)), gsReal, gsAbs
+  obtain ⟨ru, hru, positiveU, diskU⟩ := ComplexOpen.disk with isOpen, member
+  obtain ⟨t1, ht1, positive1, le1r, le1g⟩ := realRadius.common with hr, hrg,
+    positiveR, positiveG
+  obtain ⟨t2, ht2, positive2, le2u, le2δ⟩ := realRadius.common with hru, hδ,
+    positiveU, positiveδ
+  obtain ⟨ρ, hρ, positiveρ, le1, le2⟩ := realRadius.common with ht1, ht2,
+    positive1, positive2
+  have ρr : (ρ:R) ≤ r by linarith
+  have ρg : (ρ:R) ≤ rg by linarith
+  have ρu : (ρ:R) ≤ ru by linarith
+  have ρδ : (ρ:R) ≤ δ by linarith
+  have intoR := complexDisk.mono at s, ρ, r with sMember, hρ, hr, ρr
+  have intoG := complexDisk.mono at s, ρ, rg with sMember, hρ, hrg, ρg
+  have intoU := complexDisk.mono at s, ρ, ru with sMember, hρ, hru, ρu
+  have insideU : complexDisk(s, ρ) ⊆ U
+    intros w hw
+    exact diskU with w, (intoU with w, hw)
+  have openD := complexDisk.open with sMember, hρ
+  have centerD := complexDisk.center with sMember, hρ, positiveρ
+  have holomorphicD := HolomorphicOn.mono with holomorphicG, openD, intoG
+  have nonvanishing : ∀ w ∈ complexDisk(s, ρ), g(w) ≠ ℂ[0]
+    intros w hw
+    obtain ⟨wMember, close⟩ := complexDisk.membership.forward with hw
+    have closeδ : complexAbs(ℂ[w - s]) < δ by linarith
+    have small := nearG with w, (intoG with w, hw), closeδ
+    intro vanish
+    rw vanish at small
+    have zero : ℂ[0 - g(s)] = ℂ[-g(s)] by ring
+    rw [zero, (complexAbs.neg with gs)] at small
+    linarith
+  -- The quotient q = g′/g and k(z) = (z − s) q(z) are continuous on D.
+  have derivG := HolomorphicOn.deriv with holomorphicD
+  have valuesDG := derivG.right.left
+  have valuesGD := holomorphicD.right.left
+  have quotient := HolomorphicOn.div with derivG, holomorphicD, nonvanishing
+  have contQ := HolomorphicOn.continuous with quotient
+  have linearC := cxaPowerMap.continuous at s, (1:N) with sMember
+  have subD := complexDisk.subset at s, ρ
+  have contL := ComplexContinuousOn.mono with linearC, subD
+  have valuesL := contL.right.left
+  have valuesQ := contQ.right.left
+  have formulaK : ∀ w ∈ complexDisk(s, ρ), complexFunctionMul(cxaPowerMap(s, (1:N)), complexFunctionDiv(complexDeriv(g, complexDisk(s, ρ)), g, complexDisk(s, ρ)), complexDisk(s, ρ))(w) = ℂ[cxaPowerMap(s, (1:N))(w) * complexFunctionDiv(complexDeriv(g, complexDisk(s, ρ)), g, complexDisk(s, ρ))(w)]
+    intros w hw
+    exact complexFunctionMul.value with valuesL, valuesQ, hw
+  have contK := ComplexContinuousOn.mul with contL, contQ, formulaK
+  have kValue : ∀ w ∈ complexDisk(s, ρ), complexFunctionMul(cxaPowerMap(s, (1:N)), complexFunctionDiv(complexDeriv(g, complexDisk(s, ρ)), g, complexDisk(s, ρ)), complexDisk(s, ρ))(w) =
+      ℂ[(w - s) * complexDiv(complexDeriv(g, complexDisk(s, ρ))(w), g(w))]
+    intros w hw
+    obtain ⟨wMember, _⟩ := complexDisk.membership.forward with hw
+    have gw := valuesGD with w, hw
+    have dgw := valuesDG with w, hw
+    have quotientMember : complexDiv(complexDeriv(g, complexDisk(s, ρ))(w), g(w)) ∈ ℂ
+      unfold complexDiv
+      have inverse := complexInv.member with gw
+      typecheck
+    rw [(formulaK with w, hw), (cxaPowerMap.value at s, (1:N), w with sMember,
+      wMember), (complexFunctionDiv.value with valuesDG, valuesGD, hw),
+      monoidPow.succ, monoidPow.zero]
+    ring
+  have kCenter : complexFunctionMul(cxaPowerMap(s, (1:N)), complexFunctionDiv(complexDeriv(g, complexDisk(s, ρ)), g, complexDisk(s, ρ)), complexDisk(s, ρ))(s) = ℂ[0]
+    rw (kValue with s, centerD)
+    have quotientMember : complexDiv(complexDeriv(g, complexDisk(s, ρ))(s), g(s)) ∈ ℂ
+      unfold complexDiv
+      have inverse := complexInv.member with gs
+      have dgs := valuesDG with s, centerD
+      typecheck
+    ring
+  -- Off s, (z − s) f′(z)/f(z) = n + (z − s) g′(z)/g(z).
+  have identity : ∀ z ∈ complexDisk(s, ρ), z ≠ s → h(z) = ℂ[complexOfReal(realNat(analyticOrderNat(f, s))) +
+      (z - s) * complexDiv(complexDeriv(g, complexDisk(s, ρ))(z), g(z))]
+    intros z hz distinct
+    obtain ⟨zMember, _⟩ := complexDisk.membership.forward with hz
+    have zU := insideU with z, hz
+    obtain ⟨DP, hDP, derivP, relation⟩ := cxaPowerMap.derivative at s, complexDisk(s, ρ), z,
+      analyticOrderNat(f, s) with sMember, openD, hz
+    have derivGz := complexDeriv.has_derivative with holomorphicD, hz
+    have product := HasComplexDerivativeAt.mul with derivP, derivGz
+    have valuesP := derivP.right.right.right.left
+    have agreeF : ∀ w ∈ complexDisk(s, ρ), complexFunctionMul(cxaPowerMap(s,
+        analyticOrderNat(f, s)), g, complexDisk(s, ρ))(w) = f(w)
+      intros w hw
+      obtain ⟨wMember, _⟩ := complexDisk.membership.forward with hw
+      rw [(complexFunctionMul.value with valuesP, valuesGD, hw),
+        (cxaPowerMap.value at s, analyticOrderNat(f, s), w with sMember,
+          wMember), (factor with w, (intoR with w, hw))]
+    have derivD := HasComplexDerivativeAt.congr with product, agreeF
+    have derivU := HasComplexDerivativeAt.of_local with derivD, isOpen,
+      insideU, valuesF
+    have same := HasComplexDerivativeAt.unique with
+      (complexDeriv.has_derivative with holomorphic, zU), derivU
+    have difference : ℂ[z - s] ∈ ℂ by typecheck
+    have nonzeroD : ℂ[z - s] ≠ ℂ[0]
+      intro vanish
+      apply distinct
+      have shape : z = ℂ[(z - s) + s] by ring
+      rw [shape, vanish]
+      ring
+    have power := complexPow.member at ℂ[z - s], analyticOrderNat(f, s) with
+      difference
+    have powerNonzero := cxaPow.nonzero at ℂ[z - s], analyticOrderNat(f, s)
+      with difference, nonzeroD
+    have gz := valuesGD with z, hz
+    have dgz := valuesDG with z, hz
+    have gzNonzero := nonvanishing with z, hz
+    have fzNonzero : ℂ[(z - s) ^ analyticOrderNat(f, s) * g(z)] ≠ ℂ[0]
+      intro vanish
+      exact gzNonzero with (complexMul.eq_zero_cancel_left with power, gz,
+        powerNonzero, vanish)
+    have fz : ℂ[(z - s) ^ analyticOrderNat(f, s) * g(z)] ∈ ℂ by typecheck
+    have cancelF := complexInv.mul_cancel with fz, fzNonzero
+    have cancelG := complexInv.mul_cancel with gz, gzNonzero
+    have inverseF := complexInv.member with fz
+    have inverseG := complexInv.member with gz
+    have nIn : complexOfReal(realNat(analyticOrderNat(f, s))) ∈ ℂ by typecheck
+    rw (values with z, zU)
+    unfold logDeriv
+    unfold complexDiv
+    rw [same, (cxaPowerMap.value at s, analyticOrderNat(f, s), z with sMember,
+      zMember), (factor with z, (intoR with z, hz))]
+    linear_combination (g(z) * complexInv(ℂ[(z - s) ^ analyticOrderNat(f, s) *
+      g(z)])) * relation + complexOfReal(realNat(analyticOrderNat(f, s))) * cancelF + ((z - s) *
+      complexDeriv(g, complexDisk(s, ρ))(z) * complexInv(g(z))) * cancelF - ((z - s) *
+      complexDeriv(g, complexDisk(s, ρ))(z) * (z - s) ^ analyticOrderNat(f, s) *
+      complexInv(ℂ[(z - s) ^ analyticOrderNat(f, s) * g(z)])) * cancelG
+  -- The limit.
+  have nMember : complexOfReal(realNat(analyticOrderNat(f, s))) ∈ ℂ by typecheck
+  have valuesH : ∀ z ∈ U, h(z) ∈ ℂ
+    intros z hz
+    exact FunctionBetween.apply_closed with function, hz
+  apply cxaTendsto.punctured with sub, valuesH, sMember, nMember
+  intros e he ePositive
+  obtain ⟨d, hd, dPositive, nearK⟩ := contK.right.right with s, centerD, e, he,
+    ePositive
+  obtain ⟨t, ht, positiveT, leD, leρ⟩ := realRadius.common with hd, hρ,
+    dPositive, positiveρ
+  have tρ : (t:R) ≤ ρ by linarith
+  have intoD := complexDisk.mono at s, t, ρ with sMember, ht, hρ, tρ
+  have insideT : complexDisk(s, t) ⊆ U
+    intros w hw
+    exact insideU with w, (intoD with w, hw)
+  refine ⟨t, ht, positiveT, insideT, ?_⟩
+  intros z hz distinct
+  have zD := intoD with z, hz
+  obtain ⟨zMember, closeT⟩ := complexDisk.membership.forward with hz
+  have closeD : complexAbs(ℂ[z - s]) < d by linarith
+  have small := nearK with z, zD, closeD
+  rw [kCenter, (kValue with z, zD)] at small
+  rw (identity with z, zD, distinct)
+  have gz := valuesGD with z, zD
+  have dgz := valuesDG with z, zD
+  have quotientMember : complexDiv(complexDeriv(g, complexDisk(s, ρ))(z), g(z)) ∈ ℂ
+    unfold complexDiv
+    have inverse := complexInv.member with gz
+    typecheck
+  have shift : ℂ[complexOfReal(realNat(analyticOrderNat(f, s))) + (z - s) * complexDiv(complexDeriv(g, complexDisk(s, ρ))(z), g(z)) -
+      complexOfReal(realNat(analyticOrderNat(f, s)))] = ℂ[(z - s) * complexDiv(complexDeriv(g, complexDisk(s, ρ))(z), g(z)) - 0] by ring
+  rw shift
+  exact small
 
 -- The logarithmic derivative of z ↦ z − a is 1/(z − a).
 theorem logDeriv.linear (g U a z : Set)
@@ -409,7 +2074,35 @@ theorem logDeriv.linear (g U a z : Set)
   requires different : z ≠ a
   shows logDeriv(g, U, z) = complexInv(ℂ[z - a])
 proof
-  sorry
+  have isOpen : ComplexOpen(U) := open
+  have sub := ComplexOpen.subset with isOpen
+  have zMember := sub with z, member
+  have minus : ℂ[-a] ∈ ℂ by typecheck
+  have identity := HolomorphicOn.id with isOpen
+  have constant := HolomorphicOn.const with isOpen, minus
+  have sum := HolomorphicOn.add with identity, constant
+  have valuesI := identity.right.left
+  have valuesC := constant.right.left
+  have agree : ∀ w ∈ U, complexFunctionAdd(complexFunctionId(U),
+      complexFunctionConst(ℂ[-a], U), U)(w) = g(w)
+    intros w hw
+    have wMember := sub with w, hw
+    rw [(complexFunctionAdd.value with valuesI, valuesC, hw),
+      (complexFunctionId.value with sub, hw),
+      (complexFunctionConst.value with minus, hw), (values with w, hw)]
+    ring
+  have holomorphicG := HolomorphicOn.congr with sum, agree
+  have derivative := HasComplexDerivativeAt.add with
+    (HasComplexDerivativeAt.id with isOpen, member),
+    (HasComplexDerivativeAt.const at ℂ[-a], U, z with isOpen, member, minus)
+  have derivativeG := HasComplexDerivativeAt.congr with derivative, agree
+  have value := cxaDeriv.eq with holomorphicG, derivativeG
+  have difference : ℂ[z - a] ∈ ℂ by typecheck
+  have inverse := complexInv.member with difference
+  unfold logDeriv
+  unfold complexDiv
+  rw [value, (values with z, member)]
+  ring
 
 -- Section: Integrals depending holomorphically on a parameter
 -- If K(s)(t) is continuous in (s, t) on U × [A, B] and holomorphic in s
