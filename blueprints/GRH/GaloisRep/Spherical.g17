@@ -1,0 +1,252 @@
+-- Galois representations attached to eigenforms on the definite unitary
+-- group U_n of a CM field: Hecke polynomials at split places, eigenforms
+-- for a system of Hecke polynomials, the Hodge–Tate jumps of a weight,
+-- the statement SphericalCompat (an attached ℓ-adic representation
+-- exists, and every attached one is unramified or crystalline with the
+-- jumps of the weight at a spherical place, where the Hecke polynomial
+-- kills geometric Frobenius), and its proofs in odd rank and in every
+-- rank; with the lemmas on Hecke polynomials and on split places.
+-- Source: grh-compact/src/Lib/GaloisRep/Main/AttachedDefs.lean
+-- (SphericalCompat), Main/SphericalAllRanks.lean (sphericalCompat_std),
+-- Main/AvatarCompatibility.lean (sphericalCompat_of_odd),
+-- Main/HeckeOperatorOfFunction.lean (coeff_heckePoly,
+-- HasHeckePolyAt.isMonicOfDegree, Weight.nodup_jumps),
+-- Main/SplitPlaceCount.lean (eventually_notMem_star_notMem); with the
+-- definitions they use from Lib/Weil/Unramified/SphericalHecke.lean
+-- (Weight, heckePoly, maxCompactAt, HasHeckePolyAt, IsEigenform, jumps)
+-- and Lib/Adelic/Adeles/CoprimeValuation.lean (StablyUnram).
+-- Encoding. The CM field E carries the CM type Φ (GRH.Adelic.Adeles); a
+-- weight is a pair κ = (κ₁, κ₂) of functions on Φ, κ₁(v) : ℕ → ℕ the
+-- column counts and κ₂(v) ∈ ℤ the determinant exponent (the source's
+-- Weight E, its infinite places read through Φ); the forms of weight κ
+-- on U_n are algForms(E, Φ, n, schurWeightDatum(E, Φ, n, κ₁, κ₂))
+-- (GRH.Adelic.CuspForms, GRH.GLn.WeightRep), functions on G_f × index;
+-- G_f acts by right translation. The Hecke operators T_{w,j} at a split
+-- place w (the source's heckeSplit, Lib/Weil/Unramified) are read from a
+-- STAND-IN family T: T((w, j)) is the operator on forms. The multiset
+-- jumps κ N σ is its count function on ℤ.
+-- Part of the GRH blueprint (layer 4, Lib/GaloisRep).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.GaloisRep.Spherical
+import GRH.GaloisRep.Attached
+import GRH.GLn.WeightRep
+import GRH.Weil.Unramified
+
+section Spherical
+
+-- Section: Forms and their right translates
+-- SphericalHecke.lean, (stdSpace E n).forms κ: the algebraic forms of
+-- weight κ = (κ₁, κ₂) on the definite U_n.
+def csGRForms (E Φ n κ : Set) : Set :=
+  algForms(E, Φ, n, schurWeightDatum(E, Φ, n, fst(κ), snd(κ)))
+
+-- The right translate (g·f)(x, i) = f(xg, i) (rightRegular).
+def csGRRightTranslate (E n g f : Set) : Set :=
+  { (q, f((matMul(finiteAdeleRing(E), n, n, n, fst(q), g), snd(q)))) | q ∈ domain(f) }
+
+-- f is fixed by the subgroup K of G_f.
+predicate csGRFixedBy (E n K f : Set) := ∀ k ∈ K, csGRRightTranslate(E, n, k, f) = f
+
+-- STAND-IN for Weil/Unramified/SphericalHecke.lean, maxCompactAt n w =
+-- Kf ⊓ supportedOn n {w}: the integral points of G_f trivial at every
+-- place other than w and w̄.
+def csGRMaxCompactAt (E n w : Set) : Set :=
+  { k ∈ kfMatrices(E, n) | ∀ u ∈ finPlaces(E), u ≠ w → u ≠ csGRConjPlace(E, w) →
+    (∀ q ∈ n × n, k(q)(u) = matOne(finiteAdeleRing(E), n)(q)(u)) }
+
+-- Section: Hecke polynomials
+-- STAND-IN for Weil/Unramified/SphericalHecke.lean, heckePoly q N t =
+-- Σ_{j=0}^{N} (−1)^j q^{j(j−1)/2} t_j X^{N−j}, over ℂ.
+-- The triangular numbers j(j − 1)/2.
+def csGRTriangle (j : Nat) → Nat
+  | zero => zero
+  | succ(k) => add(csGRTriangle(k), k)
+
+-- The term (−1)^j q^{j(j−1)/2} t_j X^{N−j}.
+def heckePolyCoeff (q j : Nat, t : Set) : Set :=
+  call2(complexMul, call2(complexMul,
+    Ring.pow(complexRing, apply(complexNeg, complexOne), j),
+    Ring.pow(complexRing, natCast(complexRing, q), csGRTriangle(j))), t(j))
+
+def heckePolyTerm (q N j : Nat, t : Set) : Set :=
+  call2(Ring.mul(polynomialRing(complexRing, {0})), polyC(complexRing, heckePolyCoeff(q, j, t)),
+    Ring.pow(polynomialRing(complexRing, {0}), polyX(complexRing), N - j))
+
+def heckePolyTerms (q N : Nat, t : Set) : Set :=
+  { (j, heckePolyTerm(q, N, j, t)) | j ∈ succ(N) }
+
+def heckePoly (q N : Nat, t : Set) : Set :=
+  finiteRingSum(succ(N), Ring.carrier(polynomialRing(complexRing, {0})),
+    Ring.add(polynomialRing(complexRing, {0})), Ring.zero(polynomialRing(complexRing, {0})),
+    Ring.neg(polynomialRing(complexRing, {0})), Ring.mul(polynomialRing(complexRing, {0})),
+    Ring.one(polynomialRing(complexRing, {0})), heckePolyTerms(q, N, t))
+
+-- The scalar multiple c·f of a form.
+def csGRFormSmul (c f : Set) : Set := { (q, call2(complexMul, c, f(q))) | q ∈ domain(f) }
+
+-- The zero function on the domain of f.
+def csGRZeroForm (f : Set) : Set := { (q, complexZero) | q ∈ domain(f) }
+
+-- STAND-IN for SphericalHecke.lean, HasHeckePolyAt f w hw P: at the split
+-- place w, f is fixed by K_w, each Hecke operator T_{w,j} acts on f by a
+-- scalar t_j, and P = heckePoly(q_w, |n|, t).
+predicate HasHeckePolyAt (E n T f w P : Set) :=
+  csGRIsSplit(E, w) ∧ csGRFixedBy(E, n, csGRMaxCompactAt(E, n, w), f) ∧
+  (∃ t, FunctionBetween(t, ℕ, complexCarrier) ∧
+    (∃ q ∈ ℕ, ∃ N ∈ ℕ, q = placeNorm(E, w) ∧ N = cardinality(n) ∧ P = heckePoly(q, N, t)) ∧
+    (∀ j ∈ ℕ, T((w, j))(f) = csGRFormSmul(t(j), f)))
+
+-- STAND-IN for SphericalHecke.lean, IsEigenform f P: f ≠ 0 and, outside
+-- finitely many places, every place w of prime norm is split with Hecke
+-- polynomial P(w) there.
+predicate IsEigenform (E n T f P : Set) :=
+  f ≠ csGRZeroForm(f) ∧ (∃ F, Finite(F) ∧ (∀ w ∈ finPlaces(E), w ∉ F →
+    (∃ q ∈ ℕ, q = placeNorm(E, w) ∧ Prime(q)) → HasHeckePolyAt(E, n, T, f, w, P(w))))
+
+-- Section: Jumps of a weight
+-- The element of Φ above the embedding σ (σ itself or its conjugate).
+def csGRPhiOf (E Φ σ : Set) : Set :=
+  ⋃({ φ ∈ Φ | φ = σ ∨ φ = conjugateEmbedding(E, σ) })
+
+-- The naturals h with j < h < N.
+def natOpenInterval (j N : Set) : Set := { h ∈ ℕ | j ∈ h ∧ h ∈ N }
+
+def columnCountTerms (κ v j N : Set) : Set :=
+  { (h, integerOfNat(fst(κ)(v)(h))) | h ∈ natOpenInterval(j, N) }
+
+-- λ_j = κ₂(v) + Σ_{j<h<N} κ₁(v)(h) + (N − 1 − j) for j < N, with N − 1 − j
+-- the number of h with j < h < N.
+def jumpBase (E Φ κ N σ j : Set) : Set :=
+  call2(Ring.add(integerRing), call2(Ring.add(integerRing), snd(κ)(csGRPhiOf(E, Φ, σ)),
+    finiteRingSum(natOpenInterval(j, N), Ring.carrier(integerRing), Ring.add(integerRing),
+      Ring.zero(integerRing), Ring.neg(integerRing), Ring.mul(integerRing),
+      Ring.one(integerRing), columnCountTerms(κ, csGRPhiOf(E, Φ, σ), j, N))),
+    integerOfNat(cardinality(natOpenInterval(j, N))))
+
+-- STAND-IN for SphericalHecke.lean, jumps κ N σ: the multiset over j < N
+-- of N − 1 − λ_j if σ ∈ Φ and λ_j otherwise, as its count function.
+def jumpValue (E Φ κ N σ j : Set) : Set :=
+  ⋃({ u ∈ ℤ | (σ ∈ Φ ∧ u = Ring.sub(integerRing, integerOfNat(cardinality(natOpenInterval(0, N))),
+      jumpBase(E, Φ, κ, N, σ, j))) ∨ (σ ∉ Φ ∧ u = jumpBase(E, Φ, κ, N, σ, j)) })
+
+def jumpIndices (E Φ κ N σ u : Set) : Set := { j ∈ N | jumpValue(E, Φ, κ, N, σ, j) = u }
+
+def jumpCounts (E Φ κ N σ : Set) : Set :=
+  { (u, cardinality(jumpIndices(E, Φ, κ, N, σ, u))) | u ∈ ℤ }
+
+def jumps (E Φ κ N : Set) : Set :=
+  { (σ, jumpCounts(E, Φ, κ, N, σ)) | σ ∈ complexEmbeddings(E) }
+
+-- Section: Spherical compatibility
+-- The polynomial ιQ over ℚ̄_ℓ.
+def csGRPolyToPadic (Q ι P : Set) : Set := polyMap(complexRing, Algebra.ring(Q), ι)(P)
+
+-- The family w ↦ P(w) as a family of Hecke polynomials.
+predicate HeckeSystem (E P : Set) :=
+  FunctionBetween(P, finPlaces(E), Ring.carrier(polynomialRing(complexRing, {0})))
+
+-- AttachedDefs.lean, SphericalCompat E n N w: every eigenform f of weight
+-- κ for a system P has an attached r : Gal(Ω/E) → GL_n(ℚ̄_ℓ); if K_w fixes
+-- f, every attached r is, at every place A of Ω above w, unramified or
+-- crystalline with the jumps of κ in rank N, and ιQ kills every
+-- geometric Frobenius at A whenever f has Hecke polynomial Q at w.
+predicate SphericalCompat (H X : Set, l : Nat, Q ι Φ n T N w : Set) :=
+  ∀ P, ∀ κ, ∀ f, HeckeSystem(Algebra.base(X), P) →
+    f ∈ csGRForms(Algebra.base(X), Φ, n, κ) → IsEigenform(Algebra.base(X), n, T, f, P) →
+    (∃ r, GalRep(X, Q, n, r) ∧ AttachedGal(X, l, Q, ι, P, n, r)) ∧
+    (∀ r, AttachedGal(X, l, Q, ι, P, n, r) →
+      csGRFixedBy(Algebra.base(X), n, csGRMaxCompactAt(Algebra.base(X), n, w), f) →
+      (∀ A, csGRIsPlaceOver(X, A, w) → IsGoodAt(H, X, l, Q, n, r, A) ∧
+        HasJumpsAt(H, X, l, Q, ι, r, A, jumps(Algebra.base(X), Φ, κ, N)) ∧
+        (∀ R, HasHeckePolyAt(Algebra.base(X), n, T, f, w, R) →
+          (∀ s ∈ algebraAutomorphisms(X), ∀ q ∈ ℕ, q = placeNorm(Algebra.base(X), w) →
+            csGRIsFrob(X, A, q, Group.inv(galoisGroup(X))(s)) →
+            PolyKillsAt(H, X, l, Q, n, r, A, s, csGRPolyToPadic(Q, ι, R))))))
+
+-- STAND-IN for Adelic/Adeles/CoprimeValuation.lean, StablyUnram E: E
+-- contains a primitive 5040-th root of unity.
+predicate csGRStablyUnram (E : Set) := ∃ ζ ∈ Ring.carrier(E), IsPrimitiveRoot(E, ζ, 5040)
+
+-- The data of the main theorems: Ω/E with E CM of CM type Φ, the prime ℓ
+-- with ι : ℂ ≃ ℚ̄_ℓ, the p-adic Hodge theory H, and the Hecke operators T
+-- of the forms on U_n.
+predicate SphericalSetting (H X : Set, l : Nat, Q ι Φ n T : Set) :=
+  csGRClosure(X) ∧ CMType(Algebra.base(X), Φ) ∧ csGRPadicIso(l, Q, ι) ∧ Finite(n) ∧ n ≠ ∅
+
+-- AvatarCompatibility.lean, sphericalCompat_of_odd: in odd rank a, for E
+-- stably unramified, SphericalCompat E (Fin a) a w holds at every finite
+-- place w.
+theorem sphericalCompat_of_odd (H X : Set, l : Nat, Q ι Φ T a w : Set)
+  requires setting : SphericalSetting(H, X, l, Q, ι, Φ, a, T)
+  requires natural : a ∈ ℕ
+  requires odd : ∃ b ∈ ℕ, a = succ(add(b, b))
+  requires stably : csGRStablyUnram(Algebra.base(X))
+  requires place : w ∈ finPlaces(Algebra.base(X))
+  shows SphericalCompat(H, X, l, Q, ι, Φ, a, T, a, w)
+proof
+  sorry
+
+-- SphericalAllRanks.lean, sphericalCompat_std: for E with Weil data, every
+-- rank: SphericalCompat E n |n| w at every finite place w (the even rank
+-- reduced to odd rank by a theta lift).
+theorem sphericalCompat_std (H X : Set, l : Nat, Q ι Φ n T W w : Set)
+  requires setting : SphericalSetting(H, X, l, Q, ι, Φ, n, T)
+  requires weil : IsWeilDatum(W)
+  requires field : WeilDatum.field(W) = Algebra.base(X)
+  requires cmType : WeilDatum.cmType(W) = Φ
+  requires place : w ∈ finPlaces(Algebra.base(X))
+  shows SphericalCompat(H, X, l, Q, ι, Φ, n, T, cardinality(n), w)
+proof
+  sorry
+
+-- Section: Hecke polynomials and jumps
+-- HeckeOperatorOfFunction.lean, coeff_heckePoly: the coefficient of X^j
+-- is (−1)^(N−j) q^((N−j)(N−j−1)/2) t_{N−j} for j ≤ N and 0 otherwise.
+theorem heckePoly.coeff (q N : Nat, t : Set, j : Nat)
+  requires values : FunctionBetween(t, ℕ, complexCarrier)
+  shows (j ∈ succ(N) → polyCoeff(heckePoly(q, N, t), j) =
+      heckePolyCoeff(q, N - j, t)) ∧
+    (j ∉ succ(N) → polyCoeff(heckePoly(q, N, t), j) = complexZero)
+proof
+  sorry
+
+-- HeckeOperatorOfFunction.lean, HasHeckePolyAt.isMonicOfDegree: for f ≠ 0
+-- a Hecke polynomial of f is monic of degree |n|.
+theorem HasHeckePolyAt.monic_of_degree (E Φ n κ T f w P : Set)
+  requires cm : CMType(E, Φ)
+  requires finite : Finite(n)
+  requires form : f ∈ csGRForms(E, Φ, n, κ)
+  requires nonzero : f ≠ csGRZeroForm(f)
+  requires hecke : HasHeckePolyAt(E, n, T, f, w, P)
+  shows PolyMonic(complexRing, P) ∧ polyDegrees(complexRing, P) ⊆ succ(cardinality(n)) ∧
+    cardinality(n) ∈ polyDegrees(complexRing, P)
+proof
+  sorry
+
+-- HeckeOperatorOfFunction.lean, Weight.nodup_jumps: the jumps of a weight
+-- are distinct, each with multiplicity at most 1.
+theorem jumps.nodup (E Φ κ N σ u : Set)
+  requires cm : CMType(E, Φ)
+  requires natural : N ∈ ℕ
+  requires embedding : σ ∈ complexEmbeddings(E)
+  requires integer : u ∈ ℤ
+  shows jumps(E, Φ, κ, N)(σ)(u) ∈ 2
+proof
+  sorry
+
+-- SplitPlaceCount.lean, eventually_notMem_star_notMem: outside finitely
+-- many places w, neither w nor w̄ lies in the finite set S and ℓ ∉ w.
+theorem finPlaces.eventually_not_mem_conj (E S : Set, l : Nat)
+  requires cm : CMField(E)
+  requires number : NumberField(E)
+  requires finite : Finite(S)
+  requires positive : l ≠ 0
+  shows ∃ F, Finite(F) ∧ (∀ w ∈ finPlaces(E), w ∉ F →
+    w ∉ S ∧ csGRConjPlace(E, w) ∉ S ∧ natCast(E, l) ∉ w)
+proof
+  sorry
+
+end Spherical
