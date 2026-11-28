@@ -1,0 +1,496 @@
+-- Shintani descent for GLₙ(F_q) with the lift named: semidirect products
+-- with a Galois group, class functions descending along a coset of a
+-- normal subgroup (root choices, conjugation counts and induction), the
+-- semidirect product GLₙ(k′) ⋊ Gal(k′/k), descent of a function on it to
+-- class functions over k and over k′, lifts of class functions by
+-- characters and their stability under the ring operations, the lift of
+-- the Brauer lift, of determinant characters and of Green's characters of
+-- labels in prime degree, and Galois equivariance of Green's characters.
+-- Source: grh-compact/src/Lib/LocalGL/Shintani/LabelCharacters.lean
+-- (DescendsOnCoset, conjCount, induceClassFn, IsRootChoice,
+-- induceClassFn_mem_virtualChars, exists_isRootChoice,
+-- IsIrrChar.extend_semidirect, IsRootChoice.classInner_eq_fibre_mean,
+-- galActionGL, GalSemidirect, HasFixedField, DescendsTo, HasCommonLift,
+-- Lift, Lift.exists_descendsTo, DescendsTo.iff_comp_inl_eq_evalGL,
+-- Lift.exists_lift_of_descendsTo, exists_descendsTo_of_gal_trivial,
+-- Lift.rankPart_of_descendsTo, Lift.lift_constOne, Lift.one,
+-- Lift.evalGL_mem_virtualChars, Lift.sub, Lift.mul, Lift.mulMu,
+-- Lift.rankPart_mulMu_mul_constOne, exists_lift_brauerLift,
+-- lift_labelChar_self), Lib/LocalGL/Shintani/ShintaniLifting.lean
+-- (evalGL_detChar, exists_isChar_descendsTo_labelChar, labelChar_gal_map,
+-- lift_detChar, fixed_eq_range_iff_ne_one, DescendsTo.card_mul_classInner,
+-- shintani_lift_labelChar).
+-- Not stated: the parabolic Frobenius reciprocity classInner_evalGL_prod
+-- and sum_evalGL_prod_eq_zero_iff (block homomorphisms of parabolic
+-- subgroups), exists_norm_char_semidirect, exists_isRootChoice_GL,
+-- exists_torus_induced_descendsTo, conjCount_conj,
+-- IsRootChoice.restrict_subgroup, IsRootChoice.descendsOnCoset_comp,
+-- DescendsOnCoset.induce, finMean_ite and simClassOf_leftMulMatrix.
+-- Encoding. A semidirect product N ⋊_α H of group records is the record
+-- on N.carrier × H.carrier with (n, h)(n′, h′) = (n α_h(n′), h h′). An
+-- extension k′/k of finite fields is a field extension record E (base k,
+-- ring k′); Gal(k′/k) is galoisGroup(E), acting on GLₙ(k′) entrywise. A
+-- field k₀ with an algebra map into k′ (the source's [Algebra k₀ k′]) is a
+-- field extension record E0 with ring k′; the trivial extension k′/k′ is
+-- selfExtension(E). The coefficient semiring Z is its image in ℂ, as in
+-- GRH.LocalGL.GroupChars.
+-- Part of the GRH blueprint (layer 4, Lib/LocalGL, stage S3).
+-- Copyright (c) 2026 Grant Passmore.
+-- Released under the Apache License 2.0. See LICENSE in the repository root.
+-- Authors: Grant Passmore
+
+module GRH.LocalGL.Shintani
+import GRH.LocalGL.Labels
+import Grace.Cumulus.Algebra.Group.Cyclic
+
+section Shintani
+notation ring ℂ := (complexCarrier, complexAdd, complexZero, complexNeg,
+  complexMul, complexOne)
+notation ring R := (ℝ, realAdd, realZero, realNeg, realMul, realOne)
+
+-- Section: Semidirect products
+-- N ⋊_α H for an action α : H → Aut(N), α(h) a function on N.carrier.
+def semidirectMul (N H α : Set) : Set :=
+  { p ∈ ((Group.carrier(N) × Group.carrier(H)) × (Group.carrier(N) × Group.carrier(H))) ×
+      (Group.carrier(N) × Group.carrier(H)) |
+    snd(p) = (Group.mul(N)(fst(fst(fst(p))), α(snd(fst(fst(p))))(fst(snd(fst(p))))),
+      Group.mul(H)(snd(fst(fst(p))), snd(snd(fst(p))))) }
+
+def semidirectInv (N H α : Set) : Set :=
+  { p ∈ (Group.carrier(N) × Group.carrier(H)) × (Group.carrier(N) × Group.carrier(H)) |
+    snd(p) = (α(Group.inv(H)(snd(fst(p))))(Group.inv(N)(fst(fst(p)))),
+      Group.inv(H)(snd(fst(p)))) }
+
+def semidirectGroup (N H α : Set) : Set :=
+  Group.mk(Group.carrier(N) × Group.carrier(H), semidirectMul(N, H, α),
+    (Group.one(N), Group.one(H)), semidirectInv(N, H, α))
+
+-- α is an action of H on N by automorphisms.
+predicate GroupActionByAut (N H α : Set) :=
+  Group(N) ∧ Group(H) ∧ (α : Group.carrier(H) → functionSpace(Group.carrier(N), Group.carrier(N))) ∧
+  (∀ h ∈ Group.carrier(H), GroupHom(α(h), N, N) ∧ BijectiveBetween(α(h), Group.carrier(N),
+    Group.carrier(N))) ∧
+  (∀ h ∈ Group.carrier(H), ∀ h2 ∈ Group.carrier(H), ∀ x ∈ Group.carrier(N),
+    α(Group.mul(H)(h, h2))(x) = α(h)(α(h2)(x))) ∧
+  (∀ x ∈ Group.carrier(N), α(Group.one(H))(x) = x)
+
+-- Section: Descent along a coset
+-- DescendsOnCoset π σ j h f: h(s) = f(γ) whenever π(s) = σ and
+-- s^(ord σ) = j(γ).
+predicate DescendsOnCoset (E Γ G π σ j h f : Set) :=
+  ∀ s ∈ Group.carrier(E), ∀ γ ∈ Group.carrier(G), π(s) = σ →
+    groupPow(E, s, elementOrder(Γ, σ)) = j(γ) → h(s) = f(γ)
+
+-- conjCount π s t = #{x ∈ ker π : x t x⁻¹ = s}, in ℂ.
+def conjugators (E Γ π s t : Set) : Set :=
+  { x ∈ Group.carrier(E) | π(x) = Group.one(Γ) ∧
+    Group.mul(E)(Group.mul(E)(x, t), Group.inv(E)(x)) = s }
+
+def conjCount (E Γ π s t : Set) : Set := csLGNat(cardinality(conjugators(E, Γ, π, s, t)))
+
+-- induceClassFn π ρ f (s) = [E′ : ker(π∘ρ)] ⟨t ↦ conjCount π s ρ(t), f⟩.
+def conjCountAlong (E Γ E2 π ρ s : Set) : Set :=
+  { (t, conjCount(E, Γ, π, s, ρ(t))) | t ∈ Group.carrier(E2) }
+
+def kernelAlong (Γ E2 π ρ : Set) : Set :=
+  { t ∈ Group.carrier(E2) | π(ρ(t)) = Group.one(Γ) }
+
+def induceClassFn (E Γ E2 π ρ f : Set) : Set :=
+  { (s, ℂ[complexDiv(csLGNat(cardinality(Group.carrier(E2))),
+      csLGNat(cardinality(kernelAlong(Γ, E2, π, ρ)))) *
+      classInner(E2, conjCountAlong(E, Γ, E2, π, ρ, s), f)]) | s ∈ Group.carrier(E) }
+
+-- IsRootChoice π σ j r: j is injective and r(γ) is a conjugation-
+-- equivariant (ord σ)-th root of j(γ) over σ, such that any x ∈ ker π
+-- conjugating one r(δ) to an r(γ) lies in j(G).
+predicate IsRootChoice (E Γ G π σ j r : Set) :=
+  GroupHom(π, E, Γ) ∧ GroupHom(j, G, E) ∧ (r : Group.carrier(G) → Group.carrier(E)) ∧
+  (∀ γ ∈ Group.carrier(G), ∀ δ ∈ Group.carrier(G), j(γ) = j(δ) → γ = δ) ∧
+  (∀ γ ∈ Group.carrier(G), π(r(γ)) = σ ∧ groupPow(E, r(γ), elementOrder(Γ, σ)) = j(γ)) ∧
+  (∀ v ∈ Group.carrier(G), ∀ γ ∈ Group.carrier(G),
+    r(Group.mul(G)(Group.mul(G)(v, γ), Group.inv(G)(v))) =
+      Group.mul(E)(Group.mul(E)(j(v), r(γ)), Group.inv(E)(j(v)))) ∧
+  (∀ x ∈ Group.carrier(E), ∀ γ ∈ Group.carrier(G), ∀ δ ∈ Group.carrier(G),
+    π(x) = Group.one(Γ) →
+    Group.mul(E)(Group.mul(E)(x, r(δ)), Group.inv(E)(x)) = r(γ) →
+    ∃ v ∈ Group.carrier(G), x = j(v))
+
+-- Section: Laws of descent
+-- induceClassFn_mem_virtualChars: induction along ρ with π∘ρ onto keeps
+-- virtual characters.
+theorem induceClassFn.virtual (Z E Γ E2 π ρ h : Set)
+  requires finiteE : FiniteGroup(E)
+  requires finiteΓ : FiniteGroup(Γ)
+  requires finiteE2 : FiniteGroup(E2)
+  requires hπ : GroupHom(π, E, Γ)
+  requires hρ : GroupHom(ρ, E2, E)
+  requires onto : ∀ σ ∈ Group.carrier(Γ), ∃ t ∈ Group.carrier(E2), π(ρ(t)) = σ
+  requires semiring : Z = natComplexes ∨ Z = intComplexes
+  requires hh : h ∈ virtualChars(Z, E2)
+  shows induceClassFn(E, Γ, E2, π, ρ, h) ∈ virtualChars(Z, E)
+proof
+  sorry
+
+-- IsRootChoice.classInner_eq_fibre_mean: every s over σ is conjugate by
+-- ker π to some r(γ); and for h, g descending to f, f′ and invariant
+-- under ker π, [E : ker π] mean_{π s = σ} conj h(s) g(s) = ⟨f, f′⟩.
+def fibreValue (π σ h g s : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | (π(s) = σ ∧ c = ℂ[complexConj(h(s)) * g(s)]) ∨
+    (π(s) ≠ σ ∧ c = complexZero) })
+
+def fibreTerms (E Γ π σ h g : Set) : Set :=
+  { (s, fibreValue(π, σ, h, g, s)) | s ∈ Group.carrier(E) }
+
+def kernelOf (E Γ π : Set) : Set := { x ∈ Group.carrier(E) | π(x) = Group.one(Γ) }
+
+theorem IsRootChoice.fibre_mean (E Γ G π σ j r h g f f2 : Set)
+  requires finiteE : FiniteGroup(E)
+  requires finiteΓ : FiniteGroup(Γ)
+  requires finiteG : FiniteGroup(G)
+  requires hσ : σ ∈ Group.carrier(Γ)
+  requires root : IsRootChoice(E, Γ, G, π, σ, j, r)
+  requires hh : h ∈ groupFunctions(E)
+  requires hg : g ∈ groupFunctions(E)
+  requires hf : f ∈ groupFunctions(G)
+  requires hf2 : f2 ∈ groupFunctions(G)
+  requires descends : DescendsOnCoset(E, Γ, G, π, σ, j, h, f)
+  requires descends2 : DescendsOnCoset(E, Γ, G, π, σ, j, g, f2)
+  requires invariant : ∀ s ∈ Group.carrier(E), ∀ x ∈ kernelOf(E, Γ, π),
+    h(Group.mul(E)(Group.mul(E)(x, s), Group.inv(E)(x))) = h(s) ∧
+    g(Group.mul(E)(Group.mul(E)(x, s), Group.inv(E)(x))) = g(s)
+  shows (∀ s ∈ Group.carrier(E), π(s) = σ → ∃ x ∈ kernelOf(E, Γ, π), ∃ γ ∈ Group.carrier(G),
+      Group.mul(E)(Group.mul(E)(x, r(γ)), Group.inv(E)(x)) = s) ∧
+    ℂ[complexDiv(csLGNat(cardinality(Group.carrier(E))), csLGNat(cardinality(kernelOf(E, Γ, π)))) *
+      finMean(Group.carrier(E), fibreTerms(E, Γ, π, σ, h, g))] = classInner(G, f, f2)
+proof
+  sorry
+
+-- IsIrrChar.extend_semidirect: for Y a Γ-invariant irreducible character
+-- of G and a virtual character Φ of G ⋊ Γ with
+-- |Γ|⟨Φ, Φ⟩ = ⟨Φ|G, Φ|G⟩ + |Γ| − 1 and ⟨Y, Φ|G⟩ = 1 + |Γ| m, the
+-- function equal to Y on G and to Φ off G is an irreducible character.
+def restrictToNormal (G Γ Φ : Set) : Set := { (g, Φ((g, Group.one(Γ)))) | g ∈ Group.carrier(G) }
+
+def extendValue (Γ Y Φ x : Set) : Set :=
+  ⋃({ c ∈ complexCarrier | (snd(x) = Group.one(Γ) ∧ c = Y(fst(x))) ∨
+    (snd(x) ≠ Group.one(Γ) ∧ c = Φ(x)) })
+
+def extendBy (G Γ α Y Φ : Set) : Set :=
+  { (x, extendValue(Γ, Y, Φ, x)) | x ∈ Group.carrier(semidirectGroup(G, Γ, α)) }
+
+theorem IsIrrChar.extend_semidirect (G Γ α Y Φ m : Set)
+  requires finiteG : FiniteGroup(G)
+  requires finiteΓ : FiniteGroup(Γ)
+  requires action : GroupActionByAut(G, Γ, α)
+  requires irreducible : IsIrrChar(G, Y)
+  requires invariant : ∀ σ ∈ Group.carrier(Γ), ∀ g ∈ Group.carrier(G), Y(α(σ)(g)) = Y(g)
+  requires virtual : Φ ∈ virtualChars(intComplexes, semidirectGroup(G, Γ, α))
+  requires norm : ℂ[csLGNat(cardinality(Group.carrier(Γ))) *
+      classInner(semidirectGroup(G, Γ, α), Φ, Φ)] =
+    ℂ[classInner(G, restrictToNormal(G, Γ, Φ), restrictToNormal(G, Γ, Φ)) +
+      (csLGNat(cardinality(Group.carrier(Γ))) - complexOne)]
+  requires hm : m ∈ ℤ
+  requires multiplicity : classInner(G, Y, restrictToNormal(G, Γ, Φ)) =
+    ℂ[complexOne + csLGNat(cardinality(Group.carrier(Γ))) * complexOfReal(realInt(m))]
+  shows IsIrrChar(semidirectGroup(G, Γ, α), extendBy(G, Γ, α, Y, Φ))
+proof
+  sorry
+
+-- Section: GLₙ(k′) ⋊ Gal(k′/k)
+-- galActionGL: σ acts on GLₙ(k′) entrywise.
+def galActionAt (E n σ : Set) : Set :=
+  { (g, matMap(Algebra.ring(E), n, n, σ, g)) | g ∈ invertibleMatrices(Algebra.ring(E), n) }
+
+def galActionGL (E n : Set) : Set := { (σ, galActionAt(E, n, σ)) | σ ∈ algebraAutomorphisms(E) }
+
+-- GalSemidirect k k′ n = GLₙ(k′) ⋊ Gal(k′/k).
+def galSemidirect (E n : Set) : Set :=
+  semidirectGroup(generalLinearGroup(Algebra.ring(E), n), galoisGroup(E), galActionGL(E, n))
+
+-- HasFixedField k₀ σ: the image of k₀ in k′ is the fixed field of σ.
+def baseImage (E0 : Set) : Set := { Algebra.map(E0)(a) | a ∈ Ring.carrier(Algebra.base(E0)) }
+
+def fixedPointsOf (E0 σ : Set) : Set := { x ∈ algebraCarrier(E0) | σ(x) = x }
+
+predicate HasFixedField (E0 σ : Set) := baseImage(E0) = fixedPointsOf(E0, σ)
+
+-- The inclusion GLₙ(k₀) → GLₙ(k′) ⋊ Gal, γ ↦ (γ, 1).
+def baseInclusion (E E0 n γ : Set) : Set :=
+  (matMap(Algebra.ring(E), n, n, Algebra.map(E0), γ), identity(algebraCarrier(E)))
+
+-- DescendsTo Φ X (X a class function over k₀): for every σ with fixed
+-- field k₀, every s over σ and γ ∈ GLₙ(k₀) with s^(ord σ) = (γ, 1),
+-- Φ(s) = X(γ).
+predicate DescendsTo (E E0 n Φ X : Set) :=
+  ∀ σ ∈ algebraAutomorphisms(E), HasFixedField(E0, σ) →
+    ∀ g ∈ invertibleMatrices(Algebra.ring(E), n),
+    ∀ γ ∈ invertibleMatrices(Algebra.base(E0), n),
+      groupPow(galSemidirect(E, n), (g, σ), elementOrder(galoisGroup(E), σ)) =
+        baseInclusion(E, E0, n, γ) →
+      Φ((g, σ)) = X((n, γ))
+
+-- The trivial extension k′/k′.
+def selfExtension (E : Set) : Set :=
+  Algebra.mk(Algebra.ring(E), Algebra.ring(E), identity(algebraCarrier(E)))
+
+-- HasCommonLift Z F F′ n and Lift Z F F′: one Z-combination of characters
+-- of GLₙ(k′) ⋊ Gal(k′/k) descends to F over k and to F′ over k′, for
+-- every n.
+predicate HasCommonLift (Z E n F F2 : Set) :=
+  ∃ Φ ∈ virtualChars(Z, galSemidirect(E, n)),
+    DescendsTo(E, E, n, Φ, F) ∧ DescendsTo(E, selfExtension(E), n, Φ, F2)
+
+predicate ShintaniLift (Z E F F2 : Set) := ∀ m ∈ ℕ, HasCommonLift(Z, E, m, F, F2)
+
+-- Extensions of finite fields.
+predicate FiniteFieldExtension (E : Set) :=
+  FieldExtension(E) ∧ FiniteField(Algebra.base(E)) ∧ FiniteField(Algebra.ring(E))
+
+-- The left inclusion g ↦ (g, 1) and Φ read on it.
+def leftRestrict (E n Φ : Set) : Set :=
+  { (g, Φ((g, identity(algebraCarrier(E))))) | g ∈ invertibleMatrices(Algebra.ring(E), n) }
+
+-- Section: Laws of lifts
+-- DescendsTo.iff_comp_inl_eq_evalGL: descending to F′ over k′ is Φ = F′
+-- on GLₙ(k′).
+theorem DescendsTo.self_iff (E n Φ F2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires natural : n ∈ ℕ
+  requires hΦ : Φ ∈ groupFunctions(galSemidirect(E, n))
+  requires hF2 : F2 ∈ hallFunctions(Algebra.ring(E))
+  shows DescendsTo(E, selfExtension(E), n, Φ, F2) ↔
+    leftRestrict(E, n, Φ) = evalGL(Algebra.ring(E), n, F2)
+proof
+  sorry
+
+-- Lift.exists_lift_of_descendsTo: if for every m some virtual character
+-- descends to F over k, then F lifts to some F′.
+theorem ShintaniLift.of_descends (Z E F : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires hF : F ∈ hallFunctions(Algebra.base(E))
+  requires descends : ∀ m ∈ ℕ, ∃ Φ ∈ virtualChars(Z, galSemidirect(E, m)),
+    DescendsTo(E, E, m, Φ, F)
+  shows ∃ G ∈ hallFunctions(Algebra.ring(E)), ShintaniLift(Z, E, F, G)
+proof
+  sorry
+
+-- exists_descendsTo_of_gal_trivial: with Gal(k′/k) trivial, a virtual
+-- character F′ on GLₙ(k′) agreeing with F on GLₙ(k) gives a common lift.
+theorem HasCommonLift.of_gal_trivial (Z E n F F2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires natural : n ∈ ℕ
+  requires hZ : complexOne ∈ Z
+  requires trivial : algebraAutomorphisms(E) = {identity(algebraCarrier(E))}
+  requires hF : F ∈ hallFunctions(Algebra.base(E))
+  requires hF2 : F2 ∈ hallFunctions(Algebra.ring(E))
+  requires virtual : evalGL(Algebra.ring(E), n, F2) ∈
+    virtualChars(Z, generalLinearGroup(Algebra.ring(E), n))
+  requires agree : ∀ g ∈ invertibleMatrices(Algebra.base(E), n),
+    F2((n, matMap(Algebra.ring(E), n, n, Algebra.map(E), g))) = F((n, g))
+  shows HasCommonLift(Z, E, n, F, F2)
+proof
+  sorry
+
+-- Lift.rankPart_of_descendsTo: a common lift in rank m gives a lift of
+-- the rank-m parts in all ranks.
+theorem ShintaniLift.rankPart (Z E m F F2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires natural : m ∈ ℕ
+  requires hZ : Z = natComplexes ∨ Z = intComplexes
+  requires common : HasCommonLift(Z, E, m, F, F2)
+  shows ShintaniLift(Z, E, rankPart(Algebra.base(E), m, F), rankPart(Algebra.ring(E), m, F2))
+proof
+  sorry
+
+-- Lift.lift_constOne and Lift.one.
+theorem ShintaniLift.constOne (Z E : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires hZ : Z = natComplexes ∨ Z = intComplexes
+  shows ShintaniLift(Z, E, constOne(Algebra.base(E)), constOne(Algebra.ring(E))) ∧
+    ShintaniLift(Z, E, hallOne(Algebra.base(E)), hallOne(Algebra.ring(E)))
+proof
+  sorry
+
+-- Lift.evalGL_mem_virtualChars: a liftable F is a virtual character on
+-- every GLₙ(k).
+theorem ShintaniLift.virtual (Z E F G n : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires hZ : Z = natComplexes ∨ Z = intComplexes
+  requires natural : n ∈ ℕ
+  requires lift : ShintaniLift(Z, E, F, G)
+  shows evalGL(Algebra.base(E), n, F) ∈ virtualChars(Z, generalLinearGroup(Algebra.base(E), n))
+proof
+  sorry
+
+-- Lift.sub, Lift.mul, Lift.mulMu and Lift.rankPart_mulMu_mul_constOne:
+-- lifts are stable under differences, the induction product, F ↦ F·μ and
+-- F ↦ (−1)^m rankPart m ((F·μ) ∗ 𝟙).
+theorem ShintaniLift.sub (E F F2 G G2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires lift : ShintaniLift(intComplexes, E, F, F2)
+  requires lift2 : ShintaniLift(intComplexes, E, G, G2)
+  shows ShintaniLift(intComplexes, E, hallSub(Algebra.base(E), F, G),
+    hallSub(Algebra.ring(E), F2, G2))
+proof
+  sorry
+
+theorem ShintaniLift.mul (Z E F F2 G G2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires hZ : Z = natComplexes ∨ Z = intComplexes
+  requires lift : ShintaniLift(Z, E, F, F2)
+  requires lift2 : ShintaniLift(Z, E, G, G2)
+  shows ShintaniLift(Z, E, hallMul(Algebra.base(E), F, G), hallMul(Algebra.ring(E), F2, G2))
+proof
+  sorry
+
+theorem ShintaniLift.mulMu (E F F2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires lift : ShintaniLift(intComplexes, E, F, F2)
+  shows ShintaniLift(intComplexes, E, mulMu(Algebra.base(E), F), mulMu(Algebra.ring(E), F2))
+proof
+  sorry
+
+def signedCuspidalPart (K m F : Set) : Set :=
+  hallSmul(K, signPow(m), rankPart(K, m, hallMul(K, mulMu(K, F), constOne(K))))
+
+theorem ShintaniLift.signed_cuspidal_part (E m F F2 : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires natural : m ∈ ℕ
+  requires lift : ShintaniLift(intComplexes, E, F, F2)
+  shows ShintaniLift(intComplexes, E, signedCuspidalPart(Algebra.base(E), m, F),
+    signedCuspidalPart(Algebra.ring(E), m, F2))
+proof
+  sorry
+
+-- Section: Lifts of Green's characters
+-- An extension K of k′ over k: k → k′ → K as two records with the same
+-- ring K and compatible structure maps.
+predicate ExtensionTower (E E1 E2 : Set) :=
+  FiniteFieldExtension(E) ∧ FiniteBaseClosure(E1) ∧ FiniteBaseClosure(E2) ∧
+  Algebra.base(E1) = Algebra.base(E) ∧ Algebra.base(E2) = Algebra.ring(E) ∧
+  Algebra.ring(E1) = Algebra.ring(E2) ∧
+  ∀ a ∈ Ring.carrier(Algebra.base(E)), Algebra.map(E1)(a) = Algebra.map(E2)(Algebra.map(E)(a))
+
+-- exists_lift_brauerLift: the Brauer lift β_θ lifts by virtual characters.
+theorem ShintaniLift.brauerLift (E E1 θ : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires closure : FiniteBaseClosure(E1)
+  requires base : Algebra.base(E1) = Algebra.base(E)
+  requires hθ : MulChar(Algebra.ring(E1), complexRing, θ)
+  shows ∃ B ∈ hallFunctions(Algebra.ring(E)), ShintaniLift(intComplexes, E, brauerLift(E1, θ), B)
+proof
+  sorry
+
+-- lift_labelChar_self: Ξ_c is in every dimension a natural combination of
+-- characters (a lift over the trivial extension).
+theorem ShintaniLift.labelChar_self (E1 T r c : Set)
+  requires faithful : IsFaithfulMulChar(E1, T)
+  requires finite : FiniteField(Algebra.base(E1))
+  requires label : IsLabel(Algebra.base(E1), r, c)
+  shows ShintaniLift(natComplexes, selfExtension(Algebra.mk(Algebra.base(E1), Algebra.base(E1),
+      identity(Ring.carrier(Algebra.base(E1))))),
+    labelChar(E1, T, c), labelChar(E1, T, c))
+proof
+  sorry
+
+-- evalGL_detChar: χ∘det at g is χ(det g).
+theorem detChar.evalGL (K χ n g : Set)
+  requires field : Field(K)
+  requires natural : n ∈ ℕ
+  requires hg : g ∈ invertibleMatrices(K, n)
+  shows evalGL(K, n, detChar(K, χ))(g) = χ(matDet(K, n, g))
+proof
+  sorry
+
+-- labelChar_gal_map: Ξ_c(σ(g)) = Ξ_{σ(c)}(g) for σ ∈ Gal(k′/k), c a label
+-- over k′.
+def polyGalMap (E σ c : Set) : Set := polyMap(Algebra.ring(E), Algebra.ring(E), σ)(c)
+
+theorem labelChar.gal_map (E E2 T σ r c n g : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires faithful : IsFaithfulMulChar(E2, T)
+  requires base : Algebra.base(E2) = Algebra.ring(E)
+  requires hσ : σ ∈ algebraAutomorphisms(E)
+  requires label : IsLabel(Algebra.ring(E), r, c)
+  requires natural : n ∈ ℕ
+  requires hg : g ∈ invertibleMatrices(Algebra.ring(E), n)
+  shows labelChar(E2, T, c)((n, matMap(Algebra.ring(E), n, n, σ, g))) =
+    labelChar(E2, T, polyGalMap(E, σ, c))((n, g))
+proof
+  sorry
+
+-- lift_detChar: if x_{χ′} = x_χ in k′, then χ∘det and χ′∘det lift by
+-- characters.
+theorem ShintaniLift.detChar (E E1 E2 T χ χ2 : Set)
+  requires tower : ExtensionTower(E, E1, E2)
+  requires faithful1 : IsFaithfulMulChar(E1, T)
+  requires faithful2 : IsFaithfulMulChar(E2, T)
+  requires hχ : MulChar(Algebra.base(E), complexRing, χ)
+  requires hχ2 : MulChar(Algebra.ring(E), complexRing, χ2)
+  requires names : charName(E2, T, χ2) = Algebra.map(E)(charName(E1, T, χ))
+  shows ShintaniLift(natComplexes, E, detChar(Algebra.base(E), χ), detChar(Algebra.ring(E), χ2))
+proof
+  sorry
+
+-- fixed_eq_range_iff_ne_one: in an extension of prime degree, σ has fixed
+-- field k exactly when σ ≠ 1.
+theorem HasFixedField.prime_degree (E σ : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires prime : Prime(extensionDegree(E))
+  requires hσ : σ ∈ algebraAutomorphisms(E)
+  shows HasFixedField(E, σ) ↔ σ ≠ identity(algebraCarrier(E))
+proof
+  sorry
+
+-- DescendsTo.card_mul_classInner: in prime degree, for class functions Φ,
+-- Ψ descending to F, G over k,
+-- |Gal| ⟨Φ, Ψ⟩ = ⟨Φ|GLₙ(k′), Ψ|GLₙ(k′)⟩ + (|Gal| − 1) ⟨F, G⟩ₙ.
+theorem DescendsTo.card_mul_classInner (E n F G Φ Ψ : Set)
+  requires extension : FiniteFieldExtension(E)
+  requires prime : Prime(extensionDegree(E))
+  requires natural : n ∈ ℕ
+  requires hF : F ∈ hallFunctions(Algebra.base(E))
+  requires hG : G ∈ hallFunctions(Algebra.base(E))
+  requires classΦ : IsClassFunction(galSemidirect(E, n), Φ)
+  requires classΨ : IsClassFunction(galSemidirect(E, n), Ψ)
+  requires descendsΦ : DescendsTo(E, E, n, Φ, F)
+  requires descendsΨ : DescendsTo(E, E, n, Ψ, G)
+  shows ℂ[csLGNat(cardinality(algebraAutomorphisms(E))) * classInner(galSemidirect(E, n), Φ, Ψ)] =
+    ℂ[classInner(generalLinearGroup(Algebra.ring(E), n), leftRestrict(E, n, Φ),
+        leftRestrict(E, n, Ψ)) +
+      (csLGNat(cardinality(algebraAutomorphisms(E))) - complexOne) *
+        rankInner(Algebra.base(E), n, F, G)]
+proof
+  sorry
+
+-- exists_isChar_descendsTo_labelChar: for P an irreducible label of degree
+-- r = [L : k] with root x, some character of GL_r(k′) ⋊ Gal descends to
+-- C_{θ_x}·μ over k and to (−1)^r Ξ_P·μ over k′.
+theorem labelChar.descends_cuspidal (E E1 E2 T P r x : Set)
+  requires tower : ExtensionTower(E, E1, E2)
+  requires faithful1 : IsFaithfulMulChar(E1, T)
+  requires faithful2 : IsFaithfulMulChar(E2, T)
+  requires irreducible : RingIrreducible(polyRing(Algebra.base(E)), P)
+  requires label : IsLabel(Algebra.base(E), r, P)
+  requires root : x ∈ polyAlgebraRootSet(E1, P)
+  shows ∃ Φ, IsChar(galSemidirect(E, r), Φ) ∧
+    DescendsTo(E, E, r, Φ, mulMu(Algebra.base(E),
+      greenCuspidal(E1, thetaChar(E1, T, pow(fieldOrder(Algebra.base(E)), r), x)))) ∧
+    DescendsTo(E, selfExtension(E), r, Φ, hallSmul(Algebra.ring(E), signPow(r),
+      mulMu(Algebra.ring(E), labelChar(E2, T, polyToExtension(E, P)))))
+proof
+  sorry
+
+-- shintani_lift_labelChar (Shintani; Silberger–Zink): for k′/k of prime
+-- degree and c a label over k, Ξ_c lifts by characters to Ξ_c over k′.
+theorem ShintaniLift.labelChar (E E1 E2 T r c : Set)
+  requires tower : ExtensionTower(E, E1, E2)
+  requires prime : Prime(extensionDegree(E))
+  requires faithful1 : IsFaithfulMulChar(E1, T)
+  requires faithful2 : IsFaithfulMulChar(E2, T)
+  requires label : IsLabel(Algebra.base(E), r, c)
+  shows ShintaniLift(natComplexes, E, labelChar(E1, T, c), labelChar(E2, T, polyToExtension(E, c)))
+proof
+  sorry
+
+end Shintani
